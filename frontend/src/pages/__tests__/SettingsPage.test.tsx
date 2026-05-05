@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SWRConfig } from "swr";
@@ -193,6 +194,7 @@ describe("SettingsPage", () => {
   });
 
   it("loads bootstrap metadata and shows derived model details", async () => {
+    const user = userEvent.setup();
     fetchSettingsBootstrap.mockResolvedValue(buildBootstrapData());
 
     renderSettingsPage();
@@ -200,24 +202,34 @@ describe("SettingsPage", () => {
     expect(await screen.findByLabelText("Request Timeout")).toHaveValue(
       "10000",
     );
-    expect(screen.getByLabelText("App Data Directory")).toHaveValue(
+
+    await user.click(screen.getByRole("tab", { name: "Path" }));
+    expect(await screen.findByLabelText("App Data Directory")).toHaveValue(
       "/home/test/.flowent",
     );
     expect(screen.getByLabelText("Working Directory")).toHaveValue(
       "/workspace/project",
     );
-    expect(screen.getByText("Context window: 128,000")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Model" }));
+    expect(
+      await screen.findByText("Context window: 128,000"),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
         "Capabilities: input_image=true, output_image=false, structured_output=false",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("assistant-role-guidance")).toHaveTextContent(
-      "Human-facing assistant role",
-    );
-    expect(screen.getAllByText("Default leader role").length).toBeGreaterThan(
-      0,
-    );
+
+    await user.click(screen.getByRole("tab", { name: "Assistant" }));
+    expect(
+      await screen.findByTestId("assistant-role-guidance"),
+    ).toHaveTextContent("Human-facing assistant role");
+
+    await user.click(screen.getByRole("tab", { name: "Leader" }));
+    expect(
+      (await screen.findAllByText("Default leader role")).length,
+    ).toBeGreaterThan(0);
   });
 
   it("keeps assistant identity guidance visible for a non-Steward selected role", async () => {
@@ -250,7 +262,11 @@ describe("SettingsPage", () => {
       }),
     );
 
+    const user = userEvent.setup();
     renderSettingsPage();
+
+    const assistantTab = await screen.findByRole("tab", { name: "Assistant" });
+    await user.click(assistantTab);
 
     const guidance = await screen.findByTestId("assistant-role-guidance");
 
@@ -293,16 +309,20 @@ describe("SettingsPage", () => {
       reauthRequired: false,
     });
 
+    const user = userEvent.setup();
     renderSettingsPage();
 
     const timeoutInput = await screen.findByLabelText("Request Timeout");
     const contextWindowInput = screen.getByLabelText("Context Window");
-    const networkAccessSwitch = screen.getByRole("switch", {
-      name: "Network Access",
-    });
 
     fireEvent.change(timeoutInput, { target: { value: "15000" } });
     fireEvent.change(contextWindowInput, { target: { value: "64000" } });
+
+    await user.click(screen.getByRole("tab", { name: "Assistant" }));
+    const networkAccessSwitch = await screen.findByRole("switch", {
+      name: "Network Access",
+    });
+
     fireEvent.click(networkAccessSwitch);
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 

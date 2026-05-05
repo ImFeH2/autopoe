@@ -6,7 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { PanelCard, sectionSurfaceClass } from "@/components/ui/surface";
+import { PanelCard } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 
 interface PageScaffoldProps {
@@ -95,8 +95,10 @@ export function PageTitleBar({
 
 export function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="mb-2.5 px-1">
-      <h2 className="text-[13px] font-semibold text-foreground/85">{title}</h2>
+    <div className="mb-4">
+      <h2 className="text-[14px] font-medium tracking-tight text-foreground/90">
+        {title}
+      </h2>
     </div>
   );
 }
@@ -116,10 +118,18 @@ export function FormSection({
 }) {
   return (
     <section
-      className={cn(separated ? "border-t border-border pt-8" : "", className)}
+      className={cn(
+        separated ? "border-t border-border pt-8" : "mb-10",
+        className,
+      )}
     >
       <SectionHeader title={title} />
-      <div className={cn(sectionSurfaceClass, contentClassName)}>
+      <div
+        className={cn(
+          "rounded-xl border border-white/[0.04] bg-card/[0.03] shadow-sm px-5 transition-colors",
+          contentClassName,
+        )}
+      >
         {children}
       </div>
     </section>
@@ -136,9 +146,9 @@ export function SettingsRow({
   valueClassName?: string;
 }) {
   return (
-    <div className="flex flex-col gap-3 border-b border-border/50 px-4 py-4 last:border-b-0 md:flex-row md:items-start md:justify-between md:gap-4 transition-colors hover:bg-muted/30">
-      <div className="min-w-0 shrink-0 md:w-[35%] pt-0.5">
-        <label className="block text-[13px] font-medium text-foreground">
+    <div className="flex flex-col gap-2 border-b border-border/40 py-5 last:border-b-0 md:flex-row md:items-start md:justify-between md:gap-8 hover:bg-muted/10 transition-colors">
+      <div className="min-w-0 shrink-0 md:w-[35%] pt-1">
+        <label className="block text-[13px] font-medium text-foreground/80 tracking-tight">
           {label}
         </label>
       </div>

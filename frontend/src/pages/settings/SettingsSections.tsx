@@ -206,7 +206,7 @@ export function AssistantConfigurationSection({
   settings,
 }: AssistantConfigurationSectionProps) {
   return (
-    <FormSection title="Assistant Configuration" className="mt-10">
+    <FormSection title="Assistant Configuration">
       <SettingsRow label="Assistant Role">
         <Select
           value={settings.assistant.role_name}

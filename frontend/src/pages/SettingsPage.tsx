@@ -1,5 +1,6 @@
 import { PageScaffold } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AccessConfigurationSection,
   AssistantConfigurationSection,
@@ -45,7 +46,7 @@ export function SettingsPage() {
 
   return (
     <PageScaffold>
-      <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-none">
+      <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-none pb-20">
         <div className="mx-auto max-w-[680px] pb-10 pt-6">
           <SettingsHeader
             accessDraftError={accessDraftError}
@@ -55,38 +56,68 @@ export function SettingsPage() {
             saving={saving}
             settings={settings}
           />
-          <AccessConfigurationSection
-            accessDraft={accessDraft}
-            accessDraftError={accessDraftError}
-            onAccessDraftChange={updateAccessDraft}
-          />
-          <PathConfigurationSection
-            onSettingsChange={updateSettings}
-            settings={settings}
-          />
-          <AssistantConfigurationSection
-            assistantRole={assistantRole}
-            onSettingsChange={updateSettings}
-            roles={roles}
-            settings={settings}
-          />
-          <LeaderConfigurationSection
-            leaderRole={leaderRole}
-            onSettingsChange={updateSettings}
-            roles={roles}
-            settings={settings}
-          />
-          <ModelConfigurationSection
-            activeProvider={activeProvider}
-            activeProviderModels={activeProviderModels}
-            availableActiveProviderModels={availableActiveProviderModels}
-            effectiveContextWindowTokens={effectiveContextWindowTokens}
-            effectiveModelCapabilities={effectiveModelCapabilities}
-            knownSafeInputTokens={knownSafeInputTokens}
-            onSettingsChange={updateSettings}
-            providers={providers}
-            settings={settings}
-          />
+
+          <Tabs defaultValue="model" className="w-full">
+            <TabsList className="mb-8 w-full justify-start h-auto flex-wrap bg-transparent p-0 gap-6 border-b border-border/40 rounded-none">
+              {["model", "assistant", "leader", "access", "path"].map((t) => (
+                <TabsTrigger
+                  key={t}
+                  value={t}
+                  className="data-[state=active]:bg-transparent data-[state=active]:shadow-none bg-transparent border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground rounded-none px-1 pb-2.5 pt-2 hover:text-foreground transition-colors"
+                >
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            <TabsContent value="model" className="mt-0">
+              <ModelConfigurationSection
+                activeProvider={activeProvider}
+                activeProviderModels={activeProviderModels}
+                availableActiveProviderModels={availableActiveProviderModels}
+                effectiveContextWindowTokens={effectiveContextWindowTokens}
+                effectiveModelCapabilities={effectiveModelCapabilities}
+                knownSafeInputTokens={knownSafeInputTokens}
+                onSettingsChange={updateSettings}
+                providers={providers}
+                settings={settings}
+              />
+            </TabsContent>
+
+            <TabsContent value="assistant" className="mt-0">
+              <AssistantConfigurationSection
+                assistantRole={assistantRole}
+                onSettingsChange={updateSettings}
+                roles={roles}
+                settings={settings}
+              />
+            </TabsContent>
+
+            <TabsContent value="leader" className="mt-0">
+              <LeaderConfigurationSection
+                leaderRole={leaderRole}
+                onSettingsChange={updateSettings}
+                roles={roles}
+                settings={settings}
+              />
+            </TabsContent>
+
+            <TabsContent value="access" className="mt-0">
+              <AccessConfigurationSection
+                accessDraft={accessDraft}
+                accessDraftError={accessDraftError}
+                onAccessDraftChange={updateAccessDraft}
+              />
+            </TabsContent>
+
+            <TabsContent value="path" className="mt-0">
+              <PathConfigurationSection
+                onSettingsChange={updateSettings}
+                settings={settings}
+              />
+            </TabsContent>
+          </Tabs>
+
           <SettingsFooter appVersion={appVersion} />
         </div>
       </div>
