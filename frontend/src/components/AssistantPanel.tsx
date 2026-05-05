@@ -50,7 +50,7 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
   return (
     <div
       className={cn(
-        "relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface-overlay text-foreground shadow-md",
+        "relative flex h-full flex-col overflow-hidden bg-surface-overlay text-foreground",
       )}
     >
       <div
@@ -101,42 +101,44 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
           }}
           className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-b from-transparent via-background/70 to-background/95 px-2.5 pt-8"
         >
-          <AssistantChatComposer
-            busy={assistantActivity.running}
-            disabled={
-              (!input.trim() && draftImages.length === 0) ||
-              hasUploadingImages ||
-              sending
-            }
-            commandsEnabled
-            images={draftImages}
-            imageInputEnabled={supportsInputImage}
-            input={input}
-            onAddImages={(files) => void addImages(files)}
-            onChange={setInput}
-            onNavigateHistory={navigateInputHistory}
-            onKeyDown={handleKeyDown}
-            onRemoveImage={removeImage}
-            onSend={() => void sendMessage()}
-            onStop={() => {
-              setStopping(true);
-              void stopAssistant()
-                .catch((error) => {
-                  toast.error(
-                    error instanceof Error
-                      ? error.message
-                      : "Failed to stop Assistant",
-                  );
-                })
-                .finally(() => {
-                  setStopping(false);
-                });
-            }}
-            overlay
-            stopping={stopping}
-            suppressCommandNavigation={isBrowsingInputHistory}
-            targetLabel="Assistant"
-          />
+          <div className="mx-auto w-full max-w-3xl">
+            <AssistantChatComposer
+              busy={assistantActivity.running}
+              disabled={
+                (!input.trim() && draftImages.length === 0) ||
+                hasUploadingImages ||
+                sending
+              }
+              commandsEnabled
+              images={draftImages}
+              imageInputEnabled={supportsInputImage}
+              input={input}
+              onAddImages={(files) => void addImages(files)}
+              onChange={setInput}
+              onNavigateHistory={navigateInputHistory}
+              onKeyDown={handleKeyDown}
+              onRemoveImage={removeImage}
+              onSend={() => void sendMessage()}
+              onStop={() => {
+                setStopping(true);
+                void stopAssistant()
+                  .catch((error) => {
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : "Failed to stop Assistant",
+                    );
+                  })
+                  .finally(() => {
+                    setStopping(false);
+                  });
+              }}
+              overlay
+              stopping={stopping}
+              suppressCommandNavigation={isBrowsingInputHistory}
+              targetLabel="Assistant"
+            />
+          </div>
         </div>
       </div>
     </div>

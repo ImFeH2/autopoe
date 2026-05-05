@@ -71,36 +71,38 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
         paddingBottom: `${baseBottomPadding + bottomInset}px`,
         scrollPaddingBottom: `${baseBottomPadding + bottomInset}px`,
       }}
-      className="flex-1 space-y-2.5 overflow-y-auto px-3 pt-3"
+      className="flex-1 overflow-y-auto px-3 pt-3"
     >
-      {visibleItems.length === 0 && !runningHint ? (
-        <WorkspaceEmptyState />
-      ) : null}
+      <div className="mx-auto w-full max-w-3xl space-y-2.5">
+        {visibleItems.length === 0 && !runningHint ? (
+          <WorkspaceEmptyState />
+        ) : null}
 
-      {visibleItems.map((item, index) => (
-        <div
-          key={getTimelineItemKey(item, index)}
-          className="[content-visibility:auto] [contain-intrinsic-size:auto_100px]"
-        >
-          <TimelineItem
-            allowHumanMessageRetry={allowHumanMessageRetry}
-            item={item}
-            nodes={nodes}
-            onRetryHumanMessage={onRetryHumanMessage}
-            retryImageInputEnabled={retryImageInputEnabled}
-            retryingMessageId={retryingMessageId}
-          />
-        </div>
-      ))}
+        {visibleItems.map((item, index) => (
+          <div
+            key={getTimelineItemKey(item, index)}
+            className="[content-visibility:auto] [contain-intrinsic-size:auto_100px]"
+          >
+            <TimelineItem
+              allowHumanMessageRetry={allowHumanMessageRetry}
+              item={item}
+              nodes={nodes}
+              onRetryHumanMessage={onRetryHumanMessage}
+              retryImageInputEnabled={retryImageInputEnabled}
+              retryingMessageId={retryingMessageId}
+            />
+          </div>
+        ))}
 
-      {runningHint ? (
-        <div>
-          <AssistantRunningHint
-            label={runningHint.label}
-            toolName={runningHint.toolName}
-          />
-        </div>
-      ) : null}
+        {runningHint ? (
+          <div>
+            <AssistantRunningHint
+              label={runningHint.label}
+              toolName={runningHint.toolName}
+            />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 });
