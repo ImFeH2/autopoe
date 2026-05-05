@@ -6,12 +6,9 @@ import { FormTextarea } from "@/components/form/FormControls";
 import { PageScaffold, PageTitleBar } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { Button } from "@/components/ui/button";
+import { PanelCard, StatusChip } from "@/components/ui/surface";
 import { fetchPromptSettings, savePromptSettings } from "@/lib/api";
 
-const promptCharCountClass =
-  "rounded-full border border-border bg-accent/30 px-2 py-0.5 text-[10px] font-medium text-muted-foreground";
-const promptEditorSurfaceClass =
-  "relative flex min-h-0 flex-1 rounded-xl border border-border bg-card/30 p-1";
 const promptEditorTextareaClass =
   "min-h-0 w-full flex-1 resize-none select-text rounded-md bg-transparent p-3 font-mono text-[13px] leading-relaxed text-foreground placeholder:text-muted-foreground transition-colors focus:bg-background/35 focus:outline-none scrollbar-none";
 
@@ -85,15 +82,19 @@ export function PromptsPage() {
                 <h2 className="text-[15px] font-medium text-foreground">
                   Custom Prompt
                 </h2>
-                <span className={promptCharCountClass}>
+                <StatusChip tone="neutral" className="px-2 py-0.5">
                   {customPrompt.length} chars
-                </span>
+                </StatusChip>
               </div>
               <p className="text-[12px] text-muted-foreground">
                 Appended to every node's system prompt
               </p>
             </div>
-            <div className={promptEditorSurfaceClass}>
+            <PanelCard
+              as="div"
+              padding="none"
+              className="relative flex min-h-0 flex-1 p-1"
+            >
               <FormTextarea
                 aria-label="Custom Prompt"
                 value={customPrompt}
@@ -102,7 +103,7 @@ export function PromptsPage() {
                 className={promptEditorTextareaClass}
                 mono
               />
-            </div>
+            </PanelCard>
           </div>
           <div className="flex min-h-0 flex-col">
             <div className="mb-3 flex items-center justify-between px-1">
@@ -110,15 +111,19 @@ export function PromptsPage() {
                 <h2 className="text-[15px] font-medium text-foreground">
                   Custom Post Prompt
                 </h2>
-                <span className={promptCharCountClass}>
+                <StatusChip tone="neutral" className="px-2 py-0.5">
                   {customPostPrompt.length} chars
-                </span>
+                </StatusChip>
               </div>
               <p className="text-[12px] text-muted-foreground">
                 Added after the built-in runtime post prompt
               </p>
             </div>
-            <div className={promptEditorSurfaceClass}>
+            <PanelCard
+              as="div"
+              padding="none"
+              className="relative flex min-h-0 flex-1 p-1"
+            >
               <FormTextarea
                 aria-label="Custom Post Prompt"
                 value={customPostPrompt}
@@ -127,7 +132,7 @@ export function PromptsPage() {
                 className={promptEditorTextareaClass}
                 mono
               />
-            </div>
+            </PanelCard>
           </div>
         </div>
       </div>

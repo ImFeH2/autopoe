@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { McpServerDialog } from "@/components/mcp/McpServerDialog";
 import {
   FilterPill,
-  mcpEyebrowClass,
   ReadonlyBlock,
   SummaryCard,
 } from "@/components/mcp/McpPrimitives";
@@ -14,6 +13,13 @@ import {
   PageTitleBar,
   SoftPanel,
 } from "@/components/layout/PageScaffold";
+import {
+  CodeBlock,
+  PageState,
+  PanelCard,
+  StatusChip,
+  mutedLabelClass,
+} from "@/components/ui/surface";
 import { WorkspaceDialogField } from "@/components/WorkspaceCommandDialog";
 import { cn } from "@/lib/utils";
 import {
@@ -44,18 +50,13 @@ import { useMcpPageState } from "@/pages/mcp/useMcpPageState";
 
 const mcpPanelClass = "bg-card/20";
 const mcpPanelTextClass = "text-[13px] text-muted-foreground";
-const mcpCardSurfaceClass =
-  "rounded-xl border border-border bg-card/20 px-4 py-3";
-const mcpCodeBlockClass =
-  "mt-4 max-h-48 overflow-auto rounded-xl border border-border bg-background/55 p-3 text-[11px] text-foreground/70";
+const mcpEyebrowClass = mutedLabelClass;
 const mcpOutlineButtonClass =
   "border-border bg-accent/20 text-foreground hover:bg-accent/35";
 const mcpDestructiveButtonClass =
   "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/18";
-const mcpTagClass =
-  "rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em]";
-const mcpInfoIconClass =
-  "flex size-14 items-center justify-center rounded-xl border border-border bg-accent/20 text-muted-foreground";
+const mcpCodeBlockClass =
+  "mt-4 max-h-48 bg-background/55 p-3 text-foreground/70";
 
 export function McpPage() {
   const {
@@ -103,9 +104,8 @@ export function McpPage() {
             </p>
           </div>
           {quickAdd.parse.draft ? (
-            <span
+            <StatusChip
               className={cn(
-                "rounded-full border px-2.5 py-1 text-[10px] font-medium",
                 statusClassName(
                   quickAdd.parse.draft.transport === "streamable_http"
                     ? "connected"
@@ -116,7 +116,7 @@ export function McpPage() {
               {quickAdd.parse.draft.transport === "streamable_http"
                 ? "URL"
                 : "Launcher"}
-            </span>
+            </StatusChip>
           ) : null}
         </div>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(260px,0.6fr)]">
@@ -251,14 +251,12 @@ export function McpPage() {
           ) : servers.length === 0 ? (
             <div className="flex h-full min-h-0 flex-col">
               {quickAddPanel}
-              <SoftPanel className="mt-4 flex h-full flex-col items-center justify-center text-center">
-                <div className={mcpInfoIconClass}>
-                  <Unplug className="size-6" />
-                </div>
-                <h2 className="mt-5 text-[16px] font-medium text-foreground">
-                  No MCP servers
-                </h2>
-              </SoftPanel>
+              <PageState
+                icon={Unplug}
+                title="No MCP servers"
+                minHeightClassName="h-full"
+                className="mt-4"
+              />
             </div>
           ) : (
             <div className="flex h-full min-h-0 flex-col">
@@ -297,27 +295,23 @@ export function McpPage() {
 
               <div className="mt-4 min-h-0 flex-1 overflow-hidden">
                 {filteredServers.length === 0 ? (
-                  <SoftPanel className="flex h-full flex-col items-center justify-center text-center">
-                    <div className={mcpInfoIconClass}>
-                      <Search className="size-6" />
-                    </div>
-                    <h2 className="mt-5 text-[16px] font-medium text-foreground">
-                      No matching MCP servers
-                    </h2>
-                    <p className="mt-2 max-w-lg text-[13px] leading-6 text-muted-foreground">
-                      Choose another status filter to see matching servers
-                      again.
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className={cn("mt-5", mcpOutlineButtonClass)}
-                      onClick={clearServerFilters}
-                    >
-                      <X className="mr-2 size-4" />
-                      Show All Servers
-                    </Button>
-                  </SoftPanel>
+                  <PageState
+                    icon={Search}
+                    title="No matching MCP servers"
+                    description="Choose another status filter to see matching servers again."
+                    minHeightClassName="h-full"
+                    action={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={mcpOutlineButtonClass}
+                        onClick={clearServerFilters}
+                      >
+                        <X className="mr-2 size-4" />
+                        Show All Servers
+                      </Button>
+                    }
+                  />
                 ) : (
                   <div className="grid h-full gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
                     <div className="min-h-0 overflow-y-auto pr-1 scrollbar-none">
@@ -327,13 +321,15 @@ export function McpPage() {
                             selectedServer?.config.name === record.config.name;
                           const visibility = globalAvailabilityLabel(record);
                           return (
-                            <div
+                            <PanelCard
+                              as="div"
+                              padding="sm"
                               key={record.config.name}
                               className={cn(
-                                "rounded-xl border p-4 transition-colors",
+                                "p-4 transition-colors",
                                 isSelected
-                                  ? "border-border bg-accent/20"
-                                  : "border-border bg-card/20 hover:bg-accent/20",
+                                  ? "bg-accent/20"
+                                  : "bg-card/20 hover:bg-accent/20",
                               )}
                             >
                               <div className="flex items-start justify-between gap-3">
@@ -350,14 +346,20 @@ export function McpPage() {
                                       {record.config.name}
                                     </p>
                                     {record.config.required ? (
-                                      <span className="rounded-full border border-graph-status-idle/18 bg-graph-status-idle/[0.12] px-2 py-0.5 text-[10px] font-medium text-graph-status-idle">
+                                      <StatusChip
+                                        tone="idle"
+                                        className="px-2 py-0.5"
+                                      >
                                         required
-                                      </span>
+                                      </StatusChip>
                                     ) : null}
                                     {visibility ? (
-                                      <span className="rounded-full border border-primary/20 bg-primary/[0.1] px-2 py-0.5 text-[10px] font-medium text-primary">
+                                      <StatusChip
+                                        tone="primary"
+                                        className="px-2 py-0.5"
+                                      >
                                         {visibility}
-                                      </span>
+                                      </StatusChip>
                                     ) : null}
                                   </div>
                                   <div className="mt-3 grid gap-1.5 text-[12px] text-muted-foreground">
@@ -382,14 +384,13 @@ export function McpPage() {
                                   ) : null}
                                 </Button>
                                 <div className="flex shrink-0 flex-col items-end gap-1.5">
-                                  <span
+                                  <StatusChip
                                     className={cn(
-                                      "rounded-full border px-2.5 py-1 text-[10px] font-medium",
                                       statusClassName(record.snapshot.status),
                                     )}
                                   >
                                     {statusLabel(record.snapshot.status)}
-                                  </span>
+                                  </StatusChip>
                                   <div className="flex flex-wrap justify-end gap-1.5">
                                     <Button
                                       type="button"
@@ -467,7 +468,7 @@ export function McpPage() {
                                   </div>
                                 </div>
                               </div>
-                            </div>
+                            </PanelCard>
                           );
                         })}
                       </div>
@@ -482,20 +483,20 @@ export function McpPage() {
                                 <h2 className="text-[18px] font-medium text-foreground">
                                   {selectedServer.config.name}
                                 </h2>
-                                <span
+                                <StatusChip
+                                  uppercase
                                   className={cn(
-                                    mcpTagClass,
                                     statusClassName(
                                       selectedServer.snapshot.status,
                                     ),
                                   )}
                                 >
                                   {statusLabel(selectedServer.snapshot.status)}
-                                </span>
+                                </StatusChip>
                                 {globalAvailabilityLabel(selectedServer) ? (
-                                  <span className="rounded-full border border-primary/20 bg-primary/[0.1] px-2.5 py-1 text-[10px] font-medium text-primary">
+                                  <StatusChip tone="primary">
                                     {globalAvailabilityLabel(selectedServer)}
-                                  </span>
+                                  </StatusChip>
                                 ) : null}
                               </div>
                               <p className="mt-2 text-[13px] text-muted-foreground">
@@ -674,9 +675,11 @@ export function McpPage() {
                                     {Object.entries(
                                       selectedServer.snapshot.capability_counts,
                                     ).map(([key, value]) => (
-                                      <div
+                                      <PanelCard
+                                        as="div"
+                                        padding="sm"
                                         key={key}
-                                        className={mcpCardSurfaceClass}
+                                        className="bg-card/20"
                                       >
                                         <p className={mcpEyebrowClass}>
                                           {key.replaceAll("_", " ")}
@@ -684,7 +687,7 @@ export function McpPage() {
                                         <p className="mt-2 text-xl font-medium text-foreground">
                                           {value}
                                         </p>
-                                      </div>
+                                      </PanelCard>
                                     ))}
                                   </div>
                                 </SoftPanel>
@@ -806,11 +809,10 @@ export function McpPage() {
                                         mono
                                       />
                                     </div>
-                                    <div
-                                      className={cn(
-                                        "mt-4",
-                                        mcpCardSurfaceClass,
-                                      )}
+                                    <PanelCard
+                                      as="div"
+                                      padding="sm"
+                                      className="mt-4 bg-card/20"
                                     >
                                       <p className={mcpEyebrowClass}>
                                         Recent Auth Result
@@ -828,7 +830,7 @@ export function McpPage() {
                                           selectedServer.snapshot.auth_status,
                                         )}
                                       </p>
-                                    </div>
+                                    </PanelCard>
                                   </SoftPanel>
                                 )}
                               </div>
@@ -887,19 +889,19 @@ export function McpPage() {
                                               </div>
                                               <div className="flex flex-wrap gap-2 text-[10px]">
                                                 {tool.read_only_hint ? (
-                                                  <span className="rounded-full border border-primary/20 bg-primary/[0.1] px-2 py-1 text-primary">
+                                                  <StatusChip tone="primary">
                                                     readOnly
-                                                  </span>
+                                                  </StatusChip>
                                                 ) : null}
                                                 {tool.destructive_hint ? (
-                                                  <span className="rounded-full border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive">
+                                                  <StatusChip tone="danger">
                                                     destructive
-                                                  </span>
+                                                  </StatusChip>
                                                 ) : null}
                                                 {tool.open_world_hint ? (
-                                                  <span className="rounded-full border border-graph-status-idle/18 bg-graph-status-idle/[0.12] px-2 py-1 text-graph-status-idle">
+                                                  <StatusChip tone="idle">
                                                     openWorld
-                                                  </span>
+                                                  </StatusChip>
                                                 ) : null}
                                               </div>
                                             </div>
@@ -908,13 +910,15 @@ export function McpPage() {
                                                 {tool.description}
                                               </p>
                                             ) : null}
-                                            <pre className={mcpCodeBlockClass}>
+                                            <CodeBlock
+                                              className={mcpCodeBlockClass}
+                                            >
                                               {JSON.stringify(
                                                 tool.parameters ?? {},
                                                 null,
                                                 2,
                                               )}
-                                            </pre>
+                                            </CodeBlock>
                                           </SoftPanel>
                                         ),
                                       )
@@ -1042,7 +1046,7 @@ export function McpPage() {
                                                   {prompt.description}
                                                 </p>
                                               ) : null}
-                                              <pre
+                                              <CodeBlock
                                                 className={mcpCodeBlockClass}
                                               >
                                                 {JSON.stringify(
@@ -1050,7 +1054,7 @@ export function McpPage() {
                                                   null,
                                                   2,
                                                 )}
-                                              </pre>
+                                              </CodeBlock>
                                             </Button>
                                           ),
                                         )
@@ -1099,7 +1103,7 @@ export function McpPage() {
                                           </div>
                                           {promptPreviewState.selectedPrompt
                                             ?.arguments?.length ? (
-                                            <pre
+                                            <CodeBlock
                                               className={cn(
                                                 mcpCodeBlockClass,
                                                 "max-h-40",
@@ -1111,9 +1115,9 @@ export function McpPage() {
                                                 null,
                                                 2,
                                               )}
-                                            </pre>
+                                            </CodeBlock>
                                           ) : null}
-                                          <pre
+                                          <CodeBlock
                                             className={cn(
                                               mcpCodeBlockClass,
                                               "max-h-[420px]",
@@ -1127,7 +1131,7 @@ export function McpPage() {
                                                   null,
                                                   2,
                                                 )}
-                                          </pre>
+                                          </CodeBlock>
                                         </>
                                       ) : (
                                         <p className="mt-4 text-[13px] leading-6 text-muted-foreground">
@@ -1177,9 +1181,9 @@ export function McpPage() {
                                       <div className="flex flex-wrap items-start justify-between gap-3">
                                         <div>
                                           <div className="flex flex-wrap items-center gap-2">
-                                            <span className="rounded-full border border-border bg-accent/20 px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
+                                            <StatusChip tone="neutral">
                                               {activityCategoryLabel(entry)}
-                                            </span>
+                                            </StatusChip>
                                             <p className="text-[14px] font-medium text-foreground">
                                               {formatSentenceCase(entry.action)}
                                             </p>
@@ -1188,14 +1192,14 @@ export function McpPage() {
                                             {formatTimestamp(entry.started_at)}
                                           </p>
                                         </div>
-                                        <span
+                                        <StatusChip
+                                          uppercase
                                           className={cn(
-                                            mcpTagClass,
                                             resultClassName(entry.result),
                                           )}
                                         >
                                           {entry.result}
-                                        </span>
+                                        </StatusChip>
                                       </div>
                                       <p className="mt-3 text-[13px] leading-6 text-muted-foreground">
                                         {entry.summary}
@@ -1233,9 +1237,11 @@ export function McpPage() {
                           </div>
                         </SoftPanel>
                       ) : (
-                        <SoftPanel className="flex h-full items-center justify-center text-center text-muted-foreground">
-                          Select an MCP server to inspect details.
-                        </SoftPanel>
+                        <PageState
+                          title="Select an MCP server"
+                          description="Choose a server from the list to inspect details."
+                          minHeightClassName="h-full"
+                        />
                       )}
                     </div>
                   </div>

@@ -8,6 +8,7 @@ import {
 import { HistoryView } from "@/components/HistoryView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DetailSection } from "@/components/ui/surface";
 import {
   useAgentNodesRuntime,
   useAgentTabsRuntime,
@@ -739,21 +740,6 @@ function PanelActionButton({
     >
       {children}
     </Button>
-  );
-}
-
-function DetailSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="border-t border-border pt-3.5">
-      <p className="text-[10px] font-semibold text-muted-foreground">{title}</p>
-      <div className="mt-2">{children}</div>
-    </section>
   );
 }
 

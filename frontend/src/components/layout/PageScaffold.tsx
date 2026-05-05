@@ -6,6 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PanelCard, sectionSurfaceClass } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 
 interface PageScaffoldProps {
@@ -37,14 +38,16 @@ export function PageScaffold({ children, className }: PageScaffoldProps) {
 
 export function SoftPanel({ children, className }: SoftPanelProps) {
   return (
-    <section
+    <PanelCard
+      as="section"
+      padding="md"
       className={cn(
-        "rounded-xl bg-card/[0.18] p-5 ring-1 ring-white/[0.04]",
+        "border-transparent bg-card/[0.18] ring-1 ring-white/[0.04]",
         className,
       )}
     >
       {children}
-    </section>
+    </PanelCard>
   );
 }
 
@@ -95,6 +98,31 @@ export function SectionHeader({ title }: { title: string }) {
     <div className="mb-2.5 px-1">
       <h2 className="text-[13px] font-semibold text-foreground/85">{title}</h2>
     </div>
+  );
+}
+
+export function FormSection({
+  children,
+  className,
+  contentClassName,
+  separated = false,
+  title,
+}: {
+  children: ReactNode;
+  className?: string;
+  contentClassName?: string;
+  separated?: boolean;
+  title: string;
+}) {
+  return (
+    <section
+      className={cn(separated ? "border-t border-border pt-8" : "", className)}
+    >
+      <SectionHeader title={title} />
+      <div className={cn(sectionSurfaceClass, contentClassName)}>
+        {children}
+      </div>
+    </section>
   );
 }
 

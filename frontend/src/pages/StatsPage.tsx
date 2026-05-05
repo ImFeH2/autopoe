@@ -25,6 +25,12 @@ import {
   PageTitleBar,
   SoftPanel,
 } from "@/components/layout/PageScaffold";
+import {
+  CodeBlock,
+  MetricCard,
+  PageState,
+  StatusChip,
+} from "@/components/ui/surface";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -81,14 +87,7 @@ function StatsLoadingState() {
 }
 
 function StatsEmptyState() {
-  return (
-    <SoftPanel className="flex min-h-[280px] flex-col items-center justify-center text-center">
-      <div className="flex size-12 items-center justify-center rounded-xl border border-border bg-accent/20 text-muted-foreground">
-        <ChartColumnBig className="size-5" />
-      </div>
-      <h2 className="mt-5 text-xl font-medium text-foreground">No stats yet</h2>
-    </SoftPanel>
-  );
+  return <PageState icon={ChartColumnBig} title="No stats yet" />;
 }
 
 function StatsErrorState({
@@ -99,25 +98,22 @@ function StatsErrorState({
   onRetry: () => void;
 }) {
   return (
-    <SoftPanel className="flex min-h-[280px] flex-col items-center justify-center text-center">
-      <div className="flex size-12 items-center justify-center rounded-xl border border-destructive/20 bg-destructive/10 text-destructive">
-        <AlertTriangle className="size-5" />
-      </div>
-      <h2 className="mt-5 text-xl font-medium text-foreground">
-        Failed to load stats
-      </h2>
-      <p className="mt-2 max-w-xl text-[13px] leading-6 text-muted-foreground">
-        {message}
-      </p>
-      <Button
-        type="button"
-        variant="outline"
-        className="mt-5 border-border bg-accent/20 text-foreground hover:bg-accent/35"
-        onClick={onRetry}
-      >
-        Retry
-      </Button>
-    </SoftPanel>
+    <PageState
+      icon={AlertTriangle}
+      title="Failed to load stats"
+      description={message}
+      tone="danger"
+      action={
+        <Button
+          type="button"
+          variant="outline"
+          className="border-border bg-accent/20 text-foreground hover:bg-accent/35"
+          onClick={onRetry}
+        >
+          Retry
+        </Button>
+      }
+    />
   );
 }
 
@@ -133,24 +129,12 @@ function StatsValueCard({
   accentClassName?: string;
 }) {
   return (
-    <SoftPanel className="flex flex-col gap-4 py-4 min-h-[140px] justify-between">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-muted-foreground">{title}</div>
-        <div
-          className={cn(
-            "flex size-8 items-center justify-center rounded-md bg-accent/20 text-muted-foreground",
-            accentClassName,
-          )}
-        >
-          <Icon className="size-4" />
-        </div>
-      </div>
-      <div>
-        <div className="text-2xl font-semibold leading-none tracking-tight">
-          {value}
-        </div>
-      </div>
-    </SoftPanel>
+    <MetricCard
+      label={title}
+      value={value}
+      icon={Icon}
+      accentClassName={accentClassName}
+    />
   );
 }
 
@@ -432,17 +416,17 @@ function EventDetail({ event }: { event: StatsEvent }) {
           <p className="text-[11px] font-medium text-muted-foreground">
             Normalized Usage
           </p>
-          <pre className="max-h-[240px] overflow-auto rounded-xl border border-border bg-background/50 p-4 text-[11px] leading-6 text-foreground/75">
+          <CodeBlock className="max-h-[240px]">
             {JSON.stringify(event.request.normalized_usage ?? null, null, 2)}
-          </pre>
+          </CodeBlock>
         </div>
         <div className="space-y-2">
           <p className="text-[11px] font-medium text-muted-foreground">
             Raw Usage
           </p>
-          <pre className="max-h-[240px] overflow-auto rounded-xl border border-border bg-background/50 p-4 text-[11px] leading-6 text-foreground/75">
+          <CodeBlock className="max-h-[240px]">
             {JSON.stringify(event.request.raw_usage ?? null, null, 2)}
-          </pre>
+          </CodeBlock>
         </div>
       </div>
     </div>
@@ -890,16 +874,16 @@ export function StatsPage() {
                                   {agent.tabTitle}
                                 </p>
                               </div>
-                              <span
+                              <StatusChip
                                 className={cn(
-                                  "inline-flex h-fit w-fit rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
+                                  "px-2 py-0.5 uppercase tracking-[0.12em]",
                                   agent.state
                                     ? stateBadgeColor[agent.state]
                                     : "border-border bg-accent/25 text-muted-foreground",
                                 )}
                               >
                                 {agent.state || "unknown"}
-                              </span>
+                              </StatusChip>
                               <span>
                                 Req {formatInteger(agent.requestCount)}
                               </span>

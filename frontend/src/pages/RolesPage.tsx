@@ -2,12 +2,13 @@ import { motion } from "motion/react";
 import { Edit2, Eye, Plus, RefreshCw, Trash2, Users, X } from "lucide-react";
 import { ModelParamsFields } from "@/components/ModelParamsFields";
 import {
+  FormSection,
   PageScaffold,
   PageTitleBar,
-  SectionHeader,
   SettingsRow,
 } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
+import { PanelCard, PageState, StatusChip } from "@/components/ui/surface";
 import {
   FormIconButton,
   FormInput,
@@ -23,7 +24,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -101,14 +101,15 @@ export function RolesPage() {
           {isPanelOpen ? (
             <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-none">
               <div className="mx-auto max-w-3xl pb-10">
-                <div className="mb-8 flex items-center justify-between rounded-xl border border-border bg-card/30 px-5 py-4">
+                <PanelCard
+                  as="div"
+                  padding="sm"
+                  className="mb-8 flex items-center justify-between px-5 py-4"
+                >
                   <div className="flex items-center gap-3">
-                    <Badge
-                      variant="secondary"
-                      className="rounded-full border border-border/70 bg-accent/20 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground"
-                    >
+                    <StatusChip tone="neutral" className="py-0.5 text-[11px]">
                       {panelEyebrow}
-                    </Badge>
+                    </StatusChip>
                     <h2 className="text-[15px] font-medium text-foreground">
                       {panelTitle}
                     </h2>
@@ -122,90 +123,93 @@ export function RolesPage() {
                   >
                     <X className="size-3.5" />
                   </Button>
-                </div>
+                </PanelCard>
 
-                <section className="mb-10">
-                  <SectionHeader title="Identity" />
+                <FormSection
+                  title="Identity"
+                  className="mb-10"
+                  contentClassName="rounded-lg border-dashed bg-card/30"
+                >
+                  <SettingsRow label="Role Name">
+                    <FormInput
+                      value={draft.name}
+                      onChange={(event) =>
+                        actions.updateDraft((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                      readOnly={isReadOnly || lockBuiltinFields}
+                      placeholder="e.g., Code Reviewer"
+                      className={cn(
+                        isReadOnly || lockBuiltinFields
+                          ? formReadOnlyClass
+                          : "",
+                      )}
+                    />
+                  </SettingsRow>
 
-                  <div className="border border-dashed border-border rounded-lg bg-card/30">
-                    <SettingsRow label="Role Name">
-                      <FormInput
-                        value={draft.name}
-                        onChange={(event) =>
-                          actions.updateDraft((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        readOnly={isReadOnly || lockBuiltinFields}
-                        placeholder="e.g., Code Reviewer"
-                        className={cn(
-                          isReadOnly || lockBuiltinFields
-                            ? formReadOnlyClass
-                            : "",
-                        )}
-                      />
-                    </SettingsRow>
+                  <SettingsRow label="Description">
+                    <FormTextarea
+                      value={draft.description}
+                      onChange={(event) =>
+                        actions.updateDraft((current) => ({
+                          ...current,
+                          description: event.target.value,
+                        }))
+                      }
+                      readOnly={isReadOnly || lockBuiltinFields}
+                      placeholder="Briefly explain what this role is best suited for"
+                      rows={3}
+                      className={cn(
+                        "resize-y",
+                        isReadOnly || lockBuiltinFields
+                          ? formReadOnlyClass
+                          : "",
+                      )}
+                    />
+                  </SettingsRow>
 
-                    <SettingsRow label="Description">
+                  <SettingsRow label="System Prompt">
+                    <div className="space-y-2">
                       <FormTextarea
-                        value={draft.description}
+                        value={draft.system_prompt}
                         onChange={(event) =>
                           actions.updateDraft((current) => ({
                             ...current,
-                            description: event.target.value,
+                            system_prompt: event.target.value,
                           }))
                         }
                         readOnly={isReadOnly || lockBuiltinFields}
-                        placeholder="Briefly explain what this role is best suited for"
-                        rows={3}
+                        placeholder="You are a helpful assistant that..."
+                        rows={12}
                         className={cn(
                           "resize-y",
                           isReadOnly || lockBuiltinFields
                             ? formReadOnlyClass
                             : "",
                         )}
+                        mono
                       />
-                    </SettingsRow>
+                      <p className="text-[11px] text-muted-foreground">
+                        {isReadOnly
+                          ? activeRole?.is_builtin
+                            ? "This built-in role can be inspected. Use Edit to adjust only its model configuration."
+                            : "This role is in read-only view. Use Edit to modify it."
+                          : lockBuiltinFields
+                            ? "Built-in role prompt and tool configuration are fixed. Only model configuration can be changed."
+                            : "This prompt defines how agents with this role will behave."}
+                      </p>
+                    </div>
+                  </SettingsRow>
+                </FormSection>
 
-                    <SettingsRow label="System Prompt">
-                      <div className="space-y-2">
-                        <FormTextarea
-                          value={draft.system_prompt}
-                          onChange={(event) =>
-                            actions.updateDraft((current) => ({
-                              ...current,
-                              system_prompt: event.target.value,
-                            }))
-                          }
-                          readOnly={isReadOnly || lockBuiltinFields}
-                          placeholder="You are a helpful assistant that..."
-                          rows={12}
-                          className={cn(
-                            "resize-y",
-                            isReadOnly || lockBuiltinFields
-                              ? formReadOnlyClass
-                              : "",
-                          )}
-                          mono
-                        />
-                        <p className="text-[11px] text-muted-foreground">
-                          {isReadOnly
-                            ? activeRole?.is_builtin
-                              ? "This built-in role can be inspected. Use Edit to adjust only its model configuration."
-                              : "This role is in read-only view. Use Edit to modify it."
-                            : lockBuiltinFields
-                              ? "Built-in role prompt and tool configuration are fixed. Only model configuration can be changed."
-                              : "This prompt defines how agents with this role will behave."}
-                        </p>
-                      </div>
-                    </SettingsRow>
-                  </div>
-                </section>
-
-                <section className="mb-10 border-t border-border pt-8">
-                  <SectionHeader title="Model Configuration" />
-
+                <FormSection
+                  title="Model Configuration"
+                  className="mb-10"
+                  separated
+                  contentClassName="border-transparent bg-transparent p-0 shadow-none"
+                >
                   <div className="space-y-6">
                     <div className="flex flex-wrap gap-3">
                       <Button
@@ -243,7 +247,7 @@ export function RolesPage() {
                     </div>
 
                     {draft.model ? (
-                      <div className="rounded-xl border border-border bg-card/30 p-5">
+                      <PanelCard>
                         <div className="grid gap-6 md:grid-cols-2">
                           <div className="space-y-2">
                             <label className="text-[13px] font-medium text-foreground/80">
@@ -360,7 +364,7 @@ export function RolesPage() {
                             </p>
                           </div>
                         </div>
-                      </div>
+                      </PanelCard>
                     ) : (
                       <p className="text-[13px] text-muted-foreground">
                         This role follows the default provider and model from
@@ -368,11 +372,14 @@ export function RolesPage() {
                       </p>
                     )}
                   </div>
-                </section>
+                </FormSection>
 
-                <section className="mb-10 border-t border-border pt-8">
-                  <SectionHeader title="Model Parameters" />
-
+                <FormSection
+                  title="Model Parameters"
+                  className="mb-10"
+                  separated
+                  contentClassName="border-transparent bg-transparent p-0 shadow-none"
+                >
                   <div className="space-y-6">
                     <div className="flex flex-wrap gap-3">
                       <Button
@@ -414,7 +421,7 @@ export function RolesPage() {
                     </div>
 
                     {!isEmptyModelParams(draft.model_params) ? (
-                      <div className="rounded-xl border border-border bg-card/30 p-5">
+                      <PanelCard>
                         <ModelParamsFields
                           value={cloneModelParams(draft.model_params)}
                           onChange={(params) =>
@@ -429,7 +436,7 @@ export function RolesPage() {
                           reasoningDisableLabel="Disable"
                           helperText="These canonical parameters override Settings only for this role. Unsupported fields are ignored by the resolved provider."
                         />
-                      </div>
+                      </PanelCard>
                     ) : (
                       <p className="text-[13px] text-muted-foreground">
                         This role inherits the default model parameters from
@@ -437,61 +444,60 @@ export function RolesPage() {
                       </p>
                     )}
                   </div>
-                </section>
+                </FormSection>
 
-                <section className="mb-10 border-t border-border pt-8">
-                  <SectionHeader title="Tool Configuration" />
-
-                  <div className="overflow-hidden rounded-xl border border-border bg-card/30">
-                    {configurableTools.map((tool) => {
-                      const state = getToolState(tool.name);
-                      return (
+                <FormSection
+                  title="Tool Configuration"
+                  className="mb-10"
+                  separated
+                  contentClassName="bg-card/30"
+                >
+                  {configurableTools.map((tool) => {
+                    const state = getToolState(tool.name);
+                    return (
+                      <div
+                        key={tool.name}
+                        className="flex items-center justify-between gap-4 border-b border-border px-5 py-4 last:border-b-0"
+                      >
                         <div
-                          key={tool.name}
-                          className="flex items-center justify-between gap-4 border-b border-border px-5 py-4 last:border-b-0"
+                          className="min-w-0 flex-1"
+                          title={tool.description}
                         >
-                          <div
-                            className="min-w-0 flex-1"
-                            title={tool.description}
-                          >
-                            <p className="font-mono text-[13px] text-foreground/80">
-                              {tool.name}
-                            </p>
-                            <p className="mt-1 truncate text-[12px] text-muted-foreground">
-                              {tool.description}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            onClick={() =>
-                              actions.cycleRoleToolState(tool.name)
-                            }
-                            disabled={isReadOnly || lockBuiltinFields}
-                            className={cn(
-                              "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                              state === "included" &&
-                                "bg-accent/50 text-foreground",
-                              state === "excluded" &&
-                                "bg-transparent text-muted-foreground line-through",
-                              state === "allowed" &&
-                                "bg-accent/20 text-muted-foreground hover:bg-accent/35",
-                              (isReadOnly || lockBuiltinFields) &&
-                                "cursor-default hover:bg-inherit opacity-60",
-                            )}
-                          >
-                            {state === "allowed"
-                              ? "Allowed"
-                              : state === "included"
-                                ? "Included"
-                                : "Excluded"}
-                          </Button>
+                          <p className="font-mono text-[13px] text-foreground/80">
+                            {tool.name}
+                          </p>
+                          <p className="mt-1 truncate text-[12px] text-muted-foreground">
+                            {tool.description}
+                          </p>
                         </div>
-                      );
-                    })}
-                  </div>
-                </section>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => actions.cycleRoleToolState(tool.name)}
+                          disabled={isReadOnly || lockBuiltinFields}
+                          className={cn(
+                            "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                            state === "included" &&
+                              "bg-accent/50 text-foreground",
+                            state === "excluded" &&
+                              "bg-transparent text-muted-foreground line-through",
+                            state === "allowed" &&
+                              "bg-accent/20 text-muted-foreground hover:bg-accent/35",
+                            (isReadOnly || lockBuiltinFields) &&
+                              "cursor-default hover:bg-inherit opacity-60",
+                          )}
+                        >
+                          {state === "allowed"
+                            ? "Allowed"
+                            : state === "included"
+                              ? "Included"
+                              : "Excluded"}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </FormSection>
 
                 <div className="flex items-center justify-end gap-3 border-t border-border pt-6">
                   <Button
@@ -536,16 +542,12 @@ export function RolesPage() {
               animate={{ opacity: 1 }}
               className="flex h-full flex-col items-center justify-center text-center"
             >
-              <div className="flex size-12 items-center justify-center rounded-xl border border-border bg-accent/20 shadow-sm">
-                <Users className="size-5 text-muted-foreground" />
-              </div>
-              <h3 className="mt-5 text-[15px] font-medium text-foreground">
-                No Roles Created
-              </h3>
-              <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground">
-                Roles define agent behavior. Create your first role to get
-                started.
-              </p>
+              <PageState
+                icon={Users}
+                title="No Roles Created"
+                description="Roles define agent behavior. Create your first role to get started."
+                className="border-transparent bg-transparent"
+              />
             </motion.div>
           ) : (
             <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-none">
@@ -595,9 +597,12 @@ export function RolesPage() {
                               {role.name}
                             </span>
                             {role.is_builtin ? (
-                              <span className="shrink-0 rounded-full border border-border bg-accent/25 px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                              <StatusChip
+                                tone="muted"
+                                className="px-1.5 py-0.5 text-[9px]"
+                              >
                                 Built-in
-                              </span>
+                              </StatusChip>
                             ) : null}
                           </div>
                           <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">

@@ -17,8 +17,8 @@ import {
 } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { Button } from "@/components/ui/button";
+import { PanelCard, StatusChip } from "@/components/ui/surface";
 import { formatLocalTimestamp } from "@/lib/datetime";
-import { cn } from "@/lib/utils";
 import type {
   TelegramApprovedChat,
   TelegramPendingChat,
@@ -137,16 +137,9 @@ export function ChannelsPage() {
                   Telegram
                 </h2>
               </div>
-              <div
-                className={cn(
-                  "rounded-full border px-2.5 py-0.5 text-[10px] font-medium",
-                  configured
-                    ? "border-graph-status-running/20 bg-graph-status-running/[0.12] text-graph-status-running"
-                    : "border-graph-status-idle/20 bg-graph-status-idle/[0.12] text-graph-status-idle",
-                )}
-              >
+              <StatusChip tone={configured ? "running" : "idle"}>
                 {configured ? "Configured" : "Not configured"}
-              </div>
+              </StatusChip>
             </div>
 
             <section>
@@ -178,9 +171,9 @@ export function ChannelsPage() {
                 <label className="text-[13px] font-medium text-foreground/80">
                   Pending Private Chats
                 </label>
-                <span className="rounded-full border border-border bg-accent/25 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <StatusChip tone="muted" className="px-2 py-0.5">
                   {settings.pending_chats.length} waiting
-                </span>
+                </StatusChip>
               </div>
               {settings.pending_chats.length === 0 ? (
                 <p className="mt-4 text-[13px] text-muted-foreground">
@@ -189,9 +182,11 @@ export function ChannelsPage() {
               ) : (
                 <div className="mt-4 space-y-2">
                   {settings.pending_chats.map((chat) => (
-                    <div
+                    <PanelCard
+                      as="div"
                       key={chat.chat_id}
-                      className="rounded-xl border border-border bg-card/30 px-4 py-3.5 transition-colors hover:bg-accent/20"
+                      padding="sm"
+                      className="px-4 py-3.5 transition-colors hover:bg-accent/20"
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div className="min-w-0">
@@ -232,7 +227,7 @@ export function ChannelsPage() {
                           </Button>
                         </div>
                       </div>
-                    </div>
+                    </PanelCard>
                   ))}
                 </div>
               )}
@@ -243,9 +238,9 @@ export function ChannelsPage() {
                 <label className="text-[13px] font-medium text-foreground/80">
                   Approved Private Chats
                 </label>
-                <span className="rounded-full border border-border bg-accent/25 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <StatusChip tone="muted" className="px-2 py-0.5">
                   {settings.approved_chats.length} active
-                </span>
+                </StatusChip>
               </div>
               {settings.approved_chats.length === 0 ? (
                 <p className="mt-4 text-[13px] text-muted-foreground">
@@ -254,9 +249,11 @@ export function ChannelsPage() {
               ) : (
                 <div className="mt-4 space-y-2">
                   {settings.approved_chats.map((chat) => (
-                    <div
+                    <PanelCard
+                      as="div"
                       key={chat.chat_id}
-                      className="group rounded-xl border border-border bg-card/30 px-4 py-3.5 transition-colors hover:bg-accent/20"
+                      padding="sm"
+                      className="group px-4 py-3.5 transition-colors hover:bg-accent/20"
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div className="min-w-0">
@@ -285,7 +282,7 @@ export function ChannelsPage() {
                           <Trash2 className="size-3.5" />
                         </Button>
                       </div>
-                    </div>
+                    </PanelCard>
                   ))}
                 </div>
               )}

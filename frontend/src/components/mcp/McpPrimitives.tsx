@@ -1,20 +1,11 @@
 import { FormSwitch } from "@/components/form/FormControls";
-import { Button } from "@/components/ui/button";
+import {
+  FilterToggle,
+  MetricCard,
+  PanelCard,
+  ReadonlyBlock as SharedReadonlyBlock,
+} from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
-
-export const mcpEyebrowClass =
-  "text-[12px] font-medium text-muted-foreground/80";
-
-const mcpMetricEyebrowClass =
-  "text-[12px] font-medium text-muted-foreground/80";
-const mcpMetricCardClass =
-  "rounded-xl border border-border bg-card/20 px-4 py-4";
-const mcpReadonlyBlockClass =
-  "min-h-[44px] whitespace-pre-wrap break-all rounded-xl border border-border bg-background/40 px-4 py-3 text-[12px] leading-6 text-foreground/80";
-const mcpFilterPillBaseClass =
-  "inline-flex h-8 items-center rounded-full border px-3 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
-const mcpLineTabBaseClass =
-  "inline-flex h-8 -mb-px items-center border-b-2 px-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 export function SummaryCard({
   label,
@@ -23,12 +14,7 @@ export function SummaryCard({
   label: string;
   value: number;
 }) {
-  return (
-    <div className={mcpMetricCardClass}>
-      <p className={mcpMetricEyebrowClass}>{label}</p>
-      <p className="mt-2 text-[26px] font-medium text-foreground">{value}</p>
-    </div>
-  );
+  return <MetricCard label={label} value={value} className="min-h-0 px-4" />;
 }
 
 export function FilterPill({
@@ -43,24 +29,12 @@ export function FilterPill({
   variant?: "pill" | "tab";
 }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
+    <FilterToggle
+      active={active}
+      label={label}
       onClick={onClick}
-      className={cn(
-        variant === "pill" ? mcpFilterPillBaseClass : mcpLineTabBaseClass,
-        variant === "pill"
-          ? active
-            ? "border-border bg-card/30 text-foreground"
-            : "border-transparent bg-card/20 text-muted-foreground hover:bg-accent/25 hover:text-foreground"
-          : active
-            ? "border-primary text-foreground"
-            : "border-transparent text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </Button>
+      variant={variant}
+    />
   );
 }
 
@@ -73,16 +47,7 @@ export function ReadonlyBlock({
   value: string;
   mono?: boolean;
 }) {
-  return (
-    <div className="space-y-2">
-      <p className={mcpEyebrowClass}>{label}</p>
-      <pre
-        className={cn(mcpReadonlyBlockClass, mono && "font-mono text-[11px]")}
-      >
-        {value}
-      </pre>
-    </div>
-  );
+  return <SharedReadonlyBlock label={label} value={value} mono={mono} />;
 }
 
 export function MountToggle({
@@ -99,18 +64,24 @@ export function MountToggle({
   return (
     <label
       className={cn(
-        "flex items-center justify-between gap-4 rounded-xl border border-border bg-card/20 px-4 py-3 text-sm",
+        "flex items-center justify-between gap-4 text-sm",
         disabled && "opacity-50",
       )}
     >
-      <span className="text-foreground/85">{label}</span>
-      <FormSwitch
-        checked={checked}
-        disabled={disabled}
-        label={label}
-        onCheckedChange={onChange}
-        className="h-6 w-11"
-      />
+      <PanelCard
+        as="div"
+        padding="sm"
+        className="flex w-full items-center justify-between gap-4 bg-card/20"
+      >
+        <span className="text-foreground/85">{label}</span>
+        <FormSwitch
+          checked={checked}
+          disabled={disabled}
+          label={label}
+          onCheckedChange={onChange}
+          className="h-6 w-11"
+        />
+      </PanelCard>
     </label>
   );
 }

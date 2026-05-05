@@ -9,11 +9,12 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  FormSection,
   PageScaffold,
   PageTitleBar,
-  SectionHeader,
   SettingsRow,
 } from "@/components/layout/PageScaffold";
+import { PanelCard, PageState, StatusChip } from "@/components/ui/surface";
 import {
   FormInput,
   FormTextarea,
@@ -91,7 +92,11 @@ export function ProvidersPage() {
     <PageScaffold className="overflow-hidden px-4 pt-6 sm:px-5">
       <div className="flex h-full min-h-0 flex-col">
         <PageTitleBar title="Providers" />
-        <div className="mt-6 flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-card/[0.14]">
+        <PanelCard
+          as="div"
+          padding="none"
+          className="mt-6 flex min-h-0 flex-1 overflow-hidden border-border/60 bg-card/[0.14]"
+        >
           <ProvidersSidebar
             isDragging={isDragging}
             loading={loading}
@@ -148,8 +153,11 @@ export function ProvidersPage() {
                 </div>
 
                 <div className="mx-auto w-full max-w-[720px] flex-1">
-                  <SectionHeader title="Identity" />
-                  <div className="mb-10 border border-dashed border-border rounded-lg bg-card/30">
+                  <FormSection
+                    title="Identity"
+                    className="mb-10"
+                    contentClassName="rounded-lg border-dashed bg-card/30"
+                  >
                     <SettingsRow label="Name">
                       <FormInput
                         value={draft.name}
@@ -182,123 +190,120 @@ export function ProvidersPage() {
                         </SelectContent>
                       </Select>
                     </SettingsRow>
-                  </div>
+                  </FormSection>
 
-                  <div className="border-t border-border pt-8">
-                    <SectionHeader title="Endpoint & Auth" />
-                    <div className="border border-dashed border-border rounded-lg bg-card/30">
-                      <SettingsRow label="Base URL">
-                        <FormInput
-                          value={draft.base_url}
+                  <FormSection
+                    title="Endpoint & Auth"
+                    separated
+                    contentClassName="rounded-lg border-dashed bg-card/30"
+                  >
+                    <SettingsRow label="Base URL">
+                      <FormInput
+                        value={draft.base_url}
+                        onChange={(event) =>
+                          setDraft({ ...draft, base_url: event.target.value })
+                        }
+                        placeholder="https://api.openai.com/v1"
+                      />
+                    </SettingsRow>
+                    <SettingsRow label="Request Preview">
+                      <div
+                        className={cn(
+                          "w-full select-text rounded-md border px-3 py-2 text-[12px]",
+                          endpointPreview.error
+                            ? "border-destructive/20 bg-destructive/8 text-destructive"
+                            : "border-border bg-card/30 text-foreground/80",
+                        )}
+                      >
+                        {endpointPreview.error ? (
+                          endpointPreview.error
+                        ) : endpointPreview.previewUrl ? (
+                          <code className="select-text font-mono">
+                            {endpointPreview.previewUrl}
+                          </code>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Enter a base URL to preview
+                          </span>
+                        )}
+                      </div>
+                    </SettingsRow>
+                    <SettingsRow label="API Key">
+                      <SecretInput
+                        value={draft.api_key}
+                        onChange={(event) =>
+                          setDraft({ ...draft, api_key: event.target.value })
+                        }
+                        placeholder="sk-..."
+                        mono
+                        showLabel="Show API key"
+                        hideLabel="Hide API key"
+                      />
+                    </SettingsRow>
+                    <SettingsRow label="Headers">
+                      <div className="space-y-2">
+                        <FormTextarea
+                          value={draft.headers_text}
                           onChange={(event) =>
-                            setDraft({ ...draft, base_url: event.target.value })
+                            setDraft({
+                              ...draft,
+                              headers_text: event.target.value,
+                            })
                           }
-                          placeholder="https://api.openai.com/v1"
-                        />
-                      </SettingsRow>
-                      <SettingsRow label="Request Preview">
-                        <div
+                          placeholder={'{\n  "Authorization": "Bearer ..."\n}'}
+                          spellCheck={false}
                           className={cn(
-                            "w-full select-text rounded-md border px-3 py-2 text-[12px]",
-                            endpointPreview.error
-                              ? "border-destructive/20 bg-destructive/8 text-destructive"
-                              : "border-border bg-card/30 text-foreground/80",
+                            "min-h-[140px]",
+                            parsedHeaders.error
+                              ? "border-destructive/30 text-destructive focus-visible:border-destructive/50 focus-visible:ring-destructive/20"
+                              : "",
                           )}
-                        >
-                          {endpointPreview.error ? (
-                            endpointPreview.error
-                          ) : endpointPreview.previewUrl ? (
-                            <code className="select-text font-mono">
-                              {endpointPreview.previewUrl}
-                            </code>
-                          ) : (
-                            <span className="text-muted-foreground">
-                              Enter a base URL to preview
-                            </span>
-                          )}
-                        </div>
-                      </SettingsRow>
-                      <SettingsRow label="API Key">
-                        <SecretInput
-                          value={draft.api_key}
-                          onChange={(event) =>
-                            setDraft({ ...draft, api_key: event.target.value })
-                          }
-                          placeholder="sk-..."
                           mono
-                          showLabel="Show API key"
-                          hideLabel="Hide API key"
                         />
-                      </SettingsRow>
-                      <SettingsRow label="Headers">
-                        <div className="space-y-2">
-                          <FormTextarea
-                            value={draft.headers_text}
-                            onChange={(event) =>
+                        {parsedHeaders.error ? (
+                          <p className="text-[11px] text-destructive">
+                            {parsedHeaders.error}
+                          </p>
+                        ) : null}
+                      </div>
+                    </SettingsRow>
+                    <SettingsRow label="429 Retry Delay">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <FormInput
+                            aria-label="429 Retry Delay"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={String(draft.retry_429_delay_seconds)}
+                            onChange={(event) => {
+                              const nextValue = event.target.value.trim();
+                              if (!/^\d+$/.test(nextValue)) {
+                                return;
+                              }
+                              const parsed = Number.parseInt(nextValue, 10);
+                              if (!Number.isSafeInteger(parsed) || parsed < 0) {
+                                return;
+                              }
                               setDraft({
                                 ...draft,
-                                headers_text: event.target.value,
-                              })
-                            }
-                            placeholder={
-                              '{\n  "Authorization": "Bearer ..."\n}'
-                            }
-                            spellCheck={false}
-                            className={cn(
-                              "min-h-[140px]",
-                              parsedHeaders.error
-                                ? "border-destructive/30 text-destructive focus-visible:border-destructive/50 focus-visible:ring-destructive/20"
-                                : "",
-                            )}
+                                retry_429_delay_seconds: parsed,
+                              });
+                            }}
                             mono
                           />
-                          {parsedHeaders.error ? (
-                            <p className="text-[11px] text-destructive">
-                              {parsedHeaders.error}
-                            </p>
-                          ) : null}
+                          <span className="text-[13px] font-medium text-muted-foreground">
+                            s
+                          </span>
                         </div>
-                      </SettingsRow>
-                      <SettingsRow label="429 Retry Delay">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <FormInput
-                              aria-label="429 Retry Delay"
-                              inputMode="numeric"
-                              pattern="[0-9]*"
-                              value={String(draft.retry_429_delay_seconds)}
-                              onChange={(event) => {
-                                const nextValue = event.target.value.trim();
-                                if (!/^\d+$/.test(nextValue)) {
-                                  return;
-                                }
-                                const parsed = Number.parseInt(nextValue, 10);
-                                if (
-                                  !Number.isSafeInteger(parsed) ||
-                                  parsed < 0
-                                ) {
-                                  return;
-                                }
-                                setDraft({
-                                  ...draft,
-                                  retry_429_delay_seconds: parsed,
-                                });
-                              }}
-                              mono
-                            />
-                            <span className="text-[13px] font-medium text-muted-foreground">
-                              s
-                            </span>
-                          </div>
-                        </div>
-                      </SettingsRow>
-                    </div>
-                  </div>
+                      </div>
+                    </SettingsRow>
+                  </FormSection>
 
                   <div className="border-t border-border pt-8">
-                    <SectionHeader title="Models" />
-
-                    <div className="space-y-4 rounded-xl border border-border bg-card/30 p-5">
+                    <FormSection
+                      title="Models"
+                      contentClassName="space-y-4 bg-card/30 p-5"
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <p className="text-[13px] font-medium text-foreground/80">
@@ -351,7 +356,11 @@ export function ProvidersPage() {
                       </div>
 
                       {draft.models.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-border bg-background/35 px-4 py-5 text-center">
+                        <PanelCard
+                          as="div"
+                          padding="sm"
+                          className="border-dashed bg-background/35 py-5 text-center"
+                        >
                           <p className="text-[13px] font-medium text-foreground/80">
                             No models in this provider draft
                           </p>
@@ -359,15 +368,17 @@ export function ProvidersPage() {
                             Fetch models from the current draft connection, or
                             add a manual entry.
                           </p>
-                        </div>
+                        </PanelCard>
                       ) : (
                         <div className="space-y-2">
                           {draft.models.map((entry) => {
                             const testState = modelTestStates[entry.model];
                             return (
-                              <div
+                              <PanelCard
+                                as="div"
                                 key={entry.model}
-                                className="rounded-xl border border-border bg-background/35 px-4 py-3"
+                                padding="sm"
+                                className="bg-background/35"
                               >
                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                   <div className="min-w-0 flex-1">
@@ -375,18 +386,18 @@ export function ProvidersPage() {
                                       <p className="truncate select-text font-mono text-[13px] text-foreground/85">
                                         {entry.model}
                                       </p>
-                                      <span
-                                        className={cn(
-                                          "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                                      <StatusChip
+                                        tone={
                                           entry.source === "manual"
-                                            ? "border-graph-status-idle/20 bg-graph-status-idle/[0.12] text-graph-status-idle"
-                                            : "border-graph-status-running/20 bg-graph-status-running/[0.12] text-graph-status-running",
-                                        )}
+                                            ? "idle"
+                                            : "running"
+                                        }
+                                        className="px-2 py-0.5"
                                       >
                                         {entry.source === "manual"
                                           ? "Manual"
                                           : "Discovered"}
-                                      </span>
+                                      </StatusChip>
                                     </div>
                                     <p className="mt-1 select-text text-[11px] leading-relaxed text-muted-foreground">
                                       {buildModelSummary(entry)}
@@ -445,23 +456,26 @@ export function ProvidersPage() {
                                     </Button>
                                   </div>
                                 </div>
-                              </div>
+                              </PanelCard>
                             );
                           })}
                         </div>
                       )}
-                    </div>
+                    </FormSection>
                   </div>
 
                   {!isCreating && selectedProvider ? (
                     <div className="border-t border-border pt-8">
-                      <div className="border border-dashed border-border rounded-lg bg-card/30">
+                      <FormSection
+                        title="Provider"
+                        contentClassName="rounded-lg border-dashed bg-card/30"
+                      >
                         <SettingsRow label="Provider ID">
                           <div className="select-text rounded-md border border-border bg-card/30 px-3 py-2 font-mono text-[12px] text-foreground/80">
                             {selectedProvider.id}
                           </div>
                         </SettingsRow>
-                      </div>
+                      </FormSection>
                     </div>
                   ) : null}
                 </div>
@@ -472,20 +486,16 @@ export function ProvidersPage() {
                 animate={{ opacity: 1 }}
                 className="flex h-full flex-col items-center justify-center px-6 text-center"
               >
-                <div className="flex size-12 items-center justify-center rounded-xl border border-border bg-accent/20 shadow-sm">
-                  <Server className="size-5 text-muted-foreground" />
-                </div>
-                <h3 className="mt-5 text-[15px] font-medium text-foreground">
-                  No Provider Selected
-                </h3>
-                <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground">
-                  Select a provider from the sidebar to edit its connection
-                  fields, model catalog, and model tests.
-                </p>
+                <PageState
+                  icon={Server}
+                  title="No Provider Selected"
+                  description="Select a provider from the sidebar to edit its connection fields, model catalog, and model tests."
+                  className="border-transparent bg-transparent"
+                />
               </motion.div>
             )}
           </div>
-        </div>
+        </PanelCard>
 
         <ProviderModelDialog
           draft={modelEditorDraft}
