@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import ast
+import json
+import shutil
+import subprocess
 import uuid
 from copy import deepcopy
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flowent import settings as settings_module
 from flowent.events import event_bus
@@ -16,8 +21,10 @@ from flowent.models import (
     NodeConfig,
     NodeType,
     PortDirection,
+    PortType,
     ReceivedMessage,
     Tab,
+    WorkflowActivationState,
     WorkflowDefinition,
     WorkflowNodeDefinition,
     WorkflowNodeKind,
@@ -33,7 +40,9 @@ from flowent.settings import (
     STEWARD_ROLE_INCLUDED_TOOLS,
     STEWARD_ROLE_NAME,
     build_assistant_write_dirs,
+    find_provider,
     find_role,
+    resolve_model_info,
     resolve_path,
 )
 from flowent.tools import MINIMUM_TOOLS
@@ -126,87 +135,160 @@ def is_tab_leader(*, node_id: str, tab_id: str | None = None) -> bool:
     return get_tab_leader_id(resolved_tab_id) == node_id
 
 
+def _coerce_port_type(raw_value: object, default: PortType) -> PortType:
+    try:
+        return PortType(str(raw_value))
+    except ValueError:
+        return default
+
+
+def _port_from_code_config(
+    raw_port: object,
+    *,
+    direction: PortDirection,
+) -> WorkflowPort | None:
+    if not isinstance(raw_port, dict):
+        return None
+    key = raw_port.get("key")
+    if not isinstance(key, str) or not key.strip():
+        return None
+    try:
+        port_type = PortType(str(raw_port.get("type")))
+    except ValueError:
+        return None
+    return WorkflowPort(
+        key=key.strip(),
+        direction=direction,
+        type=port_type,
+        required=bool(raw_port.get("required", direction == PortDirection.INPUT)),
+        multiple=bool(raw_port.get("multiple", False)),
+    )
+
+
+def _build_code_ports(
+    config: dict[str, object],
+) -> tuple[list[WorkflowPort], list[WorkflowPort]]:
+    raw_inputs = config.get("inputs")
+    raw_outputs = config.get("outputs")
+    inputs = [
+        port
+        for port in (
+            _port_from_code_config(item, direction=PortDirection.INPUT)
+            for item in (raw_inputs if isinstance(raw_inputs, list) else [])
+        )
+        if port is not None
+    ]
+    outputs = [
+        port
+        for port in (
+            _port_from_code_config(item, direction=PortDirection.OUTPUT)
+            for item in (raw_outputs if isinstance(raw_outputs, list) else [])
+        )
+        if port is not None
+    ]
+    if not inputs:
+        inputs = [
+            WorkflowPort(
+                key="in",
+                direction=PortDirection.INPUT,
+                type=PortType.PARTS,
+                required=True,
+            )
+        ]
+    if not outputs:
+        outputs = [
+            WorkflowPort(
+                key="out",
+                direction=PortDirection.OUTPUT,
+                type=PortType.PARTS,
+                multiple=True,
+            )
+        ]
+    return inputs, outputs
+
+
 def _default_ports(
     node_kind: WorkflowNodeKind,
+    config: dict[str, object] | None = None,
 ) -> tuple[list[WorkflowPort], list[WorkflowPort]]:
+    node_config = config or {}
     if node_kind == WorkflowNodeKind.TRIGGER:
+        output_type = _coerce_port_type(node_config.get("output_type"), PortType.PARTS)
         return (
             [],
             [
                 WorkflowPort(
                     key="out",
                     direction=PortDirection.OUTPUT,
-                    kind=EdgeKind.CONTROL,
+                    type=output_type,
+                    multiple=True,
+                )
+            ],
+        )
+    if node_kind == WorkflowNodeKind.LLM:
+        input_type = _coerce_port_type(node_config.get("input_type"), PortType.PARTS)
+        output_type = _coerce_port_type(node_config.get("output_type"), PortType.PARTS)
+        return (
+            [
+                WorkflowPort(
+                    key="in",
+                    direction=PortDirection.INPUT,
+                    type=input_type,
+                    required=True,
+                )
+            ],
+            [
+                WorkflowPort(
+                    key="out",
+                    direction=PortDirection.OUTPUT,
+                    type=output_type,
                     multiple=True,
                 )
             ],
         )
     if node_kind == WorkflowNodeKind.CODE:
-        return (
-            [
-                WorkflowPort(
-                    key="in",
-                    direction=PortDirection.INPUT,
-                    kind=EdgeKind.CONTROL,
-                ),
-                WorkflowPort(
-                    key="input",
-                    direction=PortDirection.INPUT,
-                    kind=EdgeKind.DATA,
-                    multiple=True,
-                ),
-            ],
-            [
-                WorkflowPort(
-                    key="out",
-                    direction=PortDirection.OUTPUT,
-                    kind=EdgeKind.CONTROL,
-                    multiple=True,
-                ),
-                WorkflowPort(
-                    key="output",
-                    direction=PortDirection.OUTPUT,
-                    kind=EdgeKind.DATA,
-                    multiple=True,
-                ),
-            ],
-        )
+        return _build_code_ports(node_config)
     if node_kind == WorkflowNodeKind.IF:
+        input_type = _coerce_port_type(node_config.get("input_type"), PortType.PARTS)
         return (
             [
                 WorkflowPort(
                     key="in",
                     direction=PortDirection.INPUT,
-                    kind=EdgeKind.CONTROL,
-                ),
-                WorkflowPort(
-                    key="condition",
-                    direction=PortDirection.INPUT,
-                    kind=EdgeKind.DATA,
+                    type=input_type,
+                    required=True,
                 ),
             ],
             [
                 WorkflowPort(
-                    key="true",
+                    key="then",
                     direction=PortDirection.OUTPUT,
-                    kind=EdgeKind.CONTROL,
+                    type=input_type,
                     multiple=True,
                 ),
                 WorkflowPort(
-                    key="false",
+                    key="else",
                     direction=PortDirection.OUTPUT,
-                    kind=EdgeKind.CONTROL,
+                    type=input_type,
                     multiple=True,
                 ),
             ],
         )
     if node_kind == WorkflowNodeKind.MERGE:
+        input_type = _coerce_port_type(node_config.get("input_type"), PortType.PARTS)
+        strategy = node_config.get("strategy")
+        output_type = (
+            input_type
+            if strategy == "first_completed"
+            else _coerce_port_type(node_config.get("output_type"), PortType.JSON)
+        )
         return (
             [
                 WorkflowPort(
                     key="in",
                     direction=PortDirection.INPUT,
-                    kind=EdgeKind.CONTROL,
+                    type=input_type,
+                    required=True,
                     multiple=True,
                 )
             ],
@@ -214,7 +296,7 @@ def _default_ports(
                 WorkflowPort(
                     key="out",
                     direction=PortDirection.OUTPUT,
-                    kind=EdgeKind.CONTROL,
+                    type=output_type,
                     multiple=True,
                 )
             ],
@@ -224,14 +306,15 @@ def _default_ports(
             WorkflowPort(
                 key="in",
                 direction=PortDirection.INPUT,
-                kind=EdgeKind.CONTROL,
+                type=PortType.PARTS,
+                required=True,
             )
         ],
         [
             WorkflowPort(
                 key="out",
                 direction=PortDirection.OUTPUT,
-                kind=EdgeKind.CONTROL,
+                type=PortType.PARTS,
                 multiple=True,
             )
         ],
@@ -244,7 +327,7 @@ def build_workflow_node_definition(
     node_kind: WorkflowNodeKind,
     config: dict[str, object] | None = None,
 ) -> WorkflowNodeDefinition:
-    inputs, outputs = _default_ports(node_kind)
+    inputs, outputs = _default_ports(node_kind, config)
     return WorkflowNodeDefinition(
         id=node_id,
         type=node_kind,
@@ -290,6 +373,7 @@ def serialize_tab_summary(tab: Tab) -> dict[str, object]:
         "id": tab.id,
         "title": tab.title,
         "leader_id": tab.leader_id,
+        "activation_state": tab.activation_state.value,
         "created_at": tab.created_at,
         "updated_at": tab.updated_at,
         "definition": tab.definition.serialize(),
@@ -677,6 +761,8 @@ def set_tab_permissions(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
+    if _is_active(tab):
+        return None, _active_edit_error("permissions")
 
     leader_id = get_tab_leader_id(tab_id)
     if not leader_id:
@@ -791,6 +877,17 @@ def delete_tab(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
+    if _is_active(tab):
+        _, deactivate_error = deactivate_tab(
+            tab_id=tab_id,
+            actor_id="assistant",
+            timeout=timeout,
+        )
+        if deactivate_error is not None:
+            return None, deactivate_error
+        tab = workspace_store.get_tab(tab_id)
+        if tab is None:
+            return None, f"Tab '{tab_id}' not found"
 
     stored_nodes = list_tab_nodes(tab_id)
     live_nodes = [node for node in registry.get_all() if node.config.tab_id == tab_id]
@@ -889,6 +986,14 @@ def _persist_tab(tab: Tab, *, actor_id: str) -> Tab:
     return tab
 
 
+def _is_active(tab: Tab) -> bool:
+    return tab.activation_state == WorkflowActivationState.ACTIVE
+
+
+def _active_edit_error(noun: str) -> str:
+    return f"Workflow is active; deactivate it before changing {noun}"
+
+
 def create_graph_node(
     *,
     tab_id: str,
@@ -899,6 +1004,8 @@ def create_graph_node(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
+    if _is_active(tab):
+        return None, _active_edit_error("nodes")
     node_id = str(uuid.uuid4())
     node = build_workflow_node_definition(
         node_id=node_id,
@@ -925,6 +1032,8 @@ def create_agent_node(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
+    if _is_active(tab):
+        return None, _active_edit_error("nodes")
 
     config, error = build_node_config(
         role_name=role_name,
@@ -980,6 +1089,10 @@ def update_tab_definition(
     edge_ids = [edge.id for edge in next_definition.edges]
     if len(edge_ids) != len(set(edge_ids)):
         return None, "Workflow definition contains duplicate edge ids"
+    if _is_active(tab) and _semantic_definition(tab.definition) != _semantic_definition(
+        next_definition
+    ):
+        return None, _active_edit_error("workflow structure")
 
     current_agent_ids = {
         node.id for node in tab.definition.nodes if node.type == WorkflowNodeKind.AGENT
@@ -1043,7 +1156,6 @@ def update_tab_definition(
             source_node.outputs,
             port_key=edge.from_port_key,
             direction=PortDirection.OUTPUT,
-            kind=edge.kind,
         )
         if source_port is None:
             return None, f"Output port '{edge.from_port_key}' is invalid"
@@ -1051,10 +1163,15 @@ def update_tab_definition(
             target_node.inputs,
             port_key=edge.to_port_key,
             direction=PortDirection.INPUT,
-            kind=edge.kind,
         )
         if target_port is None:
             return None, f"Input port '{edge.to_port_key}' is invalid"
+        if source_port.type != target_port.type:
+            return (
+                None,
+                f"Port type mismatch: '{source_node.id}.{source_port.key}' is {source_port.type.value} "
+                f"but '{target_node.id}.{target_port.key}' is {target_port.type.value}",
+            )
         target_key = (edge.to_node_id, edge.to_port_key)
         if target_key in seen_target_ports and not target_port.multiple:
             return None, f"Input port '{edge.to_port_key}' already has an incoming edge"
@@ -1070,18 +1187,627 @@ def _port_matches(
     *,
     port_key: str,
     direction: PortDirection,
-    kind: EdgeKind,
 ) -> WorkflowPort | None:
     return next(
         (
             port
             for port in ports
-            if port.key == port_key
-            and port.direction == direction
-            and port.kind == kind
+            if port.key == port_key and port.direction == direction
         ),
         None,
     )
+
+
+def _semantic_definition(definition: WorkflowDefinition) -> dict[str, object]:
+    payload = definition.serialize()
+    payload.pop("view", None)
+    return payload
+
+
+_PORT_TYPES = {item.value for item in PortType}
+_TRIGGER_KINDS = {"manual", "cron"}
+_LLM_RESPONSE_FORMAT_KINDS = {"text", "json_schema"}
+_IF_OPERATORS = {
+    "eq",
+    "neq",
+    "contains",
+    "not_contains",
+    "is_empty",
+    "is_not_empty",
+    "gt",
+    "lt",
+    "gte",
+    "lte",
+    "is_truthy",
+    "is_falsy",
+}
+_MERGE_STRATEGIES = {"collect", "named_object", "first_completed"}
+_CODE_RUNTIMES = {"javascript", "python"}
+
+
+def _validation_error(
+    errors: list[dict[str, str]],
+    *,
+    message: str,
+    node_id: str | None = None,
+    edge_id: str | None = None,
+    path: str | None = None,
+) -> None:
+    error: dict[str, str] = {"message": message}
+    if node_id is not None:
+        error["node_id"] = node_id
+    if edge_id is not None:
+        error["edge_id"] = edge_id
+    if path is not None:
+        error["path"] = path
+    errors.append(error)
+
+
+def _is_json_serializable(value: object) -> bool:
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _is_valid_parts_value(value: object) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    for part in value:
+        if not isinstance(part, dict):
+            return False
+        part_type = part.get("type")
+        if part_type == "text":
+            text = part.get("text")
+            if not isinstance(text, str) or not text:
+                return False
+            continue
+        if part_type == "image":
+            asset_id = part.get("asset_id")
+            if not isinstance(asset_id, str) or not asset_id.strip():
+                return False
+            continue
+        return False
+    return True
+
+
+def _validate_typed_value(value: object, port_type: PortType) -> bool:
+    if port_type == PortType.PARTS:
+        return _is_valid_parts_value(value)
+    if port_type == PortType.STRING:
+        return isinstance(value, str) and bool(value)
+    return isinstance(value, dict) and _is_json_serializable(value)
+
+
+def _get_string_config(config: dict[str, object], key: str) -> str:
+    value = config.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _parse_response_format_kind(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        kind = value.get("kind")
+        return kind.strip() if isinstance(kind, str) else ""
+    return ""
+
+
+def _response_format_schema(value: object) -> object:
+    if not isinstance(value, dict):
+        return None
+    return value.get("schema")
+
+
+def _validate_cron_expression(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    fields = value.split()
+    if len(fields) not in {5, 6}:
+        return False
+    return all(field.strip() for field in fields)
+
+
+def _validate_timezone(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        ZoneInfo(value.strip())
+    except ZoneInfoNotFoundError:
+        return False
+    return True
+
+
+def _validate_trigger_node(
+    node: WorkflowNodeDefinition,
+    errors: list[dict[str, str]],
+) -> None:
+    kind = _get_string_config(node.config, "kind")
+    if kind not in _TRIGGER_KINDS:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.kind",
+            message="trigger kind must be manual or cron",
+        )
+    output_type = _coerce_port_type(node.config.get("output_type"), PortType.PARTS)
+    if str(node.config.get("output_type", output_type.value)) not in _PORT_TYPES:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.output_type",
+            message="trigger output_type must be parts, string, or json",
+        )
+    if not node.outputs or any(port.type != output_type for port in node.outputs):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="outputs",
+            message="trigger output port type must match config.output_type",
+        )
+    if "message" not in node.config or not _validate_typed_value(
+        node.config.get("message"),
+        output_type,
+    ):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.message",
+            message="trigger message must match output_type",
+        )
+    if kind == "cron":
+        if not _validate_cron_expression(node.config.get("cron")):
+            _validation_error(
+                errors,
+                node_id=node.id,
+                path="config.cron",
+                message="cron trigger requires a 5-field or 6-field expression",
+            )
+        if not _validate_timezone(node.config.get("timezone")):
+            _validation_error(
+                errors,
+                node_id=node.id,
+                path="config.timezone",
+                message="cron trigger requires an IANA timezone",
+            )
+
+
+def _resolve_llm_model(
+    node: WorkflowNodeDefinition,
+) -> tuple[str, str]:
+    model_config = node.config.get("model")
+    if isinstance(model_config, dict):
+        provider_id = model_config.get("provider_id")
+        model = model_config.get("model")
+        return (
+            provider_id.strip() if isinstance(provider_id, str) else "",
+            model.strip() if isinstance(model, str) else "",
+        )
+    provider_id = node.config.get("provider_id")
+    model = node.config.get("model")
+    return (
+        provider_id.strip() if isinstance(provider_id, str) else "",
+        model.strip() if isinstance(model, str) else "",
+    )
+
+
+def _validate_llm_node(
+    node: WorkflowNodeDefinition,
+    errors: list[dict[str, str]],
+) -> None:
+    input_type = _coerce_port_type(node.config.get("input_type"), PortType.PARTS)
+    output_type = _coerce_port_type(node.config.get("output_type"), PortType.PARTS)
+    if str(node.config.get("input_type", input_type.value)) not in _PORT_TYPES:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.input_type",
+            message="llm input_type must be parts, string, or json",
+        )
+    if str(node.config.get("output_type", output_type.value)) not in _PORT_TYPES:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.output_type",
+            message="llm output_type must be parts, string, or json",
+        )
+    response_format = node.config.get("response_format", {"kind": "text"})
+    response_format_kind = _parse_response_format_kind(response_format)
+    if response_format_kind not in _LLM_RESPONSE_FORMAT_KINDS:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.response_format",
+            message="llm response_format must be text or json_schema",
+        )
+    if response_format_kind == "json_schema":
+        schema = _response_format_schema(response_format)
+        if not isinstance(schema, dict) or not _is_json_serializable(schema):
+            _validation_error(
+                errors,
+                node_id=node.id,
+                path="config.response_format.schema",
+                message="json_schema response_format requires a JSON schema object",
+            )
+        if output_type != PortType.JSON:
+            _validation_error(
+                errors,
+                node_id=node.id,
+                path="config.output_type",
+                message="json_schema response_format requires json output_type",
+            )
+    elif output_type == PortType.JSON:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.output_type",
+            message="text response_format requires parts or string output_type",
+        )
+    provider_id, model_id = _resolve_llm_model(node)
+    settings = settings_module.get_settings()
+    provider = find_provider(settings, provider_id)
+    if provider is None:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.model",
+            message="llm model provider was not found",
+        )
+        return
+    if not model_id:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.model",
+            message="llm model must not be empty",
+        )
+        return
+    if provider.models and all(entry.model != model_id for entry in provider.models):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.model",
+            message="llm model is not in the provider model catalog",
+        )
+        return
+    model_info = resolve_model_info(provider=provider, model_id=model_id)
+    if (
+        response_format_kind == "json_schema"
+        and not model_info.capabilities.structured_output
+    ):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.model",
+            message="llm model does not support structured_output",
+        )
+
+
+def _validate_if_node(
+    node: WorkflowNodeDefinition,
+    errors: list[dict[str, str]],
+) -> None:
+    expression = node.config.get("expression")
+    if not isinstance(expression, dict):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.expression",
+            message="if expression must be an object",
+        )
+        return
+    field = expression.get("field")
+    operator = expression.get("operator")
+    if not isinstance(field, str) or not field.strip().startswith("{{input."):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.expression.field",
+            message="if expression field must reference an input path",
+        )
+    if not isinstance(operator, str) or operator not in _IF_OPERATORS:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.expression.operator",
+            message="if expression operator is not supported",
+        )
+    if (
+        operator in {"eq", "neq", "contains", "not_contains", "gt", "lt", "gte", "lte"}
+        and "value" not in expression
+    ):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.expression.value",
+            message="if expression operator requires a value",
+        )
+    input_type = _coerce_port_type(node.config.get("input_type"), PortType.PARTS)
+    if any(port.type != input_type for port in node.inputs + node.outputs):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="ports",
+            message="if node input and output port types must match",
+        )
+
+
+def _validate_merge_node(
+    node: WorkflowNodeDefinition,
+    errors: list[dict[str, str]],
+) -> None:
+    strategy = _get_string_config(node.config, "strategy") or "collect"
+    if strategy not in _MERGE_STRATEGIES:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.strategy",
+            message="merge strategy must be collect, named_object, or first_completed",
+        )
+    if strategy == "named_object" and not isinstance(
+        node.config.get("named_inputs"),
+        dict,
+    ):
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.named_inputs",
+            message="named_object merge requires named_inputs",
+        )
+    if not node.inputs or not node.inputs[0].multiple:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="inputs",
+            message="merge input port must allow multiple upstream values",
+        )
+
+
+def _validate_code_node(
+    node: WorkflowNodeDefinition,
+    errors: list[dict[str, str]],
+) -> None:
+    runtime = _get_string_config(node.config, "runtime")
+    source = node.config.get("source")
+    if runtime not in _CODE_RUNTIMES:
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.runtime",
+            message="code runtime must be javascript or python",
+        )
+    if not isinstance(source, str) or not source.strip():
+        _validation_error(
+            errors,
+            node_id=node.id,
+            path="config.source",
+            message="code source must not be empty",
+        )
+        return
+    if runtime == "python":
+        try:
+            ast.parse(source)
+        except SyntaxError as exc:
+            _validation_error(
+                errors,
+                node_id=node.id,
+                path="config.source",
+                message=f"python source is not parseable: {exc.msg}",
+            )
+    elif runtime == "javascript" and shutil.which("node"):
+        completed = subprocess.run(
+            ["node", "--check"],
+            input=source,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        if completed.returncode != 0:
+            _validation_error(
+                errors,
+                node_id=node.id,
+                path="config.source",
+                message="javascript source is not parseable",
+            )
+
+
+def _validate_node_config(
+    node: WorkflowNodeDefinition,
+    errors: list[dict[str, str]],
+) -> None:
+    if node.type == WorkflowNodeKind.TRIGGER:
+        _validate_trigger_node(node, errors)
+    elif node.type == WorkflowNodeKind.LLM:
+        _validate_llm_node(node, errors)
+    elif node.type == WorkflowNodeKind.IF:
+        _validate_if_node(node, errors)
+    elif node.type == WorkflowNodeKind.MERGE:
+        _validate_merge_node(node, errors)
+    elif node.type == WorkflowNodeKind.CODE:
+        _validate_code_node(node, errors)
+
+
+def validate_workflow_activation(tab: Tab) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    if not tab.definition.nodes:
+        _validation_error(
+            errors,
+            message="workflow must contain at least one trigger node before activation",
+            path="definition.nodes",
+        )
+    if not any(node.type == WorkflowNodeKind.TRIGGER for node in tab.definition.nodes):
+        _validation_error(
+            errors,
+            message="workflow must contain a trigger node before activation",
+            path="definition.nodes",
+        )
+    node_ids = [node.id for node in tab.definition.nodes]
+    if len(node_ids) != len(set(node_ids)):
+        _validation_error(
+            errors,
+            message="workflow definition contains duplicate node ids",
+            path="definition.nodes",
+        )
+    edge_ids = [edge.id for edge in tab.definition.edges]
+    if len(edge_ids) != len(set(edge_ids)):
+        _validation_error(
+            errors,
+            message="workflow definition contains duplicate edge ids",
+            path="definition.edges",
+        )
+    incoming_edges_by_port: dict[tuple[str, str], list[GraphEdge]] = {}
+    seen_edge_endpoints: set[tuple[str, str, str, str]] = set()
+    for edge in tab.definition.edges:
+        edge_endpoint = (
+            edge.from_node_id,
+            edge.from_port_key,
+            edge.to_node_id,
+            edge.to_port_key,
+        )
+        if edge_endpoint in seen_edge_endpoints:
+            _validation_error(
+                errors,
+                edge_id=edge.id,
+                message="duplicate edges are not allowed",
+            )
+        seen_edge_endpoints.add(edge_endpoint)
+        source_node = tab.definition.get_node(edge.from_node_id)
+        target_node = tab.definition.get_node(edge.to_node_id)
+        if source_node is None:
+            _validation_error(
+                errors,
+                edge_id=edge.id,
+                message=f"edge source node '{edge.from_node_id}' does not exist",
+            )
+            continue
+        if target_node is None:
+            _validation_error(
+                errors,
+                edge_id=edge.id,
+                message=f"edge target node '{edge.to_node_id}' does not exist",
+            )
+            continue
+        source_port = _port_matches(
+            source_node.outputs,
+            port_key=edge.from_port_key,
+            direction=PortDirection.OUTPUT,
+        )
+        target_port = _port_matches(
+            target_node.inputs,
+            port_key=edge.to_port_key,
+            direction=PortDirection.INPUT,
+        )
+        if source_port is None:
+            _validation_error(
+                errors,
+                edge_id=edge.id,
+                path="from_port_key",
+                message=f"output port '{edge.from_port_key}' is invalid",
+            )
+            continue
+        if target_port is None:
+            _validation_error(
+                errors,
+                edge_id=edge.id,
+                path="to_port_key",
+                message=f"input port '{edge.to_port_key}' is invalid",
+            )
+            continue
+        if source_port.type != target_port.type:
+            _validation_error(
+                errors,
+                edge_id=edge.id,
+                message=(
+                    f"port type mismatch: '{source_node.id}.{source_port.key}' is {source_port.type.value} "
+                    f"but '{target_node.id}.{target_port.key}' is {target_port.type.value}"
+                ),
+            )
+        incoming_edges_by_port.setdefault(
+            (edge.to_node_id, edge.to_port_key), []
+        ).append(edge)
+    for node in tab.definition.nodes:
+        for port in node.inputs:
+            edges = incoming_edges_by_port.get((node.id, port.key), [])
+            if port.required and not edges:
+                _validation_error(
+                    errors,
+                    node_id=node.id,
+                    path=f"inputs.{port.key}",
+                    message=f"required input port '{port.key}' has no upstream edge",
+                )
+            if len(edges) > 1 and not port.multiple:
+                _validation_error(
+                    errors,
+                    node_id=node.id,
+                    path=f"inputs.{port.key}",
+                    message=f"input port '{port.key}' accepts only one upstream edge",
+                )
+        _validate_node_config(node, errors)
+    return errors
+
+
+def activate_tab(
+    *,
+    tab_id: str,
+    actor_id: str = "assistant",
+) -> tuple[Tab | None, list[dict[str, str]] | None, str | None]:
+    tab = workspace_store.get_tab(tab_id)
+    if tab is None:
+        return None, None, f"Tab '{tab_id}' not found"
+    errors = validate_workflow_activation(tab)
+    if errors:
+        return None, errors, None
+    if tab.activation_state != WorkflowActivationState.ACTIVE:
+        tab.activation_state = WorkflowActivationState.ACTIVE
+        _persist_tab(tab, actor_id=actor_id)
+    return tab, None, None
+
+
+def deactivate_tab(
+    *,
+    tab_id: str,
+    actor_id: str = "assistant",
+    timeout: float = SYSTEM_NODE_TIMEOUT,
+) -> tuple[Tab | None, str | None]:
+    tab = workspace_store.get_tab(tab_id)
+    if tab is None:
+        return None, f"Tab '{tab_id}' not found"
+
+    lingering_node_ids: list[str] = []
+    ordinary_node_ids = {
+        node.id
+        for node in tab.definition.nodes
+        if node.type == WorkflowNodeKind.AGENT
+        and not is_tab_leader(node_id=node.id, tab_id=tab_id)
+    }
+    for node_id in ordinary_node_ids:
+        live_node = registry.get(node_id)
+        if live_node is not None:
+            if live_node.state in {AgentState.RUNNING, AgentState.SLEEPING}:
+                live_node.request_interrupt()
+                if not live_node.wait_until_idle(timeout=timeout):
+                    lingering_node_ids.append(live_node.uuid)
+            continue
+        record = workspace_store.get_node_record(node_id)
+        if record is None:
+            continue
+        if record.state in {AgentState.RUNNING, AgentState.SLEEPING}:
+            record.state = AgentState.IDLE
+            workspace_store.upsert_node_record(record)
+
+    if lingering_node_ids:
+        return (
+            None,
+            "Failed to deactivate workflow because some nodes did not stop: "
+            + ", ".join(node_id[:8] for node_id in lingering_node_ids),
+        )
+
+    if tab.activation_state != WorkflowActivationState.INACTIVE:
+        tab.activation_state = WorkflowActivationState.INACTIVE
+        _persist_tab(tab, actor_id=actor_id)
+    return tab, None
 
 
 def create_edge(
@@ -1093,7 +1819,7 @@ def create_edge(
     to_port_key: str = "in",
     kind: EdgeKind | str = EdgeKind.CONTROL,
 ) -> tuple[GraphEdge | None, str | None]:
-    resolved_kind = kind if isinstance(kind, EdgeKind) else EdgeKind(str(kind))
+    del kind
     resolved_tab_id = tab_id
     if resolved_tab_id is None:
         source_record = workspace_store.get_node_record(from_node_id)
@@ -1107,6 +1833,8 @@ def create_edge(
     tab = workspace_store.get_tab(resolved_tab_id)
     if tab is None:
         return None, f"Tab '{resolved_tab_id}' not found"
+    if _is_active(tab):
+        return None, _active_edit_error("edges")
     if is_tab_leader(node_id=from_node_id, tab_id=resolved_tab_id) or is_tab_leader(
         node_id=to_node_id,
         tab_id=resolved_tab_id,
@@ -1124,7 +1852,6 @@ def create_edge(
         source_node.outputs,
         port_key=from_port_key,
         direction=PortDirection.OUTPUT,
-        kind=resolved_kind,
     )
     if source_port is None:
         return None, f"Output port '{from_port_key}' is invalid"
@@ -1132,16 +1859,20 @@ def create_edge(
         target_node.inputs,
         port_key=to_port_key,
         direction=PortDirection.INPUT,
-        kind=resolved_kind,
     )
     if target_port is None:
         return None, f"Input port '{to_port_key}' is invalid"
+    if source_port.type != target_port.type:
+        return (
+            None,
+            f"Port type mismatch: '{source_node.id}.{source_port.key}' is {source_port.type.value} "
+            f"but '{target_node.id}.{target_port.key}' is {target_port.type.value}",
+        )
     if any(
         edge.from_node_id == from_node_id
         and edge.from_port_key == from_port_key
         and edge.to_node_id == to_node_id
         and edge.to_port_key == to_port_key
-        and edge.kind == resolved_kind
         for edge in tab.definition.edges
     ):
         return None, "Duplicate edges are not allowed"
@@ -1158,7 +1889,6 @@ def create_edge(
         from_port_key=from_port_key,
         to_node_id=to_node_id,
         to_port_key=to_port_key,
-        kind=resolved_kind,
     )
     tab.definition.edges.append(edge)
     _persist_tab(tab, actor_id=from_node_id)
@@ -1177,6 +1907,8 @@ def delete_edge(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
+    if _is_active(tab):
+        return None, _active_edit_error("edges")
 
     matched_edge: GraphEdge | None = None
     for edge in tab.definition.edges:
@@ -1212,6 +1944,8 @@ def delete_agent_node(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
+    if _is_active(tab):
+        return None, _active_edit_error("nodes")
 
     node_definition = tab.definition.get_node(node_id)
     if node_definition is None:

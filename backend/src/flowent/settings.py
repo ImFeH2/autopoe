@@ -221,6 +221,7 @@ class ProviderModelCatalogEntry:
     context_window_tokens: int | None = None
     input_image: bool | None = None
     output_image: bool | None = None
+    structured_output: bool | None = None
 
 
 @dataclass
@@ -335,6 +336,7 @@ class ModelSettings:
     active_model: str = ""
     input_image: bool | None = None
     output_image: bool | None = None
+    structured_output: bool | None = None
     context_window_tokens: int | None = None
     params: ModelParams = field(default_factory=build_default_model_params)
     timeout_ms: int = DEFAULT_LLM_TIMEOUT_MS
@@ -583,6 +585,18 @@ def build_model_output_image(
     if not isinstance(raw_output_image, bool):
         raise ValueError(f"{field_name} must be a boolean or null")
     return raw_output_image
+
+
+def build_model_structured_output(
+    raw_structured_output: object,
+    *,
+    field_name: str = "model.structured_output",
+) -> bool | None:
+    if raw_structured_output is None:
+        return None
+    if not isinstance(raw_structured_output, bool):
+        raise ValueError(f"{field_name} must be a boolean or null")
+    return raw_structured_output
 
 
 def build_model_context_window_tokens(
@@ -916,6 +930,9 @@ def _normalize_provider_model_catalog_entries(
         output_image, output_image_migrated = _normalize_nullable_bool(
             raw_entry.get("output_image")
         )
+        structured_output, structured_output_migrated = _normalize_nullable_bool(
+            raw_entry.get("structured_output")
+        )
         context_window_tokens, context_window_tokens_migrated = _normalize_positive_int(
             raw_entry.get("context_window_tokens")
         )
@@ -924,6 +941,7 @@ def _normalize_provider_model_catalog_entries(
             or source_migrated
             or input_image_migrated
             or output_image_migrated
+            or structured_output_migrated
             or context_window_tokens_migrated
             or model != raw_model
             or model in entries_by_model
@@ -934,6 +952,7 @@ def _normalize_provider_model_catalog_entries(
             context_window_tokens=context_window_tokens,
             input_image=input_image,
             output_image=output_image,
+            structured_output=structured_output,
         )
     return list(entries_by_model.values()), migrated
 
@@ -971,6 +990,7 @@ def serialize_provider_model_catalog_entry(
         "context_window_tokens": entry.context_window_tokens,
         "input_image": entry.input_image,
         "output_image": entry.output_image,
+        "structured_output": entry.structured_output,
     }
 
 
@@ -1062,6 +1082,7 @@ def serialize_settings(
             model_id=settings.model.active_model,
             input_image=settings.model.input_image,
             output_image=settings.model.output_image,
+            structured_output=settings.model.structured_output,
             context_window_tokens=settings.model.context_window_tokens,
         )
     data["model"]["capabilities"] = (
@@ -1106,6 +1127,7 @@ def resolve_model_info(
     model_id: str,
     input_image: bool | None = None,
     output_image: bool | None = None,
+    structured_output: bool | None = None,
     context_window_tokens: int | None = None,
 ):
     from flowent.model_metadata import build_model_info
@@ -1125,6 +1147,13 @@ def resolve_model_info(
             output_image
             if output_image is not None
             else catalog_entry.output_image
+            if catalog_entry is not None
+            else None
+        ),
+        structured_output=(
+            structured_output
+            if structured_output is not None
+            else catalog_entry.structured_output
             if catalog_entry is not None
             else None
         ),
@@ -1987,6 +2016,9 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
     output_image, migrated_output_image = _normalize_nullable_bool(
         model_data.get("output_image")
     )
+    structured_output, migrated_structured_output = _normalize_nullable_bool(
+        model_data.get("structured_output")
+    )
     context_window_tokens, migrated_context_window_tokens = _normalize_positive_int(
         model_data.get("context_window_tokens")
     )
@@ -2019,6 +2051,7 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
         active_model=str(model_data.get("active_model", "")),
         input_image=input_image,
         output_image=output_image,
+        structured_output=structured_output,
         context_window_tokens=context_window_tokens,
         params=model_params,
         timeout_ms=model_timeout_ms,
@@ -2033,6 +2066,7 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
         migrated
         or migrated_input_image
         or migrated_output_image
+        or migrated_structured_output
         or migrated_context_window_tokens
         or migrated_auto_compact_token_limit
     )

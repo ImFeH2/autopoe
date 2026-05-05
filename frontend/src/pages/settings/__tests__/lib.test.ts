@@ -177,6 +177,7 @@ describe("settings lib", () => {
     ).toEqual({
       input_image: true,
       output_image: true,
+      structured_output: false,
     });
     expect(getKnownSafeInputTokens(128000, settings.model.params)).toBe(122976);
   });

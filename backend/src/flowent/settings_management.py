@@ -22,6 +22,7 @@ from flowent.settings import (
     build_model_retry_initial_delay_seconds,
     build_model_retry_max_delay_seconds,
     build_model_retry_policy,
+    build_model_structured_output,
     build_model_timeout_ms,
     build_working_dir,
     find_role,
@@ -83,6 +84,7 @@ def resolve_settings_update(
     context_window_tokens: object = MISSING,
     input_image: object = MISSING,
     output_image: object = MISSING,
+    structured_output: object = MISSING,
     max_retries: object = MISSING,
     retry_policy: object = MISSING,
     timeout_ms: object = MISSING,
@@ -105,6 +107,7 @@ def resolve_settings_update(
     retry_backoff_cap_retries_field_name: str = "model.retry_backoff_cap_retries",
     input_image_field_name: str = "model.input_image",
     output_image_field_name: str = "model.output_image",
+    structured_output_field_name: str = "model.structured_output",
     context_window_tokens_field_name: str = "model.context_window_tokens",
     auto_compact_token_limit_field_name: str = "model.auto_compact_token_limit",
 ) -> ResolvedSettingsUpdate:
@@ -174,6 +177,14 @@ def resolve_settings_update(
         else build_model_output_image(
             output_image,
             field_name=output_image_field_name,
+        )
+    )
+    next_structured_output = (
+        settings.model.structured_output
+        if structured_output is MISSING
+        else build_model_structured_output(
+            structured_output,
+            field_name=structured_output_field_name,
         )
     )
     next_retry_policy = (
@@ -261,6 +272,7 @@ def resolve_settings_update(
             active_model=next_active_model,
             input_image=next_input_image,
             output_image=next_output_image,
+            structured_output=next_structured_output,
             context_window_tokens=next_context_window_tokens,
             params=next_model_params,
             timeout_ms=next_timeout_ms,

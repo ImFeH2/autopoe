@@ -76,12 +76,6 @@ class ConnectTool(Tool):
                 "description": "Target input port key",
                 "default": "in",
             },
-            "kind": {
-                "type": "string",
-                "enum": ["control", "data", "event"],
-                "description": "Workflow edge kind",
-                "default": "control",
-            },
         },
         "required": ["from", "to"],
     }
@@ -93,7 +87,6 @@ class ConnectTool(Tool):
         to_ref = args.get("to")
         from_port_key = args.get("from_port_key", "out")
         to_port_key = args.get("to_port_key", "in")
-        kind = args.get("kind", "control")
 
         if not isinstance(from_ref, str) or not from_ref:
             return json.dumps({"error": "from must be a non-empty string"})
@@ -103,8 +96,6 @@ class ConnectTool(Tool):
             return json.dumps({"error": "from_port_key must be a non-empty string"})
         if not isinstance(to_port_key, str) or not to_port_key.strip():
             return json.dumps({"error": "to_port_key must be a non-empty string"})
-        if kind not in {"control", "data", "event"}:
-            return json.dumps({"error": "kind must be control, data, or event"})
         if not agent.config.tab_id:
             return json.dumps(
                 {"error": "Only a workflow Leader may connect task nodes"}
@@ -148,7 +139,6 @@ class ConnectTool(Tool):
             from_port_key=from_port_key,
             to_node_id=target_id,
             to_port_key=to_port_key,
-            kind=kind,
         )
         if error is not None or edge is None:
             return json.dumps({"error": error or "Failed to connect nodes"})

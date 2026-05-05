@@ -2,11 +2,15 @@ export type NodeType =
   | "assistant"
   | "agent"
   | "trigger"
+  | "llm"
   | "code"
   | "if"
   | "merge";
 
 export type WorkflowNodeType = Exclude<NodeType, "assistant">;
+export type WorkflowActivationState = "inactive" | "active";
+export type WorkflowPortType = "parts" | "string" | "json";
+export type WorkflowPortDirection = "in" | "out";
 
 export interface AccessState {
   authenticated: boolean;
@@ -67,6 +71,9 @@ export interface Node {
     x: number;
     y: number;
   } | null;
+  config?: Record<string, unknown>;
+  inputs?: WorkflowPort[];
+  outputs?: WorkflowPort[];
 }
 
 export interface AgentEvent {
@@ -174,8 +181,8 @@ export interface NodeDetail {
 
 export interface WorkflowPort {
   key: string;
-  direction: "input" | "output";
-  kind: "control" | "data" | "event";
+  direction: WorkflowPortDirection;
+  type: WorkflowPortType;
   required: boolean;
   multiple: boolean;
 }
@@ -242,6 +249,7 @@ export interface TaskTab {
   created_at: number;
   updated_at: number;
   definition: WorkflowDefinition;
+  activation_state?: WorkflowActivationState;
   node_count?: number;
   edge_count?: number;
 }
@@ -252,7 +260,7 @@ export interface TabEdge {
   from_port_key: string;
   to_node_id: string;
   to_port_key: string;
-  kind: "control" | "data" | "event";
+  kind?: "control" | "data" | "event";
   tab_id?: string;
   created_at?: number;
 }
@@ -273,6 +281,7 @@ export interface ModelParams {
 export interface ModelCapabilities {
   input_image: boolean;
   output_image: boolean;
+  structured_output?: boolean;
 }
 
 export type StreamingDelta =
@@ -320,6 +329,7 @@ export interface ProviderModelCatalogEntry {
   context_window_tokens: number | null;
   input_image: boolean | null;
   output_image: boolean | null;
+  structured_output?: boolean | null;
 }
 
 export interface MCPServerConfig {

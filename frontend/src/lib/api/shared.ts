@@ -23,6 +23,18 @@ function extractErrorMessage(data: unknown): string | null {
     if (typeof value === "string" && value.trim()) {
       return value;
     }
+    if (isPlainObject(value) && Array.isArray(value.errors)) {
+      const messages = value.errors
+        .map((item) =>
+          isPlainObject(item) && typeof item.message === "string"
+            ? item.message.trim()
+            : "",
+        )
+        .filter(Boolean);
+      if (messages.length > 0) {
+        return messages.join("; ");
+      }
+    }
   }
 
   return null;

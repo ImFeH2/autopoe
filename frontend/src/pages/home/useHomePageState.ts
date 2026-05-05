@@ -12,7 +12,9 @@ import {
   useAgentUI,
 } from "@/context/AgentContext";
 import {
+  activateWorkflowRequest,
   createTabRequest,
+  deactivateWorkflowRequest,
   deleteTabRequest,
   duplicateTabRequest,
   fetchRoles,
@@ -61,6 +63,8 @@ export type WorkspacePendingAction =
   | "delete-tab"
   | "duplicate-tab"
   | "save-definition"
+  | "activate-workflow"
+  | "deactivate-workflow"
   | null;
 
 export type WorkspacePanelView = "chat" | "detail";
@@ -73,7 +77,7 @@ export interface DeleteTabTarget {
 }
 
 function formatPortLabel(port: WorkflowPort): string {
-  return `${port.key} · ${port.kind}`;
+  return `${port.key} · ${port.type}`;
 }
 
 export function useHomePageState() {
@@ -209,6 +213,8 @@ export function useHomePageState() {
     ? (agents.get(selectedAgentId) ?? null)
     : null;
   const activeTab = activeTabId ? (tabs.get(activeTabId) ?? null) : null;
+  const activeWorkflowState = activeTab?.activation_state ?? "inactive";
+  const workflowLocked = activeWorkflowState === "active";
   const tabAgents = useMemo(
     () =>
       Array.from(agents.values()).filter(
@@ -357,7 +363,13 @@ export function useHomePageState() {
 
       event.preventDefault();
       if (event.shiftKey) {
+        if (workflowLocked) {
+          return;
+        }
         void graphHistory.redo(activeTabId).catch(() => undefined);
+        return;
+      }
+      if (workflowLocked) {
         return;
       }
       void graphHistory.undo(activeTabId).catch(() => undefined);
@@ -365,7 +377,7 @@ export function useHomePageState() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeDialog, activeTabId, graphHistory]);
+  }, [activeDialog, activeTabId, graphHistory, workflowLocked]);
 
   const handleOpenLeaderDetails = useCallback(() => {
     setPanelOpen(true);
@@ -447,19 +459,57 @@ export function useHomePageState() {
     }
   }, [activeTabId, setActiveTabId]);
 
+  const handleToggleActivation = useCallback(async () => {
+    if (!activeTabId) {
+      toast.error("Create or select a workflow first");
+      return;
+    }
+    const nextPendingAction = workflowLocked
+      ? "deactivate-workflow"
+      : "activate-workflow";
+    setPendingAction(nextPendingAction);
+    try {
+      if (workflowLocked) {
+        await deactivateWorkflowRequest(activeTabId);
+        toast.success("Workflow deactivated");
+      } else {
+        await activateWorkflowRequest(activeTabId);
+        toast.success("Workflow activated");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : workflowLocked
+            ? "Failed to deactivate workflow"
+            : "Failed to activate workflow",
+      );
+    } finally {
+      setPendingAction(null);
+    }
+  }, [activeTabId, workflowLocked]);
+
   const openCreateNodeDialog = useCallback(() => {
     if (!activeTabId) {
       toast.error("Create or select a workflow first");
+      return;
+    }
+    if (workflowLocked) {
+      toast.error("Deactivate workflow before editing");
       return;
     }
     setCreateNodeType("agent");
     setCreateNodeRoleName("Worker");
     setCreateNodeName("");
     setActiveDialog("create-node");
-  }, [activeTabId]);
+  }, [activeTabId, workflowLocked]);
 
   const handleCreateNode = useCallback(async () => {
     if (!activeTabId) {
+      return;
+    }
+    if (workflowLocked) {
+      toast.error("Deactivate workflow before editing");
       return;
     }
     const trimmedName = createNodeName.trim() || undefined;
@@ -500,6 +550,7 @@ export function useHomePageState() {
     createNodeType,
     graphHistory,
     selectedCreateNodeRole?.name,
+    workflowLocked,
   ]);
 
   const requestDeleteTab = useCallback(
@@ -531,6 +582,10 @@ export function useHomePageState() {
       toast.error("Create or select a workflow first");
       return;
     }
+    if (workflowLocked) {
+      toast.error("Deactivate workflow before editing");
+      return;
+    }
     if (workflowNodeOptions.length < 2) {
       toast.error("Add at least two nodes before creating an edge");
       return;
@@ -544,7 +599,7 @@ export function useHomePageState() {
     setConnectSourceId(initialSourceId);
     setConnectTargetId(initialTargetId);
     setActiveDialog("connect-ports");
-  }, [activeTabId, workflowNodeOptions]);
+  }, [activeTabId, workflowLocked, workflowNodeOptions]);
 
   const handleConnectPorts = useCallback(async () => {
     if (
@@ -554,6 +609,10 @@ export function useHomePageState() {
       !connectTargetId ||
       !connectTargetPortKey
     ) {
+      return;
+    }
+    if (workflowLocked) {
+      toast.error("Deactivate workflow before editing");
       return;
     }
     setPendingAction("connect-ports");
@@ -580,10 +639,15 @@ export function useHomePageState() {
     connectTargetId,
     connectTargetPortKey,
     graphHistory,
+    workflowLocked,
   ]);
 
   const handleSaveDefinition = useCallback(async () => {
     if (!activeTabId) {
+      return;
+    }
+    if (workflowLocked) {
+      toast.error("Deactivate workflow before editing");
       return;
     }
     let parsed: unknown;
@@ -613,7 +677,7 @@ export function useHomePageState() {
     } finally {
       setPendingAction(null);
     }
-  }, [activeTabId, definitionDraft]);
+  }, [activeTabId, definitionDraft, workflowLocked]);
 
   return {
     activeDialog,
@@ -644,6 +708,7 @@ export function useHomePageState() {
     handleDuplicateTab,
     handleOpenLeaderDetails,
     handleSaveDefinition,
+    handleToggleActivation,
     isCompactWorkspace,
     isDragging,
     leaderDetailVisible,
@@ -685,5 +750,6 @@ export function useHomePageState() {
     togglePanel,
     workflowNodeOptions,
     workspaceRef,
+    workflowLocked,
   };
 }

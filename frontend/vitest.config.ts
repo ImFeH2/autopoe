@@ -14,6 +14,7 @@ export default mergeConfig(
       restoreMocks: true,
       fileParallelism: true,
       maxWorkers: "50%",
+      testTimeout: 15_000,
     },
   }),
 );

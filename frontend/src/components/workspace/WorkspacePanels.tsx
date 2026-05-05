@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { Bot, PanelRightClose, PanelRightOpen, Shield, X } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   AssistantChatComposer,
@@ -16,7 +16,7 @@ import { useAgentDetail } from "@/hooks/useAgentDetail";
 import { useLeaderChat } from "@/hooks/useLeaderChat";
 import { useMeasuredHeight } from "@/hooks/useMeasuredHeight";
 import { interruptNode } from "@/lib/api";
-import { getNodeLabel } from "@/lib/constants";
+import { getNodeLabel, nodeTypeIcon } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { AgentState, HistoryEntry, Node } from "@/types";
 
@@ -96,8 +96,10 @@ export function AgentDetailPanel({
   const [interrupting, setInterrupting] = useState(false);
   const { agents } = useAgentNodesRuntime();
   const { tabs } = useAgentTabsRuntime();
+  const isWorkflowStep =
+    agent.node_type !== "assistant" && agent.node_type !== "agent";
   const { detail, error, loading } = useAgentDetail(
-    agent.id,
+    isWorkflowStep ? null : agent.id,
     agent.node_type === "assistant",
   );
   const detailState = detail?.state ?? agent.state;
@@ -125,6 +127,7 @@ export function AgentDetailPanel({
     nodeType: agent.node_type,
     isLeader: agent.is_leader,
   });
+  const Icon = nodeTypeIcon[agent.node_type];
   const connectionItems = detailConnections.map((connectionId) => {
     const connectedAgent = agents.get(connectionId);
     return {
@@ -159,11 +162,7 @@ export function AgentDetailPanel({
       <div className="flex items-center justify-between border-b border-border px-3.5 py-2.5">
         <div className="flex items-center gap-3">
           <div className="flex size-7 items-center justify-center rounded-md bg-primary/8">
-            {agent.node_type === "assistant" ? (
-              <Shield className="size-3.5 text-primary" />
-            ) : (
-              <Bot className="size-3.5 text-primary" />
-            )}
+            <Icon className="size-3.5 text-primary" />
           </div>
           <div className="min-w-0 flex flex-wrap items-center gap-2">
             <p className="text-[13px] font-semibold">{label}</p>
@@ -275,191 +274,241 @@ export function AgentDetailPanel({
             )}
           </DetailSection>
 
-          <DetailSection title="State Timeline">
-            {stateTimeline.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No state changes yet
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {stateTimeline
-                  .slice(-6)
-                  .reverse()
-                  .map((entry) => (
-                    <div
-                      key={`${entry.timestamp}-${entry.state ?? "unknown"}`}
-                      className="flex items-start justify-between gap-3 rounded-md border border-border bg-accent/25 px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <Badge
-                          variant="outline"
-                          className={
-                            workspaceStateBadgeClass[entry.state ?? detailState]
-                          }
+          {isWorkflowStep ? (
+            <>
+              <DetailSection title="Ports">
+                {[...(agent.inputs ?? []), ...(agent.outputs ?? [])].length ===
+                0 ? (
+                  <p className="text-sm text-muted-foreground">No ports</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {[...(agent.inputs ?? []), ...(agent.outputs ?? [])].map(
+                      (port) => (
+                        <span
+                          key={`${port.direction}-${port.key}`}
+                          className={cn(
+                            workspaceSelectionBadgeClass,
+                            "select-text",
+                          )}
                         >
-                          {(entry.state ?? detailState).toUpperCase()}
-                        </Badge>
-                        {entry.reason ? (
-                          <p className="mt-1 select-text text-xs text-muted-foreground/78">
-                            {entry.reason}
-                          </p>
-                        ) : null}
-                      </div>
-                      <span className="shrink-0 select-text font-mono text-[10px] text-muted-foreground/64">
-                        {formatDetailTimestamp(entry.timestamp)}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </DetailSection>
-
-          <DetailSection title="Contacts">
-            {contactItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No direct contacts
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {contactItems.map((contact) => (
-                  <span
-                    key={contact.id}
-                    className={cn(workspaceSelectionBadgeClass, "select-text")}
-                  >
-                    {contact.label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </DetailSection>
-
-          <DetailSection title="Agent Graph">
-            {connectionItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No graph edges</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {connectionItems.map((connection) => (
-                  <span
-                    key={connection.id}
-                    className={cn(workspaceSelectionBadgeClass, "select-text")}
-                  >
-                    {connection.label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </DetailSection>
-
-          <DetailSection title="Tools">
-            {detailTools.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No tools configured
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {detailTools.map((tool) => (
-                  <span
-                    key={tool}
-                    className={cn(
-                      workspaceSelectionBadgeClass,
-                      "select-text font-mono",
+                          {port.direction === "in" ? "Input" : "Output"} ·{" "}
+                          {port.key} · {port.type}
+                        </span>
+                      ),
                     )}
-                  >
-                    {tool}
-                  </span>
-                ))}
-              </div>
-            )}
-          </DetailSection>
+                  </div>
+                )}
+              </DetailSection>
 
-          <DetailSection title="Permissions">
-            <div className="space-y-3">
-              <div>
-                <p className="text-[10px] font-semibold text-muted-foreground">
-                  Network
-                </p>
-                <p className="mt-1 select-text text-sm text-foreground">
-                  {detailAllowNetwork ? "Enabled" : "Disabled"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-[10px] font-semibold text-muted-foreground">
-                  Write Dirs
-                </p>
-                {detailWriteDirs.length === 0 ? (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    No write access
+              <DetailSection title="Settings">
+                {Object.keys(agent.config ?? {}).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No settings</p>
+                ) : (
+                  <pre className="max-h-56 overflow-auto rounded-md border border-border bg-background/40 p-3 text-[11px] leading-5 text-foreground">
+                    {JSON.stringify(agent.config, null, 2)}
+                  </pre>
+                )}
+              </DetailSection>
+            </>
+          ) : (
+            <>
+              <DetailSection title="State Timeline">
+                {stateTimeline.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No state changes yet
                   </p>
                 ) : (
-                  <div className="mt-2 space-y-1">
-                    {detailWriteDirs.map((path) => (
-                      <p
-                        key={path}
+                  <div className="space-y-2">
+                    {stateTimeline
+                      .slice(-6)
+                      .reverse()
+                      .map((entry) => (
+                        <div
+                          key={`${entry.timestamp}-${entry.state ?? "unknown"}`}
+                          className="flex items-start justify-between gap-3 rounded-md border border-border bg-accent/25 px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <Badge
+                              variant="outline"
+                              className={
+                                workspaceStateBadgeClass[
+                                  entry.state ?? detailState
+                                ]
+                              }
+                            >
+                              {(entry.state ?? detailState).toUpperCase()}
+                            </Badge>
+                            {entry.reason ? (
+                              <p className="mt-1 select-text text-xs text-muted-foreground/78">
+                                {entry.reason}
+                              </p>
+                            ) : null}
+                          </div>
+                          <span className="shrink-0 select-text font-mono text-[10px] text-muted-foreground/64">
+                            {formatDetailTimestamp(entry.timestamp)}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </DetailSection>
+
+              <DetailSection title="Contacts">
+                {contactItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No direct contacts
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {contactItems.map((contact) => (
+                      <span
+                        key={contact.id}
                         className={cn(
                           workspaceSelectionBadgeClass,
-                          "select-text font-mono text-[11px]",
+                          "select-text",
                         )}
                       >
-                        {path}
-                      </p>
+                        {contact.label}
+                      </span>
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
-          </DetailSection>
+              </DetailSection>
 
-          <DetailSection title="Todos">
-            <div className="space-y-2">
-              {detailTodos.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No todos</p>
-              ) : (
-                detailTodos.slice(0, 6).map((todo) => (
-                  <div
-                    key={todo.text}
-                    className="flex min-w-0 items-center gap-2 text-sm text-foreground"
-                  >
-                    <span className="size-2 rounded-full bg-border" />
-                    <span className="min-w-0 break-words [overflow-wrap:anywhere]">
-                      {todo.text}
-                    </span>
+              <DetailSection title="Workflow Graph">
+                {connectionItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No graph edges
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {connectionItems.map((connection) => (
+                      <span
+                        key={connection.id}
+                        className={cn(
+                          workspaceSelectionBadgeClass,
+                          "select-text",
+                        )}
+                      >
+                        {connection.label}
+                      </span>
+                    ))}
                   </div>
-                ))
-              )}
-            </div>
-          </DetailSection>
+                )}
+              </DetailSection>
 
-          <div className="border-t border-border pt-4">
-            <div className="px-0 pb-2">
-              <p className="text-[10px] font-semibold text-muted-foreground">
-                History
-              </p>
-            </div>
+              <DetailSection title="Tools">
+                {detailTools.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No tools configured
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {detailTools.map((tool) => (
+                      <span
+                        key={tool}
+                        className={cn(
+                          workspaceSelectionBadgeClass,
+                          "select-text font-mono",
+                        )}
+                      >
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </DetailSection>
 
-            {loading ? (
-              <div className="space-y-2">
-                {[...Array(4)].map((_, index) => (
-                  <div
-                    key={index}
-                    className="h-12 rounded-md skeleton-shimmer"
+              <DetailSection title="Permissions">
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[10px] font-semibold text-muted-foreground">
+                      Network
+                    </p>
+                    <p className="mt-1 select-text text-sm text-foreground">
+                      {detailAllowNetwork ? "Enabled" : "Disabled"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-semibold text-muted-foreground">
+                      Write Dirs
+                    </p>
+                    {detailWriteDirs.length === 0 ? (
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        No write access
+                      </p>
+                    ) : (
+                      <div className="mt-2 space-y-1">
+                        {detailWriteDirs.map((path) => (
+                          <p
+                            key={path}
+                            className={cn(
+                              workspaceSelectionBadgeClass,
+                              "select-text font-mono text-[11px]",
+                            )}
+                          >
+                            {path}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </DetailSection>
+
+              <DetailSection title="Todos">
+                <div className="space-y-2">
+                  {detailTodos.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No todos</p>
+                  ) : (
+                    detailTodos.slice(0, 6).map((todo) => (
+                      <div
+                        key={todo.text}
+                        className="flex min-w-0 items-center gap-2 text-sm text-foreground"
+                      >
+                        <span className="size-2 rounded-full bg-border" />
+                        <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+                          {todo.text}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </DetailSection>
+
+              <div className="border-t border-border pt-4">
+                <div className="px-0 pb-2">
+                  <p className="text-[10px] font-semibold text-muted-foreground">
+                    History
+                  </p>
+                </div>
+
+                {loading ? (
+                  <div className="space-y-2">
+                    {[...Array(4)].map((_, index) => (
+                      <div
+                        key={index}
+                        className="h-12 rounded-md skeleton-shimmer"
+                      />
+                    ))}
+                  </div>
+                ) : error ? (
+                  <div className="text-sm text-destructive">{error}</div>
+                ) : visibleHistory.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    No history yet.
+                  </div>
+                ) : (
+                  <HistoryView
+                    history={visibleHistory}
+                    agentLabel={label}
+                    nodes={agents}
                   />
-                ))}
+                )}
               </div>
-            ) : error ? (
-              <div className="text-sm text-destructive">{error}</div>
-            ) : visibleHistory.length === 0 ? (
-              <div className="text-sm text-muted-foreground">
-                No history yet.
-              </div>
-            ) : (
-              <HistoryView
-                history={visibleHistory}
-                agentLabel={label}
-                nodes={agents}
-              />
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
     </>

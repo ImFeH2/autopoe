@@ -39,6 +39,7 @@ class ProviderModelRequest(BaseModel):
     context_window_tokens: int | None = None
     input_image: bool | None = None
     output_image: bool | None = None
+    structured_output: bool | None = None
 
 
 class CreateProviderRequest(BaseModel):

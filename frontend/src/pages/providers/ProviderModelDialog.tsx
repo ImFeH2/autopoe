@@ -115,7 +115,7 @@ export function ProviderModelDialog({
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
               <label className="text-[13px] font-medium text-foreground/80">
                 Input Image
@@ -149,6 +149,29 @@ export function ProviderModelDialog({
                   onDraftChange({
                     ...draft,
                     output_image: value,
+                  })
+                }
+              >
+                <SelectTrigger className={formSelectTriggerClass}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl border-border bg-popover">
+                  <SelectItem value="auto">Auto</SelectItem>
+                  <SelectItem value="enabled">Enabled</SelectItem>
+                  <SelectItem value="disabled">Disabled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[13px] font-medium text-foreground/80">
+                Structured Output
+              </label>
+              <Select
+                value={draft.structured_output ?? "auto"}
+                onValueChange={(value: TriStateCapability) =>
+                  onDraftChange({
+                    ...draft,
+                    structured_output: value,
                   })
                 }
               >

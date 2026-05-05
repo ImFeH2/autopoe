@@ -37,6 +37,7 @@ export function HomePage() {
     handleDuplicateTab,
     handleOpenLeaderDetails,
     handleSaveDefinition,
+    handleToggleActivation,
     isCompactWorkspace,
     isDragging,
     leaderDetailVisible,
@@ -78,6 +79,7 @@ export function HomePage() {
     togglePanel,
     workflowNodeOptions,
     workspaceRef,
+    workflowLocked,
   } = useHomePageState();
 
   return (
@@ -107,6 +109,7 @@ export function HomePage() {
         onOpenLeaderDetails={handleOpenLeaderDetails}
         onOpenConnectDialog={openConnectDialog}
         onSaveDefinition={handleSaveDefinition}
+        onToggleActivation={handleToggleActivation}
         panelVisible={panelVisible}
         pendingAction={pendingAction}
         regularTabAgents={regularTabAgents}
@@ -122,6 +125,7 @@ export function HomePage() {
         sourcePortOptions={sourcePortOptions}
         targetPortOptions={targetPortOptions}
         workspaceRef={workspaceRef}
+        workflowLocked={workflowLocked}
       />
 
       <CreateTabDialog
@@ -163,6 +167,7 @@ export function HomePage() {
         submitDisabled={
           !activeTabId ||
           pendingAction === "create-node" ||
+          workflowLocked ||
           (createNodeType === "agent" && !selectedCreateNodeRole)
         }
       />

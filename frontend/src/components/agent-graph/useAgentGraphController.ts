@@ -180,6 +180,7 @@ export function useAgentGraphController({
   onDeleteAgent = async () => undefined,
   onInsertAgentBetween = async () => undefined,
   onOpenConnectDialog = () => undefined,
+  readOnly = false,
 }: AgentGraphProps): AgentGraphController {
   const { agents } = useAgentNodesRuntime();
   const { tabs } = useAgentTabsRuntime();
@@ -309,6 +310,16 @@ export function useAgentGraphController({
     onConnectModeChange?.(connectMode);
   }, [connectMode, onConnectModeChange]);
 
+  useEffect(() => {
+    if (!readOnly) {
+      return;
+    }
+    setConnectMode(false);
+    setTargetPickSourceId(null);
+    setQuickCreate(null);
+    setContextMenu(null);
+  }, [readOnly]);
+
   const syncViewportZoom = useCallback((zoom: number) => {
     if (!Number.isFinite(zoom) || zoom <= 0) {
       return;
@@ -358,8 +369,11 @@ export function useAgentGraphController({
   );
 
   const enterConnectMode = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
     setConnectMode((current) => !current);
-  }, []);
+  }, [readOnly]);
 
   const runtimeAgentMap = useMemo(
     () => new Map(Array.from(agents.entries())),
@@ -369,13 +383,13 @@ export function useAgentGraphController({
   const buildDefinitionAgentNode = useCallback(
     (nodeId: string): RuntimeNode | null => {
       const workflowNode = workflowNodeMap.get(nodeId);
-      if (!workflowNode || workflowNode.type !== "agent") {
+      if (!workflowNode) {
         return null;
       }
 
       return {
         id: workflowNode.id,
-        node_type: "agent",
+        node_type: workflowNode.type,
         tab_id: activeTabId,
         is_leader: false,
         state: "idle",
@@ -391,6 +405,9 @@ export function useAgentGraphController({
           typeof workflowNode.config.role_name === "string"
             ? workflowNode.config.role_name
             : null,
+        config: workflowNode.config,
+        inputs: workflowNode.inputs,
+        outputs: workflowNode.outputs,
       };
     },
     [activeTabId, workflowEdges, workflowNodeMap],
@@ -420,12 +437,12 @@ export function useAgentGraphController({
       const targetNode = workflowNodeMap.get(targetNodeId);
       const sourcePort =
         sourceNode?.outputs.find((output) =>
-          targetNode?.inputs.some((input) => input.kind === output.kind),
+          targetNode?.inputs.some((input) => input.type === output.type),
         ) ?? sourceNode?.outputs[0];
       const targetPort =
         sourcePort && targetNode
           ? (targetNode.inputs.find(
-              (input) => input.kind === sourcePort.kind,
+              (input) => input.type === sourcePort.type,
             ) ?? targetNode.inputs[0])
           : null;
 
@@ -448,6 +465,21 @@ export function useAgentGraphController({
       if (!ports) {
         return false;
       }
+      const targetNode = workflowNodeMap.get(targetNodeId);
+      const targetPort = targetNode?.inputs.find(
+        (port) => port.key === ports.targetPortKey,
+      );
+      if (
+        targetPort &&
+        !targetPort.multiple &&
+        workflowEdges.some(
+          (edge) =>
+            edge.to_node_id === targetNodeId &&
+            edge.to_port_key === ports.targetPortKey,
+        )
+      ) {
+        return false;
+      }
       return !workflowEdges.some(
         (edge) =>
           edge.from_node_id === sourceNodeId &&
@@ -456,7 +488,7 @@ export function useAgentGraphController({
           edge.to_port_key === ports.targetPortKey,
       );
     },
-    [getConnectionPorts, workflowEdges],
+    [getConnectionPorts, workflowEdges, workflowNodeMap],
   );
 
   const transientData = useMemo(() => {
@@ -490,7 +522,7 @@ export function useAgentGraphController({
         selected: node.id === selectedAgentId && selectedEdgeId === null,
         toolCall: runtimeNode ? (activeToolCalls.get(node.id) ?? null) : null,
         leaving: false,
-        canConnect: Boolean(activeTabId),
+        canConnect: Boolean(activeTabId) && !readOnly,
         showConnectionEntryHint: connectMode || Boolean(targetPickSourceId),
         connectionState:
           targetPickSourceId === node.id
@@ -511,6 +543,7 @@ export function useAgentGraphController({
     activeToolCalls,
     connectMode,
     isValidDirectConnection,
+    readOnly,
     runtimeAgentMap,
     selectedAgentId,
     selectedEdgeId,
@@ -545,7 +578,8 @@ export function useAgentGraphController({
       targetHandle: edge.to_port_key,
       type: "animated",
       data: {
-        kind: edge.kind,
+        sourcePortKey: edge.from_port_key,
+        targetPortKey: edge.to_port_key,
       },
     }));
 
@@ -781,6 +815,10 @@ export function useAgentGraphController({
       if (!activeTabId || !connection.source || !connection.target) {
         return;
       }
+      if (readOnly) {
+        toast.error("Deactivate workflow before editing");
+        return;
+      }
       void onCreateConnection(
         activeTabId,
         connection.source,
@@ -799,7 +837,7 @@ export function useAgentGraphController({
           );
         });
     },
-    [activeTabId, onCreateConnection],
+    [activeTabId, onCreateConnection, readOnly],
   );
 
   const onConnectStart = useCallback(() => {}, []);
@@ -859,6 +897,16 @@ export function useAgentGraphController({
       if (!contextNode || !activeTabId) {
         return [];
       }
+      if (readOnly) {
+        return [
+          {
+            label: "Clear Selection",
+            onClick: () => {
+              selectAgent(null);
+            },
+          },
+        ];
+      }
       return [
         {
           label: "Add Agent After",
@@ -885,7 +933,7 @@ export function useAgentGraphController({
         },
         "divider",
         {
-          label: "Delete Agent",
+          label: "Delete Node",
           danger: true,
           onClick: () => {
             void onDeleteAgent({
@@ -906,6 +954,9 @@ export function useAgentGraphController({
 
     if (contextMenu.kind === "edge") {
       if (!activeTabId) {
+        return [];
+      }
+      if (readOnly) {
         return [];
       }
       return [
@@ -946,7 +997,7 @@ export function useAgentGraphController({
     return [
       {
         label: "Add Agent",
-        disabled: !activeTabId,
+        disabled: !activeTabId || readOnly,
         onClick: () => {
           openQuickCreate({
             kind: "standalone",
@@ -957,7 +1008,7 @@ export function useAgentGraphController({
       },
       {
         label: "Connect Ports",
-        disabled: !activeTabId || workflowRuntimeNodes.length < 2,
+        disabled: !activeTabId || readOnly || workflowRuntimeNodes.length < 2,
         onClick: onOpenConnectDialog,
       },
       "divider",
@@ -990,6 +1041,7 @@ export function useAgentGraphController({
     onDeleteConnection,
     onOpenConnectDialog,
     openQuickCreate,
+    readOnly,
     getContextAgentNode,
     selectAgent,
     workflowRuntimeNodes,
@@ -1167,6 +1219,7 @@ export function useAgentGraphController({
   const isValidConnection = useCallback(
     (edgeOrConnection: FlowEdge | Connection) => {
       if (
+        readOnly ||
         !edgeOrConnection.source ||
         !edgeOrConnection.target ||
         !edgeOrConnection.sourceHandle ||
@@ -1177,6 +1230,27 @@ export function useAgentGraphController({
       if (edgeOrConnection.source === edgeOrConnection.target) {
         return false;
       }
+      const sourceNode = workflowNodeMap.get(edgeOrConnection.source);
+      const targetNode = workflowNodeMap.get(edgeOrConnection.target);
+      const sourcePort = sourceNode?.outputs.find(
+        (port) => port.key === edgeOrConnection.sourceHandle,
+      );
+      const targetPort = targetNode?.inputs.find(
+        (port) => port.key === edgeOrConnection.targetHandle,
+      );
+      if (!sourcePort || !targetPort || sourcePort.type !== targetPort.type) {
+        return false;
+      }
+      if (
+        !targetPort.multiple &&
+        workflowEdges.some(
+          (edge) =>
+            edge.to_node_id === edgeOrConnection.target &&
+            edge.to_port_key === edgeOrConnection.targetHandle,
+        )
+      ) {
+        return false;
+      }
       return !workflowEdges.some(
         (edge) =>
           edge.from_node_id === edgeOrConnection.source &&
@@ -1185,7 +1259,7 @@ export function useAgentGraphController({
           edge.to_port_key === edgeOrConnection.targetHandle,
       );
     },
-    [workflowEdges],
+    [readOnly, workflowEdges, workflowNodeMap],
   );
 
   return {
@@ -1220,6 +1294,7 @@ export function useAgentGraphController({
     quickCreate,
     quickCreateName,
     quickCreateRoleName,
+    readOnly,
     setQuickCreateName,
     setQuickCreateRoleName,
     submitQuickCreate,

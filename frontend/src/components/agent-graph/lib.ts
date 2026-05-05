@@ -148,6 +148,7 @@ export interface AgentGraphProps {
     name?: string;
   }) => Promise<unknown>;
   onOpenConnectDialog?: () => void;
+  readOnly?: boolean;
 }
 
 export interface AgentGraphController {
@@ -166,6 +167,7 @@ export interface AgentGraphController {
   quickCreate: QuickCreateState | null;
   quickCreateName: string;
   quickCreateRoleName: string;
+  readOnly: boolean;
   setQuickCreateName: (value: string) => void;
   setQuickCreateRoleName: (value: string) => void;
   submittingQuickCreate: boolean;

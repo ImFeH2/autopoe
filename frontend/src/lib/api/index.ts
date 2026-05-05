@@ -10,7 +10,9 @@ export {
 } from "./nodes";
 export {
   fetchTabs,
+  activateWorkflowRequest,
   createTabRequest,
+  deactivateWorkflowRequest,
   duplicateTabRequest,
   updateTabDefinitionRequest,
   deleteTabRequest,

@@ -14,12 +14,23 @@ const HAS_OWN = Object.prototype.hasOwnProperty;
 const WORKFLOW_NODE_TYPES = new Set<WorkflowNodeType>([
   "agent",
   "trigger",
+  "llm",
   "code",
   "if",
   "merge",
 ]);
-const PORT_DIRECTIONS = new Set<WorkflowPort["direction"]>(["input", "output"]);
-const EDGE_KINDS = new Set<TabEdge["kind"]>(["control", "data", "event"]);
+const PORT_DIRECTIONS = new Set<WorkflowPort["direction"]>(["in", "out"]);
+const PORT_TYPES = new Set<WorkflowPort["type"]>(["parts", "string", "json"]);
+const LEGACY_PORT_DIRECTIONS = new Map<unknown, WorkflowPort["direction"]>([
+  ["input", "in"],
+  ["output", "out"],
+]);
+const LEGACY_PORT_TYPES = new Map<unknown, WorkflowPort["type"]>([
+  ["control", "parts"],
+  ["event", "parts"],
+  ["data", "json"],
+]);
+const EDGE_KINDS = new Set(["control", "data", "event"]);
 
 function hasOwn(data: Record<string, unknown>, key: string): boolean {
   return HAS_OWN.call(data, key);
@@ -58,10 +69,19 @@ function isWorkflowPort(value: unknown): value is WorkflowPort {
     return false;
   }
   const port = value as Record<string, unknown>;
+  const direction =
+    port.direction &&
+    PORT_DIRECTIONS.has(port.direction as WorkflowPort["direction"])
+      ? port.direction
+      : LEGACY_PORT_DIRECTIONS.get(port.direction);
+  const type =
+    port.type && PORT_TYPES.has(port.type as WorkflowPort["type"])
+      ? port.type
+      : LEGACY_PORT_TYPES.get(port.kind);
   return (
     typeof port.key === "string" &&
-    PORT_DIRECTIONS.has(port.direction as WorkflowPort["direction"]) &&
-    EDGE_KINDS.has(port.kind as TabEdge["kind"]) &&
+    PORT_DIRECTIONS.has(direction as WorkflowPort["direction"]) &&
+    PORT_TYPES.has(type as WorkflowPort["type"]) &&
     typeof port.required === "boolean" &&
     typeof port.multiple === "boolean"
   );
@@ -78,7 +98,7 @@ function isTabEdge(value: unknown): value is TabEdge {
     typeof edge.from_port_key === "string" &&
     typeof edge.to_node_id === "string" &&
     typeof edge.to_port_key === "string" &&
-    EDGE_KINDS.has(edge.kind as TabEdge["kind"])
+    (edge.kind === undefined || EDGE_KINDS.has(edge.kind as string))
   );
 }
 
@@ -162,6 +182,8 @@ export function createTaskTabFromEvent(
     leader_id: readTabLeaderId(data) ?? null,
     created_at: readNumberField(data, "created_at") ?? now,
     updated_at: readNumberField(data, "updated_at") ?? now,
+    activation_state:
+      data.activation_state === "active" ? "active" : "inactive",
     definition: isWorkflowDefinition(data.definition)
       ? data.definition
       : EMPTY_WORKFLOW_DEFINITION,
@@ -180,6 +202,10 @@ export function mergeTaskTabUpdate(
   }
 
   const nextLeaderId = readTabLeaderId(data);
+  const nextActivationState =
+    data.activation_state === "active" || data.activation_state === "inactive"
+      ? data.activation_state
+      : undefined;
 
   return {
     ...current,
@@ -190,6 +216,7 @@ export function mergeTaskTabUpdate(
         : current.leader_id,
     created_at: readNumberField(data, "created_at") ?? current.created_at,
     updated_at: readNumberField(data, "updated_at") ?? current.updated_at,
+    activation_state: nextActivationState ?? current.activation_state,
     definition:
       hasOwn(data, "definition") && isWorkflowDefinition(data.definition)
         ? data.definition

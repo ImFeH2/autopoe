@@ -21,6 +21,7 @@ export type ProviderModelEditorDraft = {
   context_window_tokens: string;
   input_image: TriStateCapability;
   output_image: TriStateCapability;
+  structured_output?: TriStateCapability;
   source: "discovered" | "manual";
 };
 
@@ -81,6 +82,9 @@ export function createProviderModelEditorDraft(
         : String(entry.context_window_tokens),
     input_image: triStateFromNullableBool(entry?.input_image ?? null),
     output_image: triStateFromNullableBool(entry?.output_image ?? null),
+    structured_output: triStateFromNullableBool(
+      entry?.structured_output ?? null,
+    ),
     source: entry?.source ?? "manual",
   };
 }
@@ -151,6 +155,8 @@ export function mergeFetchedModelsIntoDraft(
           entry.context_window_tokens ?? discoveredEntry.context_window_tokens,
         input_image: entry.input_image ?? discoveredEntry.input_image,
         output_image: entry.output_image ?? discoveredEntry.output_image,
+        structured_output:
+          entry.structured_output ?? discoveredEntry.structured_output,
       });
       fetchedByModel.delete(entry.model);
       continue;
@@ -179,6 +185,14 @@ export function buildModelSummary(entry: ProviderModelCatalogEntry): string {
   }
   if (entry.output_image !== null) {
     parts.push(`output_image=${entry.output_image ? "true" : "false"}`);
+  }
+  if (
+    entry.structured_output !== null &&
+    entry.structured_output !== undefined
+  ) {
+    parts.push(
+      `structured_output=${entry.structured_output ? "true" : "false"}`,
+    );
   }
   return parts.length > 0 ? parts.join(" · ") : "No capability metadata";
 }
@@ -215,6 +229,9 @@ export function validateProviderModelEditorDraft(
 export function buildProviderModelEntry(
   draft: ProviderModelEditorDraft,
 ): ProviderModelCatalogEntry {
+  const structuredOutput = nullableBoolFromTriState(
+    draft.structured_output ?? "auto",
+  );
   return {
     model: draft.model.trim(),
     source: draft.source,
@@ -223,5 +240,8 @@ export function buildProviderModelEntry(
       : null,
     input_image: nullableBoolFromTriState(draft.input_image),
     output_image: nullableBoolFromTriState(draft.output_image),
+    ...(structuredOutput === null
+      ? {}
+      : { structured_output: structuredOutput }),
   };
 }

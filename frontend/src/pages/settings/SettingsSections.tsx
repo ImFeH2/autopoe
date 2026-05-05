@@ -364,6 +364,7 @@ interface ModelConfigurationSectionProps {
   effectiveModelCapabilities: {
     input_image: boolean;
     output_image: boolean;
+    structured_output: boolean;
   };
   knownSafeInputTokens: number | null;
   onSettingsChange: UpdateSettings;
@@ -489,7 +490,11 @@ export function ModelConfigurationSection({
                 Capabilities: input_image=
                 {effectiveModelCapabilities.input_image ? "true" : "false"},
                 output_image=
-                {effectiveModelCapabilities.output_image ? "true" : "false"}
+                {effectiveModelCapabilities.output_image ? "true" : "false"},
+                structured_output=
+                {effectiveModelCapabilities.structured_output
+                  ? "true"
+                  : "false"}
               </p>
             </div>
           ) : null}
@@ -497,7 +502,7 @@ export function ModelConfigurationSection({
 
         <SettingsRow label="Model Metadata Overrides">
           <div className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
               <div className="space-y-1">
                 <label
                   htmlFor="model-context-window"
@@ -587,6 +592,36 @@ export function ModelConfigurationSection({
                 >
                   <SelectTrigger
                     aria-label="Output Image"
+                    className={formSelectTriggerClass}
+                  >
+                    <SelectValue placeholder="Auto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto</SelectItem>
+                    <SelectItem value="enabled">Enabled</SelectItem>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <label className={formLabelClass}>Structured Output</label>
+                <Select
+                  value={triStateFromNullableBool(
+                    settings.model.structured_output ?? null,
+                  )}
+                  onValueChange={(value: TriStateCapability) =>
+                    onSettingsChange((current) => ({
+                      ...current,
+                      model: {
+                        ...current.model,
+                        structured_output: nullableBoolFromTriState(value),
+                      },
+                    }))
+                  }
+                >
+                  <SelectTrigger
+                    aria-label="Structured Output"
                     className={formSelectTriggerClass}
                   >
                     <SelectValue placeholder="Auto" />

@@ -444,6 +444,7 @@ def test_manage_providers_list_models_streams_model_ids(monkeypatch):
             "context_window_tokens": None,
             "input_image": False,
             "output_image": False,
+            "structured_output": False,
         },
         {
             "model": "provider-1-b",
@@ -451,6 +452,7 @@ def test_manage_providers_list_models_streams_model_ids(monkeypatch):
             "context_window_tokens": None,
             "input_image": False,
             "output_image": False,
+            "structured_output": False,
         },
     ]
     assert "".join(chunks) == (

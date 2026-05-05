@@ -96,6 +96,7 @@ def test_get_settings_bootstrap_returns_related_resources(monkeypatch):
                 "active_model": "",
                 "input_image": None,
                 "output_image": None,
+                "structured_output": None,
                 "capabilities": None,
                 "context_window_tokens": None,
                 "resolved_context_window_tokens": None,
@@ -616,6 +617,7 @@ def test_update_settings_accepts_model_metadata_overrides_and_token_limit(
                     "context_window_tokens": 64000,
                     "input_image": True,
                     "output_image": False,
+                    "structured_output": True,
                     "auto_compact_token_limit": 48000,
                 },
             )
@@ -625,12 +627,14 @@ def test_update_settings_accepts_model_metadata_overrides_and_token_limit(
     assert settings.model.context_window_tokens == 64000
     assert settings.model.input_image is True
     assert settings.model.output_image is False
+    assert settings.model.structured_output is True
     assert settings.model.auto_compact_token_limit == 48000
     assert result["settings"]["model"]["context_window_tokens"] == 64000
     assert result["settings"]["model"]["resolved_context_window_tokens"] == 64000
     assert result["settings"]["model"]["capabilities"] == {
         "input_image": True,
         "output_image": False,
+        "structured_output": True,
     }
     assert result["settings"]["model"]["auto_compact_token_limit"] == 48000
     assert saved == [settings]

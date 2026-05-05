@@ -11,6 +11,7 @@ from flowent.models.todo import TodoItem
 
 class WorkflowNodeKind(StrEnum):
     TRIGGER = "trigger"
+    LLM = "llm"
     AGENT = "agent"
     CODE = "code"
     IF = "if"
@@ -18,14 +19,43 @@ class WorkflowNodeKind(StrEnum):
 
 
 class PortDirection(StrEnum):
-    INPUT = "input"
-    OUTPUT = "output"
+    INPUT = "in"
+    OUTPUT = "out"
+
+
+class PortType(StrEnum):
+    PARTS = "parts"
+    STRING = "string"
+    JSON = "json"
 
 
 class EdgeKind(StrEnum):
     CONTROL = "control"
     DATA = "data"
     EVENT = "event"
+
+
+class WorkflowActivationState(StrEnum):
+    INACTIVE = "inactive"
+    ACTIVE = "active"
+
+
+def _parse_port_direction(raw_direction: object) -> PortDirection:
+    if raw_direction == "input":
+        return PortDirection.INPUT
+    if raw_direction == "output":
+        return PortDirection.OUTPUT
+    return PortDirection(str(raw_direction))
+
+
+def _port_type_from_legacy_kind(raw_kind: object) -> PortType | None:
+    try:
+        kind = EdgeKind(str(raw_kind))
+    except ValueError:
+        return None
+    if kind == EdgeKind.DATA:
+        return PortType.JSON
+    return PortType.PARTS
 
 
 @dataclass
@@ -51,7 +81,7 @@ class NodePosition:
 class WorkflowPort:
     key: str
     direction: PortDirection
-    kind: EdgeKind
+    type: PortType
     required: bool = False
     multiple: bool = False
 
@@ -59,7 +89,7 @@ class WorkflowPort:
         return {
             "key": self.key,
             "direction": self.direction.value,
-            "kind": self.kind.value,
+            "type": self.type.value,
             "required": self.required,
             "multiple": self.multiple,
         }
@@ -68,18 +98,24 @@ class WorkflowPort:
     def from_mapping(cls, data: dict[str, object]) -> WorkflowPort | None:
         key = data.get("key")
         direction = data.get("direction")
-        kind = data.get("kind")
+        port_type = data.get("type")
         if not isinstance(key, str) or not key.strip():
             return None
         try:
-            parsed_direction = PortDirection(str(direction))
-            parsed_kind = EdgeKind(str(kind))
+            parsed_direction = _parse_port_direction(direction)
         except ValueError:
             return None
+        try:
+            parsed_type = PortType(str(port_type))
+        except ValueError:
+            legacy_type = _port_type_from_legacy_kind(data.get("kind"))
+            if legacy_type is None:
+                return None
+            parsed_type = legacy_type
         return cls(
             key=key.strip(),
             direction=parsed_direction,
-            kind=parsed_kind,
+            type=parsed_type,
             required=bool(data.get("required", False)),
             multiple=bool(data.get("multiple", False)),
         )
@@ -103,7 +139,6 @@ class GraphEdge:
             "from_port_key": self.from_port_key,
             "to_node_id": self.to_node_id,
             "to_port_key": self.to_port_key,
-            "kind": self.kind.value,
             "created_at": self.created_at,
         }
         if self.tab_id is not None:

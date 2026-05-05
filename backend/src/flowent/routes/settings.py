@@ -138,6 +138,7 @@ async def update_settings(req: UpdateSettingsRequest) -> dict[str, object]:
     context_window_tokens: object = MISSING
     input_image: object = MISSING
     output_image: object = MISSING
+    structured_output: object = MISSING
     timeout_ms: object = MISSING
     retry_policy: object = MISSING
     max_retries: object = MISSING
@@ -159,6 +160,8 @@ async def update_settings(req: UpdateSettingsRequest) -> dict[str, object]:
             input_image = req.model.get("input_image")
         if "output_image" in req.model:
             output_image = req.model.get("output_image")
+        if "structured_output" in req.model:
+            structured_output = req.model.get("structured_output")
         if "timeout_ms" in req.model:
             timeout_ms = req.model.get("timeout_ms")
         if "retry_policy" in req.model:
@@ -189,6 +192,7 @@ async def update_settings(req: UpdateSettingsRequest) -> dict[str, object]:
             context_window_tokens=context_window_tokens,
             input_image=input_image,
             output_image=output_image,
+            structured_output=structured_output,
             max_retries=max_retries,
             retry_policy=retry_policy,
             timeout_ms=timeout_ms,

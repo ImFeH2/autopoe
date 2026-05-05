@@ -4,10 +4,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from flowent.graph_service import (
+    activate_tab,
     create_agent_node,
     create_edge,
     create_graph_node,
     create_tab,
+    deactivate_tab,
     delete_agent_node,
     delete_edge,
     delete_tab,
@@ -18,7 +20,7 @@ from flowent.graph_service import (
     serialize_tab_summary,
     update_tab_definition,
 )
-from flowent.models import AgentState, EdgeKind, WorkflowNodeKind
+from flowent.models import AgentState, WorkflowNodeKind
 from flowent.registry import registry
 from flowent.workspace_store import workspace_store
 
@@ -49,7 +51,7 @@ class CreateTabEdgeRequest(BaseModel):
     from_port_key: str = "out"
     to_node_id: str
     to_port_key: str = "in"
-    kind: str = EdgeKind.CONTROL.value
+    kind: str | None = None
 
 
 class UpdateTabDefinitionRequest(BaseModel):
@@ -134,6 +136,30 @@ async def duplicate_workflow_route(tab_id: str) -> dict[str, object]:
             detail=error or "Failed to duplicate workflow",
         )
     return serialize_tab_summary(duplicated)
+
+
+@router.post("/api/workflows/{tab_id}/activate")
+async def activate_workflow_route(tab_id: str) -> dict[str, object]:
+    updated, errors, error = activate_tab(tab_id=tab_id, actor_id=tab_id)
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+    if error is not None or updated is None:
+        raise HTTPException(
+            status_code=404 if error and error.endswith("not found") else 400,
+            detail=error or "Failed to activate workflow",
+        )
+    return serialize_tab_summary(updated)
+
+
+@router.post("/api/workflows/{tab_id}/deactivate")
+async def deactivate_workflow_route(tab_id: str) -> dict[str, object]:
+    updated, error = deactivate_tab(tab_id=tab_id, actor_id=tab_id)
+    if error is not None or updated is None:
+        raise HTTPException(
+            status_code=404 if error and error.endswith("not found") else 400,
+            detail=error or "Failed to deactivate workflow",
+        )
+    return serialize_tab_summary(updated)
 
 
 @router.get("/api/workflows/{tab_id}")
@@ -236,17 +262,13 @@ async def create_workflow_edge(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
-    try:
-        edge_kind = EdgeKind(req.kind.strip())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid edge kind") from exc
     edge, error = create_edge(
         tab_id=tab_id,
         from_node_id=req.from_node_id,
         from_port_key=req.from_port_key,
         to_node_id=req.to_node_id,
         to_port_key=req.to_port_key,
-        kind=edge_kind,
+        kind=req.kind or "",
     )
     if error is not None or edge is None:
         raise HTTPException(status_code=400, detail=error or "Failed to create edge")

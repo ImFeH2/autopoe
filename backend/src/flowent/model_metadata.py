@@ -34,6 +34,7 @@ def infer_model_capabilities(
     model_id: str,
     input_image: bool | None = None,
     output_image: bool | None = None,
+    structured_output: bool | None = None,
 ) -> ModelCapabilities:
     normalized_model_id = _normalize_model_id(model_id)
     inferred_input_image = any(
@@ -53,6 +54,7 @@ def infer_model_capabilities(
     return ModelCapabilities(
         input_image=inferred_input_image if input_image is None else input_image,
         output_image=(inferred_output_image if output_image is None else output_image),
+        structured_output=False if structured_output is None else structured_output,
     )
 
 
@@ -80,6 +82,7 @@ def build_model_info(
     model_id: str,
     input_image: bool | None = None,
     output_image: bool | None = None,
+    structured_output: bool | None = None,
     context_window_tokens: int | None = None,
 ) -> ModelInfo:
     return ModelInfo(
@@ -89,6 +92,7 @@ def build_model_info(
             model_id=model_id,
             input_image=input_image,
             output_image=output_image,
+            structured_output=structured_output,
         ),
         context_window_tokens=infer_context_window_tokens(
             provider_type=provider_type,

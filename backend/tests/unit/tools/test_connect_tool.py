@@ -122,7 +122,6 @@ def test_connect_tool_creates_directed_workflow_edge():
                 "to": right.uuid,
                 "from_port_key": "out",
                 "to_port_key": "in",
-                "kind": "control",
             },
         )
     )
@@ -132,7 +131,7 @@ def test_connect_tool_creates_directed_workflow_edge():
     assert result["from_port_key"] == "out"
     assert result["to_node_id"] == "worker-b"
     assert result["to_port_key"] == "in"
-    assert result["kind"] == "control"
+    assert "kind" not in result
     assert left.get_connections_snapshot() == []
     assert right.get_connections_snapshot() == []
     stored_edges = workspace_store.list_edges(tab.id)
@@ -191,7 +190,7 @@ def test_connect_tool_resolves_non_agent_workflow_nodes_by_name():
 
     assert result["from_node_id"] == "worker-a"
     assert result["to_node_id"] == "code-a"
-    assert result["kind"] == "control"
+    assert "kind" not in result
 
 
 def test_connect_tool_rejects_leader_endpoints():

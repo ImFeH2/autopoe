@@ -12,6 +12,7 @@ from flowent.settings import (
     build_model_context_window_tokens,
     build_model_input_image,
     build_model_output_image,
+    build_model_structured_output,
     build_provider_headers,
     build_provider_retry_429_delay_seconds,
     serialize_provider_model_catalog_entry,
@@ -27,6 +28,7 @@ class ProviderModelCatalogPayload(Protocol):
     context_window_tokens: int | None
     input_image: bool | None
     output_image: bool | None
+    structured_output: bool | None
 
 
 def validate_provider_base_url_input(
@@ -71,6 +73,10 @@ def build_provider_model_catalog_entry(
         output_image=build_model_output_image(
             payload.output_image,
             field_name=f"{field_name_prefix}.output_image",
+        ),
+        structured_output=build_model_structured_output(
+            payload.structured_output,
+            field_name=f"{field_name_prefix}.structured_output",
         ),
     )
 
@@ -178,5 +184,6 @@ def serialize_discovered_model_catalog_entry(model: ModelInfo) -> dict[str, obje
             context_window_tokens=model.context_window_tokens,
             input_image=model.capabilities.input_image,
             output_image=model.capabilities.output_image,
+            structured_output=model.capabilities.structured_output,
         )
     )

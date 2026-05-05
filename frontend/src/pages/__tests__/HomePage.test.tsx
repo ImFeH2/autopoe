@@ -267,13 +267,15 @@ function useMockHomePageState() {
     | "delete-tab"
     | "duplicate-tab"
     | "save-definition"
+    | "activate-workflow"
+    | "deactivate-workflow"
     | null
   >(null);
   const [createTabTitle, setCreateTabTitle] = useState("");
   const [createTabAllowNetwork, setCreateTabAllowNetwork] = useState(false);
   const [createTabWriteDirs, setCreateTabWriteDirs] = useState("");
   const [createNodeType, setCreateNodeType] = useState<
-    "agent" | "trigger" | "code" | "if" | "merge"
+    "agent" | "trigger" | "llm" | "code" | "if" | "merge"
   >("agent");
   const [createNodeRoleName, setCreateNodeRoleName] = useState("Worker");
   const [createNodeName, setCreateNodeName] = useState("");
@@ -401,6 +403,7 @@ function useMockHomePageState() {
       setLeaderDetailVisible(true);
     },
     handleSaveDefinition: async () => {},
+    handleToggleActivation: async () => {},
     isCompactWorkspace: false,
     isDragging: false,
     leaderDetailVisible,
@@ -454,6 +457,7 @@ function useMockHomePageState() {
     },
     workflowNodeOptions: [],
     workspaceRef,
+    workflowLocked: activeTab?.activation_state === "active",
   };
 }
 

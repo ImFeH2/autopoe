@@ -71,6 +71,10 @@ class ManageSettingsTool(Tool):
                 "type": ["boolean", "null"],
                 "description": "Explicit output_image override for the active system model",
             },
+            "structured_output": {
+                "type": ["boolean", "null"],
+                "description": "Explicit structured_output override for the active system model",
+            },
             "max_retries": {
                 "type": "integer",
                 "description": "Maximum retries for transient LLM call failures when retry_policy is limited",
@@ -139,6 +143,7 @@ class ManageSettingsTool(Tool):
             build_model_retry_initial_delay_seconds,
             build_model_retry_max_delay_seconds,
             build_model_retry_policy,
+            build_model_structured_output,
             build_model_timeout_ms,
             get_settings,
             save_settings,
@@ -161,6 +166,7 @@ class ManageSettingsTool(Tool):
         context_window_tokens = args.get("context_window_tokens")
         input_image = args.get("input_image")
         output_image = args.get("output_image")
+        structured_output = args.get("structured_output")
         auto_compact_token_limit = args.get("auto_compact_token_limit")
         model_params = args.get("model_params")
         timestamp_format = args.get("timestamp_format")
@@ -237,6 +243,14 @@ class ManageSettingsTool(Tool):
                 build_model_output_image(output_image, field_name="output_image")
             except ValueError as exc:
                 return json.dumps({"error": str(exc)})
+        if "structured_output" in args:
+            try:
+                build_model_structured_output(
+                    structured_output,
+                    field_name="structured_output",
+                )
+            except ValueError as exc:
+                return json.dumps({"error": str(exc)})
         if "context_window_tokens" in args:
             try:
                 build_model_context_window_tokens(
@@ -293,6 +307,9 @@ class ManageSettingsTool(Tool):
                 ),
                 input_image=input_image if "input_image" in args else MISSING,
                 output_image=output_image if "output_image" in args else MISSING,
+                structured_output=(
+                    structured_output if "structured_output" in args else MISSING
+                ),
                 max_retries=max_retries if max_retries is not None else MISSING,
                 retry_policy=retry_policy if retry_policy is not None else MISSING,
                 timeout_ms=timeout_ms if timeout_ms is not None else MISSING,
@@ -331,6 +348,7 @@ class ManageSettingsTool(Tool):
                 retry_backoff_cap_retries_field_name="retry_backoff_cap_retries",
                 input_image_field_name="input_image",
                 output_image_field_name="output_image",
+                structured_output_field_name="structured_output",
                 context_window_tokens_field_name="context_window_tokens",
                 auto_compact_token_limit_field_name="auto_compact_token_limit",
             )

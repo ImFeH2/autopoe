@@ -48,6 +48,7 @@ def test_manage_settings_get_returns_current_settings(monkeypatch):
             "active_model": "gpt-4o",
             "input_image": None,
             "output_image": None,
+            "structured_output": None,
             "context_window_tokens": None,
             "capabilities": None,
             "resolved_context_window_tokens": None,
@@ -103,6 +104,7 @@ def test_manage_settings_update_changes_active_provider_and_model(monkeypatch):
         "active_model": "gpt-4.1",
         "input_image": None,
         "output_image": None,
+        "structured_output": None,
         "context_window_tokens": None,
         "capabilities": None,
         "resolved_context_window_tokens": None,
@@ -448,6 +450,7 @@ def test_manage_settings_update_changes_model_metadata_overrides_and_token_limit
     assert result["model"]["capabilities"] == {
         "input_image": True,
         "output_image": False,
+        "structured_output": False,
     }
     assert result["model"]["auto_compact_token_limit"] == 48000
     assert settings.model.context_window_tokens == 64000

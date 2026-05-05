@@ -103,8 +103,8 @@ export function CreateTabDialog({
         />
       </WorkspaceDialogField>
       <WorkspaceDialogMeta>
-        New workflows always start with an empty definition and a bound Leader.
-        MCP servers are provided globally after they connect.
+        New workflows start editable. Activate the workflow after adding the
+        nodes you want to run.
       </WorkspaceDialogMeta>
       <WorkspaceDialogField
         label="Network Access"
@@ -117,12 +117,12 @@ export function CreateTabDialog({
         />
       </WorkspaceDialogField>
       <WorkspaceDialogField
-        label="Write Dirs"
-        hint="One absolute path per line"
+        label="Allowed Folders"
+        hint="One absolute folder path per line"
       >
         <Textarea
           value={writeDirs}
-          aria-label="Write directories"
+          aria-label="Allowed folders"
           onChange={(event) => onWriteDirsChange(event.target.value)}
           placeholder="/workspace/output&#10;/workspace/cache"
           className={cn(
@@ -156,6 +156,7 @@ interface CreateNodeDialogProps {
 const workflowNodeTypeLabels: Record<WorkflowNodeType, string> = {
   agent: "Agent",
   trigger: "Trigger",
+  llm: "Model",
   code: "Code",
   if: "If",
   merge: "Merge",

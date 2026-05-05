@@ -117,7 +117,7 @@ export function useSettingsPageState() {
     () =>
       settings
         ? getEffectiveModelCapabilities(settings, selectedCatalogModel)
-        : { input_image: false, output_image: false },
+        : { input_image: false, output_image: false, structured_output: false },
     [selectedCatalogModel, settings],
   );
 

@@ -11,7 +11,7 @@ import {
   WorkspacePanelEmptyState,
 } from "@/components/workspace/WorkspacePanels";
 import { cn } from "@/lib/utils";
-import type { Node, Role, TaskTab } from "@/types";
+import type { Node, Role, TaskTab, WorkflowNodeType } from "@/types";
 import type {
   WorkspaceEditorMode,
   WorkspacePendingAction,
@@ -27,6 +27,7 @@ import {
   GitGraph,
   Link2,
   Plus,
+  Power,
   Radio,
   Redo2,
   Save,
@@ -58,7 +59,7 @@ interface WorkspaceGraphHistory {
   }) => Promise<unknown>;
   createStandaloneNode?: (input: {
     tabId: string;
-    nodeType?: "agent" | "trigger" | "code" | "if" | "merge";
+    nodeType?: WorkflowNodeType;
     roleName?: string;
     name?: string;
   }) => Promise<unknown>;
@@ -110,6 +111,7 @@ interface WorkspaceShellProps {
   onOpenLeaderDetails: () => void;
   onOpenConnectDialog: () => void;
   onSaveDefinition: () => void;
+  onToggleActivation: () => void;
   panelVisible: boolean;
   pendingAction: WorkspacePendingAction;
   regularTabAgents: Node[];
@@ -125,6 +127,7 @@ interface WorkspaceShellProps {
   sourcePortOptions: WorkspacePortOption[];
   targetPortOptions: WorkspacePortOption[];
   workspaceRef: RefObject<HTMLDivElement | null>;
+  workflowLocked: boolean;
 }
 
 export function WorkspaceShell({
@@ -152,6 +155,7 @@ export function WorkspaceShell({
   onOpenLeaderDetails,
   onOpenConnectDialog,
   onSaveDefinition,
+  onToggleActivation,
   panelVisible,
   pendingAction,
   resolvedPanelWidth,
@@ -164,6 +168,7 @@ export function WorkspaceShell({
   togglePanel,
   workflowNodeOptions,
   workspaceRef,
+  workflowLocked,
 }: WorkspaceShellProps) {
   const renderPrimaryPanel = () => {
     if (leaderDetailVisible && leaderNode) {
@@ -295,6 +300,7 @@ export function WorkspaceShell({
               onDeleteConnection={graphHistory.deleteConnection}
               onInsertAgentBetween={graphHistory.insertAgentBetween}
               onOpenConnectDialog={onOpenConnectDialog}
+              readOnly={workflowLocked}
               roles={roles}
             />
           ) : (
@@ -305,12 +311,16 @@ export function WorkspaceShell({
                     Workflow JSON
                   </p>
                   <p className="mt-1 text-[13px] text-muted-foreground">
-                    Edit the formal definition shared by the graph view.
+                    Review the graph structure and saved node settings.
                   </p>
                 </div>
                 <Button
                   onClick={onSaveDefinition}
-                  disabled={!activeTabId || pendingAction === "save-definition"}
+                  disabled={
+                    !activeTabId ||
+                    workflowLocked ||
+                    pendingAction === "save-definition"
+                  }
                 >
                   <Save className="mr-1 size-4" />
                   {pendingAction === "save-definition"
@@ -323,6 +333,7 @@ export function WorkspaceShell({
                 onChange={(event) =>
                   onDefinitionDraftChange(event.target.value)
                 }
+                readOnly={workflowLocked}
                 className="h-full min-h-0 w-full resize-none rounded-xl border border-border bg-background/40 p-4 font-mono text-[12px] leading-6 text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-[3px] focus:ring-ring/50"
                 spellCheck={false}
               />
@@ -353,6 +364,11 @@ export function WorkspaceShell({
                 nodes
               </BadgeChip>
             ) : null}
+            {activeTab ? (
+              <BadgeChip tone={workflowLocked ? "primary" : "default"}>
+                {workflowLocked ? "Active" : "Editable"}
+              </BadgeChip>
+            ) : null}
           </div>
 
           <div className="pointer-events-none absolute inset-x-3 bottom-4 z-40 flex justify-center">
@@ -361,7 +377,11 @@ export function WorkspaceShell({
               className="pointer-events-auto inline-flex max-w-full items-center overflow-x-auto rounded-xl border border-border bg-surface-overlay/92 p-0.5 shadow-sm scrollbar-none"
             >
               <ToolbarButton
-                disabled={!activeTabId || !graphHistory.canUndo(activeTabId)}
+                disabled={
+                  !activeTabId ||
+                  workflowLocked ||
+                  !graphHistory.canUndo(activeTabId)
+                }
                 onClick={() => {
                   void graphHistory.undo(activeTabId);
                 }}
@@ -371,13 +391,30 @@ export function WorkspaceShell({
               </ToolbarButton>
               <ToolbarDivider />
               <ToolbarButton
-                disabled={!activeTabId || !graphHistory.canRedo(activeTabId)}
+                disabled={
+                  !activeTabId ||
+                  workflowLocked ||
+                  !graphHistory.canRedo(activeTabId)
+                }
                 onClick={() => {
                   void graphHistory.redo(activeTabId);
                 }}
               >
                 <Redo2 className="size-4 opacity-70" />
                 Redo
+              </ToolbarButton>
+              <ToolbarDivider />
+              <ToolbarButton
+                disabled={
+                  !activeTabId ||
+                  pendingAction === "activate-workflow" ||
+                  pendingAction === "deactivate-workflow"
+                }
+                active={workflowLocked}
+                onClick={onToggleActivation}
+              >
+                <Power className="size-4 opacity-70" />
+                {workflowLocked ? "Deactivate" : "Activate"}
               </ToolbarButton>
               <ToolbarDivider />
               <ToolbarButton
@@ -398,13 +435,20 @@ export function WorkspaceShell({
                 JSON
               </ToolbarButton>
               <ToolbarDivider />
-              <ToolbarButton disabled={!activeTabId} onClick={onCreateNode}>
+              <ToolbarButton
+                disabled={!activeTabId || workflowLocked}
+                onClick={onCreateNode}
+              >
                 <Plus className="size-4 opacity-70" />
                 Add Node
               </ToolbarButton>
               <ToolbarDivider />
               <ToolbarButton
-                disabled={!activeTabId || workflowNodeOptions.length < 2}
+                disabled={
+                  !activeTabId ||
+                  workflowLocked ||
+                  workflowNodeOptions.length < 2
+                }
                 active={graphConnectMode}
                 onClick={onOpenConnectDialog}
               >

@@ -59,6 +59,22 @@ export async function duplicateTabRequest(tabId: string): Promise<TaskTab> {
   });
 }
 
+export async function activateWorkflowRequest(tabId: string): Promise<TaskTab> {
+  return requestJson<TaskTab, TaskTab>(`/api/workflows/${tabId}/activate`, {
+    method: "POST",
+    errorMessage: "Failed to activate workflow",
+  });
+}
+
+export async function deactivateWorkflowRequest(
+  tabId: string,
+): Promise<TaskTab> {
+  return requestJson<TaskTab, TaskTab>(`/api/workflows/${tabId}/deactivate`, {
+    method: "POST",
+    errorMessage: "Failed to deactivate workflow",
+  });
+}
+
 export async function updateTabDefinitionRequest(
   tabId: string,
   definition: WorkflowDefinition,
@@ -99,6 +115,7 @@ export async function fetchTabDetail(
         leader_id: null,
         created_at: 0,
         updated_at: 0,
+        activation_state: "inactive",
         definition: { version: 1, nodes: [], edges: [], view: {} },
       },
       nodes: data?.nodes ?? [],
@@ -187,7 +204,6 @@ export async function createTabEdgeRequest(
     fromPortKey?: string;
     toNodeId: string;
     toPortKey?: string;
-    kind?: "control" | "data" | "event";
   },
 ): Promise<TabEdge> {
   return requestJson<TabEdge, TabEdge>(`/api/workflows/${tabId}/edges`, {
@@ -197,7 +213,6 @@ export async function createTabEdgeRequest(
       from_port_key: input.fromPortKey ?? "out",
       to_node_id: input.toNodeId,
       to_port_key: input.toPortKey ?? "in",
-      kind: input.kind ?? "control",
     },
     errorMessage: "Failed to create edge",
   });

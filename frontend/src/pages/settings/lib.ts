@@ -40,6 +40,7 @@ export interface UserSettings {
     active_model: string;
     input_image: boolean | null;
     output_image: boolean | null;
+    structured_output?: boolean | null;
     context_window_tokens: number | null;
     capabilities: ModelCapabilities | null;
     resolved_context_window_tokens: number | null;
@@ -60,6 +61,12 @@ export interface SettingsBootstrapData {
   providers: Provider[];
   roles: Role[];
   version: string | null;
+}
+
+export interface EffectiveModelCapabilities {
+  input_image: boolean;
+  output_image: boolean;
+  structured_output: boolean;
 }
 
 export function normalizeWriteDirs(writeDirs: string[]): string[] {
@@ -122,7 +129,7 @@ export function getEffectiveContextWindowTokens(
 export function getEffectiveModelCapabilities(
   settings: UserSettings,
   selectedCatalogModel: Provider["models"][number] | null,
-): ModelCapabilities {
+): EffectiveModelCapabilities {
   return {
     input_image:
       settings.model.input_image ??
@@ -133,6 +140,11 @@ export function getEffectiveModelCapabilities(
       settings.model.output_image ??
       selectedCatalogModel?.output_image ??
       settings.model.capabilities?.output_image ??
+      false,
+    structured_output:
+      settings.model.structured_output ??
+      selectedCatalogModel?.structured_output ??
+      settings.model.capabilities?.structured_output ??
       false,
   };
 }
@@ -197,6 +209,7 @@ export function buildSettingsSavePayload(
       active_model: settings.model.active_model,
       input_image: settings.model.input_image,
       output_image: settings.model.output_image,
+      structured_output: settings.model.structured_output,
       context_window_tokens: settings.model.context_window_tokens,
       timeout_ms: settings.model.timeout_ms,
       retry_policy: settings.model.retry_policy,

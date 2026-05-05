@@ -8,6 +8,7 @@ from typing import Any
 class ModelCapabilities:
     input_image: bool = False
     output_image: bool = False
+    structured_output: bool = False
 
 
 @dataclass

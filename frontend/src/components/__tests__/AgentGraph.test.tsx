@@ -330,8 +330,8 @@ function buildDefinition(nodes: Node[]): WorkflowDefinition {
         inputs: [
           {
             key: "in",
-            direction: "input" as const,
-            kind: "control" as const,
+            direction: "in" as const,
+            type: "parts" as const,
             required: false,
             multiple: false,
           },
@@ -339,8 +339,8 @@ function buildDefinition(nodes: Node[]): WorkflowDefinition {
         outputs: [
           {
             key: "out",
-            direction: "output" as const,
-            kind: "control" as const,
+            direction: "out" as const,
+            type: "parts" as const,
             required: false,
             multiple: true,
           },
@@ -366,7 +366,6 @@ function buildDefinition(nodes: Node[]): WorkflowDefinition {
                   from_port_key: "out",
                   to_node_id: targetId,
                   to_port_key: "in",
-                  kind: "control" as const,
                 },
               ]),
           ),
@@ -689,7 +688,7 @@ describe("AgentGraph", () => {
 
     expect(screen.getByText("Add Agent After")).toBeInTheDocument();
     expect(screen.getByText("Connect to...")).toBeInTheDocument();
-    expect(screen.getByText("Delete Agent")).toBeInTheDocument();
+    expect(screen.getByText("Delete Node")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Add Agent After"));
     fireEvent.click(await screen.findByText("Reviewer"));
@@ -728,7 +727,7 @@ describe("AgentGraph", () => {
 
     expect(screen.getByText("Add Agent After")).toBeInTheDocument();
     expect(screen.getByText("Connect to...")).toBeInTheDocument();
-    expect(screen.getByText("Delete Agent")).toBeInTheDocument();
+    expect(screen.getByText("Delete Node")).toBeInTheDocument();
   });
 
   it("re-fits the graph when the container is resized", async () => {

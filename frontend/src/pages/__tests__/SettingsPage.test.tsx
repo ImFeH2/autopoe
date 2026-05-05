@@ -208,7 +208,9 @@ describe("SettingsPage", () => {
     );
     expect(screen.getByText("Context window: 128,000")).toBeInTheDocument();
     expect(
-      screen.getByText("Capabilities: input_image=true, output_image=false"),
+      screen.getByText(
+        "Capabilities: input_image=true, output_image=false, structured_output=false",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("assistant-role-guidance")).toHaveTextContent(
       "Human-facing assistant role",

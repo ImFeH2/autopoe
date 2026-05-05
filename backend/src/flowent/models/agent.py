@@ -7,6 +7,7 @@ from enum import StrEnum
 class NodeType(StrEnum):
     ASSISTANT = "assistant"
     AGENT = "agent"
+    LLM = "llm"
     TRIGGER = "trigger"
     CODE = "code"
     IF = "if"

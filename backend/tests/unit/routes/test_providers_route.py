@@ -234,6 +234,7 @@ def test_list_provider_models_runs_gateway_in_threadpool(monkeypatch):
                 "context_window_tokens": None,
                 "input_image": False,
                 "output_image": False,
+                "structured_output": False,
             }
         ]
     }
@@ -327,6 +328,7 @@ def test_list_provider_models_from_draft_passes_raw_base_url_to_provider(
                 "context_window_tokens": None,
                 "input_image": False,
                 "output_image": False,
+                "structured_output": False,
             }
         ]
     }

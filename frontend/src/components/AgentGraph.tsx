@@ -80,6 +80,7 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
       quickCreate,
       quickCreateName,
       quickCreateRoleName,
+      readOnly,
       setQuickCreateName,
       setQuickCreateRoleName,
       submitQuickCreate,
@@ -140,7 +141,7 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
               connectOnClick={false}
               proOptions={{ hideAttribution: true }}
               nodesDraggable={false}
-              nodesConnectable={Boolean(activeTabId)}
+              nodesConnectable={Boolean(activeTabId) && !readOnly}
               panOnDrag
               zoomOnScroll
               zoomOnPinch
