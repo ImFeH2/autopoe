@@ -597,7 +597,6 @@ export function LeaderChatPanel({
           retryingMessageId={retryingMessageId}
           runningHint={leaderActivity.runningHint}
           scrollRef={scrollRef}
-          variant="workspace"
         />
 
         <div
@@ -642,7 +641,6 @@ export function LeaderChatPanel({
             suppressCommandNavigation={isBrowsingInputHistory}
             targetLabel="Leader"
             stopping={stopping}
-            variant="workspace"
           />
         </div>
       </div>

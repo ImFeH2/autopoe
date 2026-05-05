@@ -23,7 +23,6 @@ export function AssistantPage() {
       ) : (
         <AssistantPanel
           onOpenDetails={assistantNode ? () => setDetailsOpen(true) : undefined}
-          variant="page"
         />
       )}
     </div>

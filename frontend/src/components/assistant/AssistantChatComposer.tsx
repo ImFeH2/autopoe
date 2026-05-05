@@ -6,10 +6,7 @@ import {
   useState,
 } from "react";
 import { ArrowUp, ImagePlus, Square, X } from "lucide-react";
-import {
-  type AssistantChatVariant,
-  type AssistantComposerImage,
-} from "@/components/assistant/shared";
+import { type AssistantComposerImage } from "@/components/assistant/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -48,7 +45,6 @@ interface AssistantChatComposerProps {
   overlay?: boolean;
   targetLabel?: string;
   stopping?: boolean;
-  variant: AssistantChatVariant;
 }
 
 export function AssistantChatComposer({
@@ -69,10 +65,7 @@ export function AssistantChatComposer({
   targetLabel = "Assistant",
   stopping = false,
   suppressCommandNavigation = false,
-  variant,
 }: AssistantChatComposerProps) {
-  const isWorkspace = variant === "workspace";
-  const isPage = variant === "page";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const actionLabel = busy ? (stopping ? "Stopping..." : "Stop") : "Send";
@@ -115,8 +108,7 @@ export function AssistantChatComposer({
     const paddingTop = Number.parseFloat(computedStyle.paddingTop) || 0;
     const paddingBottom = Number.parseFloat(computedStyle.paddingBottom) || 0;
     const minHeight = lineHeight + paddingTop + paddingBottom;
-    const maxHeight =
-      lineHeight * (isWorkspace ? 8 : 7) + paddingTop + paddingBottom;
+    const maxHeight = lineHeight * 8 + paddingTop + paddingBottom;
 
     textarea.style.height = "0px";
 
@@ -128,7 +120,7 @@ export function AssistantChatComposer({
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY =
       textarea.scrollHeight > maxHeight ? "auto" : "hidden";
-  }, [input, isWorkspace]);
+  }, [input]);
 
   const handleInputChange = (nextValue: string) => {
     const nextCommandInput = commandsEnabled
@@ -263,24 +255,14 @@ export function AssistantChatComposer({
   return (
     <div
       className={cn(
-        overlay
-          ? "w-full pointer-events-auto"
-          : cn(
-              "border-t border-border",
-              isWorkspace ? "p-2.5" : "px-3.5 py-2.5",
-            ),
+        overlay ? "w-full pointer-events-auto" : "border-t border-border p-2.5",
       )}
     >
       {commandPanelVisible ? (
         <div
           role="listbox"
           aria-label="Assistant commands"
-          className={cn(
-            "pointer-events-auto mb-2 overflow-hidden rounded-xl border",
-            isWorkspace
-              ? "border-border bg-surface-overlay shadow-sm"
-              : "border-border bg-popover shadow-sm",
-          )}
+          className="pointer-events-auto mb-2 overflow-hidden rounded-xl border border-border bg-surface-overlay shadow-sm"
         >
           {commandOptions.length > 0 ? (
             commandOptions.map((command, index) => {
@@ -324,16 +306,7 @@ export function AssistantChatComposer({
           )}
         </div>
       ) : null}
-      <div
-        className={cn(
-          "border transition-[border-color,background-color,box-shadow] duration-200",
-          isWorkspace
-            ? "rounded-md border-border bg-background/30 px-2 py-1 shadow-sm hover:border-ring/35 focus-within:border-ring/45 focus-within:ring-[3px] focus-within:ring-ring/35"
-            : isPage
-              ? "rounded-[20px] border-border bg-surface-2 px-3 py-2 shadow-sm hover:border-ring/30 focus-within:border-ring/40 focus-within:ring-[3px] focus-within:ring-ring/30"
-              : "rounded-md border-border bg-surface-2/90 px-2 py-1 shadow-sm hover:border-ring/30 focus-within:border-ring/40 focus-within:ring-[3px] focus-within:ring-ring/30",
-        )}
-      >
+      <div className="rounded-md border border-border bg-background/30 px-2 py-1 shadow-sm transition-[border-color,background-color,box-shadow] duration-200 hover:border-ring/35 focus-within:border-ring/45 focus-within:ring-[3px] focus-within:ring-ring/35">
         {images.length > 0 ? (
           <div className="flex flex-wrap gap-2 border-b border-border px-0.5 py-2">
             {images.map((image) => (
@@ -399,8 +372,8 @@ export function AssistantChatComposer({
           />
           <Button
             type="button"
-            variant={isWorkspace && !busy ? "default" : "ghost"}
-            size={isWorkspace ? "sm" : "icon-sm"}
+            variant={!busy ? "default" : "ghost"}
+            size="sm"
             onClick={busy ? onStop : onSend}
             disabled={actionDisabled}
             aria-label={
@@ -408,14 +381,10 @@ export function AssistantChatComposer({
             }
             className={cn(
               "shrink-0 rounded-full transition-all duration-300 active:scale-[0.96] disabled:opacity-30",
-              isWorkspace
-                ? "h-8 gap-1.5 px-3.5"
-                : "bg-accent/70 p-0 text-foreground hover:bg-accent",
+              "h-8 gap-1.5 px-3.5",
               busy
                 ? "bg-destructive/18 text-destructive hover:bg-destructive/24"
-                : isWorkspace
-                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                  : "",
+                : "bg-primary text-primary-foreground hover:bg-primary/90",
             )}
           >
             {busy ? (
@@ -423,9 +392,7 @@ export function AssistantChatComposer({
             ) : (
               <ArrowUp className="size-4" strokeWidth={2.5} />
             )}
-            {isWorkspace ? (
-              <span className="text-[11px] font-medium">{actionLabel}</span>
-            ) : null}
+            <span className="text-[11px] font-medium">{actionLabel}</span>
           </Button>
         </div>
       </div>

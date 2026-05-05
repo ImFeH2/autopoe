@@ -56,7 +56,6 @@ describe("AssistantChatMessages", () => {
         nodes={new Map()}
         onScroll={() => {}}
         scrollRef={createRef<HTMLDivElement>()}
-        variant="workspace"
       />,
     );
 
@@ -124,7 +123,6 @@ describe("AssistantChatMessages", () => {
         nodes={nodes}
         onScroll={() => {}}
         scrollRef={createRef<HTMLDivElement>()}
-        variant="workspace"
       />,
     );
 
@@ -192,7 +190,6 @@ describe("AssistantChatMessages", () => {
         nodes={nodes}
         onScroll={() => {}}
         scrollRef={createRef<HTMLDivElement>()}
-        variant="workspace"
       />,
     );
 
@@ -227,7 +224,6 @@ describe("AssistantChatMessages", () => {
         items={[]}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -256,7 +252,6 @@ describe("AssistantChatMessages", () => {
           toolName: "manage_roles",
         }}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -279,7 +274,6 @@ describe("AssistantChatMessages", () => {
         ]}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -288,7 +282,7 @@ describe("AssistantChatMessages", () => {
     );
   });
 
-  it("renders human bubbles with gray surfaces and white text", () => {
+  it("renders human bubbles with the shared workspace surface", () => {
     const workspaceScrollRef = createRef<HTMLDivElement>();
     const panelScrollRef = createRef<HTMLDivElement>();
     const workspaceItems: AssistantChatItem[] = [
@@ -313,7 +307,6 @@ describe("AssistantChatMessages", () => {
         items={workspaceItems}
         onScroll={() => {}}
         scrollRef={workspaceScrollRef}
-        variant="workspace"
       />,
     );
 
@@ -332,7 +325,6 @@ describe("AssistantChatMessages", () => {
         items={panelItems}
         onScroll={() => {}}
         scrollRef={panelScrollRef}
-        variant="panel"
       />,
     );
 
@@ -341,7 +333,7 @@ describe("AssistantChatMessages", () => {
         ?.parentElement?.parentElement;
     expect(panelBubble).not.toBeNull();
     expect(panelBubble).toHaveClass(
-      "bg-accent/65",
+      "bg-accent/80",
       "text-accent-foreground",
       "border-border",
     );
@@ -362,7 +354,6 @@ describe("AssistantChatMessages", () => {
         ]}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -393,7 +384,6 @@ describe("AssistantChatMessages", () => {
         ]}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -427,7 +417,6 @@ describe("AssistantChatMessages", () => {
         onRetryHumanMessage={onRetryHumanMessage}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -475,7 +464,6 @@ describe("AssistantChatMessages", () => {
         onScroll={() => {}}
         retryImageInputEnabled={false}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -505,7 +493,6 @@ describe("AssistantChatMessages", () => {
         ]}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -547,7 +534,6 @@ describe("AssistantChatMessages", () => {
         ]}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -597,7 +583,6 @@ describe("AssistantChatMessages", () => {
         ]}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -696,7 +681,6 @@ describe("AssistantChatMessages", () => {
         nodes={nodes}
         onScroll={() => {}}
         scrollRef={scrollRef}
-        variant="workspace"
       />,
     );
 
@@ -769,7 +753,6 @@ describe("AssistantChatComposer", () => {
         onChange={() => {}}
         onKeyDown={() => {}}
         onSend={() => {}}
-        variant="workspace"
       />
     );
   }
@@ -783,7 +766,6 @@ describe("AssistantChatComposer", () => {
         onChange={() => {}}
         onKeyDown={() => {}}
         onSend={onSend}
-        variant="workspace"
       />,
     );
 
@@ -828,7 +810,6 @@ describe("AssistantChatComposer", () => {
         onChange={() => {}}
         onKeyDown={() => {}}
         onSend={onSend}
-        variant="workspace"
       />,
     );
 
@@ -847,7 +828,6 @@ describe("AssistantChatComposer", () => {
         onChange={() => {}}
         onKeyDown={() => {}}
         onSend={onSend}
-        variant="workspace"
       />,
     );
 
@@ -870,7 +850,6 @@ describe("AssistantChatComposer", () => {
         onKeyDown={() => {}}
         onSend={onSend}
         onStop={onStop}
-        variant="workspace"
       />,
     );
 
@@ -895,7 +874,6 @@ describe("AssistantChatComposer", () => {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -927,7 +905,6 @@ describe("AssistantChatComposer", () => {
         onNavigateHistory={onNavigateHistory}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -962,7 +939,6 @@ describe("AssistantChatComposer", () => {
         onKeyDown={onKeyDown}
         onSend={() => {}}
         suppressCommandNavigation
-        variant="workspace"
       />,
     );
 
@@ -993,7 +969,6 @@ describe("AssistantChatComposer", () => {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1022,7 +997,6 @@ describe("AssistantChatComposer", () => {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1047,7 +1021,6 @@ describe("AssistantChatComposer", () => {
         onChange={() => {}}
         onKeyDown={() => {}}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1140,7 +1113,6 @@ describe("AssistantChatComposer", () => {
         onKeyDown={() => {}}
         onRemoveImage={onRemoveImage}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1163,7 +1135,6 @@ describe("AssistantChatComposer", () => {
         onChange={() => {}}
         onKeyDown={() => {}}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1184,7 +1155,6 @@ describe("AssistantChatComposer", () => {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1209,7 +1179,6 @@ describe("AssistantChatComposer", () => {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1234,7 +1203,6 @@ describe("AssistantChatComposer", () => {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 
@@ -1259,7 +1227,6 @@ describe("AssistantChatComposer", () => {
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSend={() => {}}
-        variant="workspace"
       />,
     );
 

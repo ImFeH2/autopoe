@@ -19,7 +19,6 @@ import {
 import { CopyButton } from "@/components/CopyButton";
 import {
   RichContentBlock,
-  type AssistantChatVariant,
   type AssistantRunningHintState,
 } from "@/components/assistant/shared";
 import { Button } from "@/components/ui/button";
@@ -45,7 +44,6 @@ interface AssistantChatMessagesProps {
   retryImageInputEnabled?: boolean;
   retryingMessageId?: string | null;
   runningHint?: AssistantRunningHintState | null;
-  variant: AssistantChatVariant;
 }
 
 export const AssistantChatMessages = memo(function AssistantChatMessages({
@@ -59,12 +57,8 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
   retryImageInputEnabled = true,
   retryingMessageId = null,
   runningHint = null,
-  variant,
 }: AssistantChatMessagesProps) {
-  const isWorkspace = variant === "workspace";
-  const isFloating = variant === "floating";
-  const isPage = variant === "page";
-  const baseBottomPadding = isWorkspace ? 14 : 16;
+  const baseBottomPadding = 14;
   const visibleItems = items.filter(
     (item) => item.type !== "SystemEntry" && item.type !== "StateEntry",
   );
@@ -77,27 +71,16 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
         paddingBottom: `${baseBottomPadding + bottomInset}px`,
         scrollPaddingBottom: `${baseBottomPadding + bottomInset}px`,
       }}
-      className={cn(
-        "flex-1 space-y-2.5 overflow-y-auto",
-        isWorkspace ? "px-3 pt-3" : "px-3.5 pt-3.5",
-        isPage ? "px-4 pt-6 space-y-6" : "",
-      )}
+      className="flex-1 space-y-2.5 overflow-y-auto px-3 pt-3"
     >
-      {visibleItems.length === 0 &&
-        !runningHint &&
-        (isWorkspace ? (
-          <WorkspaceEmptyState />
-        ) : (
-          <PanelEmptyState floating={isFloating} page={isPage} />
-        ))}
+      {visibleItems.length === 0 && !runningHint ? (
+        <WorkspaceEmptyState />
+      ) : null}
 
       {visibleItems.map((item, index) => (
         <div
           key={getTimelineItemKey(item, index)}
-          className={cn(
-            "[content-visibility:auto] [contain-intrinsic-size:auto_100px]",
-            isPage ? "mx-auto w-full max-w-3xl" : "",
-          )}
+          className="[content-visibility:auto] [contain-intrinsic-size:auto_100px]"
         >
           <TimelineItem
             allowHumanMessageRetry={allowHumanMessageRetry}
@@ -106,17 +89,15 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
             onRetryHumanMessage={onRetryHumanMessage}
             retryImageInputEnabled={retryImageInputEnabled}
             retryingMessageId={retryingMessageId}
-            variant={variant}
           />
         </div>
       ))}
 
       {runningHint ? (
-        <div className={cn(isPage ? "mx-auto w-full max-w-3xl" : "")}>
+        <div>
           <AssistantRunningHint
             label={runningHint.label}
             toolName={runningHint.toolName}
-            variant={variant}
           />
         </div>
       ) : null}
@@ -127,24 +108,13 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
 function AssistantRunningHint({
   label,
   toolName,
-  variant,
 }: {
   label: string;
   toolName?: string | null;
-  variant: AssistantChatVariant;
 }) {
-  const isWorkspace = variant === "workspace";
-
   return (
     <div className="flex min-w-0 items-center">
-      <div
-        className={cn(
-          "inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] text-muted-foreground/82",
-          isWorkspace
-            ? "border-border bg-accent/25"
-            : "border-border bg-accent/20",
-        )}
-      >
+      <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-accent/25 px-3 py-1.5 text-[11px] text-muted-foreground/82">
         <span className="flex items-center gap-1.5">
           {[0, 1, 2].map((index) => (
             <span
@@ -172,7 +142,6 @@ const TimelineItem = memo(function TimelineItem({
   onRetryHumanMessage,
   retryImageInputEnabled,
   retryingMessageId,
-  variant,
 }: {
   allowHumanMessageRetry?: boolean;
   item: AssistantChatItem;
@@ -180,7 +149,6 @@ const TimelineItem = memo(function TimelineItem({
   onRetryHumanMessage?: (messageId: string) => void;
   retryImageInputEnabled?: boolean;
   retryingMessageId?: string | null;
-  variant: AssistantChatVariant;
 }) {
   if (item.type === "PendingHumanMessage") {
     return (
@@ -188,7 +156,6 @@ const TimelineItem = memo(function TimelineItem({
         content={item.content}
         parts={item.parts}
         retrying={false}
-        variant={variant}
         pending
       />
     );
@@ -222,7 +189,6 @@ const TimelineItem = memo(function TimelineItem({
             }
             parts={item.parts}
             retrying={retryingMessageId === item.message_id}
-            variant={variant}
           />
         );
       }
@@ -234,7 +200,6 @@ const TimelineItem = memo(function TimelineItem({
           label={`From ${getNodeLabel(item.from_id ?? "", nodes)}`}
           tone="received"
           streaming={item.streaming}
-          variant={variant}
         />
       );
     case "AssistantText":
@@ -267,32 +232,26 @@ const TimelineItem = memo(function TimelineItem({
           }`}
           tone="sent"
           streaming={item.streaming}
-          variant={variant}
         />
       );
     case "AssistantThinking":
       return (
         <ThinkingCard
           item={item as HistoryEntry & { type: "AssistantThinking" }}
-          variant={variant}
         />
       );
     case "ToolCall":
       return (
-        <ToolCallCard
-          item={item as HistoryEntry & { type: "ToolCall" }}
-          variant={variant}
-        />
+        <ToolCallCard item={item as HistoryEntry & { type: "ToolCall" }} />
       );
     case "CommandResultEntry":
       return (
         <CommandResultCard
           item={item as HistoryEntry & { type: "CommandResultEntry" }}
-          variant={variant}
         />
       );
     case "ErrorEntry":
-      return <ErrorCard content={item.content ?? ""} variant={variant} />;
+      return <ErrorCard content={item.content ?? ""} />;
     default:
       return null;
   }
@@ -307,7 +266,6 @@ function HumanBubble({
   retryDisabled,
   retryDisabledReason,
   retrying,
-  variant,
   pending = false,
 }: {
   allowRetry?: boolean;
@@ -318,10 +276,8 @@ function HumanBubble({
   retryDisabled?: boolean;
   retryDisabledReason?: string;
   retrying?: boolean;
-  variant: AssistantChatVariant;
   pending?: boolean;
 }) {
-  const isWorkspace = variant === "workspace";
   const showRetry =
     allowRetry &&
     !pending &&
@@ -333,9 +289,7 @@ function HumanBubble({
       <div
         className={cn(
           "min-w-0 overflow-hidden px-2.5 py-1.5 text-[13px] [overflow-wrap:anywhere]",
-          isWorkspace
-            ? "max-w-[84%] rounded-lg border border-border bg-accent/80 text-accent-foreground"
-            : "max-w-[80%] rounded-lg border border-border bg-accent/65 text-accent-foreground",
+          "max-w-[84%] rounded-lg border border-border bg-accent/80 text-accent-foreground",
           pending && "opacity-80",
         )}
       >
@@ -367,7 +321,7 @@ function HumanBubble({
             title={retryDisabledReason}
             className={cn(
               "h-auto rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-accent/45 hover:text-foreground disabled:opacity-45",
-              isWorkspace ? "bg-accent/35" : "bg-accent/25",
+              "bg-accent/35",
             )}
           >
             {retrying ? (
@@ -415,7 +369,6 @@ function MessageActivityCard({
   label,
   tone,
   streaming,
-  variant,
 }: {
   content: string;
   parts?: ContentPart[] | null;
@@ -423,16 +376,14 @@ function MessageActivityCard({
   label: string;
   tone: "received" | "sent";
   streaming?: boolean;
-  variant: AssistantChatVariant;
 }) {
-  const isWorkspace = variant === "workspace";
   const [open, setOpen] = useState(Boolean(streaming));
 
   return (
     <div
       className={cn(
         "min-w-0 w-full px-2 py-1.5",
-        isWorkspace ? "border-l border-border pl-3" : "rounded-lg",
+        "border-l border-border pl-3",
         tone === "received" && "border-border bg-accent/20",
         tone === "sent" && "border-border bg-background/24",
       )}
@@ -492,18 +443,14 @@ function MessageActivityCard({
 
 function ThinkingCard({
   item,
-  variant,
 }: {
   item: HistoryEntry & { type: "AssistantThinking" };
-  variant: AssistantChatVariant;
 }) {
   return (
     <ActivityDisclosure
       label="Thinking"
       icon={<Brain className="size-3.5 text-foreground/72" />}
-      tone="thinking"
       streaming={item.streaming}
-      variant={variant}
       defaultOpen={item.streaming ?? false}
     >
       <RichContentBlock
@@ -516,13 +463,7 @@ function ThinkingCard({
   );
 }
 
-function ToolCallCard({
-  item,
-  variant,
-}: {
-  item: HistoryEntry & { type: "ToolCall" };
-  variant: AssistantChatVariant;
-}) {
+function ToolCallCard({ item }: { item: HistoryEntry & { type: "ToolCall" } }) {
   const isIdleTool = item.tool_name === "idle";
   const displayStreaming = Boolean(item.streaming) && !isIdleTool;
   const formattedArguments = formatJsonOutput(item.arguments) ?? "";
@@ -532,9 +473,7 @@ function ToolCallCard({
     <ActivityDisclosure
       label={formatToolLabel(item.tool_name)}
       icon={<Wrench className="size-3.5 text-muted-foreground" />}
-      tone="tool"
       streaming={displayStreaming}
-      variant={variant}
       defaultOpen={displayStreaming}
     >
       <div className="space-y-4">
@@ -572,22 +511,11 @@ function ToolCallCard({
 
 function CommandResultCard({
   item,
-  variant,
 }: {
   item: HistoryEntry & { type: "CommandResultEntry" };
-  variant: AssistantChatVariant;
 }) {
-  const isWorkspace = variant === "workspace";
-
   return (
-    <div
-      className={cn(
-        "min-w-0 w-full space-y-3 px-3 py-2.5",
-        isWorkspace
-          ? "border-l border-graph-status-running/30 bg-graph-status-running/[0.08]"
-          : "rounded-xl border border-graph-status-running/18 bg-graph-status-running/[0.06]",
-      )}
-    >
+    <div className="min-w-0 w-full space-y-3 border-l border-graph-status-running/30 bg-graph-status-running/[0.08] px-3 py-2.5">
       <div className="flex items-center gap-2">
         <Sparkles className="size-4 text-graph-status-running" />
         <span className="text-[11px] font-medium text-graph-status-running/90">
@@ -616,24 +544,9 @@ function CommandResultCard({
   );
 }
 
-function ErrorCard({
-  content,
-  variant,
-}: {
-  content: string;
-  variant: AssistantChatVariant;
-}) {
-  const isWorkspace = variant === "workspace";
-
+function ErrorCard({ content }: { content: string }) {
   return (
-    <div
-      className={cn(
-        "min-w-0 w-full space-y-3 px-3 py-2.5",
-        isWorkspace
-          ? "border-l-2 border-graph-status-error/40 bg-graph-status-error/[0.1]"
-          : "rounded-xl border border-graph-status-error/20 bg-graph-status-error/[0.05]",
-      )}
-    >
+    <div className="min-w-0 w-full space-y-3 border-l-2 border-graph-status-error/40 bg-graph-status-error/[0.1] px-3 py-2.5">
       <div className="flex items-center gap-2">
         <AlertCircle className="size-4 text-graph-status-error" />
         <span className="text-[11px] font-medium text-graph-status-error">
@@ -658,34 +571,20 @@ function ErrorCard({
 function ActivityDisclosure({
   label,
   icon,
-  tone,
   streaming,
-  variant,
   defaultOpen,
   children,
 }: {
   label: string;
   icon: ReactNode;
-  tone: "thinking" | "tool";
   streaming?: boolean;
-  variant: AssistantChatVariant;
   defaultOpen: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const isWorkspace = variant === "workspace";
 
   return (
-    <div
-      className={cn(
-        "min-w-0 w-full transition-all duration-300",
-        isWorkspace
-          ? "border-l border-border pl-3 py-1.5"
-          : "rounded-xl border border-border bg-accent/10 px-3 py-2",
-        tone === "thinking" && !isWorkspace && "hover:bg-accent/20",
-        tone === "tool" && !isWorkspace && "hover:bg-accent/20",
-      )}
-    >
+    <div className="min-w-0 w-full border-l border-border py-1.5 pl-3 transition-all duration-300">
       <Button
         type="button"
         variant="ghost"
@@ -760,47 +659,6 @@ function WorkspaceEmptyState() {
             next steps.
           </p>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function PanelEmptyState({
-  floating,
-  page,
-}: {
-  floating: boolean;
-  page?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex h-full items-center justify-center",
-        page ? "pb-[10vh]" : "",
-      )}
-    >
-      <div
-        className={cn(
-          "space-y-2 text-center",
-          page ? "max-w-md" : "max-w-[260px]",
-        )}
-      >
-        <Sparkles
-          className={cn(
-            "mx-auto",
-            page ? "size-7 mb-4 text-muted-foreground/50" : "size-5",
-            floating && !page ? "text-foreground/72" : "text-muted-foreground",
-          )}
-        />
-        <p
-          className={cn(
-            "text-muted-foreground",
-            page ? "text-base" : "text-sm",
-          )}
-        >
-          Ask the Assistant to plan tasks, summarize progress, or coordinate
-          next steps.
-        </p>
       </div>
     </div>
   );

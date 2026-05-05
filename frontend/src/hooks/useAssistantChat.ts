@@ -683,6 +683,22 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     }
   };
 
+  const stopAssistant = useCallback(async () => {
+    if (!assistantId) {
+      return;
+    }
+
+    await interruptNode(assistantId);
+    setPendingAssistantMessages([]);
+    clearAgentHistory(assistantId);
+    const data = await fetchNodeDetail(assistantId);
+    if (data) {
+      setDetail(data);
+      setFetchedAt(Date.now());
+      clearHistorySnapshot(assistantId);
+    }
+  }, [assistantId, clearAgentHistory, clearHistorySnapshot]);
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -709,6 +725,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     clearChat,
     sendMessage,
     setInput,
+    stopAssistant,
     supportsInputImage,
     timelineItems,
     assistantActivity,

@@ -5,13 +5,6 @@ import { formatJsonOutput } from "@/lib/formatJsonOutput";
 import { cn } from "@/lib/utils";
 import type { ContentPart } from "@/types";
 
-export type AssistantChatVariant =
-  | "panel"
-  | "floating"
-  | "workspace"
-  | "page"
-  | "docked";
-
 export interface AssistantComposerImage {
   id: string;
   previewUrl: string;

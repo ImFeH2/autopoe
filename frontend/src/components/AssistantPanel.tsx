@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { toast } from "sonner";
 import {
   AssistantChatComposer,
   AssistantChatMessages,
@@ -10,19 +12,16 @@ import { cn } from "@/lib/utils";
 
 interface AssistantPanelProps {
   onOpenDetails?: () => void;
-  variant?: "page" | "floating" | "docked";
 }
 
-export function AssistantPanel({
-  onOpenDetails,
-  variant = "page",
-}: AssistantPanelProps) {
+export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
   const { agents } = useAgentNodesRuntime();
+  const [stopping, setStopping] = useState(false);
   const { height: composerHeight, ref: composerRef } =
     useMeasuredHeight<HTMLDivElement>();
   const {
     addImages = async () => {},
-    assistantActivity = { running: false },
+    assistantActivity = { running: false, runningHint: null },
     clearChat,
     clearing = false,
     connected,
@@ -40,12 +39,10 @@ export function AssistantPanel({
     sending,
     sendMessage,
     setInput,
+    stopAssistant,
     supportsInputImage = false,
     timelineItems,
   } = useAssistantChat({ bottomInset: composerHeight });
-  const isFloating = variant === "floating";
-  const isPage = variant === "page";
-  const chatVariant = variant;
   const assistantRoleName =
     Array.from(agents.values()).find((agent) => agent.node_type === "assistant")
       ?.role_name ?? null;
@@ -53,31 +50,32 @@ export function AssistantPanel({
   return (
     <div
       className={cn(
-        "relative flex h-full flex-col overflow-hidden text-foreground",
-        isFloating
-          ? "overflow-hidden rounded-xl border border-border bg-surface-2 text-foreground shadow-md"
-          : isPage
-            ? "bg-transparent"
-            : "border-l border-border bg-surface-overlay/94 shadow-sm",
+        "relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface-overlay text-foreground shadow-md",
       )}
     >
       <div
         aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{ background: "var(--shell-surface-sweep)" }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px"
+        style={{ background: "var(--shell-hairline)" }}
+      />
+      <div
+        aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute inset-0 transition-[opacity,border-color,box-shadow] duration-300",
+          "pointer-events-none absolute inset-0 z-20 border transition-[opacity,border-color,box-shadow] duration-300",
           assistantActivity.running
             ? "animate-pulse shadow-lg shadow-ring/5"
             : "opacity-0",
-          !isPage && "border",
           assistantActivity.running &&
-            !isPage &&
             "border-ring/25 opacity-100 shadow-ring/10",
         )}
       />
       <PanelHeader
         connected={connected}
-        floating={isFloating}
-        page={isPage}
         onClearChat={() => void clearChat()}
         onOpenDetails={onOpenDetails}
         roleName={assistantRoleName}
@@ -93,55 +91,52 @@ export function AssistantPanel({
           onScroll={onMessagesScroll}
           retryImageInputEnabled={supportsInputImage}
           retryingMessageId={retryingMessageId}
+          runningHint={assistantActivity.runningHint}
           scrollRef={scrollRef}
-          runningHint={
-            assistantActivity.running
-              ? {
-                  label: "Assistant is working...",
-                  toolName: null,
-                }
-              : null
-          }
-          variant={chatVariant}
         />
         <div
           ref={composerRef}
           style={{
-            paddingBottom: "calc(14px + env(safe-area-inset-bottom, 0px))",
+            paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))",
           }}
-          className={cn(
-            "absolute inset-x-0 bottom-0 z-10 px-4",
-            isPage ? "mx-auto w-full max-w-3xl" : "",
-            isFloating
-              ? "bg-gradient-to-b from-transparent via-background/70 to-background/95 pt-8 pointer-events-none"
-              : isPage
-                ? "bg-gradient-to-b from-transparent via-background/90 to-background pt-12 pointer-events-none"
-                : "bg-gradient-to-b from-transparent via-background/80 to-background pt-10 pointer-events-none",
-          )}
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-b from-transparent via-background/70 to-background/95 px-2.5 pt-8"
         >
-          <div className="pointer-events-auto">
-            <AssistantChatComposer
-              disabled={
-                (!input.trim() && draftImages.length === 0) ||
-                hasUploadingImages ||
-                sending
-              }
-              commandsEnabled
-              images={draftImages}
-              imageInputEnabled={supportsInputImage}
-              input={input}
-              onAddImages={(files) => void addImages(files)}
-              onChange={setInput}
-              onNavigateHistory={navigateInputHistory}
-              onKeyDown={handleKeyDown}
-              onRemoveImage={removeImage}
-              onSend={() => void sendMessage()}
-              overlay
-              suppressCommandNavigation={isBrowsingInputHistory}
-              targetLabel="Assistant"
-              variant={chatVariant}
-            />
-          </div>
+          <AssistantChatComposer
+            busy={assistantActivity.running}
+            disabled={
+              (!input.trim() && draftImages.length === 0) ||
+              hasUploadingImages ||
+              sending
+            }
+            commandsEnabled
+            images={draftImages}
+            imageInputEnabled={supportsInputImage}
+            input={input}
+            onAddImages={(files) => void addImages(files)}
+            onChange={setInput}
+            onNavigateHistory={navigateInputHistory}
+            onKeyDown={handleKeyDown}
+            onRemoveImage={removeImage}
+            onSend={() => void sendMessage()}
+            onStop={() => {
+              setStopping(true);
+              void stopAssistant()
+                .catch((error) => {
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : "Failed to stop Assistant",
+                  );
+                })
+                .finally(() => {
+                  setStopping(false);
+                });
+            }}
+            overlay
+            stopping={stopping}
+            suppressCommandNavigation={isBrowsingInputHistory}
+            targetLabel="Assistant"
+          />
         </div>
       </div>
     </div>
@@ -151,41 +146,23 @@ export function AssistantPanel({
 function PanelHeader({
   clearing,
   connected,
-  floating,
-  page,
   onClearChat,
   onOpenDetails,
   roleName,
 }: {
   clearing: boolean;
   connected: boolean;
-  floating: boolean;
-  page?: boolean;
   onClearChat: () => void;
   onOpenDetails?: () => void;
   roleName?: string | null;
 }) {
   return (
-    <div
-      className={cn(
-        "relative z-10 flex items-center justify-between px-4 py-3",
-        floating
-          ? "border-b border-border bg-accent/20"
-          : page
-            ? "bg-transparent"
-            : "border-b border-border bg-background/20",
-      )}
-    >
-      <div
-        className={cn(
-          "min-w-0",
-          page && "opacity-0 select-none pointer-events-none",
-        )}
-      >
-        <div className="text-[13px] font-medium tracking-wide text-foreground">
+    <div className="relative z-10 flex items-center gap-2.5 border-b border-border px-3.5 py-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-semibold text-foreground">
           Assistant
         </div>
-        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-muted-foreground/78">
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-muted-foreground/72">
           {roleName ? (
             <span className="rounded-full border border-border bg-accent/35 px-2 py-0.5 text-[10px] font-medium text-muted-foreground/78">
               Role: {roleName}
@@ -198,7 +175,7 @@ function PanelHeader({
         <Button
           type="button"
           size="sm"
-          variant={page ? "ghost" : "outline"}
+          variant="outline"
           disabled={clearing}
           onClick={onClearChat}
         >
@@ -207,7 +184,7 @@ function PanelHeader({
         <Button
           type="button"
           size="sm"
-          variant={page ? "ghost" : "outline"}
+          variant="outline"
           disabled={!onOpenDetails}
           onClick={onOpenDetails}
         >
