@@ -104,7 +104,7 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
     return (
       <div ref={containerRef} className="relative flex h-full flex-col">
         <div className="relative flex-1 overflow-hidden">
-          {animatedNodes.length === 0 ? (
+          {emptyState ? (
             <div className="flex h-full items-center justify-center px-5 py-8">
               <div className="w-full max-w-[22rem] rounded-xl border border-border bg-surface-overlay/60 px-5 py-5 text-center shadow-md backdrop-blur-sm">
                 <div className="mx-auto flex size-10 items-center justify-center rounded-lg border border-border bg-accent/35 text-muted-foreground">

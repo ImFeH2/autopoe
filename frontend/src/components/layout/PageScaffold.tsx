@@ -138,10 +138,12 @@ export function FormSection({
 
 export function SettingsRow({
   label,
+  description,
   children,
   valueClassName,
 }: {
   label: string;
+  description?: string;
   children: ReactNode;
   valueClassName?: string;
 }) {
@@ -151,6 +153,11 @@ export function SettingsRow({
         <label className="block text-[13px] font-medium text-foreground/80 tracking-tight">
           {label}
         </label>
+        {description && (
+          <p className="mt-1 text-[12px] text-muted-foreground/70 leading-relaxed pr-4">
+            {description}
+          </p>
+        )}
       </div>
       <div
         className={cn(
@@ -160,6 +167,51 @@ export function SettingsRow({
       >
         <div className="w-full md:max-w-md space-y-3">{children}</div>
       </div>
+    </div>
+  );
+}
+
+export function SettingsStack({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 border-b border-border/40 py-5 last:border-b-0 hover:bg-muted/10 transition-colors">
+      <div className="min-w-0 pt-1">
+        <label className="block text-[13px] font-medium text-foreground/80 tracking-tight">
+          {label}
+        </label>
+        {description && (
+          <p className="mt-1.5 text-[12px] text-muted-foreground/70 leading-relaxed max-w-2xl">
+            {description}
+          </p>
+        )}
+      </div>
+      <div className="w-full mt-1">{children}</div>
+    </div>
+  );
+}
+
+export function SettingsGroup({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "mt-3 flex flex-col gap-3 rounded-lg border border-border/40 bg-background/30 p-4",
+        className,
+      )}
+    >
+      {children}
     </div>
   );
 }

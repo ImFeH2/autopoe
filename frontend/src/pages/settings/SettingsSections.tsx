@@ -13,6 +13,8 @@ import {
   FormSection,
   PageTitleBar,
   SettingsRow,
+  SettingsStack,
+  SettingsGroup,
 } from "@/components/layout/PageScaffold";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,8 +94,11 @@ export function AccessConfigurationSection({
 }: AccessConfigurationSectionProps) {
   return (
     <FormSection title="Access Configuration" className="mt-8 first:mt-0">
-      <SettingsRow label="New Access Code">
-        <div className="space-y-2 w-full">
+      <SettingsStack
+        label="New Access Code"
+        description="Set a new code required to log into the application. Leave empty if you don't want to change the current code."
+      >
+        <div className="space-y-2 w-full max-w-lg">
           <SecretInput
             id="new-access-code"
             value={accessDraft.newCode}
@@ -109,10 +114,13 @@ export function AccessConfigurationSection({
             buttonSize="default"
           />
         </div>
-      </SettingsRow>
+      </SettingsStack>
 
-      <SettingsRow label="Confirm Access Code">
-        <div className="space-y-2 w-full">
+      <SettingsStack
+        label="Confirm Access Code"
+        description="Please confirm your new access code to ensure there are no typos."
+      >
+        <div className="space-y-2 w-full max-w-lg">
           <SecretInput
             id="confirm-access-code"
             value={accessDraft.confirmCode}
@@ -138,7 +146,7 @@ export function AccessConfigurationSection({
             </p>
           ) : null}
         </div>
-      </SettingsRow>
+      </SettingsStack>
     </FormSection>
   );
 }
@@ -154,8 +162,11 @@ export function PathConfigurationSection({
 }: PathConfigurationSectionProps) {
   return (
     <FormSection title="Path Configuration" className="mt-10">
-      <SettingsRow label="App Data Directory">
-        <div className="space-y-2">
+      <SettingsStack
+        label="App Data Directory"
+        description="The read-only directory where Flowent stores its internal database and configuration files."
+      >
+        <div className="space-y-2 max-w-lg">
           <FormInput
             aria-label="App Data Directory"
             value={settings.app_data_dir}
@@ -163,10 +174,13 @@ export function PathConfigurationSection({
             mono
           />
         </div>
-      </SettingsRow>
+      </SettingsStack>
 
-      <SettingsRow label="Working Directory">
-        <div className="space-y-2">
+      <SettingsStack
+        label="Working Directory"
+        description="The root directory where the agent operates. It defines the boundary for file reading and writing."
+      >
+        <div className="space-y-2 max-w-lg">
           <FormInput
             aria-label="Working Directory"
             value={settings.working_dir}
@@ -187,7 +201,7 @@ export function PathConfigurationSection({
             ) : null}
           </div>
         </div>
-      </SettingsRow>
+      </SettingsStack>
     </FormSection>
   );
 }
@@ -207,47 +221,55 @@ export function AssistantConfigurationSection({
 }: AssistantConfigurationSectionProps) {
   return (
     <FormSection title="Assistant Configuration">
-      <SettingsRow label="Assistant Role">
-        <Select
-          value={settings.assistant.role_name}
-          onValueChange={(value) =>
-            onSettingsChange((current) => ({
-              ...current,
-              assistant: {
-                ...current.assistant,
-                role_name: value,
-              },
-            }))
-          }
-        >
-          <SelectTrigger className={formSelectTriggerClass}>
-            <SelectValue placeholder="Select a role" />
-          </SelectTrigger>
-          <SelectContent>
-            {roles.map((role) => (
-              <SelectItem key={role.name} value={role.name}>
-                <div className="flex min-w-0 flex-col items-start">
-                  <span>{role.name}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {role.description}
-                  </span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {assistantRole ? (
-          <div
-            data-testid="assistant-role-guidance"
-            className={cn("mt-2", formHelpTextClass)}
+      <SettingsRow
+        label="Assistant Role"
+        description="The primary system persona handling day-to-step tasks."
+      >
+        <div className="w-full">
+          <Select
+            value={settings.assistant.role_name}
+            onValueChange={(value) =>
+              onSettingsChange((current) => ({
+                ...current,
+                assistant: {
+                  ...current.assistant,
+                  role_name: value,
+                },
+              }))
+            }
           >
-            <p>{assistantRole.description}</p>
-          </div>
-        ) : null}
+            <SelectTrigger className={formSelectTriggerClass}>
+              <SelectValue placeholder="Select a role" />
+            </SelectTrigger>
+            <SelectContent>
+              {roles.map((role) => (
+                <SelectItem key={role.name} value={role.name}>
+                  <div className="flex min-w-0 flex-col items-start">
+                    <span>{role.name}</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {role.description}
+                    </span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {assistantRole ? (
+            <div
+              data-testid="assistant-role-guidance"
+              className={cn("mt-2", formHelpTextClass)}
+            >
+              <p>{assistantRole.description}</p>
+            </div>
+          ) : null}
+        </div>
       </SettingsRow>
 
-      <SettingsRow label="Network Access">
-        <div className="space-y-2">
+      <SettingsRow
+        label="Network Access"
+        description="Allow the assistant to search the web for answers or read remote documentation URLs."
+      >
+        <div className="space-y-2 flex justify-end">
           <FormSwitch
             checked={settings.assistant.allow_network}
             label="Network Access"
@@ -265,8 +287,11 @@ export function AssistantConfigurationSection({
         </div>
       </SettingsRow>
 
-      <SettingsRow label="Write Dirs">
-        <div className="space-y-2">
+      <SettingsStack
+        label="Write Directories"
+        description="Paths outside of the working directory that the assistant is explicitly permitted to write to. (One path per line)"
+      >
+        <div className="space-y-2 max-w-xl">
           <FormTextarea
             aria-label="Write Dirs"
             value={settings.assistant.write_dirs.join("\n")}
@@ -286,7 +311,7 @@ export function AssistantConfigurationSection({
             mono
           />
         </div>
-      </SettingsRow>
+      </SettingsStack>
     </FormSection>
   );
 }
@@ -306,39 +331,44 @@ export function LeaderConfigurationSection({
 }: LeaderConfigurationSectionProps) {
   return (
     <FormSection title="Leader Configuration" className="mt-10">
-      <SettingsRow label="Leader Role">
-        <Select
-          value={settings.leader.role_name}
-          onValueChange={(value) =>
-            onSettingsChange((current) => ({
-              ...current,
-              leader: {
-                role_name: value,
-              },
-            }))
-          }
-        >
-          <SelectTrigger className={formSelectTriggerClass}>
-            <SelectValue placeholder="Select a role" />
-          </SelectTrigger>
-          <SelectContent>
-            {roles.map((role) => (
-              <SelectItem key={role.name} value={role.name}>
-                <div className="flex min-w-0 flex-col items-start">
-                  <span>{role.name}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {role.description}
-                  </span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {leaderRole ? (
-          <p className={cn("mt-2", formHelpTextClass)}>
-            {leaderRole.description}
-          </p>
-        ) : null}
+      <SettingsRow
+        label="Leader Role"
+        description="The persona responsible for managing multi-agent workflows and task delegation."
+      >
+        <div className="w-full">
+          <Select
+            value={settings.leader.role_name}
+            onValueChange={(value) =>
+              onSettingsChange((current) => ({
+                ...current,
+                leader: {
+                  role_name: value,
+                },
+              }))
+            }
+          >
+            <SelectTrigger className={formSelectTriggerClass}>
+              <SelectValue placeholder="Select a role" />
+            </SelectTrigger>
+            <SelectContent>
+              {roles.map((role) => (
+                <SelectItem key={role.name} value={role.name}>
+                  <div className="flex min-w-0 flex-col items-start">
+                    <span>{role.name}</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {role.description}
+                    </span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {leaderRole ? (
+            <p className={cn("mt-2", formHelpTextClass)}>
+              {leaderRole.description}
+            </p>
+          ) : null}
+        </div>
       </SettingsRow>
     </FormSection>
   );
@@ -484,8 +514,11 @@ export function ModelConfigurationSection({
         ) : null}
       </SettingsRow>
 
-      <SettingsRow label="Model Metadata Overrides">
-        <div className="space-y-3">
+      <SettingsStack
+        label="Model Metadata Overrides"
+        description="Manually override model capabilities and context windows if the auto-detected values are incorrect."
+      >
+        <div className="space-y-3 w-full">
           <div className="grid gap-3 md:grid-cols-4">
             <div className="space-y-1">
               <label htmlFor="model-context-window" className={formLabelClass}>
@@ -616,12 +649,9 @@ export function ModelConfigurationSection({
             </div>
           </div>
         </div>
-      </SettingsRow>
+      </SettingsStack>
 
-      <SettingsRow
-        label="Default Model Parameters"
-        valueClassName="w-full md:w-80"
-      >
+      <SettingsStack label="Default Model Parameters">
         <div className="rounded-xl border border-border bg-card/30 p-5">
           <ModelParamsFields
             className="w-full"
@@ -641,10 +671,13 @@ export function ModelConfigurationSection({
             helperText="Empty fields are omitted from outgoing provider requests. Reasoning effort and verbosity are mainly effective on reasoning-capable providers such as OpenAI Responses with GPT-5 family models."
           />
         </div>
-      </SettingsRow>
+      </SettingsStack>
 
-      <SettingsRow label="Request Timeout">
-        <div className="space-y-2">
+      <SettingsRow
+        label="Request Timeout"
+        description="Maximum wait time for a single API request before failing."
+      >
+        <div className="space-y-2 w-full max-w-xs">
           <div className="flex items-center gap-2">
             <FormInput
               aria-label="Request Timeout"
@@ -677,37 +710,43 @@ export function ModelConfigurationSection({
         </div>
       </SettingsRow>
 
-      <SettingsRow label="Retry Policy">
-        <div className="space-y-3">
-          <Select
-            value={settings.model.retry_policy}
-            onValueChange={(value: RetryPolicy) =>
-              onSettingsChange((current) => ({
-                ...current,
-                model: {
-                  ...current.model,
-                  retry_policy: value,
-                },
-              }))
-            }
-          >
-            <SelectTrigger className={formSelectTriggerClass}>
-              <SelectValue placeholder="Select a retry policy" />
-            </SelectTrigger>
-            <SelectContent>
-              {retryPolicyOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <SettingsStack
+        label="Retry Strategy"
+        description="Configure how the agent behaves when the API provider is unavailable or returns rate limit errors."
+      >
+        <SettingsGroup className="max-w-3xl">
+          <div className="grid gap-6 md:grid-cols-[1fr_2fr]">
+            <div className="space-y-1">
+              <label className={formLabelClass}>Policy</label>
+              <Select
+                value={settings.model.retry_policy}
+                onValueChange={(value: RetryPolicy) =>
+                  onSettingsChange((current) => ({
+                    ...current,
+                    model: {
+                      ...current.model,
+                      retry_policy: value,
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger className={formSelectTriggerClass}>
+                  <SelectValue placeholder="Select a retry policy" />
+                </SelectTrigger>
+                <SelectContent>
+                  {retryPolicyOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          {settings.model.retry_policy === "limited" ? (
-            <div className="space-y-2">
+            {settings.model.retry_policy === "limited" ? (
               <div className="space-y-1">
                 <label htmlFor="retry-attempts" className={formLabelClass}>
-                  Retry Attempts
+                  Max Attempts
                 </label>
                 <FormInput
                   id="retry-attempts"
@@ -735,14 +774,12 @@ export function ModelConfigurationSection({
                   mono
                 />
               </div>
-            </div>
-          ) : null}
-        </div>
-      </SettingsRow>
+            ) : (
+              <div />
+            )}
+          </div>
 
-      <SettingsRow label="Retry Backoff">
-        <div className="space-y-3">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-3 mt-2 border-t border-border/40 pt-4">
             <div className="space-y-1">
               <label htmlFor="retry-initial-delay" className={formLabelClass}>
                 Initial Delay
@@ -847,11 +884,14 @@ export function ModelConfigurationSection({
               />
             </div>
           </div>
-        </div>
-      </SettingsRow>
+        </SettingsGroup>
+      </SettingsStack>
 
-      <SettingsRow label="Automatic Compact">
-        <div className="space-y-3">
+      <SettingsStack
+        label="Automatic Compact"
+        description="Prevent context overflow by automatically summarizing history when tokens exceed the specified limit."
+      >
+        <div className="space-y-3 w-full max-w-sm">
           <div className="space-y-1">
             <label
               htmlFor="auto-compact-token-limit"
@@ -913,7 +953,7 @@ export function ModelConfigurationSection({
             </p>
           ) : null}
         </div>
-      </SettingsRow>
+      </SettingsStack>
     </FormSection>
   );
 }

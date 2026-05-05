@@ -479,6 +479,15 @@ afterEach(() => {
 });
 
 describe("AgentGraph", () => {
+  it("shows an empty graph background for an active workflow without nodes", () => {
+    renderGraph([]);
+
+    expect(screen.getByTestId("react-flow")).toBeInTheDocument();
+    expect(
+      screen.queryByText("This workflow is ready for its first node"),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders workflow nodes from the active tab definition and hides assistants", async () => {
     renderGraph([
       buildNode({

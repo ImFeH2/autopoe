@@ -161,7 +161,7 @@ export interface AgentGraphController {
   contextMenuItems: ContextMenuEntry[];
   emptyState: {
     title: string;
-  };
+  } | null;
   enterConnectMode: () => void;
   loadingRoles: boolean;
   quickCreate: QuickCreateState | null;

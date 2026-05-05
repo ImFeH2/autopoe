@@ -1204,11 +1204,11 @@ export function useAgentGraphController({
     if (tabs.size === 0) {
       return { title: "No workflows yet" };
     }
-    if (!activeTabId) {
+    if (!activeTab) {
       return { title: "Select a workflow" };
     }
-    return { title: "This workflow is ready for its first node" };
-  }, [activeTabId, tabs.size]);
+    return null;
+  }, [activeTab, tabs.size]);
 
   const connectHintLabel = targetPickSourceId
     ? "Choose target Agent"
