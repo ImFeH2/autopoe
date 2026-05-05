@@ -606,13 +606,10 @@ describe("HomePage", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Add Node" })[0]);
     const dialog = await screen.findByRole("dialog");
-    const reviewerButton = within(dialog)
-      .getByText("Reviewer")
-      .closest("button");
-    if (!reviewerButton) {
-      throw new Error("Reviewer role button not found");
-    }
-    fireEvent.click(reviewerButton);
+    fireEvent.change(within(dialog).getByLabelText("Search roles"), {
+      target: { value: "review" },
+    });
+    fireEvent.click(within(dialog).getByText("Reviewer"));
     fireEvent.change(screen.getByLabelText("Node display name"), {
       target: { value: "Release Reviewer" },
     });

@@ -156,7 +156,6 @@ export function HomePage() {
         activeTabTitle={activeTab?.title ?? null}
         nodeType={createNodeType}
         onNodeTypeChange={setCreateNodeType}
-        selectedRole={selectedCreateNodeRole}
         selectedRoleName={createNodeRoleName}
         onRoleNameChange={setCreateNodeRoleName}
         roles={roles}

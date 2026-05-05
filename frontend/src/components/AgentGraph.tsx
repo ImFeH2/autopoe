@@ -1,10 +1,4 @@
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
+import { forwardRef, useImperativeHandle } from "react";
 import {
   Background,
   ConnectionMode,
@@ -19,9 +13,6 @@ import { AgentNode } from "@/components/AgentNode";
 import {
   getQuickCreateTitle,
   graphChromePillClass,
-  quickCreateButtonClass,
-  quickCreateInputClass,
-  quickCreateListClass,
   VIEWPORT_MAX_ZOOM,
   VIEWPORT_MIN_ZOOM,
   type AgentGraphHandle,
@@ -30,10 +21,15 @@ import {
 import { useAgentGraphController } from "@/components/agent-graph/useAgentGraphController";
 import { AgentTooltip } from "@/components/AgentTooltip";
 import { ContextMenu } from "@/components/ContextMenu";
-import { ViewportPortal } from "@/components/ViewportPortal";
+import {
+  WorkspaceCommandDialog,
+  WorkspaceDialogField,
+  WorkspaceDialogMeta,
+} from "@/components/WorkspaceCommandDialog";
+import { RoleSearchPicker } from "@/components/workspace/RoleSearchPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn, formatZoomPercentage } from "@/lib/utils";
+import { formatZoomPercentage } from "@/lib/utils";
 import type { Role } from "@/types";
 
 export type { AgentGraphHandle } from "@/components/agent-graph/lib";
@@ -242,7 +238,7 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
         ) : null}
 
         {quickCreate ? (
-          <GraphQuickCreatePopover
+          <GraphQuickCreateDialog
             displayName={quickCreateName}
             roles={availableRoles}
             loadingRoles={loadingRoles}
@@ -253,8 +249,6 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
             selectedRoleName={quickCreateRoleName}
             submitting={submittingQuickCreate}
             title={getQuickCreateTitle(quickCreate)}
-            x={quickCreate.x}
-            y={quickCreate.y}
           />
         ) : null}
       </div>
@@ -262,9 +256,7 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
   },
 );
 
-function GraphQuickCreatePopover({
-  x,
-  y,
+function GraphQuickCreateDialog({
   title,
   selectedRoleName,
   displayName,
@@ -276,8 +268,6 @@ function GraphQuickCreatePopover({
   onSubmit,
   onClose,
 }: {
-  x: number;
-  y: number;
   title: string;
   selectedRoleName: string;
   displayName: string;
@@ -289,127 +279,60 @@ function GraphQuickCreatePopover({
   onSubmit: () => void;
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState(() => ({ left: x, top: y }));
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) {
-      return;
-    }
-    const raf = requestAnimationFrame(() => {
-      const margin = 12;
-      const rect = element.getBoundingClientRect();
-      const maxLeft = window.innerWidth - margin - rect.width;
-      const maxTop = window.innerHeight - margin - rect.height;
-      setPos({
-        left: Math.max(margin, Math.min(x, maxLeft)),
-        top: Math.max(margin, Math.min(y, maxTop)),
-      });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [loadingRoles, roles.length, title, x, y]);
-
-  useEffect(() => {
-    const handleMouseDown = (event: globalThis.MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handleMouseDown, true);
-    return () =>
-      document.removeEventListener("mousedown", handleMouseDown, true);
-  }, [onClose]);
-
   return (
-    <ViewportPortal>
-      <div
-        ref={ref}
-        className="fixed z-[210] w-[min(24rem,calc(100vw-1.5rem))] rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-md"
-        style={{ left: pos.left, top: pos.top }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-[13px] font-medium text-foreground">{title}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Choose a role and optionally set a display name.
-            </p>
-          </div>
+    <WorkspaceCommandDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+      title={title}
+      className="max-w-[44rem]"
+      footer={
+        <>
           <Button
             type="button"
-            variant="ghost"
-            size="sm"
+            variant="outline"
             onClick={onClose}
-            className="flex h-8 items-center rounded-md px-2.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
-          >
-            Close
-          </Button>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <div className={quickCreateListClass}>
-            {loadingRoles ? (
-              <p className="px-2 py-3 text-[12px] text-muted-foreground">
-                Loading roles...
-              </p>
-            ) : roles.length === 0 ? (
-              <p className="px-2 py-3 text-[12px] text-muted-foreground">
-                No roles available.
-              </p>
-            ) : (
-              roles.map((role) => (
-                <Button
-                  key={role.name}
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onSelectRole(role.name)}
-                  className={cn(
-                    quickCreateButtonClass,
-                    selectedRoleName === role.name
-                      ? "border-border bg-accent/70"
-                      : "border-transparent bg-transparent hover:border-border hover:bg-accent/45",
-                  )}
-                >
-                  <div className="text-[13px] font-medium text-foreground">
-                    {role.name}
-                  </div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    {role.description}
-                  </div>
-                </Button>
-              ))
-            )}
-          </div>
-          <Input
-            aria-label="Display Name"
-            value={displayName}
-            onChange={(event) => onDisplayNameChange(event.target.value)}
-            placeholder="Optional display name"
-            className={quickCreateInputClass}
-          />
-        </div>
-
-        <div className="mt-4 flex items-center justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="flex h-8 items-center rounded-md px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
+            disabled={submitting}
           >
             Cancel
           </Button>
           <Button
             type="button"
-            size="sm"
             disabled={!selectedRoleName || submitting}
             onClick={onSubmit}
-            className="flex h-8 items-center rounded-md bg-primary px-3.5 text-[12px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? "Saving..." : title}
           </Button>
+        </>
+      }
+    >
+      <WorkspaceDialogMeta>
+        Choose a role and set how this agent appears in the workflow.
+      </WorkspaceDialogMeta>
+      <div className="space-y-1.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-sm font-medium text-foreground/80">Role</span>
+          <span className="text-xs text-muted-foreground">Required</span>
         </div>
+        <RoleSearchPicker
+          roles={roles}
+          loadingRoles={loadingRoles}
+          selectedRoleName={selectedRoleName}
+          onRoleNameChange={onSelectRole}
+        />
       </div>
-    </ViewportPortal>
+      <WorkspaceDialogField label="Display Name" hint="Optional">
+        <Input
+          aria-label="Display Name"
+          value={displayName}
+          onChange={(event) => onDisplayNameChange(event.target.value)}
+          placeholder="Optional display name"
+          className="h-10 rounded-md bg-background/40 text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50"
+        />
+      </WorkspaceDialogField>
+    </WorkspaceCommandDialog>
   );
 }

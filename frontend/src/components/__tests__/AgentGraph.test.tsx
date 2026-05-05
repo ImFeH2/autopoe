@@ -684,6 +684,16 @@ describe("AgentGraph", () => {
             excluded_tools: [],
             is_builtin: true,
           },
+          {
+            name: "Builder",
+            description: "Creates the first draft.",
+            system_prompt: "",
+            model: null,
+            model_params: null,
+            included_tools: [],
+            excluded_tools: [],
+            is_builtin: false,
+          },
         ],
       },
     );
@@ -700,6 +710,12 @@ describe("AgentGraph", () => {
     expect(screen.getByText("Delete Node")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Add Agent After"));
+    expect(
+      await screen.findByRole("dialog", { name: "Add Agent After" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search roles"), {
+      target: { value: "review" },
+    });
     fireEvent.click(await screen.findByText("Reviewer"));
     fireEvent.change(screen.getByLabelText("Display Name"), {
       target: { value: "Review step" },

@@ -27,15 +27,10 @@ import {
   WorkspaceDialogMeta,
 } from "@/components/WorkspaceCommandDialog";
 import { FormSwitch } from "@/components/form/FormControls";
+import { RoleSearchPicker } from "@/components/workspace/RoleSearchPicker";
 
 const workspaceDialogInputClass =
   "bg-background/40 text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50";
-const workspaceChoiceCardClass =
-  "rounded-xl border border-border bg-card/40 px-4 py-3";
-const workspaceChoiceListClass =
-  "max-h-56 space-y-2 overflow-y-auto rounded-xl border border-border bg-background/40 p-2 scrollbar-none";
-const workspaceChoiceButtonBaseClass =
-  "w-full rounded-md border px-3 py-2.5 text-left transition-colors";
 
 export interface WorkspaceNodeOption {
   id: string;
@@ -148,7 +143,6 @@ interface CreateNodeDialogProps {
   onSubmit: () => void;
   open: boolean;
   pending: boolean;
-  selectedRole: Role | null;
   selectedRoleName: string;
   submitDisabled: boolean;
 }
@@ -175,7 +169,6 @@ export function CreateNodeDialog({
   onSubmit,
   open,
   pending,
-  selectedRole,
   selectedRoleName,
   submitDisabled,
 }: CreateNodeDialogProps) {
@@ -233,56 +226,18 @@ export function CreateNodeDialog({
         </Select>
       </WorkspaceDialogField>
       {nodeType === "agent" ? (
-        <WorkspaceDialogField
-          label="Role"
-          hint="Required · Leader is managed by the workflow"
-        >
-          <div className="space-y-3">
-            {selectedRole ? (
-              <div className={workspaceChoiceCardClass}>
-                <div className="text-[13px] font-medium text-foreground">
-                  {selectedRole.name}
-                </div>
-                <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-                  {selectedRole.description}
-                </p>
-              </div>
-            ) : null}
-            <div className={workspaceChoiceListClass}>
-              {loadingRoles ? (
-                <p className="px-2 py-3 text-[12px] text-muted-foreground">
-                  Loading roles...
-                </p>
-              ) : roles.length === 0 ? (
-                <p className="px-2 py-3 text-[12px] text-muted-foreground">
-                  No roles available.
-                </p>
-              ) : (
-                roles.map((role) => (
-                  <Button
-                    key={role.name}
-                    type="button"
-                    variant="ghost"
-                    onClick={() => onRoleNameChange(role.name)}
-                    className={cn(
-                      workspaceChoiceButtonBaseClass,
-                      selectedRoleName === role.name
-                        ? "border-border bg-accent/70"
-                        : "border-transparent bg-transparent hover:border-border hover:bg-accent/45",
-                    )}
-                  >
-                    <div className="text-[13px] font-medium text-foreground">
-                      {role.name}
-                    </div>
-                    <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-                      {role.description}
-                    </p>
-                  </Button>
-                ))
-              )}
-            </div>
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm font-medium text-foreground/80">Role</span>
+            <span className="text-xs text-muted-foreground">Required</span>
           </div>
-        </WorkspaceDialogField>
+          <RoleSearchPicker
+            roles={roles}
+            loadingRoles={loadingRoles}
+            selectedRoleName={selectedRoleName}
+            onRoleNameChange={onRoleNameChange}
+          />
+        </div>
       ) : null}
       <WorkspaceDialogField label="Display Name" hint="Optional">
         <Input
