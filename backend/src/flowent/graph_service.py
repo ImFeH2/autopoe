@@ -301,6 +301,25 @@ def _default_ports(
                 )
             ],
         )
+    if node_kind == WorkflowNodeKind.AGENT:
+        return (
+            [
+                WorkflowPort(
+                    key="in",
+                    direction=PortDirection.INPUT,
+                    type=PortType.PARTS,
+                    required=False,
+                )
+            ],
+            [
+                WorkflowPort(
+                    key="out",
+                    direction=PortDirection.OUTPUT,
+                    type=PortType.PARTS,
+                    multiple=True,
+                )
+            ],
+        )
     return (
         [
             WorkflowPort(
@@ -1629,18 +1648,25 @@ def _validate_node_config(
         _validate_code_node(node, errors)
 
 
+def _is_legacy_required_agent_input(
+    node: WorkflowNodeDefinition,
+    port: WorkflowPort,
+) -> bool:
+    return (
+        node.type == WorkflowNodeKind.AGENT
+        and port.key == "in"
+        and port.direction == PortDirection.INPUT
+        and port.type == PortType.PARTS
+        and not port.multiple
+    )
+
+
 def validate_workflow_activation(tab: Tab) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     if not tab.definition.nodes:
         _validation_error(
             errors,
-            message="workflow must contain at least one trigger node before activation",
-            path="definition.nodes",
-        )
-    if not any(node.type == WorkflowNodeKind.TRIGGER for node in tab.definition.nodes):
-        _validation_error(
-            errors,
-            message="workflow must contain a trigger node before activation",
+            message="Add at least one node before activating this workflow",
             path="definition.nodes",
         )
     node_ids = [node.id for node in tab.definition.nodes]
@@ -1730,7 +1756,11 @@ def validate_workflow_activation(tab: Tab) -> list[dict[str, str]]:
     for node in tab.definition.nodes:
         for port in node.inputs:
             edges = incoming_edges_by_port.get((node.id, port.key), [])
-            if port.required and not edges:
+            if (
+                port.required
+                and not edges
+                and not _is_legacy_required_agent_input(node, port)
+            ):
                 _validation_error(
                     errors,
                     node_id=node.id,

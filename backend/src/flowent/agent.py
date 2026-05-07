@@ -44,6 +44,7 @@ from flowent.models import (
     TodoItem,
     ToolCall,
     ToolResultDelta,
+    WorkflowActivationState,
     content_parts_to_text,
     deserialize_content_parts,
     has_image_parts,
@@ -1549,6 +1550,26 @@ class Agent:
             raise ValueError(f"Send failed: target `{target_ref}` is not in contacts.")
         return target
 
+    def _ensure_can_dispatch_to_contact(self, target: Agent) -> None:
+        if self.config.tab_id is None:
+            return
+
+        from flowent.graph_service import is_tab_leader
+        from flowent.workspace_store import workspace_store
+
+        if not is_tab_leader(node_id=self.uuid, tab_id=self.config.tab_id):
+            return
+        if target.node_type != NodeType.AGENT:
+            return
+        if is_tab_leader(node_id=target.uuid, tab_id=target.config.tab_id):
+            return
+
+        tab = workspace_store.get_tab(self.config.tab_id)
+        if tab is not None and tab.activation_state != WorkflowActivationState.ACTIVE:
+            raise ValueError(
+                "Activate this workflow before sending work to agent nodes."
+            )
+
     def supports_input_image(self) -> bool:
         _, model_info = self._get_effective_model_info()
         if model_info is None:
@@ -1569,6 +1590,7 @@ class Agent:
     ) -> str:
         parts = parse_content_parts_payload(raw_parts)
         target = self._resolve_contact_target(target_ref)
+        self._ensure_can_dispatch_to_contact(target)
         if has_image_parts(parts) and not target.supports_input_image():
             raise ValueError(
                 f"Send failed: target `{target_ref}` does not support `input_image`."

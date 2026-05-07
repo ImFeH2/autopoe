@@ -34,6 +34,7 @@ from flowent.models import (
     TodoItem,
     ToolCall,
     ToolCallResult,
+    WorkflowActivationState,
 )
 from flowent.providers.errors import LLMProviderError
 from flowent.registry import registry
@@ -1715,6 +1716,45 @@ def test_send_message_reports_error_when_target_lacks_input_image_support():
                 target_ref="leader",
                 raw_parts=[{"type": "image", "asset_id": "asset-1"}],
             )
+    finally:
+        registry.reset()
+
+
+def test_inactive_leader_cannot_send_work_to_agent_nodes():
+    registry.reset()
+    leader = _register_tab_leader()
+    worker = Agent(
+        NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1", name="Worker"),
+        uuid="worker",
+    )
+    registry.register(worker)
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match=r"Activate this workflow before sending work to agent nodes\.",
+        ):
+            leader.send_message(
+                target_ref="worker",
+                raw_parts=[{"type": "text", "text": "start the task"}],
+            )
+        assert not any(
+            isinstance(entry, ReceivedMessage)
+            for entry in worker.get_history_snapshot()
+        )
+
+        tab = workspace_store.get_tab("tab-1")
+        assert tab is not None
+        tab.activation_state = WorkflowActivationState.ACTIVE
+        workspace_store.upsert_tab(tab)
+
+        result = json.loads(
+            leader.send_message(
+                target_ref="worker",
+                raw_parts=[{"type": "text", "text": "start the task"}],
+            )
+        )
+        assert result == {"status": "sent", "target_id": "worker"}
     finally:
         registry.reset()
 
