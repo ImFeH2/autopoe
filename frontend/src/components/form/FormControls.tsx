@@ -2,6 +2,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch, SwitchThumb } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -150,15 +151,13 @@ export function FormSwitch({
   showStateText = false,
 }: FormSwitchProps) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
+    <Switch
+      checked={checked}
       aria-label={label}
       disabled={disabled}
-      onClick={() => onCheckedChange(!checked)}
+      onCheckedChange={onCheckedChange}
       className={cn(
-        "relative inline-flex shrink-0 items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50",
+        "relative shrink-0 border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         showStateText
           ? "h-8 w-[72px] px-1"
           : "h-5 w-9 justify-center border-2 border-transparent focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -169,7 +168,7 @@ export function FormSwitch({
       )}
     >
       {label ? <span className="sr-only">{label}</span> : null}
-      <span
+      <SwitchThumb
         aria-hidden="true"
         className={cn(
           "pointer-events-none inline-flex items-center justify-center rounded-full transition-all duration-200 ease-in-out",
@@ -186,7 +185,7 @@ export function FormSwitch({
         )}
       >
         {showStateText ? (checked ? onText : offText) : null}
-      </span>
-    </button>
+      </SwitchThumb>
+    </Switch>
   );
 }

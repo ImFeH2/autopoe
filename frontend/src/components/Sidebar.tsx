@@ -109,8 +109,9 @@ export function Sidebar({
                       const isActive = currentPage === id;
                       return (
                         <li key={id} className="group/menu-item relative">
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
                             onClick={() => navigate(id)}
                             data-active={isActive}
                             className={cn(
@@ -129,7 +130,7 @@ export function Sidebar({
                             <span className="block truncate flex-1">
                               {label}
                             </span>
-                          </button>
+                          </Button>
                         </li>
                       );
                     })}

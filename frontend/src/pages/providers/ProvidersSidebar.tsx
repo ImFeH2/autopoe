@@ -88,17 +88,8 @@ export function ProvidersSidebar({
                 initial={{ opacity: 0, x: -4 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.03 }}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelect(provider)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSelect(provider);
-                  }
-                }}
                 className={cn(
-                  "group relative flex w-full items-center justify-between rounded-lg px-3 py-2.5 transition-all",
+                  "group relative flex w-full items-center justify-between rounded-lg transition-all",
                   selectedId === provider.id
                     ? "bg-accent/55 text-foreground"
                     : "text-muted-foreground hover:bg-accent/30 hover:text-foreground",
@@ -110,20 +101,26 @@ export function ProvidersSidebar({
                     selectedId === provider.id ? "opacity-100" : "opacity-0",
                   )}
                 />
-                <div className="min-w-0 flex-1 pl-2">
-                  <p className="truncate text-[13px] font-medium">
-                    {provider.name}
-                  </p>
-                  <p className="truncate text-[11px] text-muted-foreground">
-                    {providerTypeLabel(provider.type)}
-                  </p>
-                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => onSelect(provider)}
+                  className="h-auto min-w-0 flex-1 justify-start rounded-lg bg-transparent px-3 py-2.5 text-left text-inherit shadow-none hover:bg-transparent hover:text-inherit focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                  <span className="min-w-0 flex-1 pl-2">
+                    <span className="block truncate text-[13px] font-medium">
+                      {provider.name}
+                    </span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {providerTypeLabel(provider.type)}
+                    </span>
+                  </span>
+                </Button>
                 <FormIconButton
-                  onClick={(event) => {
-                    event.stopPropagation();
+                  onClick={() => {
                     onDelete(provider);
                   }}
-                  className="size-6 shrink-0 border-transparent bg-transparent opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  className="mr-2 size-6 shrink-0 border-transparent bg-transparent opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                 >
                   <Trash2 className="size-3" />
                 </FormIconButton>

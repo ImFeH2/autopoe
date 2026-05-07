@@ -1,6 +1,8 @@
 import { AgentGraph, type AgentGraphHandle } from "@/components/AgentGraph";
 import { PanelResizer } from "@/components/PanelResizer";
 import { Button } from "@/components/ui/button";
+import { MotionButton } from "@/components/ui/motion-button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AgentDetailPanel,
   BadgeChip,
@@ -328,7 +330,7 @@ export function WorkspaceShell({
                     : "Save JSON"}
                 </Button>
               </div>
-              <textarea
+              <Textarea
                 value={definitionDraft}
                 onChange={(event) =>
                   onDefinitionDraftChange(event.target.value)
@@ -468,15 +470,16 @@ export function WorkspaceShell({
         {panelVisible ? (
           isCompactWorkspace ? (
             [
-              <motion.button
+              <MotionButton
                 key="workspace-panel-backdrop"
                 type="button"
+                variant="ghost"
                 aria-label="Close workspace panel"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.18 }}
-                className="absolute inset-0 z-10 bg-background/40 backdrop-blur-[1px]"
+                className="absolute inset-0 z-10 h-auto w-auto rounded-none border-0 bg-background/40 p-0 shadow-none backdrop-blur-[1px] hover:bg-background/40 focus-visible:ring-0"
                 onClick={togglePanel}
               />,
               <motion.aside

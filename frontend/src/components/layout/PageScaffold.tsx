@@ -6,6 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 import { PanelCard } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 
@@ -68,13 +69,15 @@ export function PageTitleBar({
             <TooltipProvider delayDuration={150}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-sm"
                     className="inline-flex size-7 items-center justify-center rounded-full border border-border/70 bg-card/20 text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                     aria-label={`${title} details`}
                   >
                     <Info className="size-3.5" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent side="right" className="max-w-xs px-3 py-2">
                   {hint}

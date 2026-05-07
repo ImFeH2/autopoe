@@ -25,6 +25,7 @@ import {
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { ShellHeader } from "@/components/layout/ShellHeader";
 import { Button } from "@/components/ui/button";
+import { MotionButton } from "@/components/ui/motion-button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AgentProvider, useAgentUI, type PageId } from "@/context/AgentContext";
 import { AccessProvider } from "@/context/AccessContext";
@@ -156,14 +157,15 @@ function AppContent() {
         <AnimatePresence>
           {sidebarOpen ? (
             <>
-              <motion.button
+              <MotionButton
                 type="button"
+                variant="ghost"
                 aria-label="Close navigation"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.18 }}
-                className="absolute inset-0 z-40 bg-background/72 backdrop-blur-[2px]"
+                className="absolute inset-0 z-40 h-auto w-auto rounded-none border-0 bg-background/72 p-0 shadow-none backdrop-blur-[2px] hover:bg-background/72 focus-visible:ring-0"
                 onClick={() => setSidebarDrawerOpen(false)}
               />
               <motion.div

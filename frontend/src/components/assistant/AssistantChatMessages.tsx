@@ -392,43 +392,39 @@ function MessageActivityCard({
         tone === "sent" && "border-border bg-background/24",
       )}
     >
-      <div
-        aria-expanded={open}
-        role="button"
-        tabIndex={0}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setOpen((current) => !current);
-          }
-        }}
-        className="flex w-full items-center gap-2 text-left"
-      >
-        <span className="flex size-5 shrink-0 translate-y-px items-center justify-center text-current">
-          {icon}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold leading-none text-foreground/88">
-          {label}
-        </span>
-        <span className="ml-auto" onClick={(event) => event.stopPropagation()}>
+      <div className="flex w-full items-center gap-2 text-left">
+        <Button
+          type="button"
+          variant="ghost"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-md bg-transparent px-0 py-0 text-left text-inherit shadow-none hover:bg-transparent hover:text-inherit focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <span className="flex size-5 shrink-0 translate-y-px items-center justify-center text-current">
+            {icon}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[11px] font-semibold leading-none text-foreground/88">
+            {label}
+          </span>
+          {streaming ? (
+            <span className="inline-flex size-5 items-center justify-center">
+              <span className="relative flex size-2.5 items-center justify-center">
+                <span className="absolute inline-flex size-2.5 animate-ping rounded-full bg-ring/28" />
+                <span className="relative inline-flex size-2 rounded-full bg-ring/82" />
+              </span>
+              <span className="sr-only">Live</span>
+            </span>
+          ) : null}
+          <ChevronRight
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        </Button>
+        <span className="shrink-0">
           <CopyButton text={content} />
         </span>
-        {streaming ? (
-          <span className="inline-flex size-5 items-center justify-center">
-            <span className="relative flex size-2.5 items-center justify-center">
-              <span className="absolute inline-flex size-2.5 animate-ping rounded-full bg-ring/28" />
-              <span className="relative inline-flex size-2 rounded-full bg-ring/82" />
-            </span>
-            <span className="sr-only">Live</span>
-          </span>
-        ) : null}
-        <ChevronRight
-          className={cn(
-            "size-4 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
-        />
       </div>
       {open ? (
         <div className="mt-2 min-w-0">

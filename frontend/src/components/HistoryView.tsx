@@ -16,6 +16,7 @@ import type { HistoryEntry, Node } from "@/types";
 import { CopyButton } from "@/components/CopyButton";
 import { ImageAssetPreview } from "@/components/ImageAssetPreview";
 import { MarkdownContent } from "@/components/MarkdownContent";
+import { Button } from "@/components/ui/button";
 import { getNodeLabel } from "@/lib/nodeLabel";
 import { formatJsonOutput } from "@/lib/formatJsonOutput";
 import { contentPartsToText, normalizeContentParts } from "@/lib/contentParts";
@@ -386,44 +387,37 @@ function CollapsibleBlock({
         className,
       )}
     >
-      <div
-        className="flex cursor-pointer items-center gap-2 px-3 py-2 select-none"
-        onClick={toggle}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggle();
-          }
-        }}
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
-      >
-        <span className="shrink-0 flex items-center justify-center">
-          {icon}
-        </span>
-        <span
-          className={cn(
-            "flex-1 truncate text-[11px] font-medium",
-            labelClassName || "text-muted-foreground",
-          )}
+      <div className="flex items-center gap-2 px-3 py-2 select-none">
+        <Button
+          type="button"
+          variant="ghost"
+          aria-expanded={open}
+          onClick={toggle}
+          className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-md bg-transparent px-0 py-0 text-left text-inherit shadow-none hover:bg-transparent hover:text-inherit focus-visible:ring-2 focus-visible:ring-ring/50"
         >
-          {label}
-        </span>
-        {actions ? (
+          <span className="shrink-0 flex items-center justify-center">
+            {icon}
+          </span>
           <span
-            className="ml-auto shrink-0 flex items-center leading-none"
-            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "min-w-0 flex-1 truncate text-[11px] font-medium",
+              labelClassName || "text-muted-foreground",
+            )}
           >
+            {label}
+          </span>
+          <ChevronRight
+            className={cn(
+              "ml-2 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-200",
+              open && "rotate-90",
+            )}
+          />
+        </Button>
+        {actions ? (
+          <span className="shrink-0 flex items-center leading-none">
             {actions}
           </span>
         ) : null}
-        <ChevronRight
-          className={cn(
-            "ml-2 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-200",
-            open && "rotate-90",
-          )}
-        />
       </div>
       <AnimatePresence initial={false}>
         {open ? (

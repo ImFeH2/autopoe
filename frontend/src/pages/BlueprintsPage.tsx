@@ -36,6 +36,7 @@ import {
 } from "@/components/form/FormControls";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MotionButton } from "@/components/ui/motion-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -140,15 +141,16 @@ function DrawerShell({
 }) {
   return (
     <>
-      <motion.button
+      <MotionButton
         type="button"
+        variant="ghost"
         aria-label="Close drawer"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.18 }}
         onClick={onClose}
-        className="absolute inset-0 z-20 bg-background/44 backdrop-blur-[2px]"
+        className="absolute inset-0 z-20 h-auto w-auto rounded-none border-0 bg-background/44 p-0 shadow-none backdrop-blur-[2px] hover:bg-background/44 focus-visible:ring-0"
       />
       <motion.aside
         initial={{ opacity: 0, x: align === "left" ? -20 : 20 }}
