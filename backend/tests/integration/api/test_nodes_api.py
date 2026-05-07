@@ -8,6 +8,7 @@ from flowent.models import (
     AgentState,
     AssistantText,
     ImagePart,
+    LLMResponse,
     ReceivedMessage,
     TextPart,
 )
@@ -233,7 +234,9 @@ def test_assistant_chat_can_be_cleared_via_nodes_api(client: TestClient):
     )
 
 
-def test_human_input_can_be_sent_directly_to_workflow_leader(client: TestClient):
+def test_unknown_slash_input_can_be_sent_directly_to_workflow_leader(
+    client: TestClient,
+):
     tab = client.post(
         "/api/workflows",
         json={"title": "Execution"},
@@ -241,7 +244,7 @@ def test_human_input_can_be_sent_directly_to_workflow_leader(client: TestClient)
 
     response = client.post(
         f"/api/nodes/{tab['leader_id']}/messages",
-        json={"content": "/help investigate the failure"},
+        json={"content": "/unknown investigate the failure"},
     )
 
     assert response.status_code == 200
@@ -256,7 +259,7 @@ def test_human_input_can_be_sent_directly_to_workflow_leader(client: TestClient)
             entry["type"] == "ReceivedMessage"
             and entry["from_id"] == "human"
             and entry["message_id"] == message_id
-            and entry["content"] == "/help investigate the failure"
+            and entry["content"] == "/unknown investigate the failure"
             for entry in history
         ):
             break
@@ -266,8 +269,207 @@ def test_human_input_can_be_sent_directly_to_workflow_leader(client: TestClient)
         entry["type"] == "ReceivedMessage"
         and entry["from_id"] == "human"
         and entry["message_id"] == message_id
-        and entry["content"] == "/help investigate the failure"
+        and entry["content"] == "/unknown investigate the failure"
         for entry in history
+    )
+
+
+def test_leader_help_command_returns_visible_command_feedback(client: TestClient):
+    tab = client.post(
+        "/api/workflows",
+        json={"title": "Execution"},
+    ).json()
+
+    response = client.post(
+        f"/api/nodes/{tab['leader_id']}/messages",
+        json={"content": "/help"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "command_executed",
+        "command_name": "/help",
+    }
+
+    detail = client.get(f"/api/nodes/{tab['leader_id']}").json()
+
+    assert any(
+        entry["type"] == "CommandResultEntry"
+        and entry["command_name"] == "/help"
+        and "Available commands" in entry["content"]
+        and "/compact" in entry["content"]
+        for entry in detail["history"]
+    )
+    assert not any(
+        entry["type"] == "ReceivedMessage" and entry.get("content") == "/help"
+        for entry in detail["history"]
+    )
+
+
+def test_leader_clear_command_clears_only_workflow_chat(client: TestClient):
+    assistant_id = _get_assistant_id(client)
+    assistant = registry.get(assistant_id)
+    assert assistant is not None
+    assistant.history.append(
+        ReceivedMessage(content="Assistant stays", from_id="human")
+    )
+    tab = client.post(
+        "/api/workflows",
+        json={"title": "Execution"},
+    ).json()
+    worker = client.post(
+        f"/api/workflows/{tab['id']}/nodes",
+        json={"role_name": "Worker", "name": "Worker"},
+    ).json()
+    leader = registry.get(tab["leader_id"])
+    assert leader is not None
+    leader.history.append(ReceivedMessage(content="Old workflow chat", from_id="human"))
+    leader.history.append(AssistantText(content="Old workflow reply"))
+
+    response = client.post(
+        f"/api/nodes/{tab['leader_id']}/messages",
+        json={"content": "/clear"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "command_executed",
+        "command_name": "/clear",
+    }
+
+    leader_detail = client.get(f"/api/nodes/{tab['leader_id']}").json()
+    assistant_detail = client.get(f"/api/nodes/{assistant_id}").json()
+    workflow = client.get(f"/api/workflows/{tab['id']}").json()
+
+    assert not any(
+        entry["type"] in {"ReceivedMessage", "AssistantText"}
+        and entry.get("content") in {"Old workflow chat", "Old workflow reply"}
+        for entry in leader_detail["history"]
+    )
+    assert not any(
+        entry["type"] == "CommandResultEntry" and entry["command_name"] == "/clear"
+        for entry in leader_detail["history"]
+    )
+    assert any(
+        entry["type"] == "ReceivedMessage" and entry.get("content") == "Assistant stays"
+        for entry in assistant_detail["history"]
+    )
+    assert any(node["id"] == worker["id"] for node in workflow["nodes"])
+
+
+def test_leader_compact_command_keeps_history_and_adds_system_feedback(
+    monkeypatch,
+    client: TestClient,
+):
+    tab = client.post(
+        "/api/workflows",
+        json={"title": "Execution"},
+    ).json()
+    leader = registry.get(tab["leader_id"])
+    assert leader is not None
+    leader.history.extend(
+        [
+            ReceivedMessage(content="Need a concise recap", from_id="human"),
+            AssistantText(content="I will summarize the workflow."),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "flowent.agent.gateway.chat",
+        lambda *args, **kwargs: LLMResponse(
+            content=(
+                "## Current Goal\nShip the shared commands.\n\n"
+                "## Active Task Boundary\nKeep it in the workflow chat.\n\n"
+                "## Key Constraints\nDo not clear visible history.\n\n"
+                "## Confirmed Decisions\nUse shared commands.\n\n"
+                "## Open Questions\nNone.\n\n"
+                "## Next Actions\nVerify the workflow panel."
+            )
+        ),
+    )
+
+    response = client.post(
+        f"/api/nodes/{tab['leader_id']}/messages",
+        json={"content": "/compact workflow command rollout"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "command_executed",
+        "command_name": "/compact",
+    }
+
+    detail = client.get(f"/api/nodes/{tab['leader_id']}").json()
+
+    assert any(
+        entry["type"] == "ReceivedMessage"
+        and entry.get("content") == "Need a concise recap"
+        for entry in detail["history"]
+    )
+    assert any(
+        entry["type"] == "AssistantText"
+        and entry.get("content") == "I will summarize the workflow."
+        for entry in detail["history"]
+    )
+    assert any(
+        entry["type"] == "CommandResultEntry"
+        and entry["command_name"] == "/compact"
+        and entry.get("include_in_context") is False
+        and "Compacted this chat for future replies." in entry["content"]
+        and "Focus: workflow command rollout" in entry["content"]
+        for entry in detail["history"]
+    )
+
+
+def test_leader_image_message_bypasses_conversation_commands(
+    client: TestClient,
+    monkeypatch,
+):
+    tab = client.post(
+        "/api/workflows",
+        json={"title": "Execution"},
+    ).json()
+    leader = registry.get(tab["leader_id"])
+    assert leader is not None
+    monkeypatch.setattr(leader, "supports_input_image", lambda: True)
+
+    upload_response = client.post(
+        "/api/image-assets",
+        files={"file": ("pixel.png", _ONE_PIXEL_PNG, "image/png")},
+    )
+    assert upload_response.status_code == 200
+    asset_id = upload_response.json()["id"]
+
+    response = client.post(
+        f"/api/nodes/{tab['leader_id']}/messages",
+        json={
+            "parts": [
+                {"type": "text", "text": "/help"},
+                {
+                    "type": "image",
+                    "asset_id": asset_id,
+                    "mime_type": "image/png",
+                    "width": 1,
+                    "height": 1,
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "sent"
+
+    detail = client.get(f"/api/nodes/{tab['leader_id']}").json()
+
+    assert any(
+        entry["type"] == "ReceivedMessage"
+        and entry["from_id"] == "human"
+        and entry["content"] == "/help[image]"
+        for entry in detail["history"]
+    )
+    assert not any(
+        entry["type"] == "CommandResultEntry" and entry["command_name"] == "/help"
+        for entry in detail["history"]
     )
 
 

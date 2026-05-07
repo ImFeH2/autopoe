@@ -59,11 +59,19 @@ export async function interruptNode(nodeId: string): Promise<void> {
   });
 }
 
-export async function clearAssistantChatRequest(nodeId: string): Promise<void> {
+export async function clearNodeChatRequest(nodeId: string): Promise<void> {
   await requestVoid(`/api/nodes/${nodeId}/clear-chat`, {
     method: "POST",
-    errorMessage: "Failed to clear assistant chat",
+    errorMessage: "Failed to clear chat",
   });
+}
+
+export const clearAssistantChatRequest = clearNodeChatRequest;
+
+export interface NodeMessageResponse {
+  status: "sent" | "command_executed";
+  command_name?: string;
+  message_id?: string | null;
 }
 
 export async function dispatchNodeMessageRequest(
@@ -72,10 +80,14 @@ export async function dispatchNodeMessageRequest(
     content?: string;
     parts?: ContentPart[];
   },
-): Promise<{ message_id?: string | null }> {
+): Promise<NodeMessageResponse> {
   return requestJson<
-    { status: string; message_id?: string | null },
-    { message_id?: string | null }
+    {
+      status: string;
+      command_name?: string | null;
+      message_id?: string | null;
+    },
+    NodeMessageResponse
   >(`/api/nodes/${nodeId}/messages`, {
     method: "POST",
     body: {
@@ -84,6 +96,9 @@ export async function dispatchNodeMessageRequest(
     },
     errorMessage: "Failed to send node message",
     map: (data) => ({
+      status: data?.status === "command_executed" ? "command_executed" : "sent",
+      command_name:
+        typeof data?.command_name === "string" ? data.command_name : undefined,
       message_id:
         typeof data?.message_id === "string" ? data.message_id : undefined,
     }),

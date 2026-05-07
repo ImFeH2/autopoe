@@ -5,7 +5,12 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from flowent.assistant_commands import (
+    ConversationCommandError,
+    execute_conversation_command_input,
+)
 from flowent.graph_service import is_tab_leader, list_node_connection_ids
+from flowent.providers.errors import LLMProviderError
 from flowent.registry import registry
 from flowent.settings import (
     find_provider,
@@ -304,8 +309,14 @@ async def clear_node_chat(node_id: str) -> dict:
     node = registry.get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
-    if node.config.node_type != NodeType.ASSISTANT:
-        raise HTTPException(status_code=400, detail="Can only clear assistant chat")
+    if node.config.node_type != NodeType.ASSISTANT and not is_tab_leader(
+        node_id=node.uuid,
+        tab_id=node.config.tab_id,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Can only clear Assistant or workflow chats",
+        )
 
     try:
         node.clear_chat_history()
@@ -321,6 +332,7 @@ async def clear_node_chat(node_id: str) -> dict:
 async def dispatch_node_message(node_id: str, req: DispatchNodeMessageRequest) -> dict:
     from flowent.graph_service import dispatch_node_message
     from flowent.models import NodeType, content_parts_to_text, has_image_parts
+    from flowent.models import TextPart as ModelTextPart
 
     node = registry.get(node_id)
     if node is None:
@@ -353,6 +365,29 @@ async def dispatch_node_message(node_id: str, req: DispatchNodeMessageRequest) -
             status_code=409,
             detail="Current model does not support `input_image`.",
         )
+
+    command_input = (
+        parts[0].text
+        if len(parts) == 1 and isinstance(parts[0], ModelTextPart)
+        else None
+    )
+
+    try:
+        executed_command = (
+            execute_conversation_command_input(node, command_input)
+            if isinstance(command_input, str)
+            else None
+        )
+    except ConversationCommandError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (RuntimeError, TimeoutError, LLMProviderError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if executed_command is not None:
+        return {
+            "status": "command_executed",
+            "command_name": executed_command.command_name,
+        }
 
     error, message_id = dispatch_node_message(
         node_id=node_id,

@@ -4,6 +4,8 @@ import { useLeaderChat } from "@/hooks/useLeaderChat";
 import { clearChatInputHistoryForTests } from "@/lib/chatInputHistory";
 import type { HistoryEntry, Node, NodeDetail, TaskTab } from "@/types";
 
+const clearNodeChatRequestMock = vi.fn();
+const dispatchNodeMessageRequestMock = vi.fn();
 const fetchNodeDetailMock = vi.fn();
 const getImageAssetUrlMock = vi.fn();
 const interruptNodeMock = vi.fn();
@@ -33,7 +35,10 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  dispatchNodeMessageRequest: vi.fn(),
+  clearNodeChatRequest: (...args: unknown[]) =>
+    clearNodeChatRequestMock(...args),
+  dispatchNodeMessageRequest: (...args: unknown[]) =>
+    dispatchNodeMessageRequestMock(...args),
   fetchNodeDetail: (...args: unknown[]) => fetchNodeDetailMock(...args),
   getImageAssetUrl: (...args: unknown[]) => getImageAssetUrlMock(...args),
   interruptNode: (...args: unknown[]) => interruptNodeMock(...args),
@@ -113,6 +118,8 @@ function buildDetail(
 
 describe("useLeaderChat", () => {
   beforeEach(() => {
+    clearNodeChatRequestMock.mockReset();
+    dispatchNodeMessageRequestMock.mockReset();
     fetchNodeDetailMock.mockReset();
     getImageAssetUrlMock.mockReset();
     interruptNodeMock.mockReset();
@@ -405,5 +412,77 @@ describe("useLeaderChat", () => {
       "msg-old",
     );
     expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it("removes the pending row when a workflow command is executed", async () => {
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "idle"));
+    dispatchNodeMessageRequestMock.mockResolvedValue({
+      status: "command_executed",
+      command_name: "/help",
+    });
+
+    const { result } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("/help");
+    });
+
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+
+    expect(dispatchNodeMessageRequestMock).toHaveBeenCalledWith("leader", {
+      content: "/help",
+      parts: [{ type: "text", text: "/help" }],
+    });
+    expect(result.current.timelineItems).toEqual([]);
+  });
+
+  it("clears the current workflow chat and reloads leader history", async () => {
+    const clearAgentHistoryMock = vi.fn();
+    const clearHistorySnapshotMock = vi.fn();
+
+    useAgentHistoryRuntimeMock.mockReturnValue({
+      agentHistories: new Map(),
+      clearAgentHistory: clearAgentHistoryMock,
+      clearHistorySnapshot: clearHistorySnapshotMock,
+      historyInvalidatedAt: new Map(),
+      historyClearedAt: new Map(),
+      historySnapshots: new Map(),
+      streamingDeltas: new Map(),
+    });
+    fetchNodeDetailMock
+      .mockResolvedValueOnce(
+        buildDetail([
+          {
+            type: "ReceivedMessage",
+            from_id: "human",
+            content: "Old workflow chat",
+            message_id: "msg-old",
+            timestamp: 1,
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(buildDetail([], "idle"));
+    clearNodeChatRequestMock.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(result.current.timelineItems).toHaveLength(1);
+    });
+
+    await act(async () => {
+      await result.current.clearChat();
+    });
+
+    expect(clearNodeChatRequestMock).toHaveBeenCalledWith("leader");
+    expect(clearAgentHistoryMock).toHaveBeenCalledWith("leader");
+    expect(clearHistorySnapshotMock).toHaveBeenCalledWith("leader");
+    expect(result.current.timelineItems).toEqual([]);
   });
 });

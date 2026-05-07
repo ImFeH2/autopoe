@@ -1001,7 +1001,7 @@ def test_execute_compact_command_replaces_history_with_summary(monkeypatch):
     assert "Summarize the rollout" not in serialized
     assert "Compacted execution context" in serialized
     assert "Ship the command layer." in serialized
-    assert "Compacted the current Assistant execution context." not in serialized
+    assert "Compacted this chat for future replies." not in serialized
 
 
 def test_compact_command_excludes_queued_messages_from_summary(monkeypatch):
@@ -1070,7 +1070,7 @@ def test_help_command_result_does_not_reenter_model_context():
     assert isinstance(entry, CommandResultEntry)
     assert entry.include_in_context is False
     assert "/compact" in entry.content
-    assert "Built-in Assistant commands" not in serialized
+    assert "Available commands" not in serialized
 
 
 def test_agent_normalizes_think_tags_in_final_content(monkeypatch):

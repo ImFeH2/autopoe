@@ -528,6 +528,8 @@ export function LeaderChatPanel({
   const {
     activeTab,
     addImages = async () => {},
+    clearChat,
+    clearing = false,
     connected,
     draftImages = [],
     handleKeyDown,
@@ -549,6 +551,8 @@ export function LeaderChatPanel({
     supportsInputImage = false,
     timelineItems,
   } = useLeaderChat({ bottomInset: composerHeight });
+  const activationLabel =
+    activeTab?.activation_state === "active" ? "Active" : "Inactive";
 
   if (!activeTab) {
     return <WorkspacePanelEmptyState />;
@@ -561,7 +565,7 @@ export function LeaderChatPanel({
     <div className="relative flex h-full flex-col">
       <div className="flex items-center gap-2.5 border-b border-border px-3.5 py-2.5">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <p className="text-[13px] font-semibold">Leader</p>
+          <p className="text-[13px] font-semibold">Workflow chat</p>
           <span className="rounded-full border border-border bg-accent/35 px-2 py-0.5 text-[10px] font-medium text-muted-foreground/78">
             {activeTab.title}
           </span>
@@ -570,11 +574,30 @@ export function LeaderChatPanel({
               {leaderNode.role_name}
             </span>
           ) : null}
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+              activeTab.activation_state === "active"
+                ? "border-graph-status-running/18 bg-graph-status-running/[0.12] text-graph-status-running"
+                : "border-graph-status-idle/18 bg-graph-status-idle/[0.1] text-graph-status-idle/84",
+            )}
+          >
+            {activationLabel}
+          </span>
           <span className="text-[11px] text-muted-foreground/72">
             {connected ? "Online" : "Connecting..."}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={clearing}
+            onClick={() => void clearChat()}
+          >
+            {clearing ? "Clearing..." : "Clear Chat"}
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -590,6 +613,7 @@ export function LeaderChatPanel({
         <AssistantChatMessages
           allowHumanMessageRetry
           bottomInset={composerHeight}
+          emptyDescription="Ask this workflow to plan tasks, summarize progress, or coordinate next steps."
           items={timelineItems}
           nodes={agents}
           onRetryHumanMessage={(messageId) => void retryMessage(messageId)}
@@ -609,7 +633,7 @@ export function LeaderChatPanel({
         >
           <AssistantChatComposer
             busy={leaderActivity.running}
-            commandsEnabled={false}
+            commandsEnabled
             disabled={
               (!input.trim() && draftImages.length === 0) ||
               hasUploadingImages ||
@@ -640,7 +664,7 @@ export function LeaderChatPanel({
             }}
             overlay
             suppressCommandNavigation={isBrowsingInputHistory}
-            targetLabel="Leader"
+            targetLabel="this workflow"
             stopping={stopping}
           />
         </div>
@@ -657,8 +681,8 @@ export function WorkspacePanelEmptyState() {
           No workflow selected
         </p>
         <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
-          Create a workflow or switch to an existing one to open its Leader
-          panel.
+          Create a workflow or switch to an existing one to open its workflow
+          chat.
         </p>
       </div>
     </div>
@@ -673,7 +697,7 @@ function WorkspacePanelLoadingState() {
           Loading workflow context
         </p>
         <p className="mt-2 text-[12px] leading-6 text-muted-foreground">
-          Restoring the current workflow Leader panel.
+          Restoring the current workflow chat.
         </p>
       </div>
     </div>

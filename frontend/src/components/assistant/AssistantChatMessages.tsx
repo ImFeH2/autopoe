@@ -36,6 +36,7 @@ import type {
 interface AssistantChatMessagesProps {
   allowHumanMessageRetry?: boolean;
   bottomInset?: number;
+  emptyDescription?: string;
   scrollRef: RefObject<HTMLDivElement | null>;
   items: AssistantChatItem[];
   nodes?: Map<string, Node>;
@@ -49,6 +50,7 @@ interface AssistantChatMessagesProps {
 export const AssistantChatMessages = memo(function AssistantChatMessages({
   allowHumanMessageRetry = true,
   bottomInset = 0,
+  emptyDescription = "Ask the Assistant to plan tasks, summarize progress, or coordinate next steps.",
   scrollRef,
   items,
   nodes,
@@ -75,7 +77,7 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
     >
       <div className="mx-auto w-full max-w-3xl space-y-2.5">
         {visibleItems.length === 0 && !runningHint ? (
-          <WorkspaceEmptyState />
+          <WorkspaceEmptyState description={emptyDescription} />
         ) : null}
 
         {visibleItems.map((item, index) => (
@@ -647,7 +649,7 @@ function getTimelineItemKey(item: AssistantChatItem, index: number) {
   return `${item.type}-${item.timestamp}-${item.message_id ?? ""}-${item.tool_call_id ?? ""}-${index}`;
 }
 
-function WorkspaceEmptyState() {
+function WorkspaceEmptyState({ description }: { description: string }) {
   return (
     <div className="flex h-full items-center justify-center px-4">
       <div className="max-w-[220px] space-y-3 text-center">
@@ -656,10 +658,7 @@ function WorkspaceEmptyState() {
         </div>
         <div className="space-y-1">
           <p className="text-sm font-medium">Start a conversation</p>
-          <p className="text-[11px] text-muted-foreground">
-            Ask the Assistant to plan tasks, summarize progress, or coordinate
-            next steps.
-          </p>
+          <p className="text-[11px] text-muted-foreground">{description}</p>
         </div>
       </div>
     </div>

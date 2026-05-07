@@ -101,6 +101,7 @@ vi.mock("@/context/AgentContext", () => ({
 vi.mock("@/hooks/useLeaderChat", () => ({
   useLeaderChat: () => ({
     activeTab: buildTab(),
+    clearChat: clearChatMock,
     clearing: false,
     connected: true,
     draftImages: [],
@@ -701,12 +702,12 @@ describe("HomePage", () => {
     });
   });
 
-  it("does not expose assistant-only clear chat actions in the workspace panel", () => {
+  it("exposes a workflow clear chat action in the workspace panel", () => {
     render(<HomePage />);
 
-    expect(
-      screen.queryByRole("button", { name: "Clear Chat" }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear Chat" }));
+
+    expect(clearChatMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows the same interrupt action for a running task node detail view", async () => {

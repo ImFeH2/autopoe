@@ -261,7 +261,7 @@ export function AssistantChatComposer({
       {commandPanelVisible ? (
         <div
           role="listbox"
-          aria-label="Assistant commands"
+          aria-label="Available commands"
           className="pointer-events-auto mb-2 overflow-hidden rounded-xl border border-border bg-surface-overlay shadow-sm"
         >
           {commandOptions.length > 0 ? (

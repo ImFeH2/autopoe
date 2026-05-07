@@ -882,7 +882,7 @@ describe("AssistantChatComposer", () => {
     );
 
     expect(
-      screen.getByRole("listbox", { name: "Assistant commands" }),
+      screen.getByRole("listbox", { name: "Available commands" }),
     ).toBeInTheDocument();
 
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
@@ -1031,7 +1031,7 @@ describe("AssistantChatComposer", () => {
     fireEvent.keyDown(textarea, { key: "Escape" });
 
     expect(
-      screen.queryByRole("listbox", { name: "Assistant commands" }),
+      screen.queryByRole("listbox", { name: "Available commands" }),
     ).not.toBeInTheDocument();
     expect(textarea.value).toBe("/");
   });
@@ -1045,7 +1045,7 @@ describe("AssistantChatComposer", () => {
     const file = new File(["image"], "pasted.png", { type: "image/png" });
 
     expect(
-      screen.getByRole("listbox", { name: "Assistant commands" }),
+      screen.getByRole("listbox", { name: "Available commands" }),
     ).toBeInTheDocument();
 
     fireEvent.paste(textarea, {
@@ -1061,7 +1061,7 @@ describe("AssistantChatComposer", () => {
     });
 
     expect(
-      screen.queryByRole("listbox", { name: "Assistant commands" }),
+      screen.queryByRole("listbox", { name: "Available commands" }),
     ).not.toBeInTheDocument();
     expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
   });
@@ -1087,7 +1087,7 @@ describe("AssistantChatComposer", () => {
     });
 
     expect(
-      screen.getByRole("listbox", { name: "Assistant commands" }),
+      screen.getByRole("listbox", { name: "Available commands" }),
     ).toBeInTheDocument();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
   });
@@ -1139,7 +1139,7 @@ describe("AssistantChatComposer", () => {
     );
 
     expect(
-      screen.getByRole("listbox", { name: "Assistant commands" }),
+      screen.getByRole("listbox", { name: "Available commands" }),
     ).toBeInTheDocument();
     expect(screen.getByText("No matching commands.")).toBeInTheDocument();
   });

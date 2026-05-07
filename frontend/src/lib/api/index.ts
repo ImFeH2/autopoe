@@ -4,6 +4,7 @@ export {
   fetchNodeDetail,
   terminateNode,
   interruptNode,
+  clearNodeChatRequest,
   clearAssistantChatRequest,
   dispatchNodeMessageRequest,
   retryNodeMessageRequest,

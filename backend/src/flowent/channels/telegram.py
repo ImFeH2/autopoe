@@ -9,8 +9,8 @@ from typing import Any
 from loguru import logger
 
 from flowent.assistant_commands import (
-    AssistantCommandError,
-    execute_assistant_command_input,
+    ConversationCommandError,
+    execute_conversation_command_input,
 )
 from flowent.events import event_bus
 from flowent.models import Event, EventType, Message
@@ -215,8 +215,8 @@ class TelegramChannel:
                 return
 
             try:
-                executed_command = execute_assistant_command_input(assistant, text)
-            except AssistantCommandError as exc:
+                executed_command = execute_conversation_command_input(assistant, text)
+            except ConversationCommandError as exc:
                 await self._send_message(chat_id, str(exc), markdown=False)
                 return
             except (RuntimeError, TimeoutError, LLMProviderError) as exc:

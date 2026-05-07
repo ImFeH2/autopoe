@@ -12,17 +12,17 @@ export interface AssistantCommandSelectionState {
 export const ASSISTANT_COMMANDS: AssistantCommandSpec[] = [
   {
     name: "/clear",
-    description: "Clear the current Assistant chat history.",
+    description: "Clear the current chat.",
     usage: "/clear",
   },
   {
     name: "/compact",
-    description: "Compact the current execution context.",
+    description: "Compress this chat for future replies.",
     usage: "/compact [focus]",
   },
   {
     name: "/help",
-    description: "Show the built-in Assistant commands and usage.",
+    description: "Show available commands and usage.",
     usage: "/help",
   },
 ];

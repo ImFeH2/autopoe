@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from flowent.assistant_commands import (
-    AssistantCommandError,
-    execute_assistant_command_input,
+    ConversationCommandError,
+    execute_conversation_command_input,
 )
 from flowent.image_assets import require_image_asset
 from flowent.models import (
@@ -110,11 +110,11 @@ async def send_assistant_message(req: AssistantMessageRequest) -> dict:
 
     try:
         executed_command = (
-            execute_assistant_command_input(assistant, command_input)
+            execute_conversation_command_input(assistant, command_input)
             if isinstance(command_input, str)
             else None
         )
-    except AssistantCommandError as exc:
+    except ConversationCommandError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (RuntimeError, TimeoutError, LLMProviderError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

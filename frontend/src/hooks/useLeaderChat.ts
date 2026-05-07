@@ -11,6 +11,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import {
+  clearNodeChatRequest,
   dispatchNodeMessageRequest,
   fetchNodeDetail,
   interruptNode,
@@ -25,7 +26,11 @@ import {
   useAgentTabsRuntime,
   useAgentUI,
 } from "@/context/AgentContext";
-import { mergeHistoryWithDeltas } from "@/lib/history";
+import { removePendingAssistantMessage } from "@/context/agentRuntimeState";
+import {
+  clearConversationHistory,
+  mergeHistoryWithDeltas,
+} from "@/lib/history";
 import { contentPartsToText, normalizeContentParts } from "@/lib/contentParts";
 import {
   appendChatInputHistoryEntry,
@@ -89,6 +94,7 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
   const [input, setInputState] = useState("");
   const [draftImages, setDraftImages] = useState<DraftChatImage[]>([]);
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [sending, setSending] = useState(false);
   const [retryingMessageId, setRetryingMessageId] = useState<string | null>(
     null,
@@ -166,14 +172,12 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
       return;
     }
 
+    setPendingMessages([]);
     setDetail((current) =>
       current
         ? {
             ...current,
-            history: current.history.filter(
-              (entry) =>
-                entry.type === "SystemEntry" || entry.type === "StateEntry",
-            ),
+            history: clearConversationHistory(current.history),
           }
         : current,
     );
@@ -428,16 +432,25 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
         content: content || contentPartsToText(parts),
         parts,
       });
-      setPendingMessages((current) =>
-        current.map((message) =>
-          message.id === pendingMessage.id
-            ? {
-                ...message,
-                message_id: response.message_id ?? null,
-              }
-            : message,
-        ),
-      );
+      if (response.status === "command_executed") {
+        setPendingMessages((current) =>
+          removePendingAssistantMessage(current, {
+            content: content || contentPartsToText(parts),
+            timestamp: submittedAt,
+          }),
+        );
+      } else {
+        setPendingMessages((current) =>
+          current.map((message) =>
+            message.id === pendingMessage.id
+              ? {
+                  ...message,
+                  message_id: response.message_id ?? null,
+                }
+              : message,
+          ),
+        );
+      }
       appendChatInputHistoryEntry(inputHistoryScope, {
         text: previousInput,
         images: toInputHistoryImages(previousDraftImages),
@@ -623,6 +636,31 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     throw new Error("Leader did not stop in time");
   }, [leaderId, leaderNode?.state]);
 
+  const clearChat = async () => {
+    if (!leaderId || clearing) {
+      return;
+    }
+
+    setClearing(true);
+    try {
+      await clearNodeChatRequest(leaderId);
+      setPendingMessages([]);
+      clearAgentHistory(leaderId);
+      const data = await fetchNodeDetail(leaderId);
+      if (data) {
+        setDetail(data);
+        setFetchedAt(Date.now());
+        clearHistorySnapshot(leaderId);
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to clear chat",
+      );
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const retryMessage = useCallback(
     async (messageId: string) => {
       if (!leaderId || !messageId || retryingMessageId) {
@@ -678,6 +716,8 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     activeTab,
     addImages,
     connected,
+    clearChat,
+    clearing,
     draftImages,
     handleKeyDown,
     hasUploadingImages,

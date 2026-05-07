@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from flowent.assistant_commands import build_assistant_help_text
+from flowent.assistant_commands import build_conversation_help_text
 from flowent.events import event_bus
 from flowent.image_assets import create_image_asset, require_image_asset
 from flowent.models import (
@@ -504,7 +504,7 @@ class Agent:
         if self.state not in {AgentState.RUNNING, AgentState.SLEEPING}:
             return False
         if not self._command_interrupt_lock.acquire(timeout=timeout):
-            raise TimeoutError("Assistant did not pause for the command in time")
+            raise TimeoutError("Current chat did not pause for the command in time")
 
         self._pause_after_interrupt_requested.set()
         self._paused_for_command.clear()
@@ -517,7 +517,7 @@ class Agent:
                 self._command_interrupt_lock.release()
                 return False
             if not self._paused_for_command.wait(timeout=timeout):
-                raise TimeoutError("Assistant did not pause after interrupt")
+                raise TimeoutError("Current chat did not pause after interrupt")
             return True
         except Exception:
             self._pause_after_interrupt_requested.clear()
@@ -532,7 +532,10 @@ class Agent:
 
     def clear_chat_history(self, *, interrupt_timeout: float = 5.0) -> None:
         if self.node_type != NodeType.ASSISTANT:
-            raise RuntimeError("Only assistant chat history can be cleared")
+            from flowent.graph_service import is_tab_leader
+
+            if not is_tab_leader(node_id=self.uuid, tab_id=self.config.tab_id):
+                raise RuntimeError("Only Assistant or workflow chats can be cleared")
 
         paused_for_command = self._pause_for_command_execution(
             timeout=interrupt_timeout
@@ -556,7 +559,11 @@ class Agent:
                 Event(
                     type=EventType.HISTORY_CLEARED,
                     agent_id=self.uuid,
-                    data={"scope": "assistant_chat"},
+                    data={
+                        "scope": "assistant_chat"
+                        if self.node_type == NodeType.ASSISTANT
+                        else "workflow_chat"
+                    },
                 )
             )
             self._persist_workspace_node()
@@ -862,14 +869,17 @@ class Agent:
         interrupt_timeout: float = 5.0,
     ) -> CommandResultEntry:
         if self.node_type != NodeType.ASSISTANT:
-            raise RuntimeError("Only assistant chat history can be compacted")
+            from flowent.graph_service import is_tab_leader
+
+            if not is_tab_leader(node_id=self.uuid, tab_id=self.config.tab_id):
+                raise RuntimeError("Only Assistant or workflow chats can be compacted")
 
         paused_for_command = self._pause_for_command_execution(
             timeout=interrupt_timeout
         )
         try:
             self._run_compact_with_stats(trigger_type="manual", focus=focus)
-            content = "Compacted the current Assistant execution context."
+            content = "Compacted this chat for future replies."
             if focus and focus.strip():
                 content += f"\n\nFocus: {focus.strip()}"
 
@@ -885,7 +895,7 @@ class Agent:
             if paused_for_command:
                 self._resume_after_command_execution()
 
-    def execute_assistant_command(
+    def execute_conversation_command(
         self,
         *,
         command_name: str,
@@ -897,7 +907,7 @@ class Agent:
             self.clear_chat_history(interrupt_timeout=interrupt_timeout)
             entry = CommandResultEntry(
                 command_name=command_name,
-                content="Cleared the current Assistant chat history.",
+                content="Cleared the current chat.",
                 include_in_context=False,
             )
             append_to_history = False
@@ -909,14 +919,27 @@ class Agent:
         elif command_name == "/help":
             entry = CommandResultEntry(
                 command_name=command_name,
-                content=build_assistant_help_text(),
+                content=build_conversation_help_text(),
             )
         else:
-            raise RuntimeError(f"Unsupported Assistant command: {command_name}")
+            raise RuntimeError(f"Unsupported conversation command: {command_name}")
 
         if append_to_history:
             self._append_history(entry)
         return entry
+
+    def execute_assistant_command(
+        self,
+        *,
+        command_name: str,
+        argument: str = "",
+        interrupt_timeout: float = 5.0,
+    ) -> CommandResultEntry:
+        return self.execute_conversation_command(
+            command_name=command_name,
+            argument=argument,
+            interrupt_timeout=interrupt_timeout,
+        )
 
     def _run(self) -> None:
         with logger.contextualize(

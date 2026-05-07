@@ -129,7 +129,7 @@ def test_compact_command_replaces_history_with_summary(monkeypatch, client):
         entry["type"] == "CommandResultEntry"
         and entry["command_name"] == "/compact"
         and entry.get("include_in_context") is False
-        and "Compacted the current Assistant execution context." in entry["content"]
+        and "Compacted this chat for future replies." in entry["content"]
         and "Focus: slash command rollout" in entry["content"]
         and "Ship the slash commands." not in entry["content"]
         for entry in detail["history"]
