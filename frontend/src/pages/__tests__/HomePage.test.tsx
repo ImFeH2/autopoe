@@ -600,6 +600,15 @@ describe("HomePage", () => {
     }
   });
 
+  it("does not show workflow status chips over the workspace canvas or chat header", () => {
+    render(<HomePage />);
+
+    expect(screen.queryByText("Editable")).not.toBeInTheDocument();
+    expect(screen.queryByText("Conductor")).not.toBeInTheDocument();
+    expect(screen.queryByText("Inactive")).not.toBeInTheDocument();
+    expect(screen.queryByText("Online")).not.toBeInTheDocument();
+  });
+
   it("adds an agent node through the custom dialog", async () => {
     createTabNodeRequestMock.mockResolvedValue(undefined);
 

@@ -364,11 +364,6 @@ export function WorkspaceShell({
                 nodes
               </BadgeChip>
             ) : null}
-            {activeTab ? (
-              <BadgeChip tone={workflowLocked ? "primary" : "default"}>
-                {workflowLocked ? "Active" : "Editable"}
-              </BadgeChip>
-            ) : null}
           </div>
 
           <div className="pointer-events-none absolute inset-x-3 bottom-4 z-40 flex justify-center">

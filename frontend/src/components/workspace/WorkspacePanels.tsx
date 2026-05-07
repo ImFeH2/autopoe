@@ -530,7 +530,6 @@ export function LeaderChatPanel({
     addImages = async () => {},
     clearChat,
     clearing = false,
-    connected,
     draftImages = [],
     handleKeyDown,
     hasUploadingImages = false,
@@ -551,8 +550,6 @@ export function LeaderChatPanel({
     supportsInputImage = false,
     timelineItems,
   } = useLeaderChat({ bottomInset: composerHeight });
-  const activationLabel =
-    activeTab?.activation_state === "active" ? "Active" : "Inactive";
 
   if (!activeTab) {
     return <WorkspacePanelEmptyState />;
@@ -566,27 +563,6 @@ export function LeaderChatPanel({
       <div className="flex items-center gap-2.5 border-b border-border px-3.5 py-2.5">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <p className="text-[13px] font-semibold">Workflow chat</p>
-          <span className="rounded-full border border-border bg-accent/35 px-2 py-0.5 text-[10px] font-medium text-muted-foreground/78">
-            {activeTab.title}
-          </span>
-          {leaderNode.role_name ? (
-            <span className="rounded-full border border-border bg-accent/35 px-2 py-0.5 text-[10px] font-medium text-muted-foreground/78">
-              {leaderNode.role_name}
-            </span>
-          ) : null}
-          <span
-            className={cn(
-              "rounded-full border px-2 py-0.5 text-[10px] font-medium",
-              activeTab.activation_state === "active"
-                ? "border-graph-status-running/18 bg-graph-status-running/[0.12] text-graph-status-running"
-                : "border-graph-status-idle/18 bg-graph-status-idle/[0.1] text-graph-status-idle/84",
-            )}
-          >
-            {activationLabel}
-          </span>
-          <span className="text-[11px] text-muted-foreground/72">
-            {connected ? "Online" : "Connecting..."}
-          </span>
         </div>
         <div className="flex items-center gap-1.5">
           <Button

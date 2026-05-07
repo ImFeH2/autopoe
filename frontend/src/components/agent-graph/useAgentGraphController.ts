@@ -179,7 +179,6 @@ export function useAgentGraphController({
   onCreateLinkedAgent = async () => undefined,
   onDeleteAgent = async () => undefined,
   onInsertAgentBetween = async () => undefined,
-  onOpenConnectDialog = () => undefined,
   readOnly = false,
 }: AgentGraphProps): AgentGraphController {
   const { agents } = useAgentNodesRuntime();
@@ -1006,40 +1005,12 @@ export function useAgentGraphController({
           });
         },
       },
-      {
-        label: "Connect Ports",
-        disabled: !activeTabId || readOnly || workflowRuntimeNodes.length < 2,
-        onClick: onOpenConnectDialog,
-      },
-      "divider",
-      {
-        label: "Fit View",
-        disabled: !flowInstance,
-        onClick: () => {
-          void fitViewport({
-            padding: VIEWPORT_FIT_PADDING,
-            maxZoom: VIEWPORT_FIT_MAX_ZOOM,
-            duration: 350,
-          });
-        },
-      },
-      {
-        label: "Clear Selection",
-        onClick: () => {
-          setSelectedEdgeId(null);
-          setTargetPickSourceId(null);
-          selectAgent(null);
-        },
-      },
     ];
   }, [
     activeTabId,
     contextMenu,
-    fitViewport,
-    flowInstance,
     onDeleteAgent,
     onDeleteConnection,
-    onOpenConnectDialog,
     openQuickCreate,
     readOnly,
     getContextAgentNode,

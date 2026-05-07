@@ -781,6 +781,7 @@ describe("AssistantChatComposer", () => {
     expect(composerShell).toContainElement(sendButton);
     expect(composerShell?.className).toContain("border-border");
     expect(composerShell?.className).toContain("shadow-sm");
+    expect(textarea.className).toContain("truncate");
 
     const originalGetComputedStyle = window.getComputedStyle;
     const getComputedStyleSpy = vi
@@ -815,6 +816,7 @@ describe("AssistantChatComposer", () => {
 
     expect(textarea.style.height).toBe("96px");
     expect(textarea.style.overflowY).toBe("hidden");
+    expect(textarea.className).not.toContain("truncate");
 
     Object.defineProperty(textarea, "scrollHeight", {
       configurable: true,

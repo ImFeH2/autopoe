@@ -368,6 +368,7 @@ export function AssistantChatComposer({
             className={cn(
               "min-h-5 w-full resize-none self-center border-0 bg-transparent px-0.5 py-0 text-[13px] leading-5 text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0",
               "rounded-sm",
+              input.length === 0 && "truncate",
             )}
           />
           <Button

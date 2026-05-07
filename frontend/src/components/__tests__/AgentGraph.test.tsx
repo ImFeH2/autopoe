@@ -104,6 +104,7 @@ vi.mock("@xyflow/react", async () => {
     onInit,
     onNodeClick,
     onNodeContextMenu,
+    onPaneContextMenu,
     onNodeMouseEnter,
     onNodeMouseMove,
     onNodeMouseLeave,
@@ -142,6 +143,7 @@ vi.mock("@xyflow/react", async () => {
     }) => void;
     onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
     onNodeContextMenu?: (event: React.MouseEvent, node: { id: string }) => void;
+    onPaneContextMenu?: (event: React.MouseEvent) => void;
     onNodeMouseEnter?: (event: React.MouseEvent, node: { id: string }) => void;
     onNodeMouseMove?: (event: React.MouseEvent, node: { id: string }) => void;
     onNodeMouseLeave?: (event: React.MouseEvent, node: { id: string }) => void;
@@ -210,7 +212,7 @@ vi.mock("@xyflow/react", async () => {
     };
 
     return (
-      <div data-testid="react-flow">
+      <div data-testid="react-flow" onContextMenu={onPaneContextMenu}>
         <button
           data-testid="connect-start"
           onClick={() => onConnectStart?.()}
@@ -535,6 +537,27 @@ describe("AgentGraph", () => {
     const plannerNode = screen.getByTestId("node-worker-1");
     expectConnectionEntriesVisible(plannerNode);
     expect(screen.getByText("Connect Ports")).toBeInTheDocument();
+  });
+
+  it("only shows add agent in the pane context menu", async () => {
+    renderGraph([
+      buildNode({
+        id: "worker-1",
+        role_name: "Planner",
+      }),
+    ]);
+
+    await screen.findByText("Planner");
+
+    fireEvent.contextMenu(screen.getByTestId("react-flow"), {
+      clientX: 160,
+      clientY: 120,
+    });
+
+    expect(screen.getByText("Add Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Connect Ports")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fit View")).not.toBeInTheDocument();
+    expect(screen.queryByText("Clear Selection")).not.toBeInTheDocument();
   });
 
   it("blocks invalid connections and forwards valid ones with explicit port keys", async () => {
