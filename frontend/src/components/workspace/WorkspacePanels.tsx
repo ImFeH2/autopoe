@@ -591,6 +591,7 @@ export function LeaderChatPanel({
     addImages = async () => {},
     clearChat,
     clearing = false,
+    connected,
     draftImages = [],
     handleKeyDown,
     hasUploadingImages = false,
@@ -621,9 +622,32 @@ export function LeaderChatPanel({
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex items-center gap-2.5 border-b border-border px-3.5 py-2.5">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <p className="text-[13px] font-semibold">Workflow chat</p>
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-3.5 py-2.5">
+        <div className="flex min-w-[220px] flex-1 items-center gap-2">
+          <p className="shrink-0 text-[14px] font-semibold leading-6">
+            Workflow chat
+          </p>
+          {leaderNode.role_name ? (
+            <span className="min-w-0 truncate rounded-full border border-border bg-accent/35 px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground/78">
+              Role: {leaderNode.role_name}
+            </span>
+          ) : null}
+          <span className="min-w-0 truncate rounded-full border border-border bg-accent/35 px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground/78">
+            {activeTab.title}
+          </span>
+          <span
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-[9px] font-medium transition-colors",
+              connected
+                ? "border-graph-status-running/18 bg-graph-status-running/[0.12] text-graph-status-running"
+                : "border-graph-status-idle/18 bg-graph-status-idle/[0.12] text-graph-status-idle",
+            )}
+          >
+            {connected ? "Online" : "Connecting..."}
+          </span>
+          <span className="rounded-full border border-border bg-accent/35 px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground/78">
+            {activeTab.activation_state === "active" ? "Active" : "Inactive"}
+          </span>
         </div>
         <div className="flex items-center gap-1.5">
           <Button
@@ -650,7 +674,6 @@ export function LeaderChatPanel({
         <AssistantChatMessages
           allowHumanMessageRetry
           bottomInset={composerHeight}
-          emptyDescription="Ask this workflow to plan tasks, summarize progress, or coordinate next steps."
           items={timelineItems}
           nodes={agents}
           onRetryHumanMessage={(messageId) => void retryMessage(messageId)}
@@ -700,6 +723,7 @@ export function LeaderChatPanel({
                 });
             }}
             overlay
+            placeholder="Do anything"
             suppressCommandNavigation={isBrowsingInputHistory}
             targetLabel="this workflow"
             stopping={stopping}

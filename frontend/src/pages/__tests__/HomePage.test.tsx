@@ -604,13 +604,18 @@ describe("HomePage", () => {
     }
   });
 
-  it("does not show workflow status chips over the workspace canvas or chat header", () => {
+  it("shows workflow chat context in the chat header", () => {
     render(<HomePage />);
 
     expect(screen.queryByText("Editable")).not.toBeInTheDocument();
-    expect(screen.queryByText("Conductor")).not.toBeInTheDocument();
-    expect(screen.queryByText("Inactive")).not.toBeInTheDocument();
-    expect(screen.queryByText("Online")).not.toBeInTheDocument();
+    const chatHeader = screen.getByText("Workflow chat").closest("div");
+    expect(chatHeader).not.toBeNull();
+    expect(within(chatHeader!).getByText("Example Tab")).toBeInTheDocument();
+    expect(
+      within(chatHeader!).getByText("Role: Conductor"),
+    ).toBeInTheDocument();
+    expect(within(chatHeader!).getByText("Inactive")).toBeInTheDocument();
+    expect(within(chatHeader!).getByText("Online")).toBeInTheDocument();
   });
 
   it("adds an agent node through the custom dialog", async () => {
