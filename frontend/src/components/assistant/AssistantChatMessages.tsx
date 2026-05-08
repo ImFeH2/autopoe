@@ -59,9 +59,7 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
   runningHint = null,
 }: AssistantChatMessagesProps) {
   const baseBottomPadding = 14;
-  const visibleItems = items.filter(
-    (item) => item.type !== "SystemEntry" && item.type !== "StateEntry",
-  );
+  const visibleItems = items.filter((item) => item.type !== "SystemEntry");
 
   return (
     <div

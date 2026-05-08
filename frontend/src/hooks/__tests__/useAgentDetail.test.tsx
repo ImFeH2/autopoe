@@ -160,22 +160,8 @@ describe("useAgentDetail", () => {
     });
   });
 
-  it("merges incremental state entries into the detail timeline", async () => {
-    const fetchedState: HistoryEntry = {
-      type: "StateEntry",
-      state: "idle",
-      reason: "created",
-      timestamp: 1,
-    };
-    const incrementalState: HistoryEntry = {
-      type: "StateEntry",
-      state: "running",
-      reason: "processing",
-      timestamp: 2,
-    };
-    const agentHistories = new Map<string, HistoryEntry[]>([
-      ["assistant", [incrementalState]],
-    ]);
+  it("updates current state from live nodes without adding state history", async () => {
+    const agentHistories = new Map<string, HistoryEntry[]>([["assistant", []]]);
 
     useAgentNodesRuntimeMock.mockReturnValue({
       agents: new Map<string, Node>([
@@ -197,15 +183,26 @@ describe("useAgentDetail", () => {
       historySnapshots: new Map(),
       streamingDeltas: new Map(),
     });
-    fetchNodeDetailMock.mockResolvedValue(buildDetail([fetchedState]));
+    fetchNodeDetailMock.mockResolvedValue(
+      buildDetail([
+        {
+          type: "AssistantText",
+          content: "Ready.",
+          timestamp: 1,
+        },
+      ]),
+    );
 
     const { result } = renderHook(() => useAgentDetail("assistant", true));
 
     await waitFor(() => {
       expect(result.current.detail?.state).toBe("running");
       expect(result.current.detail?.history).toEqual([
-        fetchedState,
-        incrementalState,
+        {
+          type: "AssistantText",
+          content: "Ready.",
+          timestamp: 1,
+        },
       ]);
     });
   });

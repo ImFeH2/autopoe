@@ -29,7 +29,6 @@ from flowent.models import (
     NodeType,
     ReceivedMessage,
     SentMessage,
-    StateEntry,
     SystemEntry,
     Tab,
     TodoItem,
@@ -489,10 +488,8 @@ def test_agent_does_not_retry_non_transient_llm_errors(monkeypatch):
         isinstance(entry, ErrorEntry) and entry.content == error_summary
         for entry in agent.get_history_snapshot()
     )
-    assert any(
-        isinstance(entry, StateEntry)
-        and entry.state == AgentState.ERROR.value
-        and entry.reason == error_summary
+    assert all(
+        entry.__class__.__name__ != "StateEntry"
         for entry in agent.get_history_snapshot()
     )
     assert not any(
@@ -772,8 +769,7 @@ def test_clear_assistant_chat_history_drops_conversation_entries():
     assistant.clear_chat_history()
 
     assert all(
-        isinstance(entry, (SystemEntry, StateEntry))
-        for entry in assistant.get_history_snapshot()
+        isinstance(entry, SystemEntry) for entry in assistant.get_history_snapshot()
     )
 
 
@@ -1556,11 +1552,7 @@ def test_request_sleep_wakes_early_when_new_message_arrives():
     ]
     assert len(received_entries) == 1
     assert received_entries[0].content == "wake up"
-    assert [
-        entry.state
-        for entry in agent.get_history_snapshot()
-        if isinstance(entry, StateEntry)
-    ][-2:] == ["sleeping", "running"]
+    assert all(entry.__class__.__name__ != "StateEntry" for entry in agent.history)
 
 
 def test_request_sleep_timeout_queues_deadline_notice():
@@ -1572,11 +1564,7 @@ def test_request_sleep_timeout_queues_deadline_notice():
     assert result.startswith("slept ")
     assert agent.state == AgentState.RUNNING
     assert agent._consume_runtime_notices() == [agent._build_sleep_deadline_notice()]
-    assert [
-        entry.state
-        for entry in agent.get_history_snapshot()
-        if isinstance(entry, StateEntry)
-    ][-2:] == ["sleeping", "running"]
+    assert all(entry.__class__.__name__ != "StateEntry" for entry in agent.history)
 
 
 def test_agent_interrupts_blocked_provider_without_streaming_output(monkeypatch):

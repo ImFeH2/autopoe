@@ -11,7 +11,6 @@ from flowent.models import (
     PortDirection,
     PortType,
     ReceivedMessage,
-    StateEntry,
     Tab,
     TodoItem,
     WorkflowDefinition,
@@ -185,26 +184,14 @@ def test_request_interrupt_ignores_idle_agent():
     assert not agent._interrupt_requested.is_set()
 
 
-def test_state_changes_are_recorded_in_history():
+def test_state_changes_update_current_state_without_history_entries():
     agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent-a")
 
     agent.set_state(AgentState.RUNNING, "processing")
     agent.set_state(AgentState.IDLE, "completed")
 
-    state_entries = [
-        entry for entry in agent.get_history_snapshot() if isinstance(entry, StateEntry)
-    ]
-
-    assert [entry.state for entry in state_entries] == [
-        "initializing",
-        "running",
-        "idle",
-    ]
-    assert [entry.reason for entry in state_entries] == [
-        "created",
-        "processing",
-        "completed",
-    ]
+    assert agent.state == AgentState.IDLE
+    assert agent.get_history_snapshot() == []
 
 
 def test_contacts_tool_uses_agent_public_api(monkeypatch):

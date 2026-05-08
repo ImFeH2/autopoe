@@ -74,13 +74,6 @@ class AssistantThinking(Serializable):
 
 
 @dataclass
-class StateEntry(Serializable):
-    state: str
-    reason: str = ""
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass
 class ToolCall(Serializable):
     tool_name: str
     tool_call_id: str
@@ -122,7 +115,6 @@ HistoryEntry = (
     | AssistantText
     | SentMessage
     | AssistantThinking
-    | StateEntry
     | ToolCall
     | ErrorEntry
     | CommandResultEntry
@@ -228,12 +220,6 @@ def deserialize_history_entry(data: dict[str, Any]) -> HistoryEntry:
             content=str(data.get("content", "")),
             timestamp=timestamp_value,
         )
-    if entry_type == "StateEntry":
-        return StateEntry(
-            state=str(data.get("state", "")),
-            reason=str(data.get("reason", "")),
-            timestamp=timestamp_value,
-        )
     if entry_type == "ToolCall":
         arguments = data.get("arguments")
         return ToolCall(
@@ -279,4 +265,8 @@ def deserialize_history_entry(data: dict[str, Any]) -> HistoryEntry:
 
 
 def deserialize_history_entries(items: list[dict[str, Any]]) -> list[HistoryEntry]:
-    return [deserialize_history_entry(item) for item in items]
+    return [
+        deserialize_history_entry(item)
+        for item in items
+        if item.get("type") != "StateEntry"
+    ]

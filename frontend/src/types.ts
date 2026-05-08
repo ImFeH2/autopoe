@@ -117,7 +117,6 @@ export type HistoryEntryType =
   | "SentMessage"
   | "PortInboundEntry"
   | "AssistantThinking"
-  | "StateEntry"
   | "ToolCall"
   | "ErrorEntry"
   | "CommandResultEntry";
@@ -140,8 +139,6 @@ export interface HistoryEntry {
   type: HistoryEntryType;
   content?: string | null;
   parts?: ContentPart[] | null;
-  state?: AgentState | null;
-  reason?: string | null;
   from_id?: string | null;
   to_id?: string | null;
   to_ids?: string[] | null;

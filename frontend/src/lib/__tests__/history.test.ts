@@ -176,29 +176,6 @@ describe("history utilities", () => {
     expect(result).toEqual([sent]);
   });
 
-  it("keeps distinct state entries even when timestamps match", () => {
-    const running: HistoryEntry = {
-      type: "StateEntry",
-      state: "running",
-      reason: "processing",
-      timestamp: 42,
-    };
-    const idle: HistoryEntry = {
-      type: "StateEntry",
-      state: "idle",
-      reason: "completed",
-      timestamp: 42,
-    };
-
-    const result = mergeHistoryWithDeltas({
-      history: [running],
-      incremental: [idle],
-      fetchedAt: 43_000,
-    });
-
-    expect(result).toEqual([running, idle]);
-  });
-
   it("merges sent and received message deltas into streaming history entries", () => {
     const deltas: StreamingDelta[] = [
       {

@@ -674,20 +674,7 @@ describe("HomePage", () => {
         write_dirs: [],
         allow_network: true,
         position: null,
-        history: [
-          {
-            type: "StateEntry",
-            state: "idle",
-            reason: "created",
-            timestamp: 1,
-          },
-          {
-            type: "StateEntry",
-            state: "running",
-            reason: "processing",
-            timestamp: 2,
-          },
-        ],
+        history: [],
       },
       error: null,
       loading: false,
@@ -706,8 +693,8 @@ describe("HomePage", () => {
     fireEvent.click(leaderDetailButtons[leaderDetailButtons.length - 1]);
 
     expect(screen.getAllByText("Status").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("State Timeline").length).toBeGreaterThan(0);
-    expect(screen.getByText("processing")).toBeInTheDocument();
+    expect(screen.queryByText("State Timeline")).not.toBeInTheDocument();
+    expect(screen.getByText("RUNNING")).toBeInTheDocument();
 
     const interruptButton = await screen.findByRole("button", {
       name: "Interrupt",

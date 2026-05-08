@@ -47,7 +47,6 @@ from flowent.models.history import (
     PortInboundEntry,
     ReceivedMessage,
     SentMessage,
-    StateEntry,
     SystemEntry,
     ToolCall,
 )
@@ -104,7 +103,6 @@ __all__ = [
     "SentMessage",
     "SentMessageDelta",
     "Serializable",
-    "StateEntry",
     "StreamingDelta",
     "SystemEntry",
     "Tab",

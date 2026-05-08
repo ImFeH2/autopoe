@@ -183,24 +183,20 @@ describe("HistoryView", () => {
     ).toBe(true);
   });
 
-  it("renders state history entries with reasons", () => {
+  it("does not render state-only entries as history rows", () => {
     render(
       <HistoryView
         history={[
           {
-            type: "StateEntry",
-            state: "running",
-            reason: "processing",
+            type: "SystemEntry",
+            content: "",
             timestamp: 1,
           },
         ]}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /State RUNNING/i }));
-
-    expect(screen.getByText("running")).toBeInTheDocument();
-    expect(screen.getByText("processing")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /State/i })).toBeNull();
   });
 
   it("shows streaming message content immediately", () => {

@@ -39,7 +39,6 @@ from flowent.models import (
     PortInboundEntry,
     ReceivedMessage,
     SentMessage,
-    StateEntry,
     SystemEntry,
     TextPart,
     ThinkingDelta,
@@ -150,7 +149,6 @@ class Agent:
         self.todos: list[TodoItem] = []
         self.connections: list[str] = []
         self.history: list[HistoryEntry] = []
-        self.history.append(StateEntry(state=self.state.value, reason="created"))
         self._terminate = threading.Event()
         self._interrupt_requested = threading.Event()
         self._interrupt_callback_lock = threading.Lock()
@@ -570,9 +568,7 @@ class Agent:
                 self._pending_runtime_notices.clear()
             with self._history_lock:
                 self.history = [
-                    entry
-                    for entry in self.history
-                    if isinstance(entry, (SystemEntry, StateEntry))
+                    entry for entry in self.history if isinstance(entry, SystemEntry)
                 ]
                 self._pending_input_turn = False
                 self._turn_started_with_pending_input = False
@@ -665,8 +661,7 @@ class Agent:
                 self.history = [
                     entry
                     for index, entry in enumerate(previous_history)
-                    if index < anchor_index
-                    or isinstance(entry, (SystemEntry, StateEntry))
+                    if index < anchor_index or isinstance(entry, SystemEntry)
                 ]
                 retried_message_id = str(_uuid.uuid4())
                 self.history.append(
@@ -816,8 +811,7 @@ class Agent:
                 self.history = [
                     entry
                     for index, entry in enumerate(previous_history)
-                    if index < anchor_index
-                    or isinstance(entry, (SystemEntry, StateEntry))
+                    if index < anchor_index or isinstance(entry, SystemEntry)
                 ]
                 retried_message_id = str(_uuid.uuid4())
                 self.history.append(
@@ -3010,10 +3004,6 @@ class Agent:
                 self._idle_started_by_tool_call_id = None
             self._idle_state_event.clear()
         if old != state or force_emit:
-            if old != state:
-                self._append_history(
-                    StateEntry(state=state.value, reason=reason),
-                )
             self._log.debug(
                 "State: {} -> {}{}",
                 old.value,

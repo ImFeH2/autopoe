@@ -51,7 +51,7 @@ def bootstrap_runtime() -> None:
         resolve_effective_permissions_for_node_record,
     )
     from flowent.mcp_service import mcp_service
-    from flowent.models import AgentState, NodeConfig, NodeType, StateEntry
+    from flowent.models import AgentState, NodeConfig, NodeType
     from flowent.settings import (
         ensure_builtin_roles,
         get_settings,
@@ -95,20 +95,6 @@ def bootstrap_runtime() -> None:
             summary=assistant_record.execution_context_summary,
             history_cutoff=assistant_record.execution_context_history_cutoff,
         )
-        if not any(isinstance(entry, StateEntry) for entry in assistant.history):
-            assistant.history.insert(
-                0,
-                StateEntry(state=assistant_record.state.value, reason="restored"),
-            )
-        if assistant_record.state in {
-            AgentState.INITIALIZING,
-            AgentState.IDLE,
-            AgentState.RUNNING,
-            AgentState.SLEEPING,
-        }:
-            assistant.history.append(
-                StateEntry(state=AgentState.IDLE.value, reason="restored")
-            )
         assistant.todos = list(assistant_record.todos)
         assistant.prime_runtime_state(
             AgentState.ERROR
@@ -147,19 +133,6 @@ def bootstrap_runtime() -> None:
             summary=record.execution_context_summary,
             history_cutoff=record.execution_context_history_cutoff,
         )
-        if not any(isinstance(entry, StateEntry) for entry in node.history):
-            node.history.insert(
-                0,
-                StateEntry(state=record.state.value, reason="restored"),
-            )
-        if record.state in {
-            AgentState.INITIALIZING,
-            AgentState.RUNNING,
-            AgentState.SLEEPING,
-        }:
-            node.history.append(
-                StateEntry(state=AgentState.IDLE.value, reason="restored")
-            )
         node.todos = list(record.todos)
         node.prime_runtime_state(
             AgentState.ERROR if record.state == AgentState.ERROR else AgentState.IDLE

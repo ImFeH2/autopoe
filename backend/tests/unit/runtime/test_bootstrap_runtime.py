@@ -5,7 +5,7 @@ import pytest
 
 import flowent.settings as settings_module
 from flowent.agent import Agent
-from flowent.models import AgentState, AssistantText, ReceivedMessage, StateEntry
+from flowent.models import AgentState, AssistantText, ReceivedMessage
 from flowent.registry import registry
 from flowent.runtime import bootstrap_runtime, shutdown_runtime
 from flowent.settings import (
@@ -502,10 +502,7 @@ def test_bootstrap_runtime_backfills_state_history_for_restored_nodes(
         restored = registry.get("node-1")
         assert restored is not None
         assert restored.state == AgentState.IDLE
-        assert any(
-            isinstance(entry, StateEntry) and entry.state == "idle"
-            for entry in restored.history
-        )
+        assert restored.history == []
     finally:
         registry.reset()
 
@@ -584,11 +581,8 @@ def test_bootstrap_runtime_restores_active_nodes_as_idle(
         assert restored.state == AgentState.IDLE
         assert restored.uuid == "node-1"
         assert [todo.text for todo in restored.todos] == ["resume me"]
-        assert any(
-            isinstance(entry, StateEntry)
-            and entry.state == "idle"
-            and entry.reason == "restored"
-            for entry in restored.history
+        assert all(
+            entry.__class__.__name__ != "StateEntry" for entry in restored.history
         )
         persisted = workspace_store.get_node_record("node-1")
         assert persisted is not None
@@ -811,11 +805,8 @@ def test_bootstrap_runtime_preserves_error_state_for_restored_nodes(
         assert restored is not None
         assert restored.state == AgentState.ERROR
         assert restored.wait_until_idle(timeout=0.05) is False
-        assert not any(
-            isinstance(entry, StateEntry)
-            and entry.state == "idle"
-            and entry.reason == "initialized, awaiting first message"
-            for entry in restored.history
+        assert all(
+            entry.__class__.__name__ != "StateEntry" for entry in restored.history
         )
         persisted = workspace_store.get_node_record("node-1")
         assert persisted is not None
@@ -990,9 +981,8 @@ def test_shutdown_runtime_keeps_persistent_workspace_nodes_unterminated(
         persisted = workspace_store.get_node_record("node-1")
         assert persisted is not None
         assert persisted.state == AgentState.IDLE
-        assert not any(
-            isinstance(entry, StateEntry) and entry.state == "terminated"
-            for entry in persistent.history
+        assert all(
+            entry.__class__.__name__ != "StateEntry" for entry in persistent.history
         )
 
         bootstrap_runtime()

@@ -4,9 +4,7 @@ import { contentPartsToText } from "@/lib/contentParts";
 export function clearConversationHistory(
   history: HistoryEntry[],
 ): HistoryEntry[] {
-  return history.filter(
-    (entry) => entry.type === "SystemEntry" || entry.type === "StateEntry",
-  );
+  return history.filter((entry) => entry.type === "SystemEntry");
 }
 
 export function historyTimestampToMs(timestamp: number): number {
@@ -121,13 +119,6 @@ function getHistoryEntryDedupKey(entry: HistoryEntry): string {
         serializeHistoryValue(entry.arguments),
         entry.result ?? "",
         entry.streaming ? "streaming" : "final",
-      ].join(":");
-    case "StateEntry":
-      return [
-        entry.type,
-        timestamp,
-        entry.state ?? "",
-        entry.reason ?? "",
       ].join(":");
     default:
       return [entry.type, timestamp, entry.content ?? ""].join(":");

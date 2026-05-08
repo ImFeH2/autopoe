@@ -19,13 +19,7 @@ import { useMeasuredHeight } from "@/hooks/useMeasuredHeight";
 import { interruptNode } from "@/lib/api";
 import { getNodeLabel, nodeTypeIcon } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type {
-  AgentState,
-  ContactEntry,
-  ContactPath,
-  HistoryEntry,
-  Node,
-} from "@/types";
+import type { AgentState, ContactEntry, ContactPath, Node } from "@/types";
 
 const workspaceSelectionBadgeClass =
   "rounded-md bg-accent/45 px-2 py-1 text-xs text-foreground";
@@ -135,13 +129,6 @@ export function AgentDetailPanel({
       workflowPermissions?.write_dirs ??
       detailWriteDirs);
   const permissionsTitle = isAssistant ? "Permissions" : "Workflow Permissions";
-  const stateTimeline = detailHistory.filter(
-    (entry): entry is HistoryEntry & { type: "StateEntry" } =>
-      entry.type === "StateEntry",
-  );
-  const visibleHistory = detailHistory.filter(
-    (entry) => entry.type !== "StateEntry",
-  );
   const label = getNodeLabel({
     name: agent.name,
     roleName: agent.role_name,
@@ -342,47 +329,6 @@ export function AgentDetailPanel({
             </>
           ) : (
             <>
-              <DetailSection title="State Timeline">
-                {stateTimeline.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No state changes yet
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {stateTimeline
-                      .slice(-6)
-                      .reverse()
-                      .map((entry) => (
-                        <div
-                          key={`${entry.timestamp}-${entry.state ?? "unknown"}`}
-                          className="flex items-start justify-between gap-3 rounded-md border border-border bg-accent/25 px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <Badge
-                              variant="outline"
-                              className={
-                                workspaceStateBadgeClass[
-                                  entry.state ?? detailState
-                                ]
-                              }
-                            >
-                              {(entry.state ?? detailState).toUpperCase()}
-                            </Badge>
-                            {entry.reason ? (
-                              <p className="mt-1 select-text text-xs text-muted-foreground/78">
-                                {entry.reason}
-                              </p>
-                            ) : null}
-                          </div>
-                          <span className="shrink-0 select-text font-mono text-[10px] text-muted-foreground/64">
-                            {formatDetailTimestamp(entry.timestamp)}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </DetailSection>
-
               <DetailSection title="Contacts">
                 {pathContacts.length === 0 && contactItems.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -528,13 +474,13 @@ export function AgentDetailPanel({
                   </div>
                 ) : error ? (
                   <div className="text-sm text-destructive">{error}</div>
-                ) : visibleHistory.length === 0 ? (
+                ) : detailHistory.length === 0 ? (
                   <div className="text-sm text-muted-foreground">
                     No history yet.
                   </div>
                 ) : (
                   <HistoryView
-                    history={visibleHistory}
+                    history={detailHistory}
                     agentLabel={label}
                     nodes={agents}
                   />
@@ -875,15 +821,4 @@ function PermissionsContent({
       </div>
     </div>
   );
-}
-
-function formatDetailTimestamp(timestamp: number | undefined): string {
-  if (!timestamp) {
-    return "—";
-  }
-  return new Date(timestamp * 1000).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
 }

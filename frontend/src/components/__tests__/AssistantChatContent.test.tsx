@@ -259,16 +259,15 @@ describe("AssistantChatMessages", () => {
     expect(screen.getByText("manage_roles")).toBeInTheDocument();
   });
 
-  it("shows the empty state when only state entries remain after a chat clear", () => {
+  it("shows the empty state when only system entries remain after a chat clear", () => {
     const scrollRef = createRef<HTMLDivElement>();
 
     renderWithImageViewer(
       <AssistantChatMessages
         items={[
           {
-            type: "StateEntry",
-            state: "idle",
-            reason: "assistant chat cleared",
+            type: "SystemEntry",
+            content: "System prompt",
             timestamp: 1,
           },
         ]}
