@@ -233,7 +233,7 @@ async def get_node(node_id: str) -> dict:
         "role_name": target_config.role_name,
         "is_leader": is_tab_leader(node_id=record_id, tab_id=target_config.tab_id),
         "state": record_state.value,
-        "contacts": node.get_contact_ids_snapshot() if node is not None else [],
+        "contacts": node.get_contacts_info() if node is not None else [],
         "connections": (
             list_node_connection_ids(
                 tab_id=target_config.tab_id,

@@ -18,6 +18,12 @@ class Message:
     content: str = ""
     message_id: str | None = None
     history_recorded: bool = False
+    from_output_port_key: str | None = None
+    to_input_port_key: str | None = None
+    port_type: str | None = None
+    value: object | None = None
+    value_summary: str | None = None
+    port_inbound_recorded: bool = False
     timestamp: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:

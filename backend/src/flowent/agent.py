@@ -36,6 +36,7 @@ from flowent.models import (
     ModelInfo,
     NodeConfig,
     NodeType,
+    PortInboundEntry,
     ReceivedMessage,
     SentMessage,
     StateEntry,
@@ -46,6 +47,7 @@ from flowent.models import (
     ToolCall,
     ToolResultDelta,
     WorkflowActivationState,
+    WorkflowNodeKind,
     content_parts_to_text,
     deserialize_content_parts,
     has_image_parts,
@@ -332,7 +334,7 @@ class Agent:
         return max(0.0, _time.perf_counter() - started_at)
 
     def get_contact_ids_snapshot(self) -> list[str]:
-        from flowent.graph_service import get_tab_leader_id
+        from flowent.graph_service import get_tab_leader_id, list_agent_contact_paths
         from flowent.registry import registry
         from flowent.workspace_store import workspace_store
 
@@ -364,8 +366,6 @@ class Agent:
         assistant = registry.get_assistant()
         if is_leader and assistant is not None:
             append_contact(assistant.uuid)
-        if not is_leader and leader_id is not None:
-            append_contact(leader_id)
 
         if is_leader:
             for node in registry.get_all():
@@ -378,13 +378,34 @@ class Agent:
                 append_contact(node.uuid)
             return contact_ids
 
+        for path in list_agent_contact_paths(
+            tab_id=self.config.tab_id,
+            node_id=self.uuid,
+        ):
+            append_contact(path.target_id)
         return contact_ids
 
     def get_contacts_info(self) -> list[dict[str, Any]]:
-        from flowent.graph_service import is_tab_leader
+        from flowent.graph_service import (
+            is_tab_leader,
+            list_agent_contact_paths,
+        )
         from flowent.registry import registry
 
         result: list[dict[str, Any]] = []
+        if (
+            self.config.tab_id is not None
+            and not is_tab_leader(node_id=self.uuid, tab_id=self.config.tab_id)
+            and self.node_type == NodeType.AGENT
+        ):
+            return [
+                path.serialize()
+                for path in list_agent_contact_paths(
+                    tab_id=self.config.tab_id,
+                    node_id=self.uuid,
+                )
+            ]
+
         for contact_id in self.get_contact_ids_snapshot():
             node = registry.get(contact_id)
             if node is None:
@@ -1266,11 +1287,20 @@ class Agent:
         has_todos: bool,
         pending_agent_dispatches: list[str],
     ) -> dict[str, str]:
+        if self._is_entry_level_sender():
+            send_lines = [
+                "- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.",
+                "- Use `contacts` to inspect the node ids and names you can currently message directly.",
+            ]
+        else:
+            send_lines = [
+                "- To send through a workflow path, use `send` with one target, source output port, target input port, and a value matching that port type.",
+                "- Use `contacts` to inspect the current output-port paths you can send through.",
+            ]
         lines = [
             "Runtime post prompt:",
             "- Plain content is never delivered to other agents.",
-            "- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.",
-            "- Use `contacts` to inspect the node ids and names you can currently message directly.",
+            *send_lines,
             "- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.",
         ]
         if pending_agent_dispatches:
@@ -1445,6 +1475,10 @@ class Agent:
             ),
         )
 
+    @staticmethod
+    def _parts_value(parts: list[TextPart | ImagePart]) -> list[dict[str, Any]]:
+        return [part.serialize() for part in parts]
+
     def _record_text_output(
         self,
         content: str,
@@ -1555,6 +1589,48 @@ class Agent:
             raise ValueError(f"Send failed: target `{target_ref}` is not in contacts.")
         return target
 
+    def _is_entry_level_sender(self) -> bool:
+        if self.node_type == NodeType.ASSISTANT:
+            return True
+        if self.config.tab_id is None:
+            return False
+        from flowent.graph_service import is_tab_leader
+
+        return is_tab_leader(node_id=self.uuid, tab_id=self.config.tab_id)
+
+    def _resolve_port_send_path(
+        self,
+        *,
+        target_ref: str,
+        from_output_port_key: str,
+        to_input_port_key: str,
+    ):
+        if self.config.tab_id is None:
+            raise ValueError("Send failed: node is not part of a workflow.")
+        from flowent.graph_service import (
+            resolve_agent_contact_path,
+            resolve_workflow_node_ref,
+        )
+
+        target_id = resolve_workflow_node_ref(
+            tab_id=self.config.tab_id,
+            node_ref=target_ref,
+        )
+        if target_id is None:
+            raise ValueError(f"Send failed: target `{target_ref}` was not found.")
+        path = resolve_agent_contact_path(
+            tab_id=self.config.tab_id,
+            source_node_id=self.uuid,
+            target_node_id=target_id,
+            from_output_port_key=from_output_port_key,
+            to_input_port_key=to_input_port_key,
+        )
+        if path is None:
+            raise ValueError(
+                f"Send failed: target `{target_ref}` is not connected from `{from_output_port_key}` to `{to_input_port_key}`."
+            )
+        return path
+
     def _ensure_can_dispatch_to_contact(self, target: Agent) -> None:
         if self.config.tab_id is None:
             return
@@ -1592,7 +1668,17 @@ class Agent:
         *,
         target_ref: str,
         raw_parts: Any,
+        from_output_port_key: str | None = None,
+        to_input_port_key: str | None = None,
+        raw_value: Any | None = None,
     ) -> str:
+        if not self._is_entry_level_sender():
+            return self.send_port_value(
+                target_ref=target_ref,
+                from_output_port_key=from_output_port_key,
+                to_input_port_key=to_input_port_key,
+                raw_value=raw_value if raw_value is not None else raw_parts,
+            )
         parts = parse_content_parts_payload(raw_parts)
         target = self._resolve_contact_target(target_ref)
         self._ensure_can_dispatch_to_contact(target)
@@ -1615,6 +1701,78 @@ class Agent:
             )
         )
         return json.dumps({"status": "sent", "target_id": target.uuid})
+
+    def send_port_value(
+        self,
+        *,
+        target_ref: str,
+        from_output_port_key: str | None,
+        to_input_port_key: str | None,
+        raw_value: Any,
+    ) -> str:
+        if self._is_entry_level_sender():
+            raise ValueError("Send failed: entry contacts use target and parts.")
+        if (
+            not isinstance(from_output_port_key, str)
+            or not from_output_port_key.strip()
+        ):
+            raise ValueError("send.from_output_port_key must be a non-empty string")
+        if not isinstance(to_input_port_key, str) or not to_input_port_key.strip():
+            raise ValueError("send.to_input_port_key must be a non-empty string")
+
+        path = self._resolve_port_send_path(
+            target_ref=target_ref,
+            from_output_port_key=from_output_port_key.strip(),
+            to_input_port_key=to_input_port_key.strip(),
+        )
+        value = raw_value
+        if path.port_type == "parts":
+            parts = parse_content_parts_payload(raw_value)
+            value = self._parts_value(parts)
+            if path.target_node_type == WorkflowNodeKind.AGENT.value:
+                target = self._resolve_contact_target(path.target_id)
+                if has_image_parts(parts) and not target.supports_input_image():
+                    raise ValueError(
+                        f"Send failed: target `{target_ref}` does not support `input_image`."
+                    )
+            for part in parts:
+                asset_id = getattr(part, "asset_id", None)
+                if isinstance(asset_id, str):
+                    require_image_asset(asset_id)
+
+        message_id = str(_uuid.uuid4())
+        from flowent.graph_service import dispatch_port_value
+
+        payload, error = dispatch_port_value(
+            tab_id=self.config.tab_id or "",
+            source_node_id=self.uuid,
+            source_output_port_key=path.from_output_port_key,
+            target_node_id=path.target_id,
+            target_input_port_key=path.to_input_port_key,
+            value=value,
+            source_is_agent_send=True,
+            message_id=message_id,
+        )
+        if error is not None or payload is None:
+            raise ValueError(f"Send failed: {error or 'path unavailable'}.")
+
+        self._mark_turn_progress()
+        sent_parts = (
+            parse_content_parts_payload(value) if path.port_type == "parts" else []
+        )
+        value_summary = str(payload.get("value_summary", ""))
+        self._append_history(
+            SentMessage(
+                to_id=path.target_id,
+                parts=sent_parts,
+                content=value_summary if path.port_type != "parts" else "",
+                message_id=message_id,
+                from_output_port_key=path.from_output_port_key,
+                to_input_port_key=path.to_input_port_key,
+                value_summary=value_summary,
+            )
+        )
+        return json.dumps(payload)
 
     def _mark_turn_progress(self) -> None:
         self._turn_made_progress = True
@@ -1942,12 +2100,20 @@ class Agent:
 
             elif isinstance(entry, ReceivedMessage):
                 self._flush_tool_calls(messages, pending_tool_calls)
+                if entry.from_output_port_key and entry.to_input_port_key:
+                    prefix = (
+                        f'<message from="{entry.from_id}" '
+                        f'from_output="{entry.from_output_port_key}" '
+                        f'to_input="{entry.to_input_port_key}">'
+                    )
+                else:
+                    prefix = f'<message from="{entry.from_id}">'
                 messages.append(
                     {
                         "role": "user",
                         "content": self._wrap_context_parts(
                             entry.parts,
-                            prefix=f'<message from="{entry.from_id}">',
+                            prefix=prefix,
                             suffix="</message>",
                         ),
                     }
@@ -1964,12 +2130,20 @@ class Agent:
 
             elif isinstance(entry, SentMessage):
                 self._flush_tool_calls(messages, pending_tool_calls)
+                if entry.from_output_port_key and entry.to_input_port_key:
+                    prefix = (
+                        f'<message to="{entry.to_id}" '
+                        f'from_output="{entry.from_output_port_key}" '
+                        f'to_input="{entry.to_input_port_key}">'
+                    )
+                else:
+                    prefix = f'<message to="{entry.to_id}">'
                 messages.append(
                     {
                         "role": "assistant",
                         "content": self._wrap_context_parts(
                             entry.parts,
-                            prefix=f'<message to="{entry.to_id}">',
+                            prefix=prefix,
                             suffix="</message>",
                         ),
                     }
@@ -2019,6 +2193,18 @@ class Agent:
                     continue
                 self._flush_tool_calls(messages, pending_tool_calls)
                 messages.append(self._build_runtime_system_message(entry.content))
+
+            elif isinstance(entry, PortInboundEntry):
+                self._flush_tool_calls(messages, pending_tool_calls)
+                messages.append(
+                    self._build_runtime_system_message(
+                        "Port input received: "
+                        f"from {entry.from_id}.{entry.from_output_port_key} "
+                        f"to {entry.to_input_port_key} "
+                        f"({entry.port_type})\n"
+                        f"{json.dumps(entry.value, ensure_ascii=False, sort_keys=True)}"
+                    )
+                )
 
         self._flush_tool_calls(messages, pending_tool_calls)
         return messages
@@ -2470,6 +2656,7 @@ class Agent:
             from_id = message.get("from", "")
             message_id = message.get("message_id")
             history_recorded = bool(message.get("history_recorded", False))
+            port_inbound_recorded = bool(message.get("port_inbound_recorded", False))
             if (
                 not isinstance(content, str)
                 or not isinstance(from_id, str)
@@ -2490,6 +2677,23 @@ class Agent:
                         message_id=message_id,
                     ),
                 )
+            elif not port_inbound_recorded and message.get("port_type") in {
+                "string",
+                "json",
+            }:
+                value = message.get("value")
+                self._append_history(
+                    PortInboundEntry(
+                        from_id=from_id,
+                        from_output_port_key=str(
+                            message.get("from_output_port_key", "")
+                        ),
+                        to_input_port_key=str(message.get("to_input_port_key", "")),
+                        port_type=str(message.get("port_type", "")),
+                        value=value,
+                        value_summary=str(message.get("value_summary", "")),
+                    )
+                )
 
     def _wait_for_input(self) -> None:
         signal = self._wait_for_wakeup()
@@ -2507,6 +2711,9 @@ class Agent:
                 from_id = message.get("from")
                 message_id = message.get("message_id")
                 history_recorded = bool(message.get("history_recorded", False))
+                port_inbound_recorded = bool(
+                    message.get("port_inbound_recorded", False)
+                )
                 if (
                     isinstance(content, str)
                     and isinstance(from_id, str)
@@ -2519,6 +2726,24 @@ class Agent:
                             parts=parts,
                             content=content,
                             message_id=message_id,
+                        )
+                    )
+                elif (
+                    isinstance(from_id, str)
+                    and history_recorded
+                    and not port_inbound_recorded
+                    and message.get("port_type") in {"string", "json"}
+                ):
+                    self._append_history(
+                        PortInboundEntry(
+                            from_id=from_id,
+                            from_output_port_key=str(
+                                message.get("from_output_port_key", "")
+                            ),
+                            to_input_port_key=str(message.get("to_input_port_key", "")),
+                            port_type=str(message.get("port_type", "")),
+                            value=message.get("value"),
+                            value_summary=str(message.get("value_summary", "")),
                         )
                     )
 
@@ -2742,6 +2967,18 @@ class Agent:
             "parts": [part.serialize() for part in msg.parts],
             "history_recorded": msg.history_recorded,
         }
+        if msg.from_output_port_key is not None:
+            payload["from_output_port_key"] = msg.from_output_port_key
+        if msg.to_input_port_key is not None:
+            payload["to_input_port_key"] = msg.to_input_port_key
+        if msg.port_type is not None:
+            payload["port_type"] = msg.port_type
+        if msg.value is not None:
+            payload["value"] = msg.value
+        if msg.value_summary is not None:
+            payload["value_summary"] = msg.value_summary
+        if msg.port_inbound_recorded:
+            payload["port_inbound_recorded"] = msg.port_inbound_recorded
         if msg.message_id is not None:
             payload["message_id"] = msg.message_id
         self._wake_queue.put(

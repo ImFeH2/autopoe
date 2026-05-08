@@ -2,15 +2,21 @@ import json
 import threading
 
 from flowent.agent import Agent
+from flowent.graph_service import build_workflow_node_definition, create_edge
 from flowent.models import (
     AgentState,
     Message,
     NodeConfig,
     NodeType,
+    PortDirection,
+    PortType,
     ReceivedMessage,
     StateEntry,
     Tab,
     TodoItem,
+    WorkflowDefinition,
+    WorkflowNodeKind,
+    WorkflowPort,
 )
 from flowent.registry import registry
 from flowent.settings import RoleConfig, Settings
@@ -223,10 +229,28 @@ def test_contacts_tool_uses_agent_public_api(monkeypatch):
     assert result == {"contacts": expected}
 
 
-def test_agent_get_contacts_info_keeps_only_leader_for_regular_agents():
+def test_agent_get_contacts_info_is_empty_without_output_paths():
     registry.reset()
     workspace_store.reset_cache()
-    workspace_store.upsert_tab(Tab(id="tab-1", title="Task", leader_id="leader-a"))
+    workspace_store.upsert_tab(
+        Tab(
+            id="tab-1",
+            title="Task",
+            leader_id="leader-a",
+            definition=WorkflowDefinition(
+                nodes=[
+                    build_workflow_node_definition(
+                        node_id="agent-a",
+                        node_kind=WorkflowNodeKind.AGENT,
+                    ),
+                    build_workflow_node_definition(
+                        node_id="agent-b",
+                        node_kind=WorkflowNodeKind.AGENT,
+                    ),
+                ]
+            ),
+        )
+    )
     leader = Agent(
         NodeConfig(
             node_type=NodeType.AGENT,
@@ -260,25 +284,50 @@ def test_agent_get_contacts_info_keeps_only_leader_for_regular_agents():
     agent.add_connection(peer.uuid)
 
     try:
-        assert agent.get_contacts_info() == [
-            {
-                "id": "leader-a",
-                "node_type": "agent",
-                "role_name": "Conductor",
-                "name": "Leader",
-                "state": "initializing",
-                "is_leader": True,
-            },
-        ]
+        assert agent.get_contacts_info() == []
     finally:
         registry.reset()
         workspace_store.reset_cache()
 
 
-def test_agent_get_contacts_info_keeps_leader_stable_when_explicitly_connected():
+def test_agent_get_contacts_info_lists_output_port_paths():
     registry.reset()
     workspace_store.reset_cache()
-    workspace_store.upsert_tab(Tab(id="tab-1", title="Task", leader_id="leader-a"))
+    workspace_store.upsert_tab(
+        Tab(
+            id="tab-1",
+            title="Task",
+            leader_id="leader-a",
+            definition=WorkflowDefinition(
+                nodes=[
+                    build_workflow_node_definition(
+                        node_id="agent-a",
+                        node_kind=WorkflowNodeKind.AGENT,
+                    ),
+                    build_workflow_node_definition(
+                        node_id="agent-b",
+                        node_kind=WorkflowNodeKind.AGENT,
+                        config={"role_name": "Reviewer", "name": "Reviewer"},
+                    ),
+                    build_workflow_node_definition(
+                        node_id="code-a",
+                        node_kind=WorkflowNodeKind.CODE,
+                        config={
+                            "inputs": [
+                                {
+                                    "key": "payload",
+                                    "direction": "in",
+                                    "type": "json",
+                                    "required": True,
+                                }
+                            ],
+                            "outputs": [],
+                        },
+                    ),
+                ]
+            ),
+        )
+    )
     leader = Agent(
         NodeConfig(
             node_type=NodeType.AGENT,
@@ -292,25 +341,74 @@ def test_agent_get_contacts_info_keeps_leader_stable_when_explicitly_connected()
         NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"),
         uuid="agent-a",
     )
-    assistant = Agent(
-        NodeConfig(node_type=NodeType.ASSISTANT, role_name="Steward", name="Assistant"),
-        uuid="assistant-a",
+    peer = Agent(
+        NodeConfig(
+            node_type=NodeType.AGENT,
+            role_name="Reviewer",
+            name="Reviewer",
+            tab_id="tab-1",
+        ),
+        uuid="agent-b",
     )
     registry.register(leader)
     registry.register(agent)
-    registry.register(assistant)
-    agent.add_connection(leader.uuid)
+    registry.register(peer)
+    tab = workspace_store.get_tab("tab-1")
+    assert tab is not None
+    source = tab.definition.get_node("agent-a")
+    assert source is not None
+    source.outputs.append(
+        WorkflowPort(
+            key="json",
+            direction=PortDirection.OUTPUT,
+            type=PortType.JSON,
+            multiple=True,
+        )
+    )
+    workspace_store.upsert_tab(tab)
+    peer_edge, error = create_edge(
+        tab_id="tab-1",
+        from_node_id="agent-a",
+        to_node_id="agent-b",
+    )
+    assert error is None and peer_edge is not None
+    code_edge, error = create_edge(
+        tab_id="tab-1",
+        from_node_id="agent-a",
+        from_port_key="json",
+        to_node_id="code-a",
+        to_port_key="payload",
+    )
+    assert error is None and code_edge is not None
 
     try:
         assert agent.get_contacts_info() == [
             {
-                "id": "leader-a",
+                "id": "agent-b",
+                "target_id": "agent-b",
                 "node_type": "agent",
-                "role_name": "Conductor",
-                "name": "Leader",
+                "role_name": "Reviewer",
+                "name": "Reviewer",
                 "state": "initializing",
-                "is_leader": True,
-            }
+                "is_leader": False,
+                "from_output_port_key": "out",
+                "to_input_port_key": "in",
+                "port_type": "parts",
+                "edge_id": peer_edge.id,
+            },
+            {
+                "id": "code-a",
+                "target_id": "code-a",
+                "node_type": "code",
+                "role_name": None,
+                "name": None,
+                "state": None,
+                "is_leader": False,
+                "from_output_port_key": "json",
+                "to_input_port_key": "payload",
+                "port_type": "json",
+                "edge_id": code_edge.id,
+            },
         ]
     finally:
         registry.reset()
@@ -354,16 +452,43 @@ def test_agent_get_contacts_info_ignores_peer_only_connections():
     peer.add_connection(agent.uuid)
 
     try:
-        assert agent.get_contacts_info() == [
-            {
-                "id": "leader-a",
-                "node_type": "agent",
-                "role_name": "Conductor",
-                "name": "Leader",
-                "state": "initializing",
-                "is_leader": True,
-            },
-        ]
+        assert agent.get_contacts_info() == []
+    finally:
+        registry.reset()
+        workspace_store.reset_cache()
+
+
+def test_workflow_node_ref_resolves_unique_agent_role_name():
+    from flowent.graph_service import resolve_workflow_node_ref
+
+    registry.reset()
+    workspace_store.reset_cache()
+    workspace_store.upsert_tab(
+        Tab(
+            id="tab-1",
+            title="Task",
+            leader_id="leader-a",
+            definition=WorkflowDefinition(
+                nodes=[
+                    build_workflow_node_definition(
+                        node_id="agent-a",
+                        node_kind=WorkflowNodeKind.AGENT,
+                        config={"role_name": "Reviewer"},
+                    ),
+                    build_workflow_node_definition(
+                        node_id="agent-b",
+                        node_kind=WorkflowNodeKind.AGENT,
+                        config={"role_name": "Writer"},
+                    ),
+                ]
+            ),
+        )
+    )
+
+    try:
+        assert (
+            resolve_workflow_node_ref(tab_id="tab-1", node_ref="Reviewer") == "agent-a"
+        )
     finally:
         registry.reset()
         workspace_store.reset_cache()

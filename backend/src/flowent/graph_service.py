@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import uuid
 from copy import deepcopy
+from dataclasses import dataclass
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flowent import settings as settings_module
@@ -21,6 +22,7 @@ from flowent.models import (
     NodeConfig,
     NodeType,
     PortDirection,
+    PortInboundEntry,
     PortType,
     ReceivedMessage,
     Tab,
@@ -29,6 +31,8 @@ from flowent.models import (
     WorkflowNodeDefinition,
     WorkflowNodeKind,
     WorkflowPort,
+    content_parts_to_text,
+    deserialize_content_parts,
 )
 from flowent.registry import registry
 from flowent.runtime import SYSTEM_NODE_TIMEOUT
@@ -53,6 +57,35 @@ from flowent.tools import (
 from flowent.workspace_store import workspace_store
 
 LEADER_NODE_NAME = "Leader"
+
+
+@dataclass(frozen=True)
+class ContactPath:
+    target_id: str
+    target_node_type: str
+    target_role_name: str | None
+    target_name: str | None
+    target_state: str | None
+    is_leader: bool
+    from_output_port_key: str
+    to_input_port_key: str
+    port_type: str
+    edge_id: str
+
+    def serialize(self) -> dict[str, object]:
+        return {
+            "id": self.target_id,
+            "target_id": self.target_id,
+            "node_type": self.target_node_type,
+            "role_name": self.target_role_name,
+            "name": self.target_name,
+            "state": self.target_state,
+            "is_leader": self.is_leader,
+            "from_output_port_key": self.from_output_port_key,
+            "to_input_port_key": self.to_input_port_key,
+            "port_type": self.port_type,
+            "edge_id": self.edge_id,
+        }
 
 
 def build_tools_for_role(
@@ -379,6 +412,376 @@ def get_workflow_node(tab_id: str, node_id: str) -> WorkflowNodeDefinition | Non
     if tab is None:
         return None
     return tab.definition.get_node(node_id)
+
+
+def get_workflow_node_definition(node_id: str) -> WorkflowNodeDefinition | None:
+    record = workspace_store.get_node_record(node_id)
+    if record is not None and record.config.tab_id:
+        return get_workflow_node(record.config.tab_id, node_id)
+    live_node = registry.get(node_id)
+    if live_node is not None and live_node.config.tab_id:
+        return get_workflow_node(live_node.config.tab_id, node_id)
+    for tab in workspace_store.list_tabs():
+        node = tab.definition.get_node(node_id)
+        if node is not None:
+            return node
+    return None
+
+
+def resolve_workflow_node_ref(*, tab_id: str, node_ref: str) -> str | None:
+    target = registry.get(node_ref)
+    if target is not None and target.config.tab_id == tab_id:
+        return target.uuid
+
+    tab = workspace_store.get_tab(tab_id)
+    if tab is None:
+        return None
+
+    definition_nodes = list(tab.definition.nodes)
+    exact_match = next((node for node in definition_nodes if node.id == node_ref), None)
+    if exact_match is not None:
+        return exact_match.id
+
+    named_matches = [
+        node
+        for node in definition_nodes
+        if isinstance(node.config.get("name"), str) and node.config["name"] == node_ref
+    ]
+    if len(named_matches) == 1:
+        return named_matches[0].id
+
+    role_matches = [
+        node
+        for node in definition_nodes
+        if node.type == WorkflowNodeKind.AGENT
+        and isinstance(node.config.get("role_name"), str)
+        and node.config["role_name"] == node_ref
+    ]
+    if len(role_matches) == 1:
+        return role_matches[0].id
+
+    if 4 <= len(node_ref) < 36:
+        prefix_matches = [
+            node for node in definition_nodes if node.id.startswith(node_ref)
+        ]
+        if len(prefix_matches) == 1:
+            return prefix_matches[0].id
+    return None
+
+
+def _resolve_contact_target_metadata(
+    *,
+    tab_id: str,
+    node_id: str,
+) -> tuple[str, str | None, str | None, str | None, bool]:
+    live_node = registry.get(node_id)
+    if live_node is not None:
+        return (
+            live_node.config.node_type.value,
+            live_node.config.role_name,
+            live_node.config.name,
+            live_node.state.value,
+            is_tab_leader(node_id=node_id, tab_id=tab_id),
+        )
+
+    record = workspace_store.get_node_record(node_id)
+    if record is not None:
+        return (
+            record.config.node_type.value,
+            record.config.role_name,
+            record.config.name,
+            record.state.value,
+            is_tab_leader(node_id=node_id, tab_id=tab_id),
+        )
+
+    definition = get_workflow_node(tab_id, node_id)
+    if definition is None:
+        return ("agent", None, None, None, False)
+    return (
+        definition.type.value,
+        str(definition.config["role_name"])
+        if isinstance(definition.config.get("role_name"), str)
+        else None,
+        str(definition.config["name"])
+        if isinstance(definition.config.get("name"), str)
+        else None,
+        None,
+        False,
+    )
+
+
+def list_agent_contact_paths(*, tab_id: str, node_id: str) -> list[ContactPath]:
+    if is_tab_leader(node_id=node_id, tab_id=tab_id):
+        return []
+    tab = workspace_store.get_tab(tab_id)
+    if tab is None:
+        return []
+
+    paths: list[ContactPath] = []
+    source_node = tab.definition.get_node(node_id)
+    if source_node is None or source_node.type != WorkflowNodeKind.AGENT:
+        return paths
+
+    for edge in sorted(
+        tab.definition.edges, key=lambda item: (item.created_at, item.id)
+    ):
+        if edge.from_node_id != node_id:
+            continue
+        source_port = _port_matches(
+            source_node.outputs,
+            port_key=edge.from_port_key,
+            direction=PortDirection.OUTPUT,
+        )
+        target_node = tab.definition.get_node(edge.to_node_id)
+        if source_port is None or target_node is None:
+            continue
+        target_port = _port_matches(
+            target_node.inputs,
+            port_key=edge.to_port_key,
+            direction=PortDirection.INPUT,
+        )
+        if target_port is None or source_port.type != target_port.type:
+            continue
+        node_type, role_name, name, state, is_leader_contact = (
+            _resolve_contact_target_metadata(tab_id=tab_id, node_id=edge.to_node_id)
+        )
+        paths.append(
+            ContactPath(
+                target_id=edge.to_node_id,
+                target_node_type=node_type,
+                target_role_name=role_name,
+                target_name=name,
+                target_state=state,
+                is_leader=is_leader_contact,
+                from_output_port_key=edge.from_port_key,
+                to_input_port_key=edge.to_port_key,
+                port_type=source_port.type.value,
+                edge_id=edge.id,
+            )
+        )
+    return paths
+
+
+def resolve_agent_contact_path(
+    *,
+    tab_id: str,
+    source_node_id: str,
+    target_node_id: str,
+    from_output_port_key: str,
+    to_input_port_key: str,
+) -> ContactPath | None:
+    return next(
+        (
+            path
+            for path in list_agent_contact_paths(tab_id=tab_id, node_id=source_node_id)
+            if path.target_id == target_node_id
+            and path.from_output_port_key == from_output_port_key
+            and path.to_input_port_key == to_input_port_key
+        ),
+        None,
+    )
+
+
+def _summarize_port_value(
+    value: object, *, port_type: PortType, limit: int = 240
+) -> str:
+    if port_type == PortType.PARTS:
+        text = content_parts_to_text(
+            deserialize_content_parts(value if isinstance(value, list) else None)
+        )
+    elif isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            text = str(value)
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _node_label_snapshot(tab_id: str, node_id: str) -> str | None:
+    _, role_name, name, _, is_leader_contact = _resolve_contact_target_metadata(
+        tab_id=tab_id,
+        node_id=node_id,
+    )
+    if name:
+        return name
+    if is_leader_contact:
+        return LEADER_NODE_NAME
+    if role_name:
+        return role_name
+    return node_id[:8]
+
+
+def dispatch_port_value(
+    *,
+    tab_id: str,
+    source_node_id: str,
+    source_output_port_key: str,
+    target_node_id: str,
+    target_input_port_key: str,
+    value: object,
+    source_is_agent_send: bool = False,
+    message_id: str | None = None,
+) -> tuple[dict[str, object] | None, str | None]:
+    tab = workspace_store.get_tab(tab_id)
+    if tab is None:
+        return None, f"Tab '{tab_id}' not found"
+    source_node = tab.definition.get_node(source_node_id)
+    target_node = tab.definition.get_node(target_node_id)
+    if source_node is None:
+        return None, f"Source node '{source_node_id}' not found"
+    if target_node is None:
+        return None, f"Target node '{target_node_id}' not found"
+    source_port = _port_matches(
+        source_node.outputs,
+        port_key=source_output_port_key,
+        direction=PortDirection.OUTPUT,
+    )
+    if source_port is None:
+        return None, f"Output port '{source_output_port_key}' is invalid"
+    target_port = _port_matches(
+        target_node.inputs,
+        port_key=target_input_port_key,
+        direction=PortDirection.INPUT,
+    )
+    if target_port is None:
+        return None, f"Input port '{target_input_port_key}' is invalid"
+    if source_port.type != target_port.type:
+        return (
+            None,
+            f"Port type mismatch: '{source_node.id}.{source_port.key}' is {source_port.type.value} "
+            f"but '{target_node.id}.{target_port.key}' is {target_port.type.value}",
+        )
+    if not _validate_typed_value(value, source_port.type):
+        return None, f"Value must match {source_port.type.value} port type"
+
+    edge = next(
+        (
+            item
+            for item in tab.definition.edges
+            if item.from_node_id == source_node_id
+            and item.to_node_id == target_node_id
+            and item.from_port_key == source_output_port_key
+            and item.to_port_key == target_input_port_key
+        ),
+        None,
+    )
+    if edge is None:
+        return None, "Send path is not connected"
+
+    value_summary = _summarize_port_value(value, port_type=source_port.type)
+    payload: dict[str, object] = {
+        "status": "sent",
+        "target_id": target_node_id,
+        "from_output_port_key": source_output_port_key,
+        "to_input_port_key": target_input_port_key,
+        "port_type": source_port.type.value,
+        "value_summary": value_summary,
+    }
+
+    target = registry.get(target_node_id)
+    if target is not None and target_node.type == WorkflowNodeKind.AGENT:
+        if source_port.type == PortType.PARTS:
+            parts = deserialize_content_parts(value)
+            if source_is_agent_send:
+                target._append_history(
+                    ReceivedMessage(
+                        from_id=source_node_id,
+                        parts=parts,
+                        message_id=message_id,
+                        from_output_port_key=source_output_port_key,
+                        to_input_port_key=target_input_port_key,
+                        value_summary=value_summary,
+                    )
+                )
+                target.enqueue_message(
+                    Message(
+                        from_id=source_node_id,
+                        to_id=target_node_id,
+                        parts=parts,
+                        message_id=message_id,
+                        history_recorded=True,
+                        from_output_port_key=source_output_port_key,
+                        to_input_port_key=target_input_port_key,
+                        port_type=source_port.type.value,
+                        value=value,
+                        value_summary=value_summary,
+                    )
+                )
+            else:
+                target._append_history(
+                    PortInboundEntry(
+                        from_id=source_node_id,
+                        from_output_port_key=source_output_port_key,
+                        to_input_port_key=target_input_port_key,
+                        port_type=source_port.type.value,
+                        value=value,
+                        source_label=_node_label_snapshot(tab_id, source_node_id),
+                        value_summary=value_summary,
+                    )
+                )
+                target.enqueue_message(
+                    Message(
+                        from_id=source_node_id,
+                        to_id=target_node_id,
+                        parts=parts,
+                        message_id=message_id,
+                        history_recorded=True,
+                        from_output_port_key=source_output_port_key,
+                        to_input_port_key=target_input_port_key,
+                        port_type=source_port.type.value,
+                        value=value,
+                        value_summary=value_summary,
+                        port_inbound_recorded=True,
+                    )
+                )
+        else:
+            target._append_history(
+                PortInboundEntry(
+                    from_id=source_node_id,
+                    from_output_port_key=source_output_port_key,
+                    to_input_port_key=target_input_port_key,
+                    port_type=source_port.type.value,
+                    value=value,
+                    source_label=_node_label_snapshot(tab_id, source_node_id),
+                    value_summary=value_summary,
+                )
+            )
+            target.enqueue_message(
+                Message(
+                    from_id=source_node_id,
+                    to_id=target_node_id,
+                    content=value_summary,
+                    message_id=message_id,
+                    history_recorded=True,
+                    from_output_port_key=source_output_port_key,
+                    to_input_port_key=target_input_port_key,
+                    port_type=source_port.type.value,
+                    value=value,
+                    value_summary=value_summary,
+                    port_inbound_recorded=True,
+                )
+            )
+
+    event_bus.emit(
+        Event(
+            type=EventType.NODE_MESSAGE,
+            agent_id=source_node_id,
+            data={
+                "to_id": target_node_id,
+                "content": value_summary,
+                "message_id": message_id,
+                "from_output_port_key": source_output_port_key,
+                "to_input_port_key": target_input_port_key,
+                "port_type": source_port.type.value,
+            },
+        ),
+    )
+    return payload, None
 
 
 def _sync_runtime_positions_into_definition(tab: Tab) -> bool:

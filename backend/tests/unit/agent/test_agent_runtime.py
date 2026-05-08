@@ -13,6 +13,7 @@ from flowent.agent import (
     WakeSignal,
 )
 from flowent.events import event_bus
+from flowent.graph_service import build_workflow_node_definition, create_edge
 from flowent.models import (
     AgentState,
     AssistantText,
@@ -35,6 +36,8 @@ from flowent.models import (
     ToolCall,
     ToolCallResult,
     WorkflowActivationState,
+    WorkflowDefinition,
+    WorkflowNodeKind,
 )
 from flowent.observability_service import observability_store
 from flowent.providers.errors import LLMProviderError
@@ -82,6 +85,39 @@ def _register_tab_leader(*, tab_id: str = "tab-1", leader_id: str = "leader") ->
     )
     registry.register(leader)
     return leader
+
+
+def _add_agent_path(
+    *,
+    tab_id: str = "tab-1",
+    source_id: str,
+    target_id: str,
+) -> None:
+    tab = workspace_store.get_tab(tab_id)
+    assert tab is not None
+    existing = {node.id for node in tab.definition.nodes}
+    next_nodes = list(tab.definition.nodes)
+    for node_id in (source_id, target_id):
+        if node_id not in existing:
+            next_nodes.append(
+                build_workflow_node_definition(
+                    node_id=node_id,
+                    node_kind=WorkflowNodeKind.AGENT,
+                )
+            )
+    tab.definition = WorkflowDefinition(
+        version=tab.definition.version,
+        nodes=next_nodes,
+        edges=list(tab.definition.edges),
+        view=tab.definition.view,
+    )
+    workspace_store.upsert_tab(tab)
+    edge, error = create_edge(
+        tab_id=tab_id,
+        from_node_id=source_id,
+        to_node_id=target_id,
+    )
+    assert error is None and edge is not None
 
 
 def test_agent_keeps_running_after_pure_text_response(monkeypatch):
@@ -1693,9 +1729,12 @@ def test_assistant_content_streams_even_when_response_has_tool_calls(monkeypatch
 
 def test_send_message_delivers_to_single_contact_and_records_histories(monkeypatch):
     registry.reset()
-    leader = _register_tab_leader()
+    _register_tab_leader()
     child = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="child")
+    peer = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="peer")
     registry.register(child)
+    registry.register(peer)
+    _add_agent_path(source_id="child", target_id="peer")
     events = []
 
     monkeypatch.setattr(event_bus, "emit", lambda event: events.append(event))
@@ -1703,7 +1742,9 @@ def test_send_message_delivers_to_single_contact_and_records_histories(monkeypat
     try:
         result = json.loads(
             child.send_message(
-                target_ref="leader",
+                target_ref="peer",
+                from_output_port_key="out",
+                to_input_port_key="in",
                 raw_parts=[{"type": "text", "text": "investigate the error"}],
             )
         )
@@ -1717,16 +1758,29 @@ def test_send_message_delivers_to_single_contact_and_records_histories(monkeypat
     )
     received_entry = next(
         entry
-        for entry in leader.get_history_snapshot()
+        for entry in peer.get_history_snapshot()
         if isinstance(entry, ReceivedMessage)
     )
-    signal = leader._wake_queue.get_nowait()
+    signal = peer._wake_queue.get_nowait()
 
-    assert result == {"status": "sent", "target_id": "leader"}
-    assert sent_entry.to_id == "leader"
+    assert result == {
+        "status": "sent",
+        "target_id": "peer",
+        "from_output_port_key": "out",
+        "to_input_port_key": "in",
+        "port_type": "parts",
+        "value_summary": "investigate the error",
+    }
+    assert sent_entry.to_id == "peer"
     assert sent_entry.content == "investigate the error"
+    assert sent_entry.from_output_port_key == "out"
+    assert sent_entry.to_input_port_key == "in"
+    assert sent_entry.value_summary == "investigate the error"
     assert received_entry.from_id == "child"
     assert received_entry.content == "investigate the error"
+    assert received_entry.from_output_port_key == "out"
+    assert received_entry.to_input_port_key == "in"
+    assert received_entry.value_summary == "investigate the error"
     assert sent_entry.message_id == received_entry.message_id
     assert signal.payload == {
         "message": {
@@ -1735,13 +1789,21 @@ def test_send_message_delivers_to_single_contact_and_records_histories(monkeypat
             "parts": [{"type": "text", "text": "investigate the error"}],
             "history_recorded": True,
             "message_id": sent_entry.message_id,
+            "from_output_port_key": "out",
+            "to_input_port_key": "in",
+            "port_type": "parts",
+            "value": [{"type": "text", "text": "investigate the error"}],
+            "value_summary": "investigate the error",
         }
     }
     assert [event.data for event in events if event.type == EventType.NODE_MESSAGE] == [
         {
-            "to_id": "leader",
+            "to_id": "peer",
             "content": "investigate the error",
             "message_id": sent_entry.message_id,
+            "from_output_port_key": "out",
+            "to_input_port_key": "in",
+            "port_type": "parts",
         }
     ]
 
@@ -1757,10 +1819,12 @@ def test_send_message_reports_error_when_target_is_not_in_contacts():
     try:
         with pytest.raises(
             ValueError,
-            match=r"Send failed: target `peer` is not in contacts\.",
+            match=r"Send failed: target `peer` is not connected from `out` to `in`\.",
         ):
             child.send_message(
                 target_ref="peer",
+                from_output_port_key="out",
+                to_input_port_key="in",
                 raw_parts=[{"type": "text", "text": "reply with the findings"}],
             )
     finally:
@@ -1778,10 +1842,12 @@ def test_send_message_validates_target_before_image_capability():
     try:
         with pytest.raises(
             ValueError,
-            match=r"Send failed: target `peer` is not in contacts\.",
+            match=r"Send failed: target `peer` is not connected from `out` to `in`\.",
         ):
             child.send_message(
                 target_ref="peer",
+                from_output_port_key="out",
+                to_input_port_key="in",
                 raw_parts=[{"type": "image", "asset_id": "asset-1"}],
             )
     finally:
@@ -1792,15 +1858,20 @@ def test_send_message_reports_error_when_target_lacks_input_image_support():
     registry.reset()
     _register_tab_leader()
     child = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="child")
+    peer = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="peer")
     registry.register(child)
+    registry.register(peer)
+    _add_agent_path(source_id="child", target_id="peer")
 
     try:
         with pytest.raises(
             ValueError,
-            match=r"Send failed: target `leader` does not support `input_image`\.",
+            match=r"Send failed: target `peer` does not support `input_image`\.",
         ):
             child.send_message(
-                target_ref="leader",
+                target_ref="peer",
+                from_output_port_key="out",
+                to_input_port_key="in",
                 raw_parts=[{"type": "image", "asset_id": "asset-1"}],
             )
     finally:
@@ -1877,21 +1948,33 @@ def test_handle_tool_call_send_success_omits_toolcall_history(monkeypatch):
     registry.reset()
     _register_tab_leader()
     child = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="child")
+    peer = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="peer")
     registry.register(child)
+    registry.register(peer)
+    _add_agent_path(source_id="child", target_id="peer")
 
     try:
         result = child._handle_tool_call(
             "send",
             {
-                "target": "leader",
-                "parts": [{"type": "text", "text": "reply with the findings"}],
+                "target": "peer",
+                "from_output_port_key": "out",
+                "to_input_port_key": "in",
+                "value": [{"type": "text", "text": "reply with the findings"}],
             },
             "call-send",
         )
     finally:
         registry.reset()
 
-    assert json.loads(result) == {"status": "sent", "target_id": "leader"}
+    assert json.loads(result) == {
+        "status": "sent",
+        "target_id": "peer",
+        "from_output_port_key": "out",
+        "to_input_port_key": "in",
+        "port_type": "parts",
+        "value_summary": "reply with the findings",
+    }
     assert not any(
         isinstance(entry, ToolCall) and entry.tool_call_id == "call-send"
         for entry in child.get_history_snapshot()
@@ -1912,7 +1995,9 @@ def test_handle_tool_call_send_failure_records_error_without_toolcall():
             "send",
             {
                 "target": "peer",
-                "parts": [{"type": "text", "text": "reply with the findings"}],
+                "from_output_port_key": "out",
+                "to_input_port_key": "in",
+                "value": [{"type": "text", "text": "reply with the findings"}],
             },
             "call-send",
         )
@@ -1920,7 +2005,7 @@ def test_handle_tool_call_send_failure_records_error_without_toolcall():
         registry.reset()
 
     assert json.loads(result) == {
-        "error": "Send failed: target `peer` is not in contacts."
+        "error": "Send failed: target `peer` is not connected from `out` to `in`."
     }
     assert not any(
         isinstance(entry, ToolCall) and entry.tool_call_id == "call-send"
@@ -1928,18 +2013,22 @@ def test_handle_tool_call_send_failure_records_error_without_toolcall():
     )
     assert any(
         isinstance(entry, ErrorEntry)
-        and entry.content == "Send failed: target `peer` is not in contacts."
+        and entry.content
+        == "Send failed: target `peer` is not connected from `out` to `in`."
         for entry in child.get_history_snapshot()
     )
 
 
 def test_multiple_send_tool_calls_stop_after_first_failure(monkeypatch):
     registry.reset()
-    leader = _register_tab_leader()
+    _register_tab_leader()
     child = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="child")
+    peer = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="peer")
     helper = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="helper")
     registry.register(child)
+    registry.register(peer)
     registry.register(helper)
+    _add_agent_path(source_id="child", target_id="peer")
 
     wait_calls = 0
     chat_calls = 0
@@ -1969,8 +2058,10 @@ def test_multiple_send_tool_calls_stop_after_first_failure(monkeypatch):
                         id="call-send-1",
                         name="send",
                         arguments={
-                            "target": "leader",
-                            "parts": [{"type": "text", "text": "first"}],
+                            "target": "peer",
+                            "from_output_port_key": "out",
+                            "to_input_port_key": "in",
+                            "value": [{"type": "text", "text": "first"}],
                         },
                     ),
                     ToolCallResult(
@@ -1978,15 +2069,19 @@ def test_multiple_send_tool_calls_stop_after_first_failure(monkeypatch):
                         name="send",
                         arguments={
                             "target": "helper",
-                            "parts": [{"type": "text", "text": "second"}],
+                            "from_output_port_key": "out",
+                            "to_input_port_key": "in",
+                            "value": [{"type": "text", "text": "second"}],
                         },
                     ),
                     ToolCallResult(
                         id="call-send-3",
                         name="send",
                         arguments={
-                            "target": "leader",
-                            "parts": [{"type": "text", "text": "third"}],
+                            "target": "peer",
+                            "from_output_port_key": "out",
+                            "to_input_port_key": "in",
+                            "value": [{"type": "text", "text": "third"}],
                         },
                     ),
                 ]
@@ -2014,12 +2109,13 @@ def test_multiple_send_tool_calls_stop_after_first_failure(monkeypatch):
     assert [entry.content for entry in sent_entries] == ["first"]
     assert [
         entry.content
-        for entry in leader.get_history_snapshot()
+        for entry in peer.get_history_snapshot()
         if isinstance(entry, ReceivedMessage)
     ] == ["first"]
     assert helper._wake_queue.empty()
     assert any(
-        entry.content == "Send failed: target `helper` is not in contacts."
+        entry.content
+        == "Send failed: target `helper` is not connected from `out` to `in`."
         for entry in error_entries
     )
 
@@ -2041,7 +2137,7 @@ def test_build_messages_replays_sent_messages_as_message_to_context(monkeypatch)
         {"role": "assistant", "content": "final answer"},
         {
             "role": "user",
-            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.\n- Use `contacts` to inspect the node ids and names you can currently message directly.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If there is no unfinished TODO and the task is finished with no immediate next action, call `idle`.</system>",
+            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send through a workflow path, use `send` with one target, source output port, target input port, and a value matching that port type.\n- Use `contacts` to inspect the current output-port paths you can send through.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If there is no unfinished TODO and the task is finished with no immediate next action, call `idle`.</system>",
         },
     ]
 
@@ -2253,7 +2349,7 @@ def test_build_messages_appends_runtime_todo_context_without_history_entry(monke
         },
         {
             "role": "user",
-            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.\n- Use `contacts` to inspect the node ids and names you can currently message directly.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If the TODO list is not complete yet, use `todo` to replace it with the latest remaining items.</system>",
+            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send through a workflow path, use `send` with one target, source output port, target input port, and a value matching that port type.\n- Use `contacts` to inspect the current output-port paths you can send through.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If the TODO list is not complete yet, use `todo` to replace it with the latest remaining items.</system>",
         },
     ]
 
@@ -2281,7 +2377,7 @@ def test_build_messages_appends_runtime_post_prompt_and_idle_guidance(monkeypatc
         {"role": "user", "content": '<message from="human">begin</message>'},
         {
             "role": "user",
-            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.\n- Use `contacts` to inspect the node ids and names you can currently message directly.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If there is no unfinished TODO and the task is finished with no immediate next action, call `idle`.</system>",
+            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send through a workflow path, use `send` with one target, source output port, target input port, and a value matching that port type.\n- Use `contacts` to inspect the current output-port paths you can send through.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If there is no unfinished TODO and the task is finished with no immediate next action, call `idle`.</system>",
         },
         {
             "role": "user",
@@ -2353,7 +2449,7 @@ def test_build_messages_warns_about_newly_created_agents_waiting_for_first_task(
         },
         {
             "role": "user",
-            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.\n- Use `contacts` to inspect the node ids and names you can currently message directly.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- Newly created agents still waiting for their first task: Directory Worker (`12345678`).\n- `create_agent` only adds a new agent node to the current workflow. It does not start work by itself.\n- Before calling `idle`, dispatch each waiting agent a concrete first task with `send`.</system>",
+            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send through a workflow path, use `send` with one target, source output port, target input port, and a value matching that port type.\n- Use `contacts` to inspect the current output-port paths you can send through.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- Newly created agents still waiting for their first task: Directory Worker (`12345678`).\n- `create_agent` only adds a new agent node to the current workflow. It does not start work by itself.\n- Before calling `idle`, dispatch each waiting agent a concrete first task with `send`.</system>",
         },
     ]
 
@@ -2418,7 +2514,7 @@ def test_build_messages_uses_role_name_when_created_agent_has_no_explicit_name(
         },
         {
             "role": "user",
-            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.\n- Use `contacts` to inspect the node ids and names you can currently message directly.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- Newly created agents still waiting for their first task: Worker (`12345678`).\n- `create_agent` only adds a new agent node to the current workflow. It does not start work by itself.\n- Before calling `idle`, dispatch each waiting agent a concrete first task with `send`.</system>",
+            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send through a workflow path, use `send` with one target, source output port, target input port, and a value matching that port type.\n- Use `contacts` to inspect the current output-port paths you can send through.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- Newly created agents still waiting for their first task: Worker (`12345678`).\n- `create_agent` only adds a new agent node to the current workflow. It does not start work by itself.\n- Before calling `idle`, dispatch each waiting agent a concrete first task with `send`.</system>",
         },
     ]
 
@@ -2494,7 +2590,7 @@ def test_build_messages_clears_new_agent_warning_after_first_sent_message(monkey
         },
         {
             "role": "user",
-            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send a formal message to another node, use `send` with a single `target` and ordered `parts`.\n- Use `contacts` to inspect the node ids and names you can currently message directly.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If there is no unfinished TODO and the task is finished with no immediate next action, call `idle`.</system>",
+            "content": "<system>Runtime post prompt:\n- Plain content is never delivered to other agents.\n- To send through a workflow path, use `send` with one target, source output port, target input port, and a value matching that port type.\n- Use `contacts` to inspect the current output-port paths you can send through.\n- `@target:` or any other `@name:` text inside normal content is just text. It does not send anything.\n- If there is no unfinished TODO and the task is finished with no immediate next action, call `idle`.</system>",
         },
     ]
 

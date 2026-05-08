@@ -73,7 +73,7 @@ def test_get_node_detail_includes_runtime_config(client: TestClient):
     }
 
 
-def test_worker_and_leader_are_stable_contacts_without_explicit_edge(
+def test_worker_contacts_follow_output_paths(
     client: TestClient,
 ):
     tab = client.post(
@@ -84,12 +84,16 @@ def test_worker_and_leader_are_stable_contacts_without_explicit_edge(
         f"/api/workflows/{tab['id']}/nodes",
         json={"role_name": "Worker", "name": "Worker"},
     ).json()
+    reviewer = client.post(
+        f"/api/workflows/{tab['id']}/nodes",
+        json={"role_name": "Worker", "name": "Reviewer"},
+    ).json()
 
     detail_without_edge = client.get(f"/api/nodes/{worker['id']}")
 
     assert detail_without_edge.status_code == 200
     worker_detail = detail_without_edge.json()
-    assert worker_detail["contacts"] == [tab["leader_id"]]
+    assert worker_detail["contacts"] == []
     assert worker_detail["allow_network"] is True
     assert worker_detail["write_dirs"] == ["/tmp"]
     assert worker_detail["workflow_permissions"] == {
@@ -98,20 +102,37 @@ def test_worker_and_leader_are_stable_contacts_without_explicit_edge(
     }
     leader_without_edge = client.get(f"/api/nodes/{tab['leader_id']}")
     assert leader_without_edge.status_code == 200
-    assert worker["id"] in leader_without_edge.json()["contacts"]
+    assert any(
+        contact["id"] == worker["id"]
+        for contact in leader_without_edge.json()["contacts"]
+    )
 
     edge_response = client.post(
         f"/api/workflows/{tab['id']}/edges",
         json={
-            "from_node_id": tab["leader_id"],
-            "to_node_id": worker["id"],
+            "from_node_id": worker["id"],
+            "to_node_id": reviewer["id"],
         },
     )
 
-    assert edge_response.status_code == 400
-    assert edge_response.json()["detail"] == (
-        "Workflow Leader does not participate in Workflow Graph edges"
-    )
+    assert edge_response.status_code == 200
+    edge = edge_response.json()
+    worker_with_edge = client.get(f"/api/nodes/{worker['id']}").json()
+    assert worker_with_edge["contacts"] == [
+        {
+            "id": reviewer["id"],
+            "target_id": reviewer["id"],
+            "node_type": "agent",
+            "role_name": "Worker",
+            "name": "Reviewer",
+            "state": "idle",
+            "is_leader": False,
+            "from_output_port_key": "out",
+            "to_input_port_key": "in",
+            "port_type": "parts",
+            "edge_id": edge["id"],
+        }
+    ]
 
 
 def test_direct_node_message_api_is_not_available(client: TestClient):

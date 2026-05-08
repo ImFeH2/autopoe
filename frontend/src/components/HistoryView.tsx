@@ -10,6 +10,7 @@ import {
   Bot,
   AlertCircle,
   Workflow,
+  GitBranch,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HistoryEntry, Node } from "@/types";
@@ -160,6 +161,33 @@ function MessageContent({
   );
 }
 
+function formatPortPath(entry: HistoryEntry): string {
+  if (!entry.from_output_port_key || !entry.to_input_port_key) {
+    return "";
+  }
+  return ` · ${entry.from_output_port_key} to ${entry.to_input_port_key}`;
+}
+
+function formatPortValue(entry: HistoryEntry): string {
+  if (entry.value_summary) {
+    return entry.value_summary;
+  }
+  if (entry.content) {
+    return entry.content;
+  }
+  if (entry.value === undefined) {
+    return "";
+  }
+  if (typeof entry.value === "string") {
+    return entry.value;
+  }
+  try {
+    return JSON.stringify(entry.value);
+  } catch {
+    return String(entry.value);
+  }
+}
+
 const HistoryItem = memo(function HistoryItem({
   agentLabel,
   entry,
@@ -189,7 +217,7 @@ const HistoryItem = memo(function HistoryItem({
     case "ReceivedMessage":
       return (
         <CollapsibleBlock
-          label={`From ${getNodeLabel(entry.from_id ?? "", nodes)}`}
+          label={`From ${getNodeLabel(entry.from_id ?? "", nodes)}${formatPortPath(entry)}`}
           icon={<MessageSquare className="size-3 text-foreground/70" />}
           className="border-border bg-accent/20"
           labelClassName="text-foreground/70"
@@ -254,7 +282,7 @@ const HistoryItem = memo(function HistoryItem({
       const targets = targetIds.map((id) => getNodeLabel(id, nodes));
       return (
         <CollapsibleBlock
-          label={`To ${targets.join(", ") || "Unknown"}`}
+          label={`To ${targets.join(", ") || "Unknown"}${formatPortPath(entry)}`}
           icon={<Send className="size-3 text-foreground/58" />}
           className="border-border bg-background/24"
           labelClassName="text-foreground/72"
@@ -271,6 +299,31 @@ const HistoryItem = memo(function HistoryItem({
         </CollapsibleBlock>
       );
     }
+
+    case "PortInboundEntry":
+      return (
+        <CollapsibleBlock
+          label={`Input from ${entry.source_label || getNodeLabel(entry.from_id ?? "", nodes)}${formatPortPath(entry)}`}
+          icon={<GitBranch className="size-3 text-foreground/66" />}
+          className="border-border bg-surface-1/24"
+          labelClassName="text-foreground/72"
+          actions={<CopyButton text={formatPortValue(entry)} />}
+          defaultOpen={false}
+        >
+          <div className="space-y-2">
+            {entry.port_type ? (
+              <span className="inline-flex rounded-md border border-border bg-background/40 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {entry.port_type}
+              </span>
+            ) : null}
+            <MarkdownOrJsonBlock
+              content={formatPortValue(entry)}
+              markdownClassName="text-foreground/86"
+              preClassName="text-foreground/86 leading-relaxed"
+            />
+          </div>
+        </CollapsibleBlock>
+      );
 
     case "AssistantText":
       return (

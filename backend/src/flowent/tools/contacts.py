@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 class ContactsTool(Tool):
     name = "contacts"
-    description = "List the agents this node can message directly right now."
+    description = "List current contacts and output-port paths."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {},

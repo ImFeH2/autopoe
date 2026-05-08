@@ -19,7 +19,13 @@ import { useMeasuredHeight } from "@/hooks/useMeasuredHeight";
 import { interruptNode } from "@/lib/api";
 import { getNodeLabel, nodeTypeIcon } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type { AgentState, HistoryEntry, Node } from "@/types";
+import type {
+  AgentState,
+  ContactEntry,
+  ContactPath,
+  HistoryEntry,
+  Node,
+} from "@/types";
 
 const workspaceSelectionBadgeClass =
   "rounded-md bg-accent/45 px-2 py-1 text-xs text-foreground";
@@ -157,20 +163,21 @@ export function AgentDetailPanel({
         : connectionId.slice(0, 8),
     };
   });
-  const contactItems = detailContacts.map((contactId) => {
+  const pathContacts = detailContacts.filter(isContactPath);
+  const entryContacts = detailContacts.filter(
+    (contact): contact is Exclude<ContactEntry, ContactPath> =>
+      !isContactPath(contact),
+  );
+  const contactItems = entryContacts.map((contact) => {
+    const contactId = typeof contact === "string" ? contact : contact.id;
     const contactAgent = agents.get(contactId);
     return {
       id: contactId,
-      label: contactAgent
-        ? getNodeLabel({
-            name: contactAgent.name,
-            roleName: contactAgent.role_name,
-            nodeType: contactAgent.node_type,
-            isLeader: contactAgent.is_leader,
-          })
-        : contactId.slice(0, 8),
+      label: getContactLabel(contact, contactAgent),
     };
   });
+  const contactMetricLabel =
+    pathContacts.length > 0 ? "reachable paths" : "reachable contacts";
 
   return (
     <>
@@ -240,7 +247,7 @@ export function AgentDetailPanel({
                 Contacts
               </p>
               <p className="mt-2 select-text text-sm text-foreground">
-                {detailContacts.length} reachable nodes
+                {detailContacts.length} {contactMetricLabel}
               </p>
             </div>
 
@@ -377,10 +384,43 @@ export function AgentDetailPanel({
               </DetailSection>
 
               <DetailSection title="Contacts">
-                {contactItems.length === 0 ? (
+                {pathContacts.length === 0 && contactItems.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     No direct contacts
                   </p>
+                ) : pathContacts.length > 0 ? (
+                  <div className="space-y-2">
+                    {pathContacts.map((contact) => (
+                      <div
+                        key={contact.edge_id}
+                        className="rounded-md border border-border bg-accent/25 px-3 py-2"
+                      >
+                        <div className="flex min-w-0 items-center justify-between gap-3">
+                          <p className="min-w-0 select-text truncate text-sm font-medium text-foreground">
+                            {getContactLabel(
+                              contact,
+                              agents.get(contact.target_id),
+                            )}
+                          </p>
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-border bg-background/40 font-mono text-[10px] text-muted-foreground"
+                          >
+                            {contact.port_type}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className="select-text rounded-md bg-background/45 px-1.5 py-0.5 font-mono text-foreground/80">
+                            {contact.from_output_port_key}
+                          </span>
+                          <span aria-hidden="true">to</span>
+                          <span className="select-text rounded-md bg-background/45 px-1.5 py-0.5 font-mono text-foreground/80">
+                            {contact.to_input_port_key}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {contactItems.map((contact) => (
@@ -506,6 +546,35 @@ export function AgentDetailPanel({
       </div>
     </>
   );
+}
+
+function isContactPath(contact: ContactEntry): contact is ContactPath {
+  return (
+    typeof contact === "object" &&
+    contact !== null &&
+    "from_output_port_key" in contact &&
+    "to_input_port_key" in contact
+  );
+}
+
+function getContactLabel(contact: ContactEntry, liveNode?: Node): string {
+  if (liveNode) {
+    return getNodeLabel({
+      name: liveNode.name,
+      roleName: liveNode.role_name,
+      nodeType: liveNode.node_type,
+      isLeader: liveNode.is_leader,
+    });
+  }
+  if (typeof contact === "string") {
+    return contact.slice(0, 8);
+  }
+  return getNodeLabel({
+    name: contact.name,
+    roleName: contact.role_name,
+    nodeType: contact.node_type,
+    isLeader: contact.is_leader,
+  });
 }
 
 export function LeaderChatPanel({

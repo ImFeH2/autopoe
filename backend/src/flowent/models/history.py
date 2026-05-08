@@ -24,6 +24,9 @@ class ReceivedMessage(Serializable):
     parts: list[ContentPart] = field(default_factory=list)
     content: str = ""
     message_id: str | None = None
+    from_output_port_key: str | None = None
+    to_input_port_key: str | None = None
+    value_summary: str | None = None
     timestamp: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:
@@ -52,6 +55,9 @@ class SentMessage(Serializable):
     parts: list[ContentPart] = field(default_factory=list)
     content: str = ""
     message_id: str | None = None
+    from_output_port_key: str | None = None
+    to_input_port_key: str | None = None
+    value_summary: str | None = None
     timestamp: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:
@@ -98,6 +104,18 @@ class CommandResultEntry(Serializable):
     timestamp: float = field(default_factory=time.time)
 
 
+@dataclass
+class PortInboundEntry(Serializable):
+    from_id: str
+    from_output_port_key: str
+    to_input_port_key: str
+    port_type: str
+    value: Any
+    source_label: str | None = None
+    value_summary: str | None = None
+    timestamp: float = field(default_factory=time.time)
+
+
 HistoryEntry = (
     SystemEntry
     | ReceivedMessage
@@ -108,6 +126,7 @@ HistoryEntry = (
     | ToolCall
     | ErrorEntry
     | CommandResultEntry
+    | PortInboundEntry
 )
 
 
@@ -133,6 +152,21 @@ def deserialize_history_entry(data: dict[str, Any]) -> HistoryEntry:
             message_id=(
                 str(data["message_id"])
                 if isinstance(data.get("message_id"), str)
+                else None
+            ),
+            from_output_port_key=(
+                str(data["from_output_port_key"])
+                if isinstance(data.get("from_output_port_key"), str)
+                else None
+            ),
+            to_input_port_key=(
+                str(data["to_input_port_key"])
+                if isinstance(data.get("to_input_port_key"), str)
+                else None
+            ),
+            value_summary=(
+                str(data["value_summary"])
+                if isinstance(data.get("value_summary"), str)
                 else None
             ),
             timestamp=timestamp_value,
@@ -172,6 +206,21 @@ def deserialize_history_entry(data: dict[str, Any]) -> HistoryEntry:
                 if isinstance(data.get("message_id"), str)
                 else None
             ),
+            from_output_port_key=(
+                str(data["from_output_port_key"])
+                if isinstance(data.get("from_output_port_key"), str)
+                else None
+            ),
+            to_input_port_key=(
+                str(data["to_input_port_key"])
+                if isinstance(data.get("to_input_port_key"), str)
+                else None
+            ),
+            value_summary=(
+                str(data["value_summary"])
+                if isinstance(data.get("value_summary"), str)
+                else None
+            ),
             timestamp=timestamp_value,
         )
     if entry_type == "AssistantThinking":
@@ -205,6 +254,25 @@ def deserialize_history_entry(data: dict[str, Any]) -> HistoryEntry:
             command_name=str(data.get("command_name", "")),
             content=str(data.get("content", "")),
             include_in_context=bool(data.get("include_in_context", False)),
+            timestamp=timestamp_value,
+        )
+    if entry_type == "PortInboundEntry":
+        return PortInboundEntry(
+            from_id=str(data.get("from_id", "")),
+            from_output_port_key=str(data.get("from_output_port_key", "")),
+            to_input_port_key=str(data.get("to_input_port_key", "")),
+            port_type=str(data.get("port_type", "")),
+            value=data.get("value"),
+            source_label=(
+                str(data["source_label"])
+                if isinstance(data.get("source_label"), str)
+                else None
+            ),
+            value_summary=(
+                str(data["value_summary"])
+                if isinstance(data.get("value_summary"), str)
+                else None
+            ),
             timestamp=timestamp_value,
         )
     raise ValueError(f"Unknown history entry type: {entry_type}")

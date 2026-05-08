@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 class SendTool(Tool):
     name = "send"
-    description = "Send a formal message to one current contact."
+    description = "Send to one current contact or output-port path."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -18,9 +18,20 @@ class SendTool(Tool):
                 "type": "string",
                 "description": "One target id, name, or unique short id from contacts.",
             },
+            "from_output_port_key": {
+                "type": "string",
+                "description": "Source output port key for workflow path sends.",
+            },
+            "to_input_port_key": {
+                "type": "string",
+                "description": "Target input port key for workflow path sends.",
+            },
+            "value": {
+                "description": "Typed value for workflow path sends. Use ordered parts for parts ports, a string for string ports, or an object for json ports.",
+            },
             "parts": {
                 "type": "array",
-                "description": "Ordered message parts to send.",
+                "description": "Ordered message parts for Assistant and Leader entry contacts.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -36,7 +47,7 @@ class SendTool(Tool):
                 },
             },
         },
-        "required": ["target", "parts"],
+        "required": ["target"],
         "additionalProperties": False,
     }
 
@@ -44,6 +55,13 @@ class SendTool(Tool):
         target = args.get("target")
         if not isinstance(target, str) or not target.strip():
             raise ValueError("send.target must be a non-empty string")
+        if not agent._is_entry_level_sender():
+            return agent.send_port_value(
+                target_ref=target.strip(),
+                from_output_port_key=args.get("from_output_port_key"),
+                to_input_port_key=args.get("to_input_port_key"),
+                raw_value=args.get("value", args.get("parts")),
+            )
         return agent.send_message(
             target_ref=target.strip(),
             raw_parts=args.get("parts"),

@@ -110,6 +110,79 @@ describe("HistoryView", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders workflow path labels for sent and received messages", () => {
+    render(
+      <HistoryView
+        history={[
+          {
+            type: "ReceivedMessage",
+            from_id: "agent-a",
+            content: "Draft ready.",
+            from_output_port_key: "out",
+            to_input_port_key: "review",
+            timestamp: 1,
+          },
+          {
+            type: "SentMessage",
+            to_id: "agent-b",
+            content: "Please review.",
+            from_output_port_key: "final",
+            to_input_port_key: "in",
+            timestamp: 2,
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /From agent-a · out to review/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /To agent-b · final to in/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders non-message port inputs", () => {
+    render(
+      <HistoryView
+        history={[
+          {
+            type: "PortInboundEntry",
+            from_id: "code-a",
+            source_label: "Formatter",
+            from_output_port_key: "json",
+            to_input_port_key: "payload",
+            port_type: "json",
+            value: { status: "ready" },
+            value_summary: '{"status":"ready"}',
+            timestamp: 1,
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: /Input from Formatter · json to payload/i,
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Input from Formatter · json to payload/i,
+      }),
+    );
+
+    expect(screen.getByText("json")).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByText((_, element) =>
+          Boolean(element?.textContent?.includes('"status": "ready"')),
+        )
+        .some((element) => element.tagName === "PRE"),
+    ).toBe(true);
+  });
+
   it("renders state history entries with reasons", () => {
     render(
       <HistoryView

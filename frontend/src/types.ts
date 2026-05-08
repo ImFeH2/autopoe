@@ -115,6 +115,7 @@ export type HistoryEntryType =
   | "ReceivedMessage"
   | "AssistantText"
   | "SentMessage"
+  | "PortInboundEntry"
   | "AssistantThinking"
   | "StateEntry"
   | "ToolCall"
@@ -144,6 +145,12 @@ export interface HistoryEntry {
   from_id?: string | null;
   to_id?: string | null;
   to_ids?: string[] | null;
+  from_output_port_key?: string | null;
+  to_input_port_key?: string | null;
+  port_type?: WorkflowPortType | string | null;
+  value?: unknown;
+  source_label?: string | null;
+  value_summary?: string | null;
   message_id?: string | null;
   tool_name?: string | null;
   tool_call_id?: string | null;
@@ -157,6 +164,25 @@ export interface HistoryEntry {
 
 export type AssistantChatItem = HistoryEntry | PendingAssistantChatMessage;
 
+export interface ContactSummary {
+  id: string;
+  node_type: NodeType;
+  role_name: string | null;
+  name: string | null;
+  state: AgentState | null;
+  is_leader: boolean;
+}
+
+export interface ContactPath extends ContactSummary {
+  target_id: string;
+  from_output_port_key: string;
+  to_input_port_key: string;
+  port_type: WorkflowPortType;
+  edge_id: string;
+}
+
+export type ContactEntry = string | ContactSummary | ContactPath;
+
 export interface NodeDetail {
   id: string;
   node_type: NodeType;
@@ -164,7 +190,7 @@ export interface NodeDetail {
   is_leader: boolean;
   state: AgentState;
   name: string | null;
-  contacts: string[];
+  contacts: ContactEntry[];
   connections: string[];
   role_name: string | null;
   todos: TodoItem[];
