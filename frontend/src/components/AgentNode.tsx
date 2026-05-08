@@ -4,6 +4,10 @@ import { motion } from "motion/react";
 import { useRef, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import { nodeTypeIcon, stateColor, stateRing } from "@/lib/constants";
+import {
+  NODE_BODY_SOURCE_HANDLE,
+  NODE_BODY_TARGET_HANDLE,
+} from "@/components/agent-graph/lib";
 import type { AgentState, NodeType, WorkflowPort } from "@/types";
 
 interface AgentNodeData {
@@ -110,6 +114,11 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
           : "";
   const showConnectionEntry =
     showConnectionEntryHint || connectionState === "source";
+  const bodySourceActive = canConnect && connectionState === null;
+  const bodyTargetActive =
+    canConnect &&
+    (connectionState === "valid-target" ||
+      connectionState === "invalid-target");
   const connectionEntryClass =
     connectionState === "source"
       ? "border-graph-selection/75 bg-graph-selection/14 shadow-[0_0_0_1px_var(--graph-glow),0_0_24px_var(--graph-glow)]"
@@ -197,6 +206,49 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
           }}
         />
       ))}
+
+      <Handle
+        id={NODE_BODY_SOURCE_HANDLE}
+        type="source"
+        position={Position.Right}
+        isConnectable={canConnect}
+        isConnectableStart={canConnect}
+        isConnectableEnd={false}
+        className={cn(
+          "!absolute !h-full !w-full !border-0 !bg-transparent !opacity-0",
+          bodySourceActive
+            ? "!z-30 !pointer-events-auto"
+            : "!z-0 !pointer-events-none",
+        )}
+        style={{
+          left: 0,
+          top: 0,
+          right: "auto",
+          bottom: "auto",
+          transform: "none",
+        }}
+      />
+      <Handle
+        id={NODE_BODY_TARGET_HANDLE}
+        type="target"
+        position={Position.Left}
+        isConnectable={canConnect}
+        isConnectableStart={false}
+        isConnectableEnd={canConnect}
+        className={cn(
+          "!absolute !h-full !w-full !border-0 !bg-transparent !opacity-0",
+          bodyTargetActive
+            ? "!z-30 !pointer-events-auto"
+            : "!z-0 !pointer-events-none",
+        )}
+        style={{
+          left: 0,
+          top: 0,
+          right: "auto",
+          bottom: "auto",
+          transform: "none",
+        }}
+      />
 
       {showConnectionEntry
         ? [

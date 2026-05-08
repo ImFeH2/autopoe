@@ -11,6 +11,10 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Edge as FlowEdge, Node as FlowNode } from "@xyflow/react";
 import { AgentGraph, type AgentGraphHandle } from "@/components/AgentGraph";
+import {
+  NODE_BODY_SOURCE_HANDLE,
+  NODE_BODY_TARGET_HANDLE,
+} from "@/components/agent-graph/lib";
 import { getAgentGraphLayoutedElements } from "@/lib/agentGraphLayout";
 import type { Node, Role, TaskTab, WorkflowDefinition } from "@/types";
 
@@ -153,7 +157,14 @@ vi.mock("@xyflow/react", async () => {
       sourceHandle: string;
       targetHandle: string;
     }) => void;
-    onConnectStart?: () => void;
+    onConnectStart?: (
+      event: MouseEvent,
+      params: {
+        nodeId: string;
+        handleId: string;
+        handleType: "source";
+      },
+    ) => void;
     onConnectEnd?: (...args: unknown[]) => void;
     onMove?: (
       event: MouseEvent | TouchEvent | null,
@@ -193,31 +204,65 @@ vi.mock("@xyflow/react", async () => {
       onInit?.({ fitView: fitViewMock, getZoom: getZoomMock });
     }, [onInit]);
 
-    const emitConnection = (sourceIndex: number, targetIndex: number) => {
+    const getNodeElement = (nodeId: string) =>
+      document.querySelector(`[data-testid="node-${nodeId}"]`);
+    const getPointerEvent = (target: Element | null) =>
+      ({
+        target,
+        clientX: 180,
+        clientY: 140,
+      }) as unknown as MouseEvent;
+
+    const emitConnection = (
+      sourceIndex: number,
+      targetIndex: number,
+      sourceHandle = "out",
+      targetHandle = "in",
+    ) => {
       const sourceId = nodes[sourceIndex]?.id;
       const targetId = nodes[targetIndex]?.id;
       if (!sourceId || !targetId) {
         return;
       }
+      onConnectStart?.(getPointerEvent(getNodeElement(sourceId)), {
+        nodeId: sourceId,
+        handleId: sourceHandle,
+        handleType: "source",
+      });
       const connection = {
         source: sourceId,
         target: targetId,
         sourceHandle: "out",
         targetHandle: "in",
+        ...(sourceHandle ? { sourceHandle } : {}),
+        ...(targetHandle ? { targetHandle } : {}),
       };
-      if (isValidConnection && !isValidConnection(connection)) {
-        return;
+      if (!isValidConnection || isValidConnection(connection)) {
+        onConnect?.(connection);
       }
-      onConnect?.(connection);
+      onConnectEnd?.(getPointerEvent(getNodeElement(targetId)), {});
     };
 
     return (
-      <div data-testid="react-flow" onContextMenu={onPaneContextMenu}>
+      <div
+        className="react-flow__pane"
+        data-testid="react-flow"
+        onContextMenu={onPaneContextMenu}
+      >
         <button
           data-testid="connect-start"
-          onClick={() => onConnectStart?.()}
+          onClick={() =>
+            onConnectStart?.(getPointerEvent(null), {
+              nodeId: nodes[0]?.id ?? "",
+              handleId: NODE_BODY_SOURCE_HANDLE,
+              handleType: "source",
+            })
+          }
         />
-        <button data-testid="connect-end" onClick={() => onConnectEnd?.()} />
+        <button
+          data-testid="connect-end"
+          onClick={() => onConnectEnd?.(getPointerEvent(null), {})}
+        />
         <button
           data-testid="connect-first-to-first"
           onClick={() => emitConnection(0, 0)}
@@ -231,6 +276,48 @@ vi.mock("@xyflow/react", async () => {
           onClick={() => emitConnection(0, nodes.length - 1)}
         />
         <button
+          data-testid="body-connect-first-to-second"
+          onClick={() =>
+            emitConnection(
+              0,
+              1,
+              NODE_BODY_SOURCE_HANDLE,
+              NODE_BODY_TARGET_HANDLE,
+            )
+          }
+        />
+        <button
+          data-testid="body-connect-first-to-last"
+          onClick={() =>
+            emitConnection(
+              0,
+              nodes.length - 1,
+              NODE_BODY_SOURCE_HANDLE,
+              NODE_BODY_TARGET_HANDLE,
+            )
+          }
+        />
+        <button
+          data-testid="body-drop-first-on-pane"
+          onClick={() => {
+            const sourceId = nodes[0]?.id;
+            if (!sourceId) {
+              return;
+            }
+            onConnectStart?.(getPointerEvent(getNodeElement(sourceId)), {
+              nodeId: sourceId,
+              handleId: NODE_BODY_SOURCE_HANDLE,
+              handleType: "source",
+            });
+            onConnectEnd?.(
+              getPointerEvent(
+                document.querySelector("[data-testid='react-flow']"),
+              ),
+              {},
+            );
+          }}
+        />
+        <button
           data-testid="move-zoom-142"
           onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 1.42 })}
         />
@@ -240,6 +327,7 @@ vi.mock("@xyflow/react", async () => {
             <div
               key={node.id}
               className="react-flow__node"
+              data-id={node.id}
               data-testid={`node-${node.id}`}
               onClick={(event) => onNodeClick?.(event, node)}
               onContextMenu={(event) => onNodeContextMenu?.(event, node)}
@@ -275,15 +363,20 @@ vi.mock("@xyflow/react", async () => {
     },
     BaseEdge: ({ id }: { id: string }) => <div data-testid={`edge-${id}`} />,
     Handle: ({
+      id,
       type,
       position,
       className,
     }: {
+      id?: string;
       type: string;
       position: string;
       className?: string;
     }) => (
-      <div data-testid={`handle-${type}-${position}`} className={className} />
+      <div
+        data-testid={`handle-${type}-${position}-${id ?? "default"}`}
+        className={className}
+      />
     ),
     Position: {
       Left: "left",
@@ -443,8 +536,13 @@ function renderGraph(
 }
 
 function expectConnectionHandlesHidden(node: HTMLElement) {
-  for (const handleId of ["handle-target-left", "handle-source-right"]) {
-    expect(within(node).getByTestId(handleId)).toHaveClass("!opacity-0");
+  for (const handlePattern of [
+    /^handle-target-left-/,
+    /^handle-source-right-/,
+  ]) {
+    for (const handle of within(node).getAllByTestId(handlePattern)) {
+      expect(handle).toHaveClass("!opacity-0");
+    }
   }
 }
 
@@ -536,7 +634,7 @@ describe("AgentGraph", () => {
 
     const plannerNode = screen.getByTestId("node-worker-1");
     expectConnectionEntriesVisible(plannerNode);
-    expect(screen.getByText("Connect Ports")).toBeInTheDocument();
+    expect(screen.getByText("Connect nodes")).toBeInTheDocument();
   });
 
   it("only shows add agent in the pane context menu", async () => {
@@ -555,7 +653,7 @@ describe("AgentGraph", () => {
     });
 
     expect(screen.getByText("Add Agent")).toBeInTheDocument();
-    expect(screen.queryByText("Connect Ports")).not.toBeInTheDocument();
+    expect(screen.queryByText("Connect nodes")).not.toBeInTheDocument();
     expect(screen.queryByText("Fit View")).not.toBeInTheDocument();
     expect(screen.queryByText("Clear Selection")).not.toBeInTheDocument();
   });
@@ -600,6 +698,162 @@ describe("AgentGraph", () => {
         "in",
       );
     });
+  });
+
+  it("creates a compatible connection when a node body is dragged to another node", async () => {
+    const onCreateConnection = vi.fn().mockResolvedValue(undefined);
+
+    renderGraph(
+      [
+        buildNode({
+          id: "worker-1",
+          role_name: "Planner",
+        }),
+        buildNode({
+          id: "worker-2",
+          role_name: "Reviewer",
+        }),
+      ],
+      { onCreateConnection },
+    );
+
+    await screen.findByText("Planner");
+
+    fireEvent.click(screen.getByTestId("body-connect-first-to-second"));
+
+    await waitFor(() => {
+      expect(onCreateConnection).toHaveBeenCalledWith(
+        "tab-1",
+        "worker-1",
+        "worker-2",
+        "out",
+        "in",
+      );
+    });
+  });
+
+  it("asks for a port choice when a node body drag has multiple valid combinations", async () => {
+    const onCreateConnection = vi.fn().mockResolvedValue(undefined);
+    const definition: WorkflowDefinition = {
+      version: 1,
+      nodes: [
+        {
+          id: "worker-1",
+          type: "agent",
+          config: { role_name: "Planner" },
+          inputs: [],
+          outputs: [
+            {
+              key: "first",
+              direction: "out",
+              type: "parts",
+              required: false,
+              multiple: true,
+            },
+            {
+              key: "second",
+              direction: "out",
+              type: "parts",
+              required: false,
+              multiple: true,
+            },
+          ],
+        },
+        {
+          id: "worker-2",
+          type: "agent",
+          config: { role_name: "Reviewer" },
+          inputs: [
+            {
+              key: "primary",
+              direction: "in",
+              type: "parts",
+              required: false,
+              multiple: true,
+            },
+            {
+              key: "backup",
+              direction: "in",
+              type: "parts",
+              required: false,
+              multiple: true,
+            },
+          ],
+          outputs: [],
+        },
+      ],
+      edges: [],
+    };
+
+    renderGraph(
+      [
+        buildNode({
+          id: "worker-1",
+          role_name: "Planner",
+        }),
+        buildNode({
+          id: "worker-2",
+          role_name: "Reviewer",
+        }),
+      ],
+      {
+        tabs: [buildTab([], { definition })],
+        onCreateConnection,
+      },
+    );
+
+    await screen.findByText("Planner");
+
+    fireEvent.click(screen.getByTestId("body-connect-first-to-second"));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Choose Connection" }),
+    ).toBeInTheDocument();
+    const choice = screen.getByText("first · parts -> primary · parts");
+    fireEvent.click(choice.closest("button") as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(onCreateConnection).toHaveBeenCalledWith(
+        "tab-1",
+        "worker-1",
+        "worker-2",
+        "first",
+        "primary",
+      );
+    });
+  });
+
+  it("opens quick create when a node body connection is released on the canvas", async () => {
+    renderGraph(
+      [
+        buildNode({
+          id: "worker-1",
+          role_name: "Planner",
+        }),
+      ],
+      {
+        roles: [
+          {
+            name: "Reviewer",
+            description: "Checks the work before it is finished.",
+            system_prompt: "",
+            model: null,
+            model_params: null,
+            included_tools: [],
+            excluded_tools: [],
+            is_builtin: true,
+          },
+        ],
+      },
+    );
+
+    await screen.findByText("Planner");
+
+    fireEvent.click(screen.getByTestId("body-drop-first-on-pane"));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Add Agent After" }),
+    ).toBeInTheDocument();
   });
 
   it("renders workflow edges with strict connection mode and port handles", async () => {

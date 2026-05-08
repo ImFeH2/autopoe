@@ -12,6 +12,7 @@ import type {
   NodeType,
   Role,
   WorkflowPort,
+  WorkflowPortType,
 } from "@/types";
 
 export const NODE_EXIT_MS = 320;
@@ -29,6 +30,8 @@ export const quickCreateListClass =
   "max-h-56 space-y-2 overflow-y-auto rounded-md border border-border bg-background/40 p-2 scrollbar-none";
 export const quickCreateButtonClass =
   "w-full rounded-md border px-3 py-2 text-left transition-colors";
+export const NODE_BODY_SOURCE_HANDLE = "__node-body-source";
+export const NODE_BODY_TARGET_HANDLE = "__node-body-target";
 
 export type FlowFitViewOptions = NonNullable<
   Parameters<ReactFlowInstance["fitView"]>[0]
@@ -81,6 +84,23 @@ export type QuickCreateState =
       sourceNodeId: string;
       targetNodeId: string;
     };
+
+export interface ConnectionPortChoice {
+  sourcePortKey: string;
+  sourcePortLabel: string;
+  targetPortKey: string;
+  targetPortLabel: string;
+  type: WorkflowPortType;
+}
+
+export interface ConnectionChoiceState {
+  tabId: string;
+  sourceNodeId: string;
+  sourceNodeLabel: string;
+  targetNodeId: string;
+  targetNodeLabel: string;
+  choices: ConnectionPortChoice[];
+}
 
 export interface AgentNodeData extends Record<string, unknown> {
   label: string;
@@ -159,6 +179,7 @@ export interface AgentGraphController {
   containerRef: RefObject<HTMLDivElement | null>;
   contextMenu: ContextMenuState | null;
   contextMenuItems: ContextMenuEntry[];
+  connectionChoice: ConnectionChoiceState | null;
   emptyState: {
     title: string;
   } | null;
@@ -170,6 +191,7 @@ export interface AgentGraphController {
   readOnly: boolean;
   setQuickCreateName: (value: string) => void;
   setQuickCreateRoleName: (value: string) => void;
+  submittingConnectionChoice: boolean;
   submittingQuickCreate: boolean;
   tooltip: TooltipData | null;
   tooltipAgent: AgentGraphNode | null;
@@ -183,6 +205,7 @@ export interface AgentGraphController {
   tooltipToolCall: string | null;
   viewportZoom: number;
   availableRoles: Role[];
+  closeConnectionChoice: () => void;
   closeContextMenu: () => void;
   closeQuickCreate: () => void;
   handleFlowInit: (instance: ReactFlowInstance) => void;
@@ -200,6 +223,7 @@ export interface AgentGraphController {
     event: globalThis.MouseEvent | TouchEvent,
     params?: {
       nodeId: string | null;
+      handleId?: string | null;
       handleType: "source" | "target" | null;
     },
   ) => void;
@@ -233,6 +257,7 @@ export interface AgentGraphController {
   ) => void;
   onPaneClick: () => void;
   onPaneContextMenu: (event: React.MouseEvent | globalThis.MouseEvent) => void;
+  submitConnectionChoice: (choice: ConnectionPortChoice) => void;
   submitQuickCreate: () => void;
 }
 

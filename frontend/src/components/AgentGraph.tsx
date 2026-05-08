@@ -11,6 +11,8 @@ import { Network } from "lucide-react";
 import { AgentEdge } from "@/components/AgentEdge";
 import { AgentNode } from "@/components/AgentNode";
 import {
+  type ConnectionChoiceState,
+  type ConnectionPortChoice,
   getQuickCreateTitle,
   graphChromePillClass,
   VIEWPORT_MAX_ZOOM,
@@ -50,8 +52,10 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
       animatedNodes,
       availableRoles,
       closeContextMenu,
+      closeConnectionChoice,
       closeQuickCreate,
       connectHintLabel,
+      connectionChoice,
       containerRef,
       contextMenu,
       contextMenuItems,
@@ -79,6 +83,8 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
       readOnly,
       setQuickCreateName,
       setQuickCreateRoleName,
+      submitConnectionChoice,
+      submittingConnectionChoice,
       submitQuickCreate,
       submittingQuickCreate,
       tooltip,
@@ -251,10 +257,90 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
             title={getQuickCreateTitle(quickCreate)}
           />
         ) : null}
+
+        {connectionChoice ? (
+          <ConnectionChoiceDialog
+            state={connectionChoice}
+            onClose={closeConnectionChoice}
+            onSelect={submitConnectionChoice}
+            submitting={submittingConnectionChoice}
+          />
+        ) : null}
       </div>
     );
   },
 );
+
+function ConnectionChoiceDialog({
+  state,
+  submitting,
+  onClose,
+  onSelect,
+}: {
+  state: ConnectionChoiceState;
+  submitting: boolean;
+  onClose: () => void;
+  onSelect: (choice: ConnectionPortChoice) => void;
+}) {
+  return (
+    <WorkspaceCommandDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+      title="Choose Connection"
+      className="max-w-[34rem]"
+      footer={
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onClose}
+          disabled={submitting}
+        >
+          Cancel
+        </Button>
+      }
+    >
+      <WorkspaceDialogMeta>
+        Choose how{" "}
+        <span className="font-semibold text-foreground">
+          {state.sourceNodeLabel}
+        </span>{" "}
+        should connect to{" "}
+        <span className="font-semibold text-foreground">
+          {state.targetNodeLabel}
+        </span>
+        .
+      </WorkspaceDialogMeta>
+      <div className="space-y-2">
+        {state.choices.map((choice) => (
+          <Button
+            key={`${choice.sourcePortKey}->${choice.targetPortKey}`}
+            type="button"
+            variant="outline"
+            className="h-auto w-full justify-between gap-4 rounded-md border-border bg-background/40 px-3 py-2.5 text-left hover:bg-accent/45"
+            disabled={submitting}
+            onClick={() => onSelect(choice)}
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-[13px] font-semibold text-foreground">
+                {choice.sourcePortLabel} -&gt; {choice.targetPortLabel}
+              </span>
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                {choice.type}
+              </span>
+            </span>
+            <span className="shrink-0 text-[12px] text-muted-foreground">
+              {submitting ? "Connecting..." : "Connect"}
+            </span>
+          </Button>
+        ))}
+      </div>
+    </WorkspaceCommandDialog>
+  );
+}
 
 function GraphQuickCreateDialog({
   title,
