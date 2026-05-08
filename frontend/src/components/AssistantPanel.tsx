@@ -134,6 +134,7 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
                   });
               }}
               overlay
+              placeholder="Do anything"
               stopping={stopping}
               suppressCommandNavigation={isBrowsingInputHistory}
               targetLabel="Assistant"

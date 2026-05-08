@@ -43,6 +43,7 @@ interface AssistantChatComposerProps {
   onSend: () => void;
   onStop?: () => void;
   overlay?: boolean;
+  placeholder?: string;
   targetLabel?: string;
   stopping?: boolean;
 }
@@ -62,6 +63,7 @@ export function AssistantChatComposer({
   onSend,
   onStop,
   overlay = false,
+  placeholder,
   targetLabel = "Assistant",
   stopping = false,
   suppressCommandNavigation = false,
@@ -360,9 +362,10 @@ export function AssistantChatComposer({
             onKeyDown={handleComposerKeyDown}
             onPaste={handleComposerPaste}
             placeholder={
-              commandsEnabled
+              placeholder ??
+              (commandsEnabled
                 ? `Message ${targetLabel} or type / for commands`
-                : `Message ${targetLabel}`
+                : `Message ${targetLabel}`)
             }
             rows={1}
             className={cn(
