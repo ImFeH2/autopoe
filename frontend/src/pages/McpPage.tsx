@@ -57,6 +57,8 @@ const mcpDestructiveButtonClass =
   "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/18";
 const mcpCodeBlockClass =
   "mt-4 max-h-48 bg-background/55 p-3 text-foreground/70";
+const mcpDescriptionLineClass =
+  "mt-2 line-clamp-1 text-[13px] leading-6 text-muted-foreground";
 
 export function McpPage() {
   const {
@@ -90,18 +92,6 @@ export function McpPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className={mcpEyebrowClass}>Quick Add</p>
-            <p className="mt-2 max-w-3xl text-[13px] leading-6 text-muted-foreground">
-              Paste a single-line launcher such as{" "}
-              <span className="font-mono text-foreground/80">
-                npx @playwright/mcp@latest
-              </span>{" "}
-              or a single{" "}
-              <span className="font-mono text-foreground/80">
-                streamable_http
-              </span>{" "}
-              URL. Connected servers become visible to every agent
-              automatically.
-            </p>
           </div>
           {quickAdd.parse.draft ? (
             <StatusChip
@@ -167,13 +157,7 @@ export function McpPage() {
           <p className="text-[13px] text-destructive">
             {quickAdd.error ?? quickAdd.parse.error}
           </p>
-        ) : (
-          <p className="text-[12px] text-muted-foreground">
-            Package-runner launchers download and start in one path. If first
-            startup is slow, the server will stay visible as Connecting until
-            refresh finishes.
-          </p>
-        )}
+        ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
@@ -298,7 +282,6 @@ export function McpPage() {
                   <PageState
                     icon={Search}
                     title="No matching MCP servers"
-                    description="Choose another status filter to see matching servers again."
                     minHeightClassName="h-full"
                     action={
                       <Button
@@ -375,7 +358,6 @@ export function McpPage() {
                                       )}
                                     </p>
                                     <p>{capabilitySummary(record)}</p>
-                                    {visibility ? <p>{visibility}</p> : null}
                                   </div>
                                   {record.snapshot.last_error ? (
                                     <p className="mt-3 line-clamp-2 text-[12px] leading-5 text-destructive">
@@ -610,10 +592,6 @@ export function McpPage() {
                                   <p className="mt-3 text-[22px] font-medium text-foreground">
                                     {globalAvailabilityLabel(selectedServer) ??
                                       "Pending"}
-                                  </p>
-                                  <p className="mt-2 text-[13px] text-muted-foreground">
-                                    Connected servers become available to all
-                                    agents without per-tab setup.
                                   </p>
                                 </SoftPanel>
 
@@ -906,7 +884,11 @@ export function McpPage() {
                                               </div>
                                             </div>
                                             {tool.description ? (
-                                              <p className="mt-3 text-[13px] leading-6 text-muted-foreground">
+                                              <p
+                                                className={
+                                                  mcpDescriptionLineClass
+                                                }
+                                              >
                                                 {tool.description}
                                               </p>
                                             ) : null}
@@ -956,7 +938,11 @@ export function McpPage() {
                                                 "Unknown MIME"}
                                             </p>
                                             {resource.description ? (
-                                              <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
+                                              <p
+                                                className={
+                                                  mcpDescriptionLineClass
+                                                }
+                                              >
                                                 {resource.description}
                                               </p>
                                             ) : null}
@@ -993,7 +979,11 @@ export function McpPage() {
                                               {template.uri_template}
                                             </p>
                                             {template.description ? (
-                                              <p className="mt-3 text-[13px] leading-6 text-muted-foreground">
+                                              <p
+                                                className={
+                                                  mcpDescriptionLineClass
+                                                }
+                                              >
                                                 {template.description}
                                               </p>
                                             ) : null}
@@ -1042,7 +1032,11 @@ export function McpPage() {
                                                 {prompt.name}
                                               </p>
                                               {prompt.description ? (
-                                                <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
+                                                <p
+                                                  className={
+                                                    mcpDescriptionLineClass
+                                                  }
+                                                >
                                                   {prompt.description}
                                                 </p>
                                               ) : null}
@@ -1134,10 +1128,8 @@ export function McpPage() {
                                           </CodeBlock>
                                         </>
                                       ) : (
-                                        <p className="mt-4 text-[13px] leading-6 text-muted-foreground">
-                                          Select a prompt to preview its
-                                          parameter structure and template
-                                          result.
+                                        <p className="mt-4 text-[13px] text-muted-foreground">
+                                          Select a prompt to preview it.
                                         </p>
                                       )}
                                     </SoftPanel>
@@ -1239,7 +1231,15 @@ export function McpPage() {
                       ) : (
                         <PageState
                           title="Select an MCP server"
-                          description="Choose a server from the list to inspect details."
+                          action={
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={focusQuickAdd}
+                            >
+                              Quick Add
+                            </Button>
+                          }
                           minHeightClassName="h-full"
                         />
                       )}

@@ -80,14 +80,19 @@ function StatsLoadingState() {
       <SoftPanel className="space-y-4">
         <div className="h-3 w-28 rounded-full skeleton-shimmer" />
         <div className="h-[220px] rounded-xl skeleton-shimmer" />
-        <p className="text-sm text-muted-foreground">Loading stats...</p>
       </SoftPanel>
     </div>
   );
 }
 
 function StatsEmptyState() {
-  return <PageState icon={ChartColumnBig} title="No stats yet" />;
+  return (
+    <PageState
+      icon={ChartColumnBig}
+      title="No stats yet"
+      description="No activity in this range."
+    />
+  );
 }
 
 function StatsErrorState({
@@ -524,7 +529,7 @@ export function StatsPage() {
         <div className="shrink-0 border-b border-border px-6 py-5">
           <PageTitleBar
             title="Stats"
-            hint="Review system-wide runtime observability here instead of a single task conversation."
+            hint="Overall activity, not a single task conversation."
             actions={
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex flex-col gap-1">

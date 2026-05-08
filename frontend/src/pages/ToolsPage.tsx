@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -14,6 +14,7 @@ import {
   ListTodo,
   Network,
   Plug,
+  Search,
   Send,
   Settings,
   Shield,
@@ -21,10 +22,13 @@ import {
   UserCog,
   Users,
   Wrench,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { fetchTools, type ToolInfo } from "@/lib/api";
 import { PageScaffold, PageTitleBar } from "@/components/layout/PageScaffold";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   CodeBlock,
   IconTile,
@@ -32,6 +36,7 @@ import {
   PageState,
   StatusChip,
 } from "@/components/ui/surface";
+import { useOptionalAgentUI } from "@/context/AgentContext";
 import { cn } from "@/lib/utils";
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -57,6 +62,14 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   manage_prompts: FileCode,
 };
 
+function shortToolDescription(description: string): string {
+  const trimmed = description.trim();
+  if (trimmed.length <= 96) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 93).trimEnd()}...`;
+}
+
 function ToolCard({
   expanded,
   onToggle,
@@ -73,7 +86,6 @@ function ToolCard({
       as="div"
       padding="md"
       onClick={onToggle}
-      title={tool.description}
       className={cn(
         "group cursor-pointer transition-colors duration-300 hover:border-ring/25 hover:bg-accent/20 hover:shadow-sm",
         expanded && "border-border bg-accent/20 shadow-sm",
@@ -93,8 +105,8 @@ function ToolCard({
           ? `MCP · ${tool.server_name ?? "unknown"}`
           : "Builtin"}
       </p>
-      <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-        {tool.description}
+      <p className="mt-2 line-clamp-1 text-[12px] leading-relaxed text-muted-foreground">
+        {shortToolDescription(tool.description)}
       </p>
 
       <AnimatePresence initial={false}>
@@ -151,8 +163,22 @@ function ToolCard({
 
 export function ToolsPage() {
   const { data: tools = [], isLoading: loading } = useSWR("tools", fetchTools);
+  const agentUI = useOptionalAgentUI();
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredTools = useMemo(() => {
+    if (!normalizedQuery) {
+      return tools;
+    }
+    return tools.filter((tool) =>
+      [tool.name, tool.description, tool.server_name ?? "", tool.source ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery),
+    );
+  }, [normalizedQuery, tools]);
 
   const toggle = (name: string) => {
     setExpanded((prev) => {
@@ -171,11 +197,29 @@ export function ToolsPage() {
       <div className="flex h-full flex-col px-8 pt-6">
         <PageTitleBar title="Tools" />
         <div className="mb-6 mt-6 flex items-center justify-between gap-4">
-          <p className="text-[13px] text-muted-foreground">
-            Built-in and connected MCP tools appear here.
-          </p>
+          <div className="relative w-full max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search tools"
+              className="h-9 rounded-full bg-background/45 pl-9 pr-9 text-[13px]"
+            />
+            {query ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-accent/35 hover:text-foreground"
+                onClick={() => setQuery("")}
+              >
+                <X className="size-3.5" />
+              </Button>
+            ) : null}
+          </div>
           <StatusChip tone="neutral" className="h-5 text-[11px]">
-            {tools.length} tools
+            {filteredTools.length} tools
           </StatusChip>
         </div>
 
@@ -198,14 +242,45 @@ export function ToolsPage() {
             >
               <PageState
                 icon={Wrench}
-                title="No Tools Available"
-                description="Connect an MCP server to expand this catalog."
+                title="No tools available"
+                action={
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => agentUI?.setCurrentPage("mcp")}
+                  >
+                    Open MCP
+                  </Button>
+                }
+                className="border-transparent bg-transparent"
+              />
+            </motion.div>
+          ) : filteredTools.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex h-full flex-col items-center justify-center text-center"
+            >
+              <PageState
+                icon={Search}
+                title="No tools found"
+                action={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setQuery("")}
+                  >
+                    <X className="size-4" />
+                    Clear Search
+                  </Button>
+                }
                 className="border-transparent bg-transparent"
               />
             </motion.div>
           ) : (
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 pb-8">
-              {tools.map((tool, i) => (
+              {filteredTools.map((tool, i) => (
                 <motion.div
                   key={tool.name}
                   initial={{ opacity: 0, y: 8 }}

@@ -120,11 +120,11 @@ export function ProvidersPage() {
                     <h2 className="text-xl font-medium text-foreground">
                       {isCreating ? "New Provider" : selectedProvider?.name}
                     </h2>
-                    <p className="mt-1 text-[13px] text-muted-foreground">
-                      {isCreating
-                        ? "Configure a new provider and its model catalog"
-                        : `ID: ${selectedProvider?.id}`}
-                    </p>
+                    {!isCreating ? (
+                      <p className="mt-1 select-text font-mono text-[12px] text-muted-foreground">
+                        {selectedProvider?.id}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     {hasChanges ? (
@@ -310,10 +310,6 @@ export function ProvidersPage() {
                             {draft.models.length} model
                             {draft.models.length === 1 ? "" : "s"}
                           </p>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            Fetch discovered models or maintain manual entries
-                            in this draft before saving.
-                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <Button
@@ -365,8 +361,7 @@ export function ProvidersPage() {
                             No models in this provider draft
                           </p>
                           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                            Fetch models from the current draft connection, or
-                            add a manual entry.
+                            Fetch models or add a manual entry.
                           </p>
                         </PanelCard>
                       ) : (
@@ -488,8 +483,7 @@ export function ProvidersPage() {
               >
                 <PageState
                   icon={Server}
-                  title="No Provider Selected"
-                  description="Select a provider from the sidebar to edit its connection fields, model catalog, and model tests."
+                  title="No provider selected"
                   className="border-transparent bg-transparent"
                 />
               </motion.div>

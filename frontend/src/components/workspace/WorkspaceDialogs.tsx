@@ -97,10 +97,6 @@ export function CreateTabDialog({
           className={cn("h-10 rounded-md", workspaceDialogInputClass)}
         />
       </WorkspaceDialogField>
-      <WorkspaceDialogMeta>
-        New workflows start editable. Activate the workflow after adding the
-        nodes you want to run.
-      </WorkspaceDialogMeta>
       <WorkspaceDialogField
         label="Network Access"
         hint="Allow the leader to connect to the internet"

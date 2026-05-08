@@ -323,7 +323,7 @@ function AccessGate() {
             >
               <div className="flex flex-col items-center text-center">
                 <h1 className="text-[22px] font-medium leading-tight tracking-tight text-foreground">
-                  Enter access code
+                  Enter Access Code
                 </h1>
               </div>
 
@@ -361,6 +361,9 @@ function AccessGate() {
                     mono
                     className={accessInputClass}
                   />
+                  <p className="text-[12px] text-muted-foreground">
+                    Find the current code in the local startup log.
+                  </p>
                 </div>
 
                 <AnimatePresence mode="wait" initial={false}>

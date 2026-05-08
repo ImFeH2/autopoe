@@ -92,12 +92,13 @@ export function AccessConfigurationSection({
   accessDraftError,
   onAccessDraftChange,
 }: AccessConfigurationSectionProps) {
+  const isChangingAccessCode = Boolean(
+    accessDraft.newCode.trim() || accessDraft.confirmCode.trim(),
+  );
+
   return (
     <FormSection title="Access Configuration" className="mt-8 first:mt-0">
-      <SettingsStack
-        label="New Access Code"
-        description="Set a new code required to log into the application. Leave empty if you don't want to change the current code."
-      >
+      <SettingsStack label="New Access Code">
         <div className="space-y-2 w-full max-w-lg">
           <SecretInput
             id="new-access-code"
@@ -113,13 +114,15 @@ export function AccessConfigurationSection({
             hideLabel="Hide new access code"
             buttonSize="default"
           />
+          {isChangingAccessCode ? (
+            <p className={formHelpTextClass}>
+              Saving signs you out; use the new code to return.
+            </p>
+          ) : null}
         </div>
       </SettingsStack>
 
-      <SettingsStack
-        label="Confirm Access Code"
-        description="Please confirm your new access code to ensure there are no typos."
-      >
+      <SettingsStack label="Confirm Access Code">
         <div className="space-y-2 w-full max-w-lg">
           <SecretInput
             id="confirm-access-code"
@@ -162,10 +165,7 @@ export function PathConfigurationSection({
 }: PathConfigurationSectionProps) {
   return (
     <FormSection title="Path Configuration" className="mt-10">
-      <SettingsStack
-        label="App Data Directory"
-        description="The read-only directory where Flowent stores its internal database and configuration files."
-      >
+      <SettingsStack label="App Data Directory">
         <div className="space-y-2 max-w-lg">
           <FormInput
             aria-label="App Data Directory"
@@ -173,13 +173,13 @@ export function PathConfigurationSection({
             readOnly
             mono
           />
+          <p className={formHelpTextClass}>
+            Read-only while Flowent is running.
+          </p>
         </div>
       </SettingsStack>
 
-      <SettingsStack
-        label="Working Directory"
-        description="The root directory where the agent operates. It defines the boundary for file reading and writing."
-      >
+      <SettingsStack label="Working Directory">
         <div className="space-y-2 max-w-lg">
           <FormInput
             aria-label="Working Directory"
@@ -193,6 +193,9 @@ export function PathConfigurationSection({
             placeholder="/workspace/project"
             mono
           />
+          <p className={formHelpTextClass}>
+            Changing this does not expand saved allowed folders.
+          </p>
           <div className={cn("space-y-2", formHelpTextClass)}>
             {!settings.working_dir.trim() ? (
               <p className="text-destructive">
@@ -221,10 +224,7 @@ export function AssistantConfigurationSection({
 }: AssistantConfigurationSectionProps) {
   return (
     <FormSection title="Assistant Configuration">
-      <SettingsRow
-        label="Assistant Role"
-        description="The primary system persona handling day-to-step tasks."
-      >
+      <SettingsRow label="Assistant Role">
         <div className="w-full">
           <Select
             value={settings.assistant.role_name}
@@ -265,11 +265,8 @@ export function AssistantConfigurationSection({
         </div>
       </SettingsRow>
 
-      <SettingsRow
-        label="Network Access"
-        description="Allow the assistant to search the web for answers or read remote documentation URLs."
-      >
-        <div className="space-y-2 flex justify-end">
+      <SettingsRow label="Network Access">
+        <div className="space-y-2">
           <FormSwitch
             checked={settings.assistant.allow_network}
             label="Network Access"
@@ -284,13 +281,15 @@ export function AssistantConfigurationSection({
             }
             showStateText
           />
+          {!settings.assistant.allow_network ? (
+            <p className={formHelpTextClass}>
+              Assistant cannot connect to the web.
+            </p>
+          ) : null}
         </div>
       </SettingsRow>
 
-      <SettingsStack
-        label="Write Directories"
-        description="Paths outside of the working directory that the assistant is explicitly permitted to write to. (One path per line)"
-      >
+      <SettingsStack label="Write Directories">
         <div className="space-y-2 max-w-xl">
           <FormTextarea
             aria-label="Write Dirs"
@@ -310,6 +309,9 @@ export function AssistantConfigurationSection({
             className="min-h-[108px]"
             mono
           />
+          <p className={formHelpTextClass}>
+            One absolute folder path per line.
+          </p>
         </div>
       </SettingsStack>
     </FormSection>
@@ -331,10 +333,7 @@ export function LeaderConfigurationSection({
 }: LeaderConfigurationSectionProps) {
   return (
     <FormSection title="Leader Configuration" className="mt-10">
-      <SettingsRow
-        label="Leader Role"
-        description="The persona responsible for managing multi-agent workflows and task delegation."
-      >
+      <SettingsRow label="Leader Role">
         <div className="w-full">
           <Select
             value={settings.leader.role_name}
@@ -514,10 +513,7 @@ export function ModelConfigurationSection({
         ) : null}
       </SettingsRow>
 
-      <SettingsStack
-        label="Model Metadata Overrides"
-        description="Manually override model capabilities and context windows if the auto-detected values are incorrect."
-      >
+      <SettingsStack label="Model Metadata Overrides">
         <div className="space-y-3 w-full">
           <div className="grid gap-3 md:grid-cols-4">
             <div className="space-y-1">
@@ -668,15 +664,11 @@ export function ModelConfigurationSection({
             emptyLabel="Not set"
             numberPlaceholder="Not set"
             reasoningDisableLabel={null}
-            helperText="Empty fields are omitted from outgoing provider requests. Reasoning effort and verbosity are mainly effective on reasoning-capable providers such as OpenAI Responses with GPT-5 family models."
           />
         </div>
       </SettingsStack>
 
-      <SettingsRow
-        label="Request Timeout"
-        description="Maximum wait time for a single API request before failing."
-      >
+      <SettingsRow label="Request Timeout">
         <div className="space-y-2 w-full max-w-xs">
           <div className="flex items-center gap-2">
             <FormInput
@@ -710,10 +702,7 @@ export function ModelConfigurationSection({
         </div>
       </SettingsRow>
 
-      <SettingsStack
-        label="Retry Strategy"
-        description="Configure how the agent behaves when the API provider is unavailable or returns rate limit errors."
-      >
+      <SettingsStack label="Retry Strategy">
         <SettingsGroup className="max-w-3xl">
           <div className="grid gap-6 md:grid-cols-[1fr_2fr]">
             <div className="space-y-1">
@@ -887,10 +876,7 @@ export function ModelConfigurationSection({
         </SettingsGroup>
       </SettingsStack>
 
-      <SettingsStack
-        label="Automatic Compact"
-        description="Prevent context overflow by automatically summarizing history when tokens exceed the specified limit."
-      >
+      <SettingsStack label="Automatic Compact">
         <div className="space-y-3 w-full max-w-sm">
           <div className="space-y-1">
             <label
@@ -967,9 +953,6 @@ export function SettingsFooter({ appVersion }: SettingsFooterProps) {
     <div className="mt-12 flex flex-col items-center pt-2 pb-6 text-center">
       <p className="text-[11px] font-medium text-muted-foreground">
         Flowent Agent Studio v{appVersion ?? "—"}
-      </p>
-      <p className="mt-1.5 text-[10px] text-muted-foreground/80">
-        A multi-agent collaboration framework.
       </p>
     </div>
   );

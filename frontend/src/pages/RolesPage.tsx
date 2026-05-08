@@ -1,5 +1,14 @@
 import { motion } from "motion/react";
-import { Edit2, Eye, Plus, RefreshCw, Trash2, Users, X } from "lucide-react";
+import {
+  Edit2,
+  Eye,
+  Info,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { ModelParamsFields } from "@/components/ModelParamsFields";
 import {
   FormSection,
@@ -25,6 +34,12 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -34,11 +49,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useOptionalAgentUI } from "@/context/AgentContext";
 import { cloneModelParams, isEmptyModelParams } from "@/lib/modelParams";
 import { cn } from "@/lib/utils";
 import { useRolesPageState } from "@/pages/roles/useRolesPageState";
 
 export function RolesPage() {
+  const agentUI = useOptionalAgentUI();
   const {
     activeRole,
     availableActiveProviderModelOptions,
@@ -61,6 +78,10 @@ export function RolesPage() {
     saving,
     actions,
   } = useRolesPageState();
+  const roleActions = {
+    ...actions,
+    openProvidersPage: () => agentUI?.setCurrentPage("providers"),
+  };
 
   if (loading && !isPanelOpen) {
     return <PageLoadingState label="Loading roles..." />;
@@ -134,7 +155,7 @@ export function RolesPage() {
                     <FormInput
                       value={draft.name}
                       onChange={(event) =>
-                        actions.updateDraft((current) => ({
+                        roleActions.updateDraft((current) => ({
                           ...current,
                           name: event.target.value,
                         }))
@@ -153,7 +174,7 @@ export function RolesPage() {
                     <FormTextarea
                       value={draft.description}
                       onChange={(event) =>
-                        actions.updateDraft((current) => ({
+                        roleActions.updateDraft((current) => ({
                           ...current,
                           description: event.target.value,
                         }))
@@ -175,7 +196,7 @@ export function RolesPage() {
                       <FormTextarea
                         value={draft.system_prompt}
                         onChange={(event) =>
-                          actions.updateDraft((current) => ({
+                          roleActions.updateDraft((current) => ({
                             ...current,
                             system_prompt: event.target.value,
                           }))
@@ -191,15 +212,13 @@ export function RolesPage() {
                         )}
                         mono
                       />
-                      <p className="text-[11px] text-muted-foreground">
-                        {isReadOnly
-                          ? activeRole?.is_builtin
-                            ? "This built-in role can be inspected. Use Edit to adjust only its model configuration."
-                            : "This role is in read-only view. Use Edit to modify it."
-                          : lockBuiltinFields
-                            ? "Built-in role prompt and tool configuration are fixed. Only model configuration can be changed."
-                            : "This prompt defines how agents with this role will behave."}
-                      </p>
+                      {isReadOnly || lockBuiltinFields ? (
+                        <p className="text-[11px] text-muted-foreground">
+                          {activeRole?.is_builtin || lockBuiltinFields
+                            ? "Built-in role fields are locked."
+                            : "View only."}
+                        </p>
+                      ) : null}
                     </div>
                   </SettingsRow>
                 </FormSection>
@@ -244,6 +263,9 @@ export function RolesPage() {
                       >
                         Set Role Override
                       </Button>
+                      {draft.model === null ? (
+                        <StatusChip tone="muted">Settings default</StatusChip>
+                      ) : null}
                     </div>
 
                     {draft.model ? (
@@ -289,7 +311,7 @@ export function RolesPage() {
                                   : undefined
                               }
                               onValueChange={(value) =>
-                                actions.updateDraft((current) => ({
+                                roleActions.updateDraft((current) => ({
                                   ...current,
                                   model: current.model
                                     ? { ...current.model, model: value }
@@ -328,10 +350,17 @@ export function RolesPage() {
                             </Select>
                             {availableActiveProviderModelOptions.length ===
                             0 ? (
-                              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                                No saved provider models. Manage this provider
-                                catalog in Providers.
-                              </p>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                                <span>No saved provider models.</span>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="xs"
+                                  onClick={roleActions.openProvidersPage}
+                                >
+                                  Open Providers
+                                </Button>
+                              </div>
                             ) : null}
                           </div>
 
@@ -342,7 +371,7 @@ export function RolesPage() {
                             <FormInput
                               value={draft.model.model}
                               onChange={(event) =>
-                                actions.updateDraft((current) => ({
+                                roleActions.updateDraft((current) => ({
                                   ...current,
                                   model: current.model
                                     ? {
@@ -366,10 +395,7 @@ export function RolesPage() {
                         </div>
                       </PanelCard>
                     ) : (
-                      <p className="text-[13px] text-muted-foreground">
-                        This role follows the default provider and model from
-                        Settings.
-                      </p>
+                      <StatusChip tone="muted">Settings default</StatusChip>
                     )}
                   </div>
                 </FormSection>
@@ -418,6 +444,27 @@ export function RolesPage() {
                       >
                         Set Parameter Overrides
                       </Button>
+                      {isEmptyModelParams(draft.model_params) ? (
+                        <TooltipProvider delayDuration={150}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="rounded-full text-muted-foreground hover:bg-accent/35 hover:text-foreground"
+                                aria-label="Parameter override details"
+                              >
+                                <Info className="size-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs">
+                              Overrides affect this role only. Unsupported
+                              fields may be ignored.
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : null}
                     </div>
 
                     {!isEmptyModelParams(draft.model_params) ? (
@@ -425,7 +472,7 @@ export function RolesPage() {
                         <ModelParamsFields
                           value={cloneModelParams(draft.model_params)}
                           onChange={(params) =>
-                            actions.updateDraft((current) => ({
+                            roleActions.updateDraft((current) => ({
                               ...current,
                               model_params: params,
                             }))
@@ -434,14 +481,10 @@ export function RolesPage() {
                           emptyLabel="Inherit settings default"
                           numberPlaceholder="Inherit settings default"
                           reasoningDisableLabel="Disable"
-                          helperText="These canonical parameters override Settings only for this role. Unsupported fields are ignored by the resolved provider."
                         />
                       </PanelCard>
                     ) : (
-                      <p className="text-[13px] text-muted-foreground">
-                        This role inherits the default model parameters from
-                        Settings.
-                      </p>
+                      <StatusChip tone="muted">Settings default</StatusChip>
                     )}
                   </div>
                 </FormSection>
@@ -544,8 +587,13 @@ export function RolesPage() {
             >
               <PageState
                 icon={Users}
-                title="No Roles Created"
-                description="Roles define agent behavior. Create your first role to get started."
+                title="No roles yet"
+                action={
+                  <Button type="button" size="sm" onClick={actions.openCreate}>
+                    <Plus className="size-4" />
+                    New Role
+                  </Button>
+                }
                 className="border-transparent bg-transparent"
               />
             </motion.div>

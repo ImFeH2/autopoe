@@ -688,6 +688,10 @@ export function useAgentUI() {
   return ctx;
 }
 
+export function useOptionalAgentUI() {
+  return useContext(AgentUIContext);
+}
+
 export function useAgent() {
   const runtime = useAgentRuntime();
   const ui = useAgentUI();

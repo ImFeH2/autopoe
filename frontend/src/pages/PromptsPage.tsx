@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
-import { Save } from "lucide-react";
+import { Info, Save } from "lucide-react";
 import { toast } from "sonner";
 import { FormTextarea } from "@/components/form/FormControls";
 import { PageScaffold, PageTitleBar } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { Button } from "@/components/ui/button";
 import { PanelCard, StatusChip } from "@/components/ui/surface";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { fetchPromptSettings, savePromptSettings } from "@/lib/api";
 
 const promptEditorTextareaClass =
@@ -82,13 +88,14 @@ export function PromptsPage() {
                 <h2 className="text-[15px] font-medium text-foreground">
                   Custom Prompt
                 </h2>
+                {promptInfoButton(
+                  "Custom Prompt details",
+                  "Appended to every node's system prompt.",
+                )}
                 <StatusChip tone="neutral" className="px-2 py-0.5">
                   {customPrompt.length} chars
                 </StatusChip>
               </div>
-              <p className="text-[12px] text-muted-foreground">
-                Appended to every node's system prompt
-              </p>
             </div>
             <PanelCard
               as="div"
@@ -99,7 +106,7 @@ export function PromptsPage() {
                 aria-label="Custom Prompt"
                 value={customPrompt}
                 onChange={(event) => setCustomPrompt(event.target.value)}
-                placeholder="Add a custom prompt appended to every agent's system prompt..."
+                placeholder="Appended to every node's system prompt..."
                 className={promptEditorTextareaClass}
                 mono
               />
@@ -111,13 +118,14 @@ export function PromptsPage() {
                 <h2 className="text-[15px] font-medium text-foreground">
                   Custom Post Prompt
                 </h2>
+                {promptInfoButton(
+                  "Custom Post Prompt details",
+                  "Appended after the built-in runtime post prompt.",
+                )}
                 <StatusChip tone="neutral" className="px-2 py-0.5">
                   {customPostPrompt.length} chars
                 </StatusChip>
               </div>
-              <p className="text-[12px] text-muted-foreground">
-                Added after the built-in runtime post prompt
-              </p>
             </div>
             <PanelCard
               as="div"
@@ -128,7 +136,7 @@ export function PromptsPage() {
                 aria-label="Custom Post Prompt"
                 value={customPostPrompt}
                 onChange={(event) => setCustomPostPrompt(event.target.value)}
-                placeholder="Add custom runtime instructions appended after the built-in post prompt..."
+                placeholder="Appended after the built-in runtime post prompt..."
                 className={promptEditorTextareaClass}
                 mono
               />
@@ -139,3 +147,21 @@ export function PromptsPage() {
     </PageScaffold>
   );
 }
+const promptInfoButton = (label: string, details: string) => (
+  <TooltipProvider delayDuration={150}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={label}
+          className="rounded-full text-muted-foreground hover:bg-accent/35 hover:text-foreground"
+        >
+          <Info className="size-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{details}</TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);

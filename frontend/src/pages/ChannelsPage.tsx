@@ -147,9 +147,9 @@ export function ChannelsPage() {
                 <label className="text-[13px] font-medium text-foreground/80">
                   Bot Token
                 </label>
-                <span className="text-[11px] text-muted-foreground">
-                  Leave empty to keep the current token
-                </span>
+                <StatusChip tone={configured ? "running" : "idle"}>
+                  {configured ? "Saved" : "Missing"}
+                </StatusChip>
               </div>
               <div className="mt-3">
                 <SecretInput
@@ -163,6 +163,11 @@ export function ChannelsPage() {
                   showLabel="Show Telegram bot token"
                   hideLabel="Hide Telegram bot token"
                 />
+                {configured && !tokenDirty ? (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Leave empty to keep the current token.
+                  </p>
+                ) : null}
               </div>
             </section>
 
