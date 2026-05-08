@@ -444,13 +444,11 @@ def _build_root_uri(path: str) -> str:
 
 
 def _build_roots_for_agent(agent: Agent) -> list[dict[str, str]]:
+    from flowent.graph_service import resolve_effective_permissions_for_agent
     from flowent.settings import get_runtime_working_dir_path, resolve_path
 
     workspace_root = str(get_runtime_working_dir_path())
-    if agent.config.node_type.value == "assistant":
-        boundary_dirs = list(get_settings().assistant.write_dirs)
-    else:
-        boundary_dirs = list(agent.config.write_dirs)
+    _, boundary_dirs = resolve_effective_permissions_for_agent(agent)
     ordered_paths: list[str] = []
     seen: set[str] = set()
     for path in [workspace_root, *boundary_dirs]:
@@ -1577,11 +1575,16 @@ class MCPService:
         return snapshot.serialize()
 
     def _visible_server_names_for_agent(self, agent: Agent) -> list[str]:
+        from flowent.graph_service import resolve_effective_permissions_for_agent
+
         settings = get_settings()
+        allow_network, _ = resolve_effective_permissions_for_agent(agent)
         visible_names: list[str] = []
         seen: set[str] = set()
         for server in settings.mcp_servers:
             if server.name in seen or not server.enabled:
+                continue
+            if server.transport == "streamable_http" and not allow_network:
                 continue
             snapshot = self._get_snapshot(server.name)
             if snapshot is None or snapshot.status != "connected":
@@ -1670,13 +1673,16 @@ class MCPService:
         return prompts
 
     def _get_server_for_agent(self, agent: Agent, server_name: str) -> MCPServerConfig:
+        from flowent.graph_service import resolve_effective_permissions_for_agent
+
         if server_name not in self._visible_server_names_for_agent(agent):
             raise MCPError(f"MCP server '{server_name}' is not globally available")
         server = find_mcp_server(get_settings(), server_name)
         if server is None or not server.enabled:
             raise MCPError(f"MCP server '{server_name}' is unavailable")
-        if server.transport == "streamable_http" and not agent.config.allow_network:
-            raise MCPError("Network access is disabled for this node")
+        allow_network, _ = resolve_effective_permissions_for_agent(agent)
+        if server.transport == "streamable_http" and not allow_network:
+            raise MCPError("Network access is disabled for this workflow")
         return server
 
     def read_agent_resource(

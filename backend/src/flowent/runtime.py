@@ -48,6 +48,7 @@ def bootstrap_runtime() -> None:
     from flowent.graph_service import (
         build_assistant_tools,
         ensure_tab_leaders,
+        resolve_effective_permissions_for_node_record,
     )
     from flowent.mcp_service import mcp_service
     from flowent.models import AgentState, NodeConfig, NodeType, StateEntry
@@ -126,6 +127,9 @@ def bootstrap_runtime() -> None:
             continue
         if record.state == AgentState.TERMINATED:
             continue
+        allow_network, write_dirs = resolve_effective_permissions_for_node_record(
+            record
+        )
         node = Agent(
             NodeConfig(
                 node_type=record.config.node_type,
@@ -133,8 +137,8 @@ def bootstrap_runtime() -> None:
                 tab_id=record.config.tab_id,
                 name=record.config.name,
                 tools=list(record.config.tools),
-                write_dirs=list(record.config.write_dirs),
-                allow_network=record.config.allow_network,
+                write_dirs=write_dirs,
+                allow_network=allow_network,
             ),
             uuid=record.id,
         )

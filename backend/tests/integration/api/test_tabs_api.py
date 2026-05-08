@@ -67,7 +67,11 @@ def test_create_tab_rejects_removed_goal_field(client: TestClient):
 def test_create_tab_node_and_edge_round_trip(client: TestClient):
     create_tab_response = client.post(
         "/api/workflows",
-        json={"title": "Review Task"},
+        json={
+            "title": "Review Task",
+            "allow_network": True,
+            "write_dirs": ["/tmp"],
+        },
     )
 
     assert create_tab_response.status_code == 200
@@ -78,6 +82,8 @@ def test_create_tab_node_and_edge_round_trip(client: TestClient):
     assert tab["node_count"] == 0
     assert tab["edge_count"] == 0
     assert tab["activation_state"] == "inactive"
+    assert tab["allow_network"] is True
+    assert tab["write_dirs"] == ["/tmp"]
     assert tab["definition"] == {"version": 1, "nodes": [], "edges": []}
     assert isinstance(tab["leader_id"], str)
 
@@ -90,6 +96,17 @@ def test_create_tab_node_and_edge_round_trip(client: TestClient):
     assert writer["node_type"] == "agent"
     assert reader["config"]["role_name"] == "Worker"
     assert writer["config"]["role_name"] == "Worker"
+    assert "write_dirs" not in reader["config"]
+    assert "allow_network" not in reader["config"]
+
+    removed_permission_response = client.post(
+        f"/api/workflows/{tab_id}/nodes",
+        json={
+            "role_name": "Worker",
+            "write_dirs": ["/tmp"],
+        },
+    )
+    assert removed_permission_response.status_code == 422
 
     edge_response = client.post(
         f"/api/workflows/{tab_id}/edges",
@@ -114,6 +131,8 @@ def test_create_tab_node_and_edge_round_trip(client: TestClient):
     tab_detail = tab_detail_response.json()
     assert tab_detail["workflow"]["id"] == tab_id
     assert "goal" not in tab_detail["workflow"]
+    assert tab_detail["workflow"]["allow_network"] is True
+    assert tab_detail["workflow"]["write_dirs"] == ["/tmp"]
     assert tab_detail["workflow"]["node_count"] == 2
     assert tab_detail["workflow"]["edge_count"] == 1
     assert {node["name"] for node in tab_detail["nodes"]} == {"Reader", "Writer"}
@@ -319,7 +338,11 @@ def test_tab_edge_creation_enforces_directed_ports_and_single_input(
 def test_duplicate_tab_copies_definition_and_runtime_agents(client: TestClient):
     source_tab = client.post(
         "/api/workflows",
-        json={"title": "Original Workflow"},
+        json={
+            "title": "Original Workflow",
+            "allow_network": True,
+            "write_dirs": ["/tmp"],
+        },
     ).json()
     source_tab_id = source_tab["id"]
 
@@ -365,9 +388,13 @@ def test_duplicate_tab_copies_definition_and_runtime_agents(client: TestClient):
     assert duplicated_tab["id"] != source_tab_id
     assert duplicated_tab["leader_id"] != source_tab["leader_id"]
     assert duplicated_tab["activation_state"] == "inactive"
+    assert duplicated_tab["allow_network"] is True
+    assert duplicated_tab["write_dirs"] == ["/tmp"]
 
     duplicated_detail = client.get(f"/api/workflows/{duplicated_tab['id']}").json()
     assert "goal" not in duplicated_detail["workflow"]
+    assert duplicated_detail["workflow"]["allow_network"] is True
+    assert duplicated_detail["workflow"]["write_dirs"] == ["/tmp"]
     assert {node["name"] for node in duplicated_detail["nodes"]} == {
         "Reviewer",
         "Formatter",

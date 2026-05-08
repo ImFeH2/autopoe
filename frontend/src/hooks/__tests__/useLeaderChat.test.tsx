@@ -85,6 +85,8 @@ function buildActiveTab(): TaskTab {
     created_at: 1,
     updated_at: 1,
     definition: { version: 1, nodes: [], edges: [] },
+    allow_network: false,
+    write_dirs: [],
     node_count: 1,
     edge_count: 0,
   };

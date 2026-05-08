@@ -36,17 +36,18 @@ class ExecTool(Tool):
 
     def execute(self, agent: Agent, args: dict[str, Any], **kwargs: Any) -> str:
         on_output: Callable[[str], None] | None = kwargs.get("on_output")
+        from flowent.graph_service import resolve_effective_permissions_for_agent
         from flowent.settings import get_runtime_working_dir_path
 
         command = args["command"]
         timeout = int(args.get("timeout", 30))
-        write_dirs = agent.config.write_dirs
+        allow_network, write_dirs = resolve_effective_permissions_for_agent(agent)
         cwd = Path(get_runtime_working_dir_path())
 
         bwrap_cmd = build_bwrap_cmd(
             write_dirs,
             command,
-            allow_network=agent.config.allow_network,
+            allow_network=allow_network,
             cwd=cwd,
         )
 

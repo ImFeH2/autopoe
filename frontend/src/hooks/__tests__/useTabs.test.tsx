@@ -17,6 +17,8 @@ function buildTab(overrides: Partial<TaskTab> = {}): TaskTab {
     created_at: overrides.created_at ?? 1,
     updated_at: overrides.updated_at ?? 1,
     definition: overrides.definition ?? { version: 1, nodes: [], edges: [] },
+    allow_network: overrides.allow_network ?? false,
+    write_dirs: overrides.write_dirs ?? [],
     node_count: overrides.node_count ?? 2,
     edge_count: overrides.edge_count ?? 1,
   };

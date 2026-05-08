@@ -41,8 +41,6 @@ class CreateTabNodeRequest(BaseModel):
     name: str | None = None
     config: dict[str, object] = {}
     tools: list[str] = []
-    write_dirs: list[str] = []
-    allow_network: bool = False
 
 
 class CreateTabEdgeRequest(BaseModel):
@@ -227,8 +225,6 @@ async def create_workflow_node(
             tab_id=tab_id,
             name=req.name,
             tools=req.tools,
-            write_dirs=req.write_dirs,
-            allow_network=req.allow_network,
         )
         if error is not None or record is None:
             raise HTTPException(

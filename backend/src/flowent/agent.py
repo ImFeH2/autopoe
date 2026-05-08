@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from queue import Empty, Queue
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -124,6 +125,7 @@ class ResolvedModelSource:
     provider_id: str | None
     provider_name: str | None
     provider_type: str | None
+    provider_base_url: str | None
     model: str | None
     model_info: ModelInfo | None
 
@@ -1707,6 +1709,7 @@ class Agent:
         retry_limit = self._get_llm_max_retries()
         retry_count = 0
         started_at = _time.time()
+        self._raise_if_llm_network_disallowed()
 
         while True:
             stream_state = StreamingContentState()
@@ -1811,6 +1814,8 @@ class Agent:
     ) -> str:
         if not context_messages:
             return "- No prior execution context was available to compact."
+
+        self._raise_if_llm_network_disallowed()
 
         focus_text = focus.strip() if focus else ""
         request_lines = [
@@ -2141,6 +2146,7 @@ class Agent:
                 provider_id=None,
                 provider_name=None,
                 provider_type=None,
+                provider_base_url=None,
                 model=None,
                 model_info=None,
             )
@@ -2150,6 +2156,7 @@ class Agent:
                 provider_id=None,
                 provider_name=None,
                 provider_type=None,
+                provider_base_url=None,
                 model=None,
                 model_info=None,
             )
@@ -2157,6 +2164,7 @@ class Agent:
             provider_id=provider.id,
             provider_name=provider.name,
             provider_type=provider.type,
+            provider_base_url=provider.base_url,
             model=model_id,
             model_info=resolve_model_info(
                 provider=provider,
@@ -2174,6 +2182,29 @@ class Agent:
                 ),
             ),
         )
+
+    def _raise_if_llm_network_disallowed(self) -> None:
+        from flowent.graph_service import resolve_effective_permissions_for_agent
+
+        allow_network, _ = resolve_effective_permissions_for_agent(self)
+        if allow_network:
+            return
+        source = self._get_effective_model_source()
+        if not self._model_source_requires_network(source):
+            return
+        raise LLMProviderError(
+            "Network access is disabled for this workflow",
+            transient=False,
+        )
+
+    @staticmethod
+    def _model_source_requires_network(source: ResolvedModelSource) -> bool:
+        base_url = source.provider_base_url
+        if not base_url:
+            return False
+        parsed = urlparse(base_url)
+        host = (parsed.hostname or "").lower()
+        return host not in {"localhost", "127.0.0.1", "::1"}
 
     def _get_effective_model_info(self) -> tuple[str | None, ModelInfo | None]:
         resolved_source = self._get_effective_model_source()

@@ -313,7 +313,7 @@ export function WorkspaceShell({
                     Workflow JSON
                   </p>
                   <p className="mt-1 text-[13px] text-muted-foreground">
-                    Review the graph structure and saved node settings.
+                    Review the graph structure and saved workflow settings.
                   </p>
                 </div>
                 <Button

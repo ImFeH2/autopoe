@@ -4,7 +4,7 @@ import pytest
 
 from flowent.agent import Agent
 from flowent.graph_service import create_tab
-from flowent.models import AgentState, GraphNodeRecord, NodeConfig, NodeType
+from flowent.models import NodeConfig, NodeType
 from flowent.registry import registry
 from flowent.settings import CONDUCTOR_ROLE_NAME, RoleConfig, Settings
 from flowent.tools.create_agent import CreateAgentTool
@@ -309,14 +309,12 @@ def test_create_agent_rejects_reserved_conductor_role(monkeypatch):
     }
 
 
-def test_create_agent_respects_write_dir_and_network_boundaries(monkeypatch, tmp_path):
+def test_create_agent_rejects_node_level_permissions(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "flowent.settings.get_settings",
         lambda: Settings(roles=[RoleConfig(name="Worker", system_prompt="Do work.")]),
     )
 
-    allowed_dir = tmp_path / "allowed"
-    allowed_dir.mkdir()
     disallowed_dir = tmp_path / "disallowed"
     disallowed_dir.mkdir()
     tab = create_tab(title="Task")
@@ -327,8 +325,6 @@ def test_create_agent_respects_write_dir_and_network_boundaries(monkeypatch, tmp
             role_name="Conductor",
             tab_id=tab.id,
             tools=["create_agent"],
-            write_dirs=[str(allowed_dir)],
-            allow_network=False,
         ),
         uuid=tab.leader_id,
     )
@@ -353,90 +349,16 @@ def test_create_agent_respects_write_dir_and_network_boundaries(monkeypatch, tmp
     )
 
     assert write_dir_result == {
-        "error": f"write_dirs boundary exceeded: {disallowed_dir}"
+        "error": (
+            "create_agent uses the current workflow permissions; update the "
+            "workflow permissions instead"
+        )
     }
     assert network_result == {
-        "error": "allow_network boundary exceeded: parent disallows network access"
-    }
-
-
-def test_create_agent_also_respects_tab_leader_boundaries(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "flowent.settings.get_settings",
-        lambda: Settings(roles=[RoleConfig(name="Worker", system_prompt="Do work.")]),
-    )
-
-    leader_dir = tmp_path / "leader"
-    leader_dir.mkdir()
-    creator_dir = tmp_path / "creator"
-    creator_dir.mkdir()
-    creator_child = creator_dir / "child"
-    creator_child.mkdir()
-    tab = create_tab(title="Task")
-
-    leader = Agent(
-        NodeConfig(
-            node_type=NodeType.AGENT,
-            role_name="Conductor",
-            tab_id=tab.id,
-            tools=[],
-            write_dirs=[str(leader_dir)],
-            allow_network=False,
-        ),
-        uuid=tab.leader_id,
-    )
-    creator = Agent(
-        NodeConfig(
-            node_type=NodeType.AGENT,
-            role_name="Worker",
-            tab_id=tab.id,
-            tools=["create_agent"],
-            write_dirs=[str(creator_dir)],
-            allow_network=True,
-        ),
-        uuid="worker",
-    )
-    registry.register(leader)
-    registry.register(creator)
-    workspace_store.upsert_node_record(
-        GraphNodeRecord(
-            id=leader.uuid,
-            config=leader.config,
-            state=AgentState.INITIALIZING,
+        "error": (
+            "create_agent uses the current workflow permissions; update the "
+            "workflow permissions instead"
         )
-    )
-    workspace_store.upsert_node_record(
-        GraphNodeRecord(
-            id=creator.uuid,
-            config=creator.config,
-            state=AgentState.INITIALIZING,
-        )
-    )
-
-    write_dir_result = json.loads(
-        CreateAgentTool().execute(
-            creator,
-            {
-                "role_name": "Worker",
-                "write_dirs": [str(creator_child)],
-            },
-        )
-    )
-    network_result = json.loads(
-        CreateAgentTool().execute(
-            creator,
-            {
-                "role_name": "Worker",
-                "allow_network": True,
-            },
-        )
-    )
-
-    assert write_dir_result == {
-        "error": f"write_dirs boundary exceeded: {creator_child}"
-    }
-    assert network_result == {
-        "error": "allow_network boundary exceeded: workflow Leader disallows network access"
     }
 
 
@@ -488,16 +410,6 @@ def test_create_agent_tool_schema_exposes_workflow_placement_options():
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Optional additional tools",
-            },
-            "write_dirs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional writable directories",
-            },
-            "allow_network": {
-                "type": "boolean",
-                "description": "Whether the node can access the network",
-                "default": False,
             },
             "placement": {
                 "type": "string",

@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 class SetPermissionsTool(Tool):
     name = "set_permissions"
     description = (
-        "Update a workflow's permission boundary by patching its bound Leader's "
-        "allow_network and write_dirs."
+        "Update a workflow's permission boundary by patching its allow_network "
+        "and write_dirs."
     )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -36,7 +36,10 @@ class SetPermissionsTool(Tool):
     }
 
     def execute(self, agent: Agent, args: dict[str, Any], **_kwargs: Any) -> str:
-        from flowent.graph_service import set_tab_permissions
+        from flowent.graph_service import (
+            resolve_effective_permissions_for_agent,
+            set_tab_permissions,
+        )
         from flowent.settings import (
             build_assistant_allow_network,
             build_assistant_write_dirs,
@@ -69,12 +72,15 @@ class SetPermissionsTool(Tool):
             except ValueError as exc:
                 return json.dumps({"error": str(exc)})
 
+        caller_allow_network, caller_write_dirs = (
+            resolve_effective_permissions_for_agent(agent)
+        )
         result, error = set_tab_permissions(
             tab_id=workflow_id.strip(),
             allow_network=allow_network,
             write_dirs=write_dirs,
-            caller_allow_network=agent.config.allow_network,
-            caller_write_dirs=list(agent.config.write_dirs),
+            caller_allow_network=caller_allow_network,
+            caller_write_dirs=caller_write_dirs,
             actor_id=agent.uuid,
         )
         if error is not None or result is None:

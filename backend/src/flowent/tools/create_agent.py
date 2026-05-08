@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from flowent.graph_service import create_agent_node
 from flowent.models import NodeType
-from flowent.settings import build_assistant_write_dirs, resolve_path
 from flowent.tools import Tool
 
 if TYPE_CHECKING:
@@ -30,16 +29,6 @@ class CreateAgentTool(Tool):
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Optional additional tools",
-            },
-            "write_dirs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional writable directories",
-            },
-            "allow_network": {
-                "type": "boolean",
-                "description": "Whether the node can access the network",
-                "default": False,
             },
             "placement": {
                 "type": "string",
@@ -68,6 +57,15 @@ class CreateAgentTool(Tool):
     def execute(self, agent: Agent, args: dict[str, Any], **_kwargs: Any) -> str:
         if "workflow_id" in args or "tab_id" in args:
             return json.dumps({"error": "create_agent does not accept workflow_id"})
+        if "write_dirs" in args or "allow_network" in args:
+            return json.dumps(
+                {
+                    "error": (
+                        "create_agent uses the current workflow permissions; "
+                        "update the workflow permissions instead"
+                    )
+                }
+            )
         if "connect_to_creator" in args:
             return json.dumps(
                 {
@@ -77,8 +75,6 @@ class CreateAgentTool(Tool):
         role_name = args.get("role_name")
         name = args.get("name")
         tools = args.get("tools", [])
-        write_dirs = args.get("write_dirs", [])
-        allow_network = args.get("allow_network", False)
         placement = args.get("placement", "standalone")
         after_node_id = args.get("after_node_id")
         between_from_node_id = args.get("between_from_node_id")
@@ -92,12 +88,6 @@ class CreateAgentTool(Tool):
             isinstance(item, str) for item in tools
         ):
             return json.dumps({"error": "tools must be an array of strings"})
-        if not isinstance(write_dirs, list) or not all(
-            isinstance(item, str) for item in write_dirs
-        ):
-            return json.dumps({"error": "write_dirs must be an array of strings"})
-        if not isinstance(allow_network, bool):
-            return json.dumps({"error": "allow_network must be a boolean"})
         if placement not in {"standalone", "after", "between"}:
             return json.dumps(
                 {"error": "placement must be standalone, after, or between"}
@@ -110,13 +100,6 @@ class CreateAgentTool(Tool):
             return json.dumps({"error": "between_from_node_id must be a string"})
         if between_to_node_id is not None and not isinstance(between_to_node_id, str):
             return json.dumps({"error": "between_to_node_id must be a string"})
-        try:
-            write_dirs = build_assistant_write_dirs(
-                write_dirs,
-                field_name="write_dirs",
-            )
-        except ValueError as exc:
-            return json.dumps({"error": str(exc)})
         normalized_role_name = role_name.strip()
         if agent.node_type == NodeType.ASSISTANT:
             return json.dumps(
@@ -142,76 +125,14 @@ class CreateAgentTool(Tool):
 
         leader = registry.get(leader_id)
         leader_record = workspace_store.get_node_record(leader_id)
-        leader_config = (
-            agent.config
-            if agent.uuid == leader_id
-            else (
-                leader.config
-                if leader is not None
-                else (leader_record.config if leader_record is not None else None)
-            )
-        )
         if leader is None and leader_record is None:
             return json.dumps({"error": f"Leader '{leader_id}' was not found"})
-        leader_write_dirs_source = (
-            leader_config.write_dirs if leader_config is not None else []
-        )
-        leader_allow_network = (
-            leader_config.allow_network if leader_config is not None else False
-        )
-
-        parent_write_dirs = [resolve_path(path) for path in agent.config.write_dirs]
-        invalid_write_dirs = sorted(
-            path
-            for path in write_dirs
-            if not any(
-                resolve_path(path).is_relative_to(parent_path)
-                for parent_path in parent_write_dirs
-            )
-        )
-        if invalid_write_dirs:
-            return json.dumps(
-                {
-                    "error": "write_dirs boundary exceeded: "
-                    + ", ".join(invalid_write_dirs)
-                }
-            )
-        if allow_network and not agent.config.allow_network:
-            return json.dumps(
-                {
-                    "error": "allow_network boundary exceeded: parent disallows network access"
-                }
-            )
-        leader_write_dirs = [resolve_path(path) for path in leader_write_dirs_source]
-        leader_invalid_write_dirs = sorted(
-            path
-            for path in write_dirs
-            if not any(
-                resolve_path(path).is_relative_to(parent_path)
-                for parent_path in leader_write_dirs
-            )
-        )
-        if leader_invalid_write_dirs:
-            return json.dumps(
-                {
-                    "error": "write_dirs boundary exceeded: "
-                    + ", ".join(leader_invalid_write_dirs)
-                }
-            )
-        if allow_network and not leader_allow_network:
-            return json.dumps(
-                {
-                    "error": "allow_network boundary exceeded: workflow Leader disallows network access"
-                }
-            )
 
         record, error = create_agent_node(
             role_name=normalized_role_name,
             tab_id=agent.config.tab_id,
             name=name,
             tools=tools,
-            write_dirs=write_dirs,
-            allow_network=allow_network,
         )
         if error is not None or record is None:
             return json.dumps({"error": error or "Failed to create agent"})

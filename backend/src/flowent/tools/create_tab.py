@@ -12,9 +12,7 @@ if TYPE_CHECKING:
 
 class CreateTabTool(Tool):
     name = "create_workflow"
-    description = (
-        "Create a new workflow with its bound Leader and empty Workflow Graph."
-    )
+    description = "Create a new workflow with its own permission boundary."
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -24,12 +22,12 @@ class CreateTabTool(Tool):
             },
             "allow_network": {
                 "type": "boolean",
-                "description": "Whether the workflow's leader should have network access (default False)",
+                "description": "Whether this workflow should have network access (default False)",
             },
             "write_dirs": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "List of directory paths the workflow's leader is allowed to write to",
+                "description": "List of directory paths this workflow is allowed to write to",
             },
         },
         "required": ["title"],

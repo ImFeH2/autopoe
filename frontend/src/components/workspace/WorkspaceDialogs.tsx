@@ -99,7 +99,7 @@ export function CreateTabDialog({
       </WorkspaceDialogField>
       <WorkspaceDialogField
         label="Network Access"
-        hint="Allow the leader to connect to the internet"
+        hint="Allow this workflow to reach external services"
       >
         <FormSwitch
           checked={allowNetwork}
@@ -108,12 +108,12 @@ export function CreateTabDialog({
         />
       </WorkspaceDialogField>
       <WorkspaceDialogField
-        label="Allowed Folders"
+        label="Writable Folders"
         hint="One absolute folder path per line"
       >
         <Textarea
           value={writeDirs}
-          aria-label="Allowed folders"
+          aria-label="Writable folders"
           onChange={(event) => onWriteDirsChange(event.target.value)}
           placeholder="/workspace/output&#10;/workspace/cache"
           className={cn(

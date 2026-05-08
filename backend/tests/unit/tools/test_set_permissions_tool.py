@@ -5,6 +5,7 @@ import pytest
 from flowent.agent import Agent
 from flowent.models import AgentState, GraphNodeRecord, NodeConfig, NodeType, Tab
 from flowent.registry import registry
+from flowent.settings import AssistantSettings, Settings
 from flowent.tools.set_permissions import SetPermissionsTool
 from flowent.workspace_store import workspace_store
 
@@ -67,15 +68,40 @@ def _register_live_node(record: GraphNodeRecord) -> Agent:
     return node
 
 
-def test_set_permissions_updates_leader_and_clamps_existing_workers(tmp_path):
+def _grant_assistant_permissions(
+    monkeypatch,
+    *,
+    write_dirs: list[str],
+    allow_network: bool,
+) -> None:
+    monkeypatch.setattr(
+        "flowent.settings.get_settings",
+        lambda: Settings(
+            assistant=AssistantSettings(
+                write_dirs=list(write_dirs),
+                allow_network=allow_network,
+            )
+        ),
+    )
+
+
+def test_set_permissions_updates_workflow_boundary_for_all_nodes(monkeypatch, tmp_path):
     root_dir = tmp_path / "root"
     keep_boundary = root_dir / "keep"
     keep_dir = keep_boundary / "child"
     drop_dir = root_dir / "drop"
     keep_dir.mkdir(parents=True)
     drop_dir.mkdir(parents=True)
+    _grant_assistant_permissions(
+        monkeypatch,
+        write_dirs=[str(root_dir)],
+        allow_network=True,
+    )
 
     tab = Tab(id="tab-1", title="Task", leader_id="leader-1")
+    tab.allow_network = True
+    tab.write_dirs = [str(root_dir)]
+    tab.permissions_initialized = True
     workspace_store.upsert_tab(tab)
     leader = _make_record(
         node_id="leader-1",
@@ -135,21 +161,33 @@ def test_set_permissions_updates_leader_and_clamps_existing_workers(tmp_path):
         "write_dirs": [str(keep_boundary)],
         "updated_node_ids": ["leader-1", "worker-keep", "worker-drop"],
     }
-    assert leader_live.config.allow_network is False
-    assert leader_live.config.write_dirs == [str(keep_boundary)]
-    assert keep_live.config.allow_network is False
+    updated_tab = workspace_store.get_tab(tab.id)
+    assert updated_tab is not None
+    assert updated_tab.allow_network is False
+    assert updated_tab.write_dirs == [str(keep_boundary)]
+    assert leader_live.config.allow_network is True
+    assert leader_live.config.write_dirs == [str(root_dir)]
+    assert keep_live.config.allow_network is True
     assert keep_live.config.write_dirs == [str(keep_dir)]
-    assert drop_live.config.allow_network is False
-    assert drop_live.config.write_dirs == []
+    assert drop_live.config.allow_network is True
+    assert drop_live.config.write_dirs == [str(drop_dir)]
 
 
-def test_set_permissions_keeps_omitted_fields_unchanged(tmp_path):
+def test_set_permissions_keeps_omitted_fields_unchanged(monkeypatch, tmp_path):
     root_dir = tmp_path / "root"
     narrowed_dir = root_dir / "narrowed"
     root_dir.mkdir()
     narrowed_dir.mkdir()
+    _grant_assistant_permissions(
+        monkeypatch,
+        write_dirs=[str(root_dir)],
+        allow_network=False,
+    )
 
     tab = Tab(id="tab-1", title="Task", leader_id="leader-1")
+    tab.allow_network = True
+    tab.write_dirs = [str(root_dir)]
+    tab.permissions_initialized = True
     workspace_store.upsert_tab(tab)
     leader = _make_record(
         node_id="leader-1",
@@ -183,17 +221,32 @@ def test_set_permissions_keeps_omitted_fields_unchanged(tmp_path):
 
     assert result["allow_network"] is True
     assert result["write_dirs"] == [str(narrowed_dir)]
+    updated_tab = workspace_store.get_tab(tab.id)
+    assert updated_tab is not None
+    assert updated_tab.allow_network is True
+    assert updated_tab.write_dirs == [str(narrowed_dir)]
     assert leader_live.config.allow_network is True
-    assert leader_live.config.write_dirs == [str(narrowed_dir)]
+    assert leader_live.config.write_dirs == [str(root_dir)]
 
 
-def test_set_permissions_does_not_auto_broaden_existing_workers(tmp_path):
+def test_set_permissions_broadens_workflow_boundary_without_mutating_workers(
+    monkeypatch,
+    tmp_path,
+):
     root_dir = tmp_path / "root"
     current_boundary = root_dir / "current"
     worker_dir = current_boundary / "child"
     worker_dir.mkdir(parents=True)
+    _grant_assistant_permissions(
+        monkeypatch,
+        write_dirs=[str(root_dir)],
+        allow_network=True,
+    )
 
     tab = Tab(id="tab-1", title="Task", leader_id="leader-1")
+    tab.allow_network = False
+    tab.write_dirs = [str(current_boundary)]
+    tab.permissions_initialized = True
     workspace_store.upsert_tab(tab)
     leader = _make_record(
         node_id="leader-1",
@@ -237,15 +290,30 @@ def test_set_permissions_does_not_auto_broaden_existing_workers(tmp_path):
 
     assert result["allow_network"] is True
     assert result["write_dirs"] == [str(root_dir)]
+    updated_tab = workspace_store.get_tab(tab.id)
+    assert updated_tab is not None
+    assert updated_tab.allow_network is True
+    assert updated_tab.write_dirs == [str(root_dir)]
     assert worker_live.config.allow_network is False
     assert worker_live.config.write_dirs == [str(worker_dir)]
 
 
-def test_set_permissions_rejects_allow_network_outside_caller_boundary(tmp_path):
+def test_set_permissions_rejects_allow_network_outside_caller_boundary(
+    monkeypatch,
+    tmp_path,
+):
     root_dir = tmp_path / "root"
     root_dir.mkdir()
+    _grant_assistant_permissions(
+        monkeypatch,
+        write_dirs=[str(root_dir)],
+        allow_network=False,
+    )
 
     tab = Tab(id="tab-1", title="Task", leader_id="leader-1")
+    tab.allow_network = False
+    tab.write_dirs = [str(root_dir)]
+    tab.permissions_initialized = True
     workspace_store.upsert_tab(tab)
     workspace_store.upsert_node_record(
         _make_record(
@@ -282,13 +350,24 @@ def test_set_permissions_rejects_allow_network_outside_caller_boundary(tmp_path)
     }
 
 
-def test_set_permissions_rejects_write_dirs_outside_caller_boundary(tmp_path):
+def test_set_permissions_rejects_write_dirs_outside_caller_boundary(
+    monkeypatch,
+    tmp_path,
+):
     caller_dir = tmp_path / "caller"
     other_dir = tmp_path / "other"
     caller_dir.mkdir()
     other_dir.mkdir()
+    _grant_assistant_permissions(
+        monkeypatch,
+        write_dirs=[str(caller_dir)],
+        allow_network=True,
+    )
 
     tab = Tab(id="tab-1", title="Task", leader_id="leader-1")
+    tab.allow_network = False
+    tab.write_dirs = [str(caller_dir)]
+    tab.permissions_initialized = True
     workspace_store.upsert_tab(tab)
     workspace_store.upsert_node_record(
         _make_record(
@@ -330,6 +409,9 @@ def test_set_permissions_allows_explicitly_granted_non_assistant_agent(tmp_path)
     narrowed_dir.mkdir()
 
     tab = Tab(id="tab-1", title="Task", leader_id="leader-1")
+    tab.allow_network = True
+    tab.write_dirs = [str(root_dir)]
+    tab.permissions_initialized = True
     workspace_store.upsert_tab(tab)
     workspace_store.upsert_node_record(
         _make_record(
@@ -367,6 +449,57 @@ def test_set_permissions_allows_explicitly_granted_non_assistant_agent(tmp_path)
 
     assert result["tab_id"] == tab.id
     assert result["write_dirs"] == [str(narrowed_dir)]
+
+
+def test_set_permissions_migrates_legacy_leader_permissions(tmp_path):
+    root_dir = tmp_path / "root"
+    narrowed_dir = root_dir / "narrowed"
+    root_dir.mkdir()
+    narrowed_dir.mkdir()
+
+    tab = Tab(id="tab-1", title="Task", leader_id="leader-1")
+    workspace_store.upsert_tab(tab)
+    workspace_store.upsert_node_record(
+        _make_record(
+            node_id="leader-1",
+            tab_id=tab.id,
+            role_name="Conductor",
+            name="Leader",
+            write_dirs=[str(root_dir)],
+            allow_network=True,
+            tools=["set_permissions"],
+        )
+    )
+    leader = Agent(
+        NodeConfig(
+            node_type=NodeType.AGENT,
+            role_name="Conductor",
+            tab_id=tab.id,
+            name="Leader",
+            tools=["set_permissions"],
+            write_dirs=[str(root_dir)],
+            allow_network=True,
+        ),
+        uuid="leader-1",
+    )
+
+    result = json.loads(
+        SetPermissionsTool().execute(
+            leader,
+            {
+                "workflow_id": tab.id,
+                "write_dirs": [str(narrowed_dir)],
+            },
+        )
+    )
+
+    updated_tab = workspace_store.get_tab(tab.id)
+    assert result["allow_network"] is True
+    assert result["write_dirs"] == [str(narrowed_dir)]
+    assert updated_tab is not None
+    assert updated_tab.permissions_initialized is True
+    assert updated_tab.allow_network is True
+    assert updated_tab.write_dirs == [str(narrowed_dir)]
 
 
 def test_set_permissions_tool_schema_matches_patch_contract():

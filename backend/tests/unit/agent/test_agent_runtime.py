@@ -62,7 +62,15 @@ def reset_runtime_state(monkeypatch, tmp_path):
 
 
 def _register_tab_leader(*, tab_id: str = "tab-1", leader_id: str = "leader") -> Agent:
-    workspace_store.upsert_tab(Tab(id=tab_id, title="Task", leader_id=leader_id))
+    workspace_store.upsert_tab(
+        Tab(
+            id=tab_id,
+            title="Task",
+            leader_id=leader_id,
+            allow_network=True,
+            permissions_initialized=True,
+        )
+    )
     leader = Agent(
         NodeConfig(
             node_type=NodeType.AGENT,
@@ -77,7 +85,7 @@ def _register_tab_leader(*, tab_id: str = "tab-1", leader_id: str = "leader") ->
 
 
 def test_agent_keeps_running_after_pure_text_response(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT))
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT, allow_network=True))
     wait_calls = 0
     llm_messages: list[list[dict]] = []
     responses = iter([LLMResponse(content="working through the task"), LLMResponse()])
@@ -125,7 +133,7 @@ def test_agent_keeps_running_after_pure_text_response(monkeypatch):
 
 
 def test_agent_retries_transient_llm_errors_before_succeeding(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT))
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT, allow_network=True))
     wait_calls = 0
     llm_calls = 0
 
@@ -185,7 +193,15 @@ def test_agent_retries_transient_llm_errors_before_succeeding(monkeypatch):
 
 
 def test_chat_with_retries_records_single_request_stat(monkeypatch):
-    workspace_store.upsert_tab(Tab(id="tab-1", title="Task", leader_id="leader-1"))
+    workspace_store.upsert_tab(
+        Tab(
+            id="tab-1",
+            title="Task",
+            leader_id="leader-1",
+            allow_network=True,
+            permissions_initialized=True,
+        )
+    )
     agent = Agent(
         NodeConfig(
             node_type=NodeType.AGENT,
@@ -270,10 +286,67 @@ def test_chat_with_retries_records_single_request_stat(monkeypatch):
     assert records[0]["raw_usage"] == {"total_tokens": 120, "input_tokens": 90}
 
 
+def test_chat_with_retries_blocks_remote_model_when_network_is_disabled(monkeypatch):
+    workspace_store.upsert_tab(
+        Tab(
+            id="tab-1",
+            title="Task",
+            leader_id="leader-1",
+            allow_network=False,
+            permissions_initialized=True,
+        )
+    )
+    agent = Agent(
+        NodeConfig(
+            node_type=NodeType.AGENT,
+            role_name="Worker",
+            name="Planner",
+            tab_id="tab-1",
+        ),
+        uuid="agent-1",
+    )
+    settings = Settings(
+        model=ModelSettings(
+            active_provider_id="provider-1",
+            active_model="gpt-5.2",
+        ),
+        providers=[
+            ProviderConfig(
+                id="provider-1",
+                name="Primary",
+                type="openai_responses",
+                base_url="https://api.example.com/v1",
+                api_key="secret",
+            )
+        ],
+    )
+    monkeypatch.setattr("flowent.agent.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "flowent.agent.gateway.chat",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("gateway should not be called")
+        ),
+    )
+
+    with pytest.raises(
+        LLMProviderError,
+        match="Network access is disabled for this workflow",
+    ):
+        agent._chat_with_retries(
+            prepared_context=PreparedLLMContext(
+                messages=[{"role": "user", "content": "hello"}],
+                system_messages=[],
+                execution_context_messages=[],
+                runtime_tail_messages=[],
+            ),
+            tools_schema=None,
+        )
+
+
 def test_agent_does_not_retry_transient_llm_errors_when_retry_policy_is_no_retry(
     monkeypatch,
 ):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT))
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT, allow_network=True))
     wait_calls = 0
     llm_calls = 0
 
@@ -326,7 +399,7 @@ def test_agent_does_not_retry_transient_llm_errors_when_retry_policy_is_no_retry
 
 
 def test_agent_does_not_retry_non_transient_llm_errors(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT))
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT, allow_network=True))
     wait_calls = 0
     llm_calls = 0
     error_summary = (
@@ -396,7 +469,7 @@ def test_agent_does_not_retry_non_transient_llm_errors(monkeypatch):
 
 
 def test_agent_interrupt_stops_retry_backoff(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT))
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT, allow_network=True))
     wait_calls = 0
     llm_calls = 0
     interrupter: threading.Thread | None = None
@@ -453,7 +526,7 @@ def test_agent_interrupt_stops_retry_backoff(monkeypatch):
 
 
 def test_agent_retries_transient_errors_when_retry_policy_is_unlimited(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT))
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT, allow_network=True))
     wait_calls = 0
     llm_calls = 0
 
@@ -563,7 +636,15 @@ def test_get_llm_retry_429_delay_uses_active_provider_only_for_429(monkeypatch):
 
 
 def test_prepare_messages_records_auto_compact_stat(monkeypatch):
-    workspace_store.upsert_tab(Tab(id="tab-1", title="Task", leader_id="leader-1"))
+    workspace_store.upsert_tab(
+        Tab(
+            id="tab-1",
+            title="Task",
+            leader_id="leader-1",
+            allow_network=True,
+            permissions_initialized=True,
+        )
+    )
     agent = Agent(
         NodeConfig(
             node_type=NodeType.AGENT,
@@ -1174,7 +1255,10 @@ def test_agent_dedupes_structured_thinking_and_raw_think_tags(monkeypatch):
 
 def test_agent_unregisters_from_registry_after_termination_request(monkeypatch):
     registry.reset()
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent-x")
+    agent = Agent(
+        NodeConfig(node_type=NodeType.AGENT, allow_network=True),
+        uuid="agent-x",
+    )
     registry.register(agent)
     events = []
 
@@ -1520,7 +1604,10 @@ def test_agent_interrupts_blocked_provider_without_streaming_output(monkeypatch)
 
 
 def test_provider_resolution_error_is_recorded_in_history(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent-y")
+    agent = Agent(
+        NodeConfig(node_type=NodeType.AGENT, allow_network=True),
+        uuid="agent-y",
+    )
     wait_calls = 0
 
     def fake_wait_for_input() -> None:
@@ -2565,7 +2652,9 @@ def test_assistant_emits_human_content_for_plain_text_with_target_like_prefix(
 
 
 def test_idle_tool_records_wakeup_message_as_new_input_block(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT, tools=["idle"]))
+    agent = Agent(
+        NodeConfig(node_type=NodeType.AGENT, tools=["idle"], allow_network=True)
+    )
     wait_calls = 0
     llm_messages: list[list[dict]] = []
     responses = iter(
@@ -2660,7 +2749,10 @@ def test_idle_tool_records_wakeup_message_as_new_input_block(monkeypatch):
 
 
 def test_agent_contextualizes_plain_loguru_calls(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent-z")
+    agent = Agent(
+        NodeConfig(node_type=NodeType.AGENT, allow_network=True),
+        uuid="agent-z",
+    )
     captured: list[tuple[str, str | None]] = []
     sink_id = logger.add(
         lambda message: captured.append(
@@ -2720,7 +2812,7 @@ def test_agent_denies_tool_call_before_edit_execute(monkeypatch, tmp_path):
         "call-edit",
     )
 
-    assert result == json.dumps({"error": "Write access is disabled for this agent"})
+    assert result == json.dumps({"error": "Write access is disabled for this workflow"})
     assert isinstance(agent.history[-1], ToolCall)
     assert agent.history[-1].result == result
 

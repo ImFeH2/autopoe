@@ -9,7 +9,12 @@ from flowent.assistant_commands import (
     ConversationCommandError,
     execute_conversation_command_input,
 )
-from flowent.graph_service import is_tab_leader, list_node_connection_ids
+from flowent.graph_service import (
+    is_tab_leader,
+    list_node_connection_ids,
+    resolve_effective_permissions_for_agent,
+    resolve_effective_permissions_for_node_record,
+)
 from flowent.providers.errors import LLMProviderError
 from flowent.registry import registry
 from flowent.settings import (
@@ -201,11 +206,15 @@ async def get_node(node_id: str) -> dict:
         record_id = node.uuid
         record_state = node.state
         target_config = node.config
+        allow_network, write_dirs = resolve_effective_permissions_for_agent(node)
     else:
         assert record is not None
         record_id = record.id
         record_state = record.state
         target_config = record.config
+        allow_network, write_dirs = resolve_effective_permissions_for_node_record(
+            record
+        )
     history = (
         node.get_history_snapshot()
         if node is not None
@@ -237,8 +246,12 @@ async def get_node(node_id: str) -> dict:
         "todos": [t.serialize() for t in todos],
         "capabilities": _serialize_model_capabilities(target_config.role_name),
         "tools": sorted(set(target_config.tools) | set(MINIMUM_TOOLS)),
-        "write_dirs": list(target_config.write_dirs),
-        "allow_network": target_config.allow_network,
+        "write_dirs": list(write_dirs),
+        "allow_network": allow_network,
+        "workflow_permissions": {
+            "allow_network": allow_network,
+            "write_dirs": list(write_dirs),
+        },
         "position": record.position.serialize()
         if record is not None and record.position is not None
         else None,

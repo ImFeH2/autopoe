@@ -67,6 +67,10 @@ def test_get_node_detail_includes_runtime_config(client: TestClient):
     assert isinstance(data["tools"], list)
     assert isinstance(data["write_dirs"], list)
     assert isinstance(data["allow_network"], bool)
+    assert data["workflow_permissions"] == {
+        "allow_network": data["allow_network"],
+        "write_dirs": data["write_dirs"],
+    }
 
 
 def test_worker_and_leader_are_stable_contacts_without_explicit_edge(
@@ -74,7 +78,7 @@ def test_worker_and_leader_are_stable_contacts_without_explicit_edge(
 ):
     tab = client.post(
         "/api/workflows",
-        json={"title": "Execution"},
+        json={"title": "Execution", "allow_network": True, "write_dirs": ["/tmp"]},
     ).json()
     worker = client.post(
         f"/api/workflows/{tab['id']}/nodes",
@@ -84,7 +88,14 @@ def test_worker_and_leader_are_stable_contacts_without_explicit_edge(
     detail_without_edge = client.get(f"/api/nodes/{worker['id']}")
 
     assert detail_without_edge.status_code == 200
-    assert detail_without_edge.json()["contacts"] == [tab["leader_id"]]
+    worker_detail = detail_without_edge.json()
+    assert worker_detail["contacts"] == [tab["leader_id"]]
+    assert worker_detail["allow_network"] is True
+    assert worker_detail["write_dirs"] == ["/tmp"]
+    assert worker_detail["workflow_permissions"] == {
+        "allow_network": True,
+        "write_dirs": ["/tmp"],
+    }
     leader_without_edge = client.get(f"/api/nodes/{tab['leader_id']}")
     assert leader_without_edge.status_code == 200
     assert worker["id"] in leader_without_edge.json()["contacts"]
@@ -132,6 +143,10 @@ def test_get_assistant_detail_includes_tools_and_permissions(client: TestClient)
     assert set(data["tools"]) == set(MINIMUM_TOOLS) | set(STEWARD_ROLE_INCLUDED_TOOLS)
     assert data["write_dirs"] == [os.getcwd()]
     assert data["allow_network"] is True
+    assert data["workflow_permissions"] == {
+        "allow_network": True,
+        "write_dirs": [os.getcwd()],
+    }
 
 
 def test_get_node_detail_includes_state_entries_in_history(client: TestClient):
@@ -239,7 +254,7 @@ def test_unknown_slash_input_can_be_sent_directly_to_workflow_leader(
 ):
     tab = client.post(
         "/api/workflows",
-        json={"title": "Execution"},
+        json={"title": "Execution", "allow_network": True},
     ).json()
 
     response = client.post(
@@ -363,7 +378,7 @@ def test_leader_compact_command_keeps_history_and_adds_system_feedback(
 ):
     tab = client.post(
         "/api/workflows",
-        json={"title": "Execution"},
+        json={"title": "Execution", "allow_network": True},
     ).json()
     leader = registry.get(tab["leader_id"])
     assert leader is not None

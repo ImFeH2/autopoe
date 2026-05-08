@@ -477,6 +477,8 @@ function buildTab(nodes: Node[], overrides: Partial<TaskTab> = {}): TaskTab {
     created_at: 1,
     updated_at: 1,
     definition: overrides.definition ?? buildDefinition(nodes),
+    allow_network: false,
+    write_dirs: [],
     ...overrides,
   };
 }

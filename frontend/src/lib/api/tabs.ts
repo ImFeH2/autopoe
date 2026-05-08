@@ -116,6 +116,8 @@ export async function fetchTabDetail(
         created_at: 0,
         updated_at: 0,
         activation_state: "inactive",
+        allow_network: false,
+        write_dirs: [],
         definition: { version: 1, nodes: [], edges: [], view: {} },
       },
       nodes: data?.nodes ?? [],
@@ -132,8 +134,6 @@ export async function createTabNodeRequest(
     name?: string | null;
     config?: Record<string, unknown>;
     tools?: string[];
-    write_dirs?: string[];
-    allow_network?: boolean;
   },
 ): Promise<TabDetailNode> {
   return requestJson<Record<string, unknown>, TabDetailNode>(

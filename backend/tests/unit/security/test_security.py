@@ -30,7 +30,7 @@ def test_authorize_rejects_edit_when_write_dirs_empty(tmp_path):
 
     result = authorize("edit", agent, {"path": str(tmp_path / "blocked.txt")})
 
-    assert result == "Write access is disabled for this agent"
+    assert result == "Write access is disabled for this workflow"
 
 
 def test_authorize_rejects_edit_outside_write_dirs(tmp_path):
@@ -99,7 +99,7 @@ def test_authorize_rejects_fetch_when_network_disabled():
 
     result = authorize("fetch", agent, {"url": "https://example.com"})
 
-    assert result == "Network access is disabled for this agent"
+    assert result == "Network access is disabled for this workflow"
 
 
 def test_authorize_allows_other_tools_by_default():

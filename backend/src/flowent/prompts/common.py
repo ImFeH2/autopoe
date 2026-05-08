@@ -47,9 +47,9 @@ SET_PERMISSIONS_TOOL_GUIDANCE = """\
 ## Set Permissions Tool Rules
 
 - Use `set_permissions` to patch a workflow's permission boundary after the workflow already exists.
-- `set_permissions` updates the target workflow by writing directly to its bound Leader's `allow_network` and `write_dirs`.
+- `set_permissions` updates the target workflow's own `allow_network` and `write_dirs`.
 - Treat `allow_network` and `write_dirs` as patch fields: omitted fields stay unchanged.
-- When the Human asks to change a workflow's network or writable directory boundary, prefer `set_permissions` instead of delegating that change to the workflow's Leader.
+- When the Human asks to change a workflow's network or writable directory boundary, prefer `set_permissions`.
 """
 
 CREATE_AGENT_TOOL_GUIDANCE = """\

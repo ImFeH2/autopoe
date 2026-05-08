@@ -172,6 +172,10 @@ export interface NodeDetail {
   tools: string[];
   write_dirs: string[];
   allow_network: boolean;
+  workflow_permissions?: {
+    write_dirs: string[];
+    allow_network: boolean;
+  } | null;
   position?: {
     x: number;
     y: number;
@@ -250,6 +254,8 @@ export interface TaskTab {
   updated_at: number;
   definition: WorkflowDefinition;
   activation_state?: WorkflowActivationState;
+  allow_network: boolean;
+  write_dirs: string[];
   node_count?: number;
   edge_count?: number;
 }

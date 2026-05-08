@@ -393,6 +393,8 @@ def serialize_tab_summary(tab: Tab) -> dict[str, object]:
         "title": tab.title,
         "leader_id": tab.leader_id,
         "activation_state": tab.activation_state.value,
+        "allow_network": tab.allow_network,
+        "write_dirs": list(tab.write_dirs),
         "created_at": tab.created_at,
         "updated_at": tab.updated_at,
         "definition": tab.definition.serialize(),
@@ -406,14 +408,8 @@ def _build_leader_record(
     tab_id: str,
     leader_id: str,
     settings,
-    allow_network: bool = False,
-    write_dirs: list[str] | None = None,
 ) -> GraphNodeRecord:
     role_name = resolve_leader_role_name(settings=settings)
-    normalized_write_dirs = build_assistant_write_dirs(
-        write_dirs or [],
-        field_name="write_dirs",
-    )
     return GraphNodeRecord(
         id=leader_id,
         config=NodeConfig(
@@ -422,11 +418,26 @@ def _build_leader_record(
             tab_id=tab_id,
             name=LEADER_NODE_NAME,
             tools=build_tools_for_role(role_name, settings=settings),
-            write_dirs=normalized_write_dirs,
-            allow_network=allow_network,
         ),
         state=AgentState.INITIALIZING,
     )
+
+
+def _sync_tab_permissions_from_legacy_leader(tab: Tab) -> bool:
+    if tab.permissions_initialized:
+        return False
+    tab.permissions_initialized = True
+    if not tab.leader_id:
+        workspace_store.upsert_tab(tab)
+        return False
+    record = workspace_store.get_node_record(tab.leader_id)
+    if record is None:
+        workspace_store.upsert_tab(tab)
+        return False
+    tab.allow_network = record.config.allow_network
+    tab.write_dirs = list(record.config.write_dirs)
+    workspace_store.upsert_tab(tab)
+    return True
 
 
 def _sync_leader_record(
@@ -462,7 +473,19 @@ def _start_persisted_agent(
 ) -> tuple[GraphNodeRecord | None, str | None]:
     from flowent.agent import Agent
 
-    node = Agent(record.config, uuid=record.id)
+    allow_network, write_dirs = resolve_effective_permissions_for_node_record(record)
+    node = Agent(
+        NodeConfig(
+            node_type=record.config.node_type,
+            role_name=record.config.role_name,
+            tab_id=record.config.tab_id,
+            name=record.config.name,
+            tools=list(record.config.tools),
+            write_dirs=write_dirs,
+            allow_network=allow_network,
+        ),
+        uuid=record.id,
+    )
     registry.register(node)
     node.start()
     return workspace_store.get_node_record(record.id), None
@@ -519,6 +542,9 @@ def ensure_tab_leaders(*, start_nodes: bool = False) -> bool:
             workspace_store.upsert_tab(tab)
             changed = True
 
+        if _sync_tab_permissions_from_legacy_leader(tab):
+            changed = True
+
         if _sync_leader_record(tab_id=tab.id, record=leader_record, settings=settings):
             workspace_store.upsert_node_record(leader_record)
             changed = True
@@ -563,8 +589,6 @@ def sync_tab_leaders(*, reason: str) -> None:
         live_node.config.role_name = record.config.role_name
         live_node.config.name = record.config.name
         live_node.config.tools = list(record.config.tools)
-        live_node.config.write_dirs = list(record.config.write_dirs)
-        live_node.config.allow_network = record.config.allow_network
         live_node._sync_system_prompt_entry()
         live_node.set_state(
             live_node.state,
@@ -617,14 +641,18 @@ def create_tab(
         title=title.strip(),
         leader_id=leader_id,
         definition=WorkflowDefinition(),
+        allow_network=allow_network,
+        write_dirs=build_assistant_write_dirs(
+            write_dirs or [],
+            field_name="write_dirs",
+        ),
+        permissions_initialized=True,
     )
     workspace_store.upsert_tab(tab)
     leader_record = _build_leader_record(
         tab_id=tab.id,
         leader_id=leader_id,
         settings=settings,
-        allow_network=allow_network,
-        write_dirs=write_dirs,
     )
     workspace_store.upsert_node_record(leader_record)
     if registry.get_all():
@@ -647,13 +675,7 @@ def duplicate_tab(
     if source_tab is None:
         return None, f"Tab '{tab_id}' not found"
 
-    leader_record = (
-        workspace_store.get_node_record(source_tab.leader_id)
-        if source_tab.leader_id
-        else None
-    )
-    allow_network = leader_record.config.allow_network if leader_record else False
-    write_dirs = list(leader_record.config.write_dirs) if leader_record else []
+    _sync_tab_permissions_from_legacy_leader(source_tab)
     duplicated_definition = WorkflowDefinition.from_mapping(
         source_tab.definition.serialize()
     )
@@ -692,6 +714,9 @@ def duplicate_tab(
         id=str(uuid.uuid4()),
         title=f"{source_tab.title} Copy",
         leader_id=str(uuid.uuid4()),
+        allow_network=source_tab.allow_network,
+        write_dirs=list(source_tab.write_dirs),
+        permissions_initialized=True,
         definition=WorkflowDefinition(
             version=duplicated_definition.version,
             nodes=duplicated_nodes,
@@ -708,8 +733,6 @@ def duplicate_tab(
             tab_id=new_tab.id,
             leader_id=new_tab.leader_id,
             settings=settings,
-            allow_network=allow_network,
-            write_dirs=write_dirs,
         )
     )
 
@@ -757,15 +780,30 @@ def _is_path_within_boundary(path: str, boundary_dirs: list[str]) -> bool:
     )
 
 
-def _clamp_write_dirs_to_boundary(
-    write_dirs: list[str],
-    boundary_dirs: list[str],
-) -> list[str]:
-    if not boundary_dirs:
-        return []
-    return [
-        path for path in write_dirs if _is_path_within_boundary(path, boundary_dirs)
-    ]
+def resolve_effective_permissions_for_agent(agent) -> tuple[bool, list[str]]:
+    if agent.config.node_type == NodeType.ASSISTANT:
+        settings = settings_module.get_settings()
+        return settings.assistant.allow_network, list(settings.assistant.write_dirs)
+    if agent.config.tab_id:
+        tab = workspace_store.get_tab(agent.config.tab_id)
+        if tab is not None:
+            _sync_tab_permissions_from_legacy_leader(tab)
+            return tab.allow_network, list(tab.write_dirs)
+    return agent.config.allow_network, list(agent.config.write_dirs)
+
+
+def resolve_effective_permissions_for_node_record(
+    record: GraphNodeRecord,
+) -> tuple[bool, list[str]]:
+    if record.config.node_type == NodeType.ASSISTANT:
+        settings = settings_module.get_settings()
+        return settings.assistant.allow_network, list(settings.assistant.write_dirs)
+    if record.config.tab_id:
+        tab = workspace_store.get_tab(record.config.tab_id)
+        if tab is not None:
+            _sync_tab_permissions_from_legacy_leader(tab)
+            return tab.allow_network, list(tab.write_dirs)
+    return record.config.allow_network, list(record.config.write_dirs)
 
 
 def set_tab_permissions(
@@ -780,6 +818,7 @@ def set_tab_permissions(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
+    _sync_tab_permissions_from_legacy_leader(tab)
     if _is_active(tab):
         return None, _active_edit_error("permissions")
 
@@ -808,63 +847,28 @@ def set_tab_permissions(
                 "write_dirs boundary exceeded: " + ", ".join(invalid_write_dirs),
             )
 
-    next_allow_network = (
-        leader_record.config.allow_network if allow_network is None else allow_network
-    )
-    next_write_dirs = (
-        list(leader_record.config.write_dirs)
-        if write_dirs is None
-        else list(write_dirs)
-    )
+    next_allow_network = tab.allow_network if allow_network is None else allow_network
+    next_write_dirs = list(tab.write_dirs) if write_dirs is None else list(write_dirs)
 
     changed_node_ids: list[str] = []
+    if tab.allow_network != next_allow_network or tab.write_dirs != next_write_dirs:
+        tab.allow_network = next_allow_network
+        tab.write_dirs = list(next_write_dirs)
+        workspace_store.upsert_tab(tab)
+        changed_node_ids = [
+            record.id for record in list_tab_nodes(tab_id) if record.id != leader_id
+        ]
+        if leader_record.id:
+            changed_node_ids.insert(0, leader_record.id)
 
-    if (
-        leader_record.config.allow_network != next_allow_network
-        or leader_record.config.write_dirs != next_write_dirs
-    ):
-        leader_record.config.allow_network = next_allow_network
-        leader_record.config.write_dirs = list(next_write_dirs)
-        workspace_store.upsert_node_record(leader_record)
-        changed_node_ids.append(leader_record.id)
-
-    for record in list_tab_nodes(tab_id):
-        if record.id == leader_id:
-            continue
-        next_node_allow_network = record.config.allow_network and next_allow_network
-        next_node_write_dirs = _clamp_write_dirs_to_boundary(
-            record.config.write_dirs,
-            next_write_dirs,
-        )
-        if (
-            record.config.allow_network == next_node_allow_network
-            and record.config.write_dirs == next_node_write_dirs
-        ):
-            continue
-        record.config.allow_network = next_node_allow_network
-        record.config.write_dirs = list(next_node_write_dirs)
-        workspace_store.upsert_node_record(record)
-        changed_node_ids.append(record.id)
-
-        live_node = registry.get(record.id)
+    for node_id in changed_node_ids:
+        live_node = registry.get(node_id)
         if live_node is not None:
-            live_node.config.allow_network = next_node_allow_network
-            live_node.config.write_dirs = list(next_node_write_dirs)
             live_node.set_state(
                 live_node.state,
                 "tab_permissions_updated",
                 force_emit=True,
             )
-
-    live_leader = registry.get(leader_id)
-    if live_leader is not None:
-        live_leader.config.allow_network = next_allow_network
-        live_leader.config.write_dirs = list(next_write_dirs)
-        live_leader.set_state(
-            live_leader.state,
-            "tab_permissions_updated",
-            force_emit=True,
-        )
 
     updated_tab = workspace_store.get_tab(tab_id)
     if updated_tab is not None:
@@ -959,8 +963,6 @@ def build_node_config(
     tab_id: str,
     name: str | None = None,
     tools: list[str] | None = None,
-    write_dirs: list[str] | None = None,
-    allow_network: bool = False,
 ) -> tuple[NodeConfig | None, str | None]:
     settings = settings_module.get_settings()
     role = find_role(settings, role_name.strip())
@@ -970,16 +972,6 @@ def build_node_config(
     requested_tools = tools or []
     if not all(isinstance(item, str) for item in requested_tools):
         return None, "tools must be an array of strings"
-    requested_write_dirs = write_dirs or []
-    if not all(isinstance(item, str) for item in requested_write_dirs):
-        return None, "write_dirs must be an array of strings"
-    try:
-        normalized_write_dirs = build_assistant_write_dirs(
-            requested_write_dirs,
-            field_name="write_dirs",
-        )
-    except ValueError as exc:
-        return None, str(exc)
 
     return (
         NodeConfig(
@@ -992,8 +984,6 @@ def build_node_config(
                 requested_tools=requested_tools,
                 settings=settings,
             ),
-            write_dirs=normalized_write_dirs,
-            allow_network=allow_network,
         ),
         None,
     )
@@ -1042,8 +1032,6 @@ def create_agent_node(
     tab_id: str,
     name: str | None = None,
     tools: list[str] | None = None,
-    write_dirs: list[str] | None = None,
-    allow_network: bool = False,
     creator_node_id: str | None = None,
     connect_to_creator: bool | None = None,
 ) -> tuple[GraphNodeRecord | None, str | None]:
@@ -1059,8 +1047,6 @@ def create_agent_node(
         tab_id=tab_id,
         name=name,
         tools=tools,
-        write_dirs=write_dirs,
-        allow_network=allow_network,
     )
     if error is not None or config is None:
         return None, error
@@ -1142,8 +1128,6 @@ def update_tab_definition(
             name=str(node.config["name"])
             if isinstance(node.config.get("name"), str)
             else None,
-            write_dirs=list(record.config.write_dirs),
-            allow_network=record.config.allow_network,
         )
         if error is not None or config is None:
             return None, error or f"Failed to validate agent node '{node.id}'"

@@ -178,7 +178,7 @@ def test_compose_system_prompt_injects_set_permissions_guidance_when_tool_presen
     )
 
     assert SET_PERMISSIONS_TOOL_GUIDANCE in result
-    assert "bound Leader's `allow_network` and `write_dirs`" in result
+    assert "target workflow's own `allow_network` and `write_dirs`" in result
 
 
 def test_common_communication_guidance_requires_explicit_target_routing():

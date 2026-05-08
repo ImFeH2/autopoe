@@ -115,6 +115,20 @@ export function AgentDetailPanel({
   const detailAllowNetwork = detail?.allow_network ?? false;
   const detailTabId = detail?.tab_id ?? agent.tab_id ?? null;
   const detailTab = detailTabId ? (tabs.get(detailTabId) ?? null) : null;
+  const isAssistant = agent.node_type === "assistant";
+  const workflowPermissions = detail?.workflow_permissions ?? null;
+  const effectiveAllowNetwork = isAssistant
+    ? detailAllowNetwork
+    : (detailTab?.allow_network ??
+      workflowPermissions?.allow_network ??
+      detailAllowNetwork ??
+      false);
+  const effectiveWriteDirs = isAssistant
+    ? detailWriteDirs
+    : (detailTab?.write_dirs ??
+      workflowPermissions?.write_dirs ??
+      detailWriteDirs);
+  const permissionsTitle = isAssistant ? "Permissions" : "Workflow Permissions";
   const stateTimeline = detailHistory.filter(
     (entry): entry is HistoryEntry & { type: "StateEntry" } =>
       entry.type === "StateEntry",
@@ -277,6 +291,14 @@ export function AgentDetailPanel({
 
           {isWorkflowStep ? (
             <>
+              <DetailSection title="Workflow Permissions">
+                <PermissionsContent
+                  allowNetwork={effectiveAllowNetwork}
+                  writeDirs={effectiveWriteDirs}
+                  inherited={!isAssistant}
+                />
+              </DetailSection>
+
               <DetailSection title="Ports">
                 {[...(agent.inputs ?? []), ...(agent.outputs ?? [])].length ===
                 0 ? (
@@ -420,42 +442,12 @@ export function AgentDetailPanel({
                 )}
               </DetailSection>
 
-              <DetailSection title="Permissions">
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-[10px] font-semibold text-muted-foreground">
-                      Network
-                    </p>
-                    <p className="mt-1 select-text text-sm text-foreground">
-                      {detailAllowNetwork ? "Enabled" : "Disabled"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[10px] font-semibold text-muted-foreground">
-                      Write Dirs
-                    </p>
-                    {detailWriteDirs.length === 0 ? (
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        No write access
-                      </p>
-                    ) : (
-                      <div className="mt-2 space-y-1">
-                        {detailWriteDirs.map((path) => (
-                          <p
-                            key={path}
-                            className={cn(
-                              workspaceSelectionBadgeClass,
-                              "select-text font-mono text-[11px]",
-                            )}
-                          >
-                            {path}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+              <DetailSection title={permissionsTitle}>
+                <PermissionsContent
+                  allowNetwork={effectiveAllowNetwork}
+                  writeDirs={effectiveWriteDirs}
+                  inherited={!isAssistant}
+                />
               </DetailSection>
 
               <DetailSection title="Todos">
@@ -740,6 +732,56 @@ function PanelActionButton({
     >
       {children}
     </Button>
+  );
+}
+
+function PermissionsContent({
+  allowNetwork,
+  inherited,
+  writeDirs,
+}: {
+  allowNetwork: boolean;
+  inherited: boolean;
+  writeDirs: string[];
+}) {
+  return (
+    <div className="space-y-3">
+      {inherited ? (
+        <p className="text-xs text-muted-foreground">Set by this workflow.</p>
+      ) : null}
+
+      <div>
+        <p className="text-[10px] font-semibold text-muted-foreground">
+          Network
+        </p>
+        <p className="mt-1 select-text text-sm text-foreground">
+          {allowNetwork ? "Enabled" : "Disabled"}
+        </p>
+      </div>
+
+      <div>
+        <p className="text-[10px] font-semibold text-muted-foreground">
+          Writable Folders
+        </p>
+        {writeDirs.length === 0 ? (
+          <p className="mt-1 text-sm text-muted-foreground">No write access</p>
+        ) : (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {writeDirs.map((path) => (
+              <span
+                key={path}
+                className={cn(
+                  workspaceSelectionBadgeClass,
+                  "select-text font-mono text-[11px]",
+                )}
+              >
+                {path}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -43,6 +43,25 @@ function readNumberField(
   return typeof data[key] === "number" ? data[key] : undefined;
 }
 
+function readBooleanField(
+  data: Record<string, unknown>,
+  key: string,
+): boolean | undefined {
+  return typeof data[key] === "boolean" ? data[key] : undefined;
+}
+
+function readStringArrayField(
+  data: Record<string, unknown>,
+  key: string,
+): string[] | undefined {
+  if (!Array.isArray(data[key])) {
+    return undefined;
+  }
+  return data[key].filter(
+    (value): value is string => typeof value === "string",
+  );
+}
+
 function readTabLeaderId(
   data: Record<string, unknown>,
 ): TaskTab["leader_id"] | undefined {
@@ -187,6 +206,8 @@ export function createTaskTabFromEvent(
     definition: isWorkflowDefinition(data.definition)
       ? data.definition
       : EMPTY_WORKFLOW_DEFINITION,
+    allow_network: readBooleanField(data, "allow_network") ?? false,
+    write_dirs: readStringArrayField(data, "write_dirs") ?? [],
     node_count: readOptionalCount(data, "node_count"),
     edge_count: readOptionalCount(data, "edge_count"),
   };
@@ -206,6 +227,7 @@ export function mergeTaskTabUpdate(
     data.activation_state === "active" || data.activation_state === "inactive"
       ? data.activation_state
       : undefined;
+  const nextWriteDirs = readStringArrayField(data, "write_dirs");
 
   return {
     ...current,
@@ -217,6 +239,13 @@ export function mergeTaskTabUpdate(
     created_at: readNumberField(data, "created_at") ?? current.created_at,
     updated_at: readNumberField(data, "updated_at") ?? current.updated_at,
     activation_state: nextActivationState ?? current.activation_state,
+    allow_network: hasOwn(data, "allow_network")
+      ? (readBooleanField(data, "allow_network") ?? current.allow_network)
+      : current.allow_network,
+    write_dirs:
+      hasOwn(data, "write_dirs") && nextWriteDirs !== undefined
+        ? nextWriteDirs
+        : current.write_dirs,
     definition:
       hasOwn(data, "definition") && isWorkflowDefinition(data.definition)
         ? data.definition
