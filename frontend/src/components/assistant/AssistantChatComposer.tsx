@@ -363,9 +363,7 @@ export function AssistantChatComposer({
             onPaste={handleComposerPaste}
             placeholder={
               placeholder ??
-              (commandsEnabled
-                ? `Message ${targetLabel} or type / for commands`
-                : `Message ${targetLabel}`)
+              (commandsEnabled ? "Do anything" : `Message ${targetLabel}`)
             }
             rows={1}
             className={cn(

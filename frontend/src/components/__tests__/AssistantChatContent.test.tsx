@@ -769,9 +769,7 @@ describe("AssistantChatComposer", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
     const sendButton = screen.getByRole("button", {
       name: "Send Assistant message",
     });
@@ -879,9 +877,7 @@ describe("AssistantChatComposer", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
 
     expect(
       screen.getByRole("listbox", { name: "Available commands" }),
@@ -911,7 +907,7 @@ describe("AssistantChatComposer", () => {
     );
 
     const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
+      "Do anything",
     ) as HTMLTextAreaElement;
 
     textarea.focus();
@@ -945,7 +941,7 @@ describe("AssistantChatComposer", () => {
     );
 
     const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
+      "Do anything",
     ) as HTMLTextAreaElement;
 
     textarea.focus();
@@ -974,9 +970,7 @@ describe("AssistantChatComposer", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
 
     fireEvent.keyDown(textarea, { key: "Enter" });
 
@@ -1003,7 +997,7 @@ describe("AssistantChatComposer", () => {
     );
 
     const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
+      "Do anything",
     ) as HTMLTextAreaElement;
 
     textarea.focus();
@@ -1027,7 +1021,7 @@ describe("AssistantChatComposer", () => {
     );
 
     const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
+      "Do anything",
     ) as HTMLTextAreaElement;
 
     fireEvent.keyDown(textarea, { key: "Escape" });
@@ -1041,9 +1035,7 @@ describe("AssistantChatComposer", () => {
   it("adds pasted clipboard images into the same pending image list and hides commands", () => {
     renderWithImageViewer(<PastedImageHarness />);
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
     const file = new File(["image"], "pasted.png", { type: "image/png" });
 
     expect(
@@ -1071,9 +1063,7 @@ describe("AssistantChatComposer", () => {
   it("ignores pasted clipboard images when image input is disabled", () => {
     renderWithImageViewer(<PastedImageHarness imageInputEnabled={false} />);
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
     const file = new File(["image"], "pasted.png", { type: "image/png" });
 
     fireEvent.paste(textarea, {
@@ -1160,9 +1150,7 @@ describe("AssistantChatComposer", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
 
     fireEvent.keyDown(textarea, { key: "Enter" });
 
@@ -1184,9 +1172,7 @@ describe("AssistantChatComposer", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
 
     fireEvent.keyDown(textarea, { key: "Tab" });
 
@@ -1208,9 +1194,7 @@ describe("AssistantChatComposer", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
 
     fireEvent.keyDown(textarea, { key: "Tab" });
 
@@ -1232,9 +1216,7 @@ describe("AssistantChatComposer", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(
-      "Message Assistant or type / for commands",
-    );
+    const textarea = screen.getByPlaceholderText("Do anything");
 
     fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true });
 

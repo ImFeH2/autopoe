@@ -723,7 +723,6 @@ export function LeaderChatPanel({
                 });
             }}
             overlay
-            placeholder="Do anything"
             suppressCommandNavigation={isBrowsingInputHistory}
             targetLabel="this workflow"
             stopping={stopping}
