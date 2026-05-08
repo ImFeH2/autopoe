@@ -60,7 +60,6 @@ describe("Sidebar", () => {
     ).toEqual([
       "Assistant",
       "Workspace",
-      "Stats",
       "Providers",
       "Roles",
       "Prompts",
@@ -79,9 +78,9 @@ describe("Sidebar", () => {
       <Sidebar width={232} onWidthChange={() => {}} onNavigate={onNavigate} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Stats" }));
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
 
-    expect(setCurrentPage).toHaveBeenCalledWith("stats");
+    expect(setCurrentPage).toHaveBeenCalledWith("providers");
     expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 

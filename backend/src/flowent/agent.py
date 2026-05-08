@@ -881,7 +881,10 @@ class Agent:
             timeout=interrupt_timeout
         )
         try:
-            self._run_compact_with_stats(trigger_type="manual", focus=focus)
+            self._run_compact_with_observability(
+                trigger_type="manual",
+                focus=focus,
+            )
             content = "Compacted this chat for future replies."
             if focus and focus.strip():
                 content += f"\n\nFocus: {focus.strip()}"
@@ -1730,7 +1733,7 @@ class Agent:
                 finally:
                     self.set_interrupt_callback(None)
                 self._raise_if_interrupt_requested()
-                self._record_request_stats(
+                self._record_request_observability(
                     started_at=started_at,
                     ended_at=_time.time(),
                     retry_count=retry_count,
@@ -1753,7 +1756,7 @@ class Agent:
                     elif retry_policy == "unlimited":
                         should_retry = True
                 if not should_retry:
-                    self._record_request_stats(
+                    self._record_request_observability(
                         started_at=started_at,
                         ended_at=_time.time(),
                         retry_count=retry_count,
@@ -1774,7 +1777,7 @@ class Agent:
                 )
                 self._wait_for_llm_retry_delay(delay_seconds)
             except Exception as exc:
-                self._record_request_stats(
+                self._record_request_observability(
                     started_at=started_at,
                     ended_at=_time.time(),
                     retry_count=retry_count,
@@ -2097,7 +2100,7 @@ class Agent:
                 runtime_tail_messages=list(prepared_context.runtime_tail_messages),
             )
 
-    def _get_stats_node_label(self) -> str:
+    def _get_observability_node_label(self) -> str:
         if self.config.name:
             return self.config.name
         if self.config.role_name:
@@ -2110,7 +2113,7 @@ class Agent:
             return "Leader"
         return "Agent"
 
-    def _get_stats_tab_title(self) -> str | None:
+    def _get_observability_tab_title(self) -> str | None:
         if not self.config.tab_id:
             return None
         from flowent.workspace_store import workspace_store
@@ -2210,7 +2213,7 @@ class Agent:
         resolved_source = self._get_effective_model_source()
         return resolved_source.provider_type, resolved_source.model_info
 
-    def _record_request_stats(
+    def _record_request_observability(
         self,
         *,
         started_at: float,
@@ -2221,16 +2224,19 @@ class Agent:
         raw_usage: dict[str, Any] | None = None,
         error_summary: str | None = None,
     ) -> None:
-        from flowent.stats_service import RequestRecordInput, stats_store
+        from flowent.observability_service import (
+            RequestRecordInput,
+            observability_store,
+        )
 
         resolved_source = self._get_effective_model_source()
-        stats_store.record_request(
+        observability_store.record_request(
             RequestRecordInput(
                 node_id=self.uuid,
-                node_label=self._get_stats_node_label(),
+                node_label=self._get_observability_node_label(),
                 role_name=self.config.role_name,
                 tab_id=self.config.tab_id,
-                tab_title=self._get_stats_tab_title(),
+                tab_title=self._get_observability_tab_title(),
                 provider_id=resolved_source.provider_id,
                 provider_name=resolved_source.provider_name,
                 provider_type=resolved_source.provider_type,
@@ -2245,26 +2251,29 @@ class Agent:
             )
         )
 
-    def _run_compact_with_stats(
+    def _run_compact_with_observability(
         self,
         *,
         trigger_type: str,
         focus: str | None = None,
     ) -> str:
-        from flowent.stats_service import CompactRecordInput, stats_store
+        from flowent.observability_service import (
+            CompactRecordInput,
+            observability_store,
+        )
 
         started_at = _time.time()
         resolved_source = self._get_effective_model_source()
         try:
             result = self._compact_execution_context(focus=focus)
         except Exception as exc:
-            stats_store.record_compact(
+            observability_store.record_compact(
                 CompactRecordInput(
                     node_id=self.uuid,
-                    node_label=self._get_stats_node_label(),
+                    node_label=self._get_observability_node_label(),
                     role_name=self.config.role_name,
                     tab_id=self.config.tab_id,
-                    tab_title=self._get_stats_tab_title(),
+                    tab_title=self._get_observability_tab_title(),
                     provider_id=resolved_source.provider_id,
                     provider_name=resolved_source.provider_name,
                     provider_type=resolved_source.provider_type,
@@ -2277,13 +2286,13 @@ class Agent:
                 )
             )
             raise
-        stats_store.record_compact(
+        observability_store.record_compact(
             CompactRecordInput(
                 node_id=self.uuid,
-                node_label=self._get_stats_node_label(),
+                node_label=self._get_observability_node_label(),
                 role_name=self.config.role_name,
                 tab_id=self.config.tab_id,
-                tab_title=self._get_stats_tab_title(),
+                tab_title=self._get_observability_tab_title(),
                 provider_id=resolved_source.provider_id,
                 provider_name=resolved_source.provider_name,
                 provider_type=resolved_source.provider_type,
@@ -2387,7 +2396,7 @@ class Agent:
             preflight.context_window_tokens,
         )
         try:
-            self._run_compact_with_stats(trigger_type="auto")
+            self._run_compact_with_observability(trigger_type="auto")
         except Exception as exc:
             if (
                 preflight.safe_input_tokens is not None

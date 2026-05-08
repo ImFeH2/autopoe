@@ -1,7 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Shield,
-  ChartNoAxesCombined,
   LayoutDashboard,
   MessageSquareQuote,
   PlugZap,
@@ -30,7 +29,6 @@ export const PAGE_NAVIGATION_GROUPS: PageNavigationGroup[] = [
     items: [
       { id: "assistant", label: "Assistant", icon: Shield },
       { id: "workspace", label: "Workspace", icon: LayoutDashboard },
-      { id: "stats", label: "Stats", icon: ChartNoAxesCombined },
     ],
   },
   {

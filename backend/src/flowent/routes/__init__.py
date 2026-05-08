@@ -10,7 +10,6 @@ from flowent.routes.prompts import router as prompts_router
 from flowent.routes.providers_route import router as providers_router
 from flowent.routes.roles import router as roles_router
 from flowent.routes.settings import router as settings_router
-from flowent.routes.stats import router as stats_router
 from flowent.routes.tabs import router as tabs_router
 from flowent.routes.ws import router as ws_router
 
@@ -24,7 +23,6 @@ router.include_router(roles_router)
 router.include_router(providers_router)
 router.include_router(prompts_router)
 router.include_router(settings_router)
-router.include_router(stats_router)
 router.include_router(tabs_router)
 router.include_router(meta_router)
 router.include_router(ws_router)

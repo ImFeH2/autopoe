@@ -47,7 +47,6 @@ export type PageId =
   | "prompts"
   | "tools"
   | "channels"
-  | "stats"
   | "settings";
 
 interface AgentRuntimeContextValue {

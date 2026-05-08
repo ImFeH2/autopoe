@@ -36,10 +36,10 @@ from flowent.models import (
     ToolCallResult,
     WorkflowActivationState,
 )
+from flowent.observability_service import observability_store
 from flowent.providers.errors import LLMProviderError
 from flowent.registry import registry
 from flowent.settings import ModelSettings, ProviderConfig, Settings
-from flowent.stats_service import stats_store
 from flowent.workspace_store import workspace_store
 
 
@@ -53,11 +53,11 @@ def reset_runtime_state(monkeypatch, tmp_path):
     monkeypatch.setattr(settings_module, "_cached_settings", None)
     registry.reset()
     workspace_store.reset_cache()
-    stats_store.reset()
+    observability_store.reset()
     yield
     registry.reset()
     workspace_store.reset_cache()
-    stats_store.reset()
+    observability_store.reset()
     monkeypatch.setattr(settings_module, "_cached_settings", None)
 
 
@@ -271,7 +271,7 @@ def test_chat_with_retries_records_single_request_stat(monkeypatch):
         tools_schema=None,
     )
 
-    records = stats_store.list_requests(since=0)
+    records = observability_store.list_requests(since=0)
 
     assert response.content == "Done"
     assert len(records) == 1
@@ -704,7 +704,7 @@ def test_prepare_messages_records_auto_compact_stat(monkeypatch):
     )
 
     result = agent._prepare_messages_for_llm()
-    records = stats_store.list_compacts(since=0)
+    records = observability_store.list_compacts(since=0)
 
     assert result == prepared_context
     assert compact_calls == [None]

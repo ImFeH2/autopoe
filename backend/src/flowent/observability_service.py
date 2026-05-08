@@ -11,7 +11,7 @@ from typing import Any, Literal
 from flowent.models import LLMUsage
 from flowent.state_db import open_state_db
 
-MAX_STATS_RETENTION_SECONDS = 30 * 24 * 60 * 60
+OBSERVABILITY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 
 
 def serialize_usage(usage: LLMUsage | None) -> dict[str, Any] | None:
@@ -66,7 +66,7 @@ class CompactRecordInput:
     error_summary: str | None = None
 
 
-class StatsStore:
+class ObservabilityStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
 
@@ -82,7 +82,7 @@ class StatsStore:
             connection.close()
 
     def _prune_locked(self, connection, now: float) -> None:
-        min_timestamp = now - MAX_STATS_RETENTION_SECONDS
+        min_timestamp = now - OBSERVABILITY_RETENTION_SECONDS
         connection.execute(
             "DELETE FROM llm_request_records WHERE ended_at < ?",
             (min_timestamp,),
@@ -215,4 +215,4 @@ class StatsStore:
         return records
 
 
-stats_store = StatsStore()
+observability_store = ObservabilityStore()

@@ -74,7 +74,6 @@ export {
   retryAssistantMessageRequest,
   sendAssistantMessageRequest,
 } from "./assistant";
-export { fetchStats } from "./stats";
 export {
   getImageAssetUrl,
   uploadImageAssetRequest,
