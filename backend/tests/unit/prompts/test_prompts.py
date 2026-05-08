@@ -398,7 +398,7 @@ def test_get_system_prompt_reads_conductor_prompt_via_role_system(monkeypatch):
     )
     assert ASSISTANT_ONLY_PROMPT not in prompt
     assert CREATE_AGENT_TOOL_GUIDANCE in prompt
-    assert LIST_WORKFLOWS_TOOL_GUIDANCE in prompt
+    assert LIST_WORKFLOWS_TOOL_GUIDANCE not in prompt
     assert LIST_ROLES_TOOL_GUIDANCE in prompt
     assert LIST_TOOLS_TOOL_GUIDANCE in prompt
     assert "## Tools Available" not in CONDUCTOR_ROLE_SYSTEM_PROMPT
@@ -549,6 +549,7 @@ def test_steward_included_tools_contains_list_roles_and_list_tools():
     assert "list_tools" in STEWARD_ROLE_INCLUDED_TOOLS
     assert "connect" not in STEWARD_ROLE_INCLUDED_TOOLS
     assert "connect" in CONDUCTOR_ROLE_INCLUDED_TOOLS
+    assert "list_workflows" not in CONDUCTOR_ROLE_INCLUDED_TOOLS
     assert "set_permissions" not in CONDUCTOR_ROLE_INCLUDED_TOOLS
     assert "set_permissions" not in WORKER_ROLE_INCLUDED_TOOLS
 

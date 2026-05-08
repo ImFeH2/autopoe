@@ -15,8 +15,11 @@ from flowent.routes.roles import (
 from flowent.settings import (
     CONDUCTOR_ROLE_NAME,
     DESIGNER_ROLE_NAME,
+    STEWARD_ROLE_INCLUDED_TOOLS,
+    STEWARD_ROLE_NAME,
     AssistantSettings,
     ProviderConfig,
+    ProviderModelCatalogEntry,
     RoleConfig,
     RoleModelConfig,
     Settings,
@@ -156,6 +159,33 @@ def test_create_role_uses_name_as_identifier(monkeypatch):
     assert saved == [["Reviewer"]]
 
 
+def test_create_role_filters_assistant_only_tools(monkeypatch):
+    settings = Settings()
+    monkeypatch.setattr("flowent.routes.roles.get_settings", lambda: settings)
+    monkeypatch.setattr("flowent.routes.roles.save_settings", lambda current: None)
+
+    result = asyncio.run(
+        create_role(
+            CreateRoleRequest(
+                name="Reviewer",
+                description="Review code carefully",
+                system_prompt="Review code carefully",
+                included_tools=[
+                    "read",
+                    "create_workflow",
+                    "delete_workflow",
+                    "list_workflows",
+                    "mcp__flowent__list_workflows",
+                    "manage_settings",
+                ],
+            )
+        )
+    )
+
+    assert result["included_tools"] == ["read"]
+    assert settings.roles[0].included_tools == ["read"]
+
+
 def test_create_role_rejects_duplicate_name(monkeypatch):
     settings = Settings(
         roles=[RoleConfig(name="Reviewer", system_prompt="Review code carefully")]
@@ -231,6 +261,40 @@ def test_update_role_uses_name_path_parameter(monkeypatch):
     assert saved == [["Architect"]]
 
 
+def test_update_role_filters_assistant_only_tools(monkeypatch):
+    settings = Settings(
+        roles=[
+            RoleConfig(
+                name="Reviewer",
+                description="Review code carefully",
+                system_prompt="Review code carefully",
+                included_tools=["read"],
+            )
+        ]
+    )
+    monkeypatch.setattr("flowent.routes.roles.get_settings", lambda: settings)
+    monkeypatch.setattr("flowent.routes.roles.save_settings", lambda current: None)
+
+    result = asyncio.run(
+        update_role(
+            "Reviewer",
+            UpdateRoleRequest(
+                included_tools=[
+                    "read",
+                    "create_workflow",
+                    "delete_workflow",
+                    "list_workflows",
+                    "mcp__flowent__list_workflows",
+                    "manage_roles",
+                ],
+            ),
+        )
+    )
+
+    assert result["included_tools"] == ["read"]
+    assert settings.roles[0].included_tools == ["read"]
+
+
 def test_update_role_rejects_duplicate_name(monkeypatch):
     settings = Settings(
         roles=[
@@ -288,6 +352,51 @@ def test_update_role_rejects_builtin_prompt_change(monkeypatch):
         excinfo.value.detail
         == "Cannot modify built-in role 'Worker' fields other than model or model_params"
     )
+
+
+def test_update_builtin_steward_role_model_preserves_management_tools(monkeypatch):
+    settings = Settings(
+        providers=[
+            ProviderConfig(
+                id="provider-1",
+                name="OpenAI",
+                type="openai",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                models=[
+                    ProviderModelCatalogEntry(
+                        model="gpt-4.1-mini",
+                    )
+                ],
+            )
+        ],
+        roles=[
+            RoleConfig(
+                name=STEWARD_ROLE_NAME,
+                description="Assistant role",
+                system_prompt="Help coordinate work.",
+                included_tools=list(STEWARD_ROLE_INCLUDED_TOOLS),
+            )
+        ],
+    )
+
+    monkeypatch.setattr("flowent.routes.roles.get_settings", lambda: settings)
+    monkeypatch.setattr("flowent.routes.roles.save_settings", lambda current: None)
+
+    result = asyncio.run(
+        update_role(
+            STEWARD_ROLE_NAME,
+            UpdateRoleRequest(
+                model=RoleModelRequest(
+                    provider_id="provider-1",
+                    model="gpt-4.1-mini",
+                )
+            ),
+        )
+    )
+
+    assert result["included_tools"] == list(STEWARD_ROLE_INCLUDED_TOOLS)
+    assert settings.roles[0].included_tools == list(STEWARD_ROLE_INCLUDED_TOOLS)
 
 
 def test_delete_role_uses_name_path_parameter(monkeypatch):

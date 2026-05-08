@@ -108,3 +108,17 @@ def test_authorize_allows_other_tools_by_default():
     result = authorize("exec", agent, {"command": "pwd"})
 
     assert result is None
+
+
+def test_authorize_rejects_assistant_only_tools_for_workflow_nodes():
+    agent = Agent(
+        NodeConfig(
+            node_type=NodeType.AGENT,
+            role_name="Worker",
+            tools=["list_workflows"],
+        )
+    )
+
+    result = authorize("list_workflows", agent, {})
+
+    assert result == "Ask the Assistant to manage workflows or settings"

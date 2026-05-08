@@ -19,18 +19,43 @@ class ListRolesTool(Tool):
     }
 
     def execute(self, agent: Agent, args: dict[str, Any], **_kwargs: Any) -> str:
+        from flowent.models import NodeType
         from flowent.settings import get_settings, normalize_tool_names
-        from flowent.tools import MINIMUM_TOOLS, build_tool_registry
+        from flowent.tools import (
+            MINIMUM_TOOLS,
+            build_tool_registry,
+            is_assistant_only_mcp_tool_name,
+            is_assistant_only_tool_name,
+        )
 
         settings = get_settings()
         tool_registry = build_tool_registry()
-        all_tool_names = [
-            tool.name for tool in tool_registry.list_tools(agent_visible_only=True)
-        ]
+        all_tool_names: list[str] = []
+        for tool in tool_registry.list_tools(agent_visible_only=True):
+            descriptor = getattr(tool, "_descriptor", None)
+            descriptor_tool_name = getattr(descriptor, "tool_name", None)
+            if isinstance(
+                descriptor_tool_name, str
+            ) and is_assistant_only_mcp_tool_name(descriptor_tool_name):
+                continue
+            all_tool_names.append(tool.name)
+        if agent.node_type != NodeType.ASSISTANT:
+            all_tool_names = [
+                tool_name
+                for tool_name in all_tool_names
+                if not is_assistant_only_tool_name(tool_name)
+            ]
         payload: list[dict[str, object]] = []
 
         for role in settings.roles:
             builtin_tools = normalize_tool_names([*MINIMUM_TOOLS, *role.included_tools])
+            if agent.node_type != NodeType.ASSISTANT:
+                builtin_tools = [
+                    tool_name
+                    for tool_name in builtin_tools
+                    if not is_assistant_only_tool_name(tool_name)
+                    and not is_assistant_only_mcp_tool_name(tool_name)
+                ]
             optional_tools = [
                 tool_name
                 for tool_name in all_tool_names

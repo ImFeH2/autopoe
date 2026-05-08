@@ -7,7 +7,9 @@ from flowent.graph_service import create_agent_node, create_edge, create_tab
 from flowent.models import NodeConfig, NodeType
 from flowent.registry import registry
 from flowent.settings import RoleConfig, Settings
+from flowent.tools.create_tab import CreateTabTool
 from flowent.tools.delete_tab import DeleteTabTool
+from flowent.tools.list_tabs import ListTabsTool
 from flowent.workspace_store import workspace_store
 
 
@@ -81,3 +83,34 @@ def test_delete_tab_tool_rejects_non_assistant():
     result = json.loads(DeleteTabTool().execute(agent, {"workflow_id": "tab-1"}))
 
     assert result == {"error": "Only the Assistant may delete workflows"}
+
+
+def test_create_tab_tool_rejects_non_assistant():
+    agent = Agent(
+        NodeConfig(
+            node_type=NodeType.AGENT,
+            role_name="Worker",
+            tools=["create_workflow"],
+        ),
+        uuid="worker",
+    )
+
+    result = json.loads(CreateTabTool().execute(agent, {"title": "Draft"}))
+
+    assert result == {"error": "Only the Assistant may create workflows"}
+    assert workspace_store.list_tabs() == []
+
+
+def test_list_tabs_tool_rejects_non_assistant():
+    agent = Agent(
+        NodeConfig(
+            node_type=NodeType.AGENT,
+            role_name="Worker",
+            tools=["list_workflows"],
+        ),
+        uuid="worker",
+    )
+
+    result = json.loads(ListTabsTool().execute(agent, {}))
+
+    assert result == {"error": "Only the Assistant may list workflows"}

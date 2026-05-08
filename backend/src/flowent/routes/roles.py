@@ -70,7 +70,7 @@ async def get_roles_bootstrap() -> dict[str, object]:
     return {
         "roles": [serialize_role(role) for role in settings.roles],
         "providers": [serialize_provider(provider) for provider in settings.providers],
-        "tools": list_agent_visible_tool_descriptors(),
+        "tools": list_agent_visible_tool_descriptors(include_assistant_only=False),
     }
 
 

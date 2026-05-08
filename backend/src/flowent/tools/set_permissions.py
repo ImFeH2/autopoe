@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from flowent.models import NodeType
 from flowent.tools import Tool
 
 if TYPE_CHECKING:
@@ -51,6 +52,14 @@ class SetPermissionsTool(Tool):
 
         if not isinstance(workflow_id, str) or not workflow_id.strip():
             return json.dumps({"error": "workflow_id must be a non-empty string"})
+        normalized_workflow_id = workflow_id.strip()
+        if (
+            agent.node_type != NodeType.ASSISTANT
+            and agent.config.tab_id != normalized_workflow_id
+        ):
+            return json.dumps(
+                {"error": "Workflow permissions can only be changed for this workflow"}
+            )
 
         allow_network: bool | None = None
         if "allow_network" in args:
@@ -76,7 +85,7 @@ class SetPermissionsTool(Tool):
             resolve_effective_permissions_for_agent(agent)
         )
         result, error = set_tab_permissions(
-            tab_id=workflow_id.strip(),
+            tab_id=normalized_workflow_id,
             allow_network=allow_network,
             write_dirs=write_dirs,
             caller_allow_network=caller_allow_network,

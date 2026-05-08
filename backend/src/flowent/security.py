@@ -10,6 +10,14 @@ if TYPE_CHECKING:
 
 def authorize(tool_name: str, agent: Agent, args: dict[str, Any]) -> str | None:
     from flowent.graph_service import resolve_effective_permissions_for_agent
+    from flowent.models import NodeType
+    from flowent.tools import (
+        is_assistant_only_mcp_tool_name,
+        is_assistant_only_tool_name,
+    )
+
+    if agent.node_type != NodeType.ASSISTANT and is_assistant_only_tool_name(tool_name):
+        return "Ask the Assistant to manage workflows or settings"
 
     allow_network, write_dirs = resolve_effective_permissions_for_agent(agent)
 
@@ -20,6 +28,10 @@ def authorize(tool_name: str, agent: Agent, args: dict[str, Any]) -> str | None:
         descriptor = mcp_service.get_dynamic_tool_descriptor(tool_name)
         if descriptor is None:
             return f"MCP tool not found: {tool_name}"
+        if agent.node_type != NodeType.ASSISTANT and is_assistant_only_mcp_tool_name(
+            descriptor.tool_name
+        ):
+            return "Ask the Assistant to manage workflows or settings"
         server = find_mcp_server(get_settings(), descriptor.server_name)
         if (
             server is not None

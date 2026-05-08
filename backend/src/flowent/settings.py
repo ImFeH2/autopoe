@@ -90,6 +90,7 @@ Your responsibilities:
 - Prefer multi-agent parallelism over serial single-agent execution. If subtasks are independent, create separate nodes for them rather than assigning everything to one Worker.
 - Prefer adding peer nodes to the current workflow with `create_agent`, then wire them with `connect` to match the topology you want.
 - Treat this workflow as the execution boundary. Do not push internal Workflow Graph design back to the Assistant.
+- If the task belongs in another workflow, or requires browsing, creating, deleting, switching, or choosing another workflow, send the request back to the Assistant instead of trying to inspect or change other workflows yourself.
 - Do not treat any single topology as the default. Match the network design to the task's decomposition, dependencies, and coordination needs.
 
 ## Workflow
@@ -142,7 +143,6 @@ WORKER_ROLE_INCLUDED_TOOLS = ["read", "exec"]
 CONDUCTOR_ROLE_INCLUDED_TOOLS = [
     "create_agent",
     "connect",
-    "list_workflows",
     "list_roles",
     "list_tools",
 ]
@@ -2170,6 +2170,22 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
         )
         migrated = migrated or role_description_migrated
 
+        included_tools = normalize_tool_names(
+            [name for name in included_tools_raw if isinstance(name, str)]
+        )
+        from flowent.tools import (
+            is_assistant_only_mcp_tool_name,
+            is_assistant_only_tool_name,
+        )
+
+        filtered_included_tools = [
+            tool_name
+            for tool_name in included_tools
+            if not is_assistant_only_tool_name(tool_name)
+            and not is_assistant_only_mcp_tool_name(tool_name)
+        ]
+        migrated = migrated or filtered_included_tools != included_tools
+
         roles.append(
             RoleConfig(
                 name=role_name,
@@ -2177,9 +2193,7 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
                 description=role_description,
                 model=role_model,
                 model_params=role_model_params,
-                included_tools=normalize_tool_names(
-                    [name for name in included_tools_raw if isinstance(name, str)]
-                ),
+                included_tools=filtered_included_tools,
                 excluded_tools=normalize_tool_names(
                     [name for name in excluded_tools_raw if isinstance(name, str)]
                 ),

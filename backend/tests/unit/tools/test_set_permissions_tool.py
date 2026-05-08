@@ -402,7 +402,9 @@ def test_set_permissions_rejects_write_dirs_outside_caller_boundary(
     assert result == {"error": f"write_dirs boundary exceeded: {other_dir}"}
 
 
-def test_set_permissions_allows_explicitly_granted_non_assistant_agent(tmp_path):
+def test_set_permissions_allows_explicitly_granted_non_assistant_agent_for_own_workflow(
+    tmp_path,
+):
     root_dir = tmp_path / "root"
     narrowed_dir = root_dir / "narrowed"
     root_dir.mkdir()
@@ -449,6 +451,75 @@ def test_set_permissions_allows_explicitly_granted_non_assistant_agent(tmp_path)
 
     assert result["tab_id"] == tab.id
     assert result["write_dirs"] == [str(narrowed_dir)]
+    updated_tab = workspace_store.get_tab(tab.id)
+    assert updated_tab is not None
+    assert updated_tab.write_dirs == [str(narrowed_dir)]
+
+
+def test_set_permissions_rejects_non_assistant_cross_workflow(tmp_path):
+    root_dir = tmp_path / "root"
+    root_dir.mkdir()
+
+    own_tab = Tab(id="tab-1", title="Own", leader_id="leader-1")
+    own_tab.allow_network = True
+    own_tab.write_dirs = [str(root_dir)]
+    own_tab.permissions_initialized = True
+    other_tab = Tab(id="tab-2", title="Other", leader_id="leader-2")
+    other_tab.allow_network = True
+    other_tab.write_dirs = [str(root_dir)]
+    other_tab.permissions_initialized = True
+    workspace_store.upsert_tab(own_tab)
+    workspace_store.upsert_tab(other_tab)
+    workspace_store.upsert_node_record(
+        _make_record(
+            node_id="leader-1",
+            tab_id=own_tab.id,
+            role_name="Conductor",
+            name="Leader",
+            write_dirs=[str(root_dir)],
+            allow_network=True,
+            tools=["set_permissions"],
+        )
+    )
+    workspace_store.upsert_node_record(
+        _make_record(
+            node_id="leader-2",
+            tab_id=other_tab.id,
+            role_name="Conductor",
+            name="Leader",
+            write_dirs=[str(root_dir)],
+            allow_network=True,
+        )
+    )
+    leader = Agent(
+        NodeConfig(
+            node_type=NodeType.AGENT,
+            role_name="Conductor",
+            tab_id=own_tab.id,
+            name="Leader",
+            tools=["set_permissions"],
+            write_dirs=[str(root_dir)],
+            allow_network=True,
+        ),
+        uuid="leader-1",
+    )
+
+    result = json.loads(
+        SetPermissionsTool().execute(
+            leader,
+            {
+                "workflow_id": other_tab.id,
+                "write_dirs": [],
+            },
+        )
+    )
+
+    assert result == {
+        "error": "Workflow permissions can only be changed for this workflow"
+    }
+    updated_other_tab = workspace_store.get_tab(other_tab.id)
+    assert updated_other_tab is not None
+    assert updated_other_tab.write_dirs == [str(root_dir)]
 
 
 def test_set_permissions_migrates_legacy_leader_permissions(tmp_path):

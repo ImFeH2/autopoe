@@ -19,6 +19,10 @@ class ListToolsTool(Tool):
     }
 
     def execute(self, agent: Agent, args: dict[str, Any], **_kwargs: Any) -> str:
+        from flowent.models import NodeType
         from flowent.tools import list_agent_visible_tool_descriptors
 
-        return json.dumps(list_agent_visible_tool_descriptors())
+        descriptors = list_agent_visible_tool_descriptors(
+            include_assistant_only=agent.node_type == NodeType.ASSISTANT
+        )
+        return json.dumps(descriptors)

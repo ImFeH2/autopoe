@@ -45,7 +45,11 @@ from flowent.settings import (
     resolve_model_info,
     resolve_path,
 )
-from flowent.tools import MINIMUM_TOOLS
+from flowent.tools import (
+    MINIMUM_TOOLS,
+    is_assistant_only_mcp_tool_name,
+    is_assistant_only_tool_name,
+)
 from flowent.workspace_store import workspace_store
 
 LEADER_NODE_NAME = "Leader"
@@ -56,6 +60,7 @@ def build_tools_for_role(
     *,
     requested_tools: list[str] | None = None,
     settings=None,
+    assistant_boundary: bool = False,
 ) -> list[str]:
     current_settings = settings or settings_module.get_settings()
     normalized_role_name = role_name.strip()
@@ -79,6 +84,11 @@ def build_tools_for_role(
     for tool_name in [*MINIMUM_TOOLS, *included_tools, *(requested_tools or [])]:
         if tool_name in seen_tools:
             continue
+        if not assistant_boundary and (
+            is_assistant_only_tool_name(tool_name)
+            or is_assistant_only_mcp_tool_name(tool_name)
+        ):
+            continue
         if tool_name in excluded_tools and tool_name not in MINIMUM_TOOLS:
             continue
         final_tools.append(tool_name)
@@ -91,6 +101,7 @@ def build_assistant_tools(*, settings=None) -> list[str]:
     assistant_tools = build_tools_for_role(
         current_settings.assistant.role_name,
         settings=current_settings,
+        assistant_boundary=True,
     )
     final_tools: list[str] = []
     seen_tools: set[str] = set()

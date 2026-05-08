@@ -465,6 +465,46 @@ def test_load_settings_drops_removed_exit_tool_from_roles(monkeypatch, tmp_path)
     ]
 
 
+def test_load_settings_drops_assistant_only_tools_from_custom_roles(
+    monkeypatch,
+    tmp_path,
+):
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(
+        json.dumps(
+            {
+                "event_log": {"timestamp_format": "absolute"},
+                "model": {"active_provider_id": "", "active_model": ""},
+                "providers": [],
+                "roles": [
+                    {
+                        "name": "Reviewer",
+                        "system_prompt": "Review work.",
+                        "included_tools": [
+                            "read",
+                            "create_workflow",
+                            "delete_workflow",
+                            "list_workflows",
+                            "mcp__flowent__list_workflows",
+                            "manage_settings",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(settings_module, "_SETTINGS_FILE", settings_file)
+    monkeypatch.setattr(settings_module, "_cached_settings", None)
+
+    loaded = settings_module.load_settings()
+
+    assert loaded.roles[0].included_tools == ["read"]
+    persisted = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert persisted["roles"][0]["included_tools"] == ["read"]
+
+
 def test_load_settings_migrates_legacy_post_prompt_to_custom_post_prompt(
     monkeypatch, tmp_path
 ):

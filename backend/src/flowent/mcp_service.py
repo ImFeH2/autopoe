@@ -1625,9 +1625,17 @@ class MCPService:
         return None
 
     def list_agent_dynamic_tools(self, agent: Agent) -> list[MCPToolDescriptor]:
+        from flowent.models import NodeType
+        from flowent.tools import is_assistant_only_mcp_tool_name
+
         tools: list[MCPToolDescriptor] = []
         for snapshot in self._visible_snapshots_for_agent(agent):
-            tools.extend(snapshot.tools)
+            tools.extend(
+                descriptor
+                for descriptor in snapshot.tools
+                if agent.node_type == NodeType.ASSISTANT
+                or not is_assistant_only_mcp_tool_name(descriptor.tool_name)
+            )
         return tools
 
     def has_visible_capabilities(self, agent: Agent) -> bool:

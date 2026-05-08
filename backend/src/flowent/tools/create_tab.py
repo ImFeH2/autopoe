@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from flowent.graph_service import create_tab, serialize_tab_summary
+from flowent.models import NodeType
 from flowent.tools import Tool
 
 if TYPE_CHECKING:
@@ -34,6 +35,9 @@ class CreateTabTool(Tool):
     }
 
     def execute(self, agent: Agent, args: dict[str, Any], **_kwargs: Any) -> str:
+        if agent.node_type != NodeType.ASSISTANT:
+            return json.dumps({"error": "Only the Assistant may create workflows"})
+
         title = args.get("title")
         allow_network = args.get("allow_network", False)
         write_dirs = args.get("write_dirs", [])

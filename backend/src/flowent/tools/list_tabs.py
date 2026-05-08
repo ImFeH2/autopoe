@@ -10,6 +10,7 @@ from flowent.graph_service import (
     list_workflow_nodes,
     serialize_tab_summary,
 )
+from flowent.models import NodeType
 from flowent.tools import Tool
 from flowent.workspace_store import workspace_store
 
@@ -32,6 +33,9 @@ class ListTabsTool(Tool):
     }
 
     def execute(self, agent: Agent, args: dict[str, Any], **_kwargs: Any) -> str:
+        if agent.node_type != NodeType.ASSISTANT:
+            return json.dumps({"error": "Only the Assistant may list workflows"})
+
         workflow_id = args.get("workflow_id")
         if workflow_id is not None and not isinstance(workflow_id, str):
             return json.dumps({"error": "workflow_id must be a string"})
