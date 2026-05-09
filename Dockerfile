@@ -31,6 +31,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY backend ./backend
+COPY README.md ./backend/README.md
 RUN uv sync --project backend --frozen --no-dev
 
 COPY --from=frontend-builder /app/frontend/dist ./frontend
