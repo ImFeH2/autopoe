@@ -20,12 +20,14 @@ export interface PageNavigationItem {
 
 export interface PageNavigationGroup {
   label: string;
+  showLabel?: boolean;
   items: PageNavigationItem[];
 }
 
 export const PAGE_NAVIGATION_GROUPS: PageNavigationGroup[] = [
   {
     label: "Core",
+    showLabel: false,
     items: [
       { id: "assistant", label: "Assistant", icon: Shield },
       { id: "workspace", label: "Workspace", icon: LayoutDashboard },

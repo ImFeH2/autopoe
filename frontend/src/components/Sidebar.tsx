@@ -100,9 +100,11 @@ export function Sidebar({
                   index > 0 && "pt-4",
                 )}
               >
-                <div className="ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 text-xs font-normal text-sidebar-foreground/62">
-                  {group.label}
-                </div>
+                {group.showLabel !== false ? (
+                  <div className="ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 text-xs font-normal text-sidebar-foreground/62">
+                    {group.label}
+                  </div>
+                ) : null}
                 <div className="w-full text-sm py-1">
                   <ul className="flex w-full min-w-0 flex-col gap-1">
                     {group.items.map(({ id, label, icon: Icon }) => {
