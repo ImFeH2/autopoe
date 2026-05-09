@@ -3,11 +3,11 @@ import type { Provider, Role, RoleModelConfig } from "@/types";
 
 export type RoleDraft = Omit<Role, "is_builtin">;
 export type ToolState = "allowed" | "included" | "excluded";
-export type PanelMode = "create" | "edit" | "view";
+export type RolePanelMode = "create" | "edit" | "view";
 
 const MINIMUM_TOOLS = new Set(["idle", "sleep", "todo", "contacts"]);
 
-export function emptyDraft(): RoleDraft {
+export function createEmptyRoleDraft(): RoleDraft {
   return {
     name: "",
     description: "",
@@ -21,7 +21,7 @@ export function emptyDraft(): RoleDraft {
 
 export function createRoleDraft(role?: Role | null): RoleDraft {
   if (!role) {
-    return emptyDraft();
+    return createEmptyRoleDraft();
   }
   return {
     name: role.name,
@@ -41,11 +41,15 @@ export function createRoleDraft(role?: Role | null): RoleDraft {
   };
 }
 
-export function getConfigurableTools<T extends { name: string }>(tools: T[]) {
+export function getRoleConfigurableTools<T extends { name: string }>(
+  tools: T[],
+) {
   return tools.filter((tool) => !MINIMUM_TOOLS.has(tool.name));
 }
 
-export function buildProvidersById(providers: Provider[]) {
+export function buildProvidersById(
+  providers: Provider[],
+): Record<string, Provider> {
   return Object.fromEntries(
     providers.map((provider) => [provider.id, provider]),
   );
@@ -152,12 +156,12 @@ export function buildRolePayload(draft: RoleDraft) {
   };
 }
 
-export function isReadOnlyPanel(panelMode: PanelMode | null) {
+export function isRolePanelReadOnly(panelMode: RolePanelMode | null) {
   return panelMode === "view";
 }
 
-export function getLockBuiltinFields(
-  panelMode: PanelMode | null,
+export function shouldLockRoleIdentityFields(
+  panelMode: RolePanelMode | null,
   activeRole: Role | null,
 ) {
   return (
@@ -167,8 +171,8 @@ export function getLockBuiltinFields(
   );
 }
 
-export function getPanelEyebrow(
-  panelMode: PanelMode | null,
+export function getRolePanelBadgeLabel(
+  panelMode: RolePanelMode | null,
   activeRole: Role | null,
 ) {
   if (panelMode === "create") {
@@ -177,8 +181,8 @@ export function getPanelEyebrow(
   return activeRole?.is_builtin ? "Built-in" : "Custom";
 }
 
-export function getPanelTitle(
-  panelMode: PanelMode | null,
+export function getRolePanelTitle(
+  panelMode: RolePanelMode | null,
   activeRole: Role | null,
 ) {
   if (panelMode === "create") {
@@ -189,11 +193,39 @@ export function getPanelTitle(
     : (activeRole?.name ?? "Role Details");
 }
 
-export function canSaveRoleDraft(draft: RoleDraft, saving: boolean) {
+export function canSaveRoleChanges(draft: RoleDraft, saving: boolean) {
   return !(
     saving ||
     !draft.name.trim() ||
     !draft.description.trim() ||
     !draft.system_prompt.trim()
   );
+}
+
+export function getRoleModelSummary(
+  role: Role,
+  providersById: Record<string, Provider>,
+) {
+  if (!role.model) {
+    return "Settings default";
+  }
+  const providerName =
+    providersById[role.model.provider_id]?.name ?? role.model.provider_id;
+  return `${providerName} / ${role.model.model}`;
+}
+
+export function getRoleToolSummary(role: Role) {
+  const includedCount = role.included_tools.length;
+  const excludedCount = role.excluded_tools.length;
+
+  if (includedCount === 0 && excludedCount === 0) {
+    return "Default";
+  }
+
+  return [
+    includedCount > 0 ? `+${includedCount}` : null,
+    excludedCount > 0 ? `-${excludedCount}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }

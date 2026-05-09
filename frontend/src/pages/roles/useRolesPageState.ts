@@ -12,27 +12,27 @@ import type { Role } from "@/types";
 import {
   buildProvidersById,
   buildRolePayload,
-  canSaveRoleDraft,
+  canSaveRoleChanges,
   createDefaultRoleModel,
-  createRoleDraft,
+  createEmptyRoleDraft,
   cycleToolState,
-  emptyDraft,
-  getConfigurableTools,
-  getLockBuiltinFields,
-  getPanelEyebrow,
-  getPanelTitle,
+  createRoleDraft,
+  getRoleConfigurableTools,
+  getRolePanelBadgeLabel,
+  getRolePanelTitle,
   getToolState,
-  isReadOnlyPanel,
+  isRolePanelReadOnly,
+  shouldLockRoleIdentityFields,
   validateRoleDraft,
-  type PanelMode,
+  type RolePanelMode,
   type RoleDraft,
 } from "@/pages/roles/lib";
 import { cloneModelParams } from "@/lib/modelParams";
 
 export function useRolesPageState() {
-  const [panelMode, setPanelMode] = useState<PanelMode | null>(null);
+  const [panelMode, setPanelMode] = useState<RolePanelMode | null>(null);
   const [activeRoleName, setActiveRoleName] = useState<string | null>(null);
-  const [draft, setDraft] = useState<RoleDraft>(emptyDraft());
+  const [draft, setDraft] = useState<RoleDraft>(createEmptyRoleDraft());
   const [saving, setSaving] = useState(false);
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
 
@@ -54,7 +54,10 @@ export function useRolesPageState() {
     () => bootstrapData?.providers ?? [],
     [bootstrapData?.providers],
   );
-  const configurableTools = useMemo(() => getConfigurableTools(tools), [tools]);
+  const configurableTools = useMemo(
+    () => getRoleConfigurableTools(tools),
+    [tools],
+  );
   const providersById = useMemo(
     () => buildProvidersById(providers),
     [providers],
@@ -74,11 +77,14 @@ export function useRolesPageState() {
   );
   const availableActiveProviderModelOptions = activeProviderModelOptions;
   const isPanelOpen = panelMode !== null;
-  const isReadOnly = isReadOnlyPanel(panelMode);
-  const lockBuiltinFields = getLockBuiltinFields(panelMode, activeRole);
-  const panelEyebrow = getPanelEyebrow(panelMode, activeRole);
-  const panelTitle = getPanelTitle(panelMode, activeRole);
-  const canSave = canSaveRoleDraft(draft, saving);
+  const isReadOnly = isRolePanelReadOnly(panelMode);
+  const shouldLockIdentityFields = shouldLockRoleIdentityFields(
+    panelMode,
+    activeRole,
+  );
+  const panelBadgeLabel = getRolePanelBadgeLabel(panelMode, activeRole);
+  const panelTitle = getRolePanelTitle(panelMode, activeRole);
+  const canSave = canSaveRoleChanges(draft, saving);
 
   const updateBootstrapRoles = useCallback(
     (nextRoles: Role[]) => {
@@ -101,13 +107,13 @@ export function useRolesPageState() {
   const closePanel = useCallback(() => {
     setPanelMode(null);
     setActiveRoleName(null);
-    setDraft(emptyDraft());
+    setDraft(createEmptyRoleDraft());
   }, []);
 
   const openCreate = useCallback(() => {
     setPanelMode("create");
     setActiveRoleName(null);
-    setDraft(emptyDraft());
+    setDraft(createEmptyRoleDraft());
   }, []);
 
   const openView = useCallback((role: Role) => {
@@ -267,8 +273,7 @@ export function useRolesPageState() {
     isPanelOpen,
     isReadOnly,
     loading,
-    lockBuiltinFields,
-    panelEyebrow,
+    panelBadgeLabel,
     panelMode,
     panelTitle,
     providers,
@@ -277,6 +282,7 @@ export function useRolesPageState() {
     roleToDelete,
     roles,
     saving,
+    shouldLockIdentityFields,
     actions: {
       clearRoleToDelete,
       closePanel,
