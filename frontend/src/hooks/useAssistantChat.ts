@@ -39,6 +39,7 @@ import {
 import {
   buildMessageParts,
   createPendingHumanMessage,
+  createPendingSendMessage,
   createUploadingImageDrafts,
   draftImagesMatchHistoryEntry,
   isReadyDraftImage,
@@ -52,10 +53,12 @@ import {
 import type {
   AssistantChatItem,
   AssistantInputHistoryEntry,
+  AssistantInputHistoryImage,
   ContentPart,
   HistoryEntry,
   NodeDetail,
   PendingAssistantChatMessage,
+  PendingSendChatMessage,
 } from "@/types";
 
 interface UseAssistantChatOptions {
@@ -89,9 +92,14 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
   const [pendingAssistantMessages, setPendingAssistantMessages] = useState<
     PendingAssistantChatMessage[]
   >([]);
+  const [pendingSend, setPendingSend] = useState<PendingSendChatMessage | null>(
+    null,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const draftImagesRef = useRef<DraftChatImage[]>([]);
+  const pendingSendRef = useRef<PendingSendChatMessage | null>(null);
+  const autoSendingPendingSendRef = useRef(false);
   const assistantId = useMemo(() => getAssistantNodeId(agents), [agents]);
   const assistantNode = useMemo(
     () => (assistantId ? (agents.get(assistantId) ?? null) : null),
@@ -124,6 +132,83 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     currentHistoryEntry !== null &&
     input === currentHistoryEntry.text &&
     draftImagesMatchHistoryEntry(draftImages, currentHistoryEntry);
+  const assistantState = assistantNode?.state ?? detail?.state ?? null;
+
+  const submitParts = useCallback(
+    async (input: {
+      content: string;
+      parts: ContentPart[];
+      history: {
+        text: string;
+        images: AssistantInputHistoryImage[];
+        timestamp: number;
+      };
+      pendingMessageTimestamp?: number;
+      restoreDraft?: {
+        input: string;
+        images: DraftChatImage[];
+        historyCursor: number | null;
+      };
+    }) => {
+      const pendingAt = input.pendingMessageTimestamp ?? Date.now();
+      const pendingMessage = createPendingHumanMessage(
+        input.content,
+        input.parts,
+        pendingAt,
+      );
+
+      setSending(true);
+      setPendingAssistantMessages((current) => [...current, pendingMessage]);
+
+      try {
+        const response = await sendAssistantMessageRequest({
+          content: input.content,
+          parts: input.parts,
+        });
+        if (response.status === "command_executed") {
+          setPendingAssistantMessages((current) =>
+            removePendingAssistantMessage(current, {
+              content: input.content,
+              timestamp: pendingAt,
+            }),
+          );
+        } else if (response.message_id) {
+          setPendingAssistantMessages((current) =>
+            current.map((message) =>
+              message.timestamp === pendingAt &&
+              message.content === input.content
+                ? { ...message, message_id: response.message_id }
+                : message,
+            ),
+          );
+        }
+        appendAssistantInputHistoryEntry(input.history);
+        if (input.restoreDraft) {
+          revokeDraftImageUrls(input.restoreDraft.images);
+        }
+        return true;
+      } catch (error) {
+        setPendingAssistantMessages((current) =>
+          removePendingAssistantMessage(current, {
+            content: input.content,
+            timestamp: pendingAt,
+          }),
+        );
+        if (input.restoreDraft) {
+          setInputState(input.restoreDraft.input);
+          setDraftImages(input.restoreDraft.images);
+          setHistoryCursor(input.restoreDraft.historyCursor);
+        }
+        toast.error(
+          error instanceof Error ? error.message : "Failed to send message",
+        );
+        return false;
+      } finally {
+        setSending(false);
+      }
+    },
+    [],
+  );
 
   const restoreHistoryEntry = useCallback(
     (entry: AssistantInputHistoryEntry | null, cursor: number | null) => {
@@ -143,6 +228,10 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     draftImagesRef.current = draftImages;
   }, [draftImages]);
 
+  useEffect(() => {
+    pendingSendRef.current = pendingSend;
+  }, [pendingSend]);
+
   useEffect(
     () => () => {
       revokeDraftImageUrls(draftImagesRef.current);
@@ -156,6 +245,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     }
 
     setPendingAssistantMessages([]);
+    setPendingSend(null);
     setDetail((current) =>
       current
         ? {
@@ -186,6 +276,61 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     );
     setFetchedAt(Date.now());
   }, [assistantHistoryInvalidatedAt, assistantHistorySnapshot]);
+
+  useEffect(() => {
+    const current = pendingSendRef.current;
+    if (!current || current.send_failed || current.target_id !== assistantId) {
+      return;
+    }
+
+    if (assistantState === current.target_state) {
+      return;
+    }
+
+    setPendingSend({ ...current, target_state: assistantState });
+  }, [assistantId, assistantState]);
+
+  useEffect(() => {
+    const current = pendingSendRef.current;
+    if (
+      !current ||
+      current.send_failed ||
+      !assistantId ||
+      current.target_id !== assistantId ||
+      assistantState !== "idle" ||
+      sending ||
+      autoSendingPendingSendRef.current
+    ) {
+      return;
+    }
+
+    autoSendingPendingSendRef.current = true;
+    setPendingSend(null);
+    void submitParts({
+      content: current.content,
+      parts: current.parts ?? [],
+      history: current.history_entry,
+      pendingMessageTimestamp: current.timestamp,
+    })
+      .then((sent) => {
+        autoSendingPendingSendRef.current = false;
+        if (!sent) {
+          setPendingSend({
+            ...current,
+            send_failed: true,
+            target_state: "error",
+          });
+        }
+      })
+      .catch(() => {
+        autoSendingPendingSendRef.current = false;
+        setPendingSend({
+          ...current,
+          send_failed: true,
+          target_state: "error",
+        });
+      });
+  }, [assistantId, assistantState, sending, submitParts]);
 
   useEffect(() => {
     if (!connected || !assistantId) {
@@ -281,13 +426,15 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
   const timelineItems = useMemo<AssistantChatItem[]>(
     () => [
       ...mergedHistory,
+      ...(pendingSend ? [{ ...pendingSend }] : []),
       ...pendingAssistantMessages.map((message) => ({ ...message })),
     ],
-    [mergedHistory, pendingAssistantMessages],
+    [mergedHistory, pendingAssistantMessages, pendingSend],
   );
 
   const assistantActivity = useMemo(() => {
-    const pendingCount = pendingAssistantMessages.length;
+    const pendingCount =
+      pendingAssistantMessages.length + (pendingSend ? 1 : 0);
     const deltas = assistantId ? (streamingDeltas.get(assistantId) ?? []) : [];
     const running =
       connected &&
@@ -342,6 +489,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     assistantNode?.state,
     connected,
     pendingAssistantMessages.length,
+    pendingSend,
     streamingDeltas,
     timelineItems,
   ]);
@@ -382,7 +530,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     autoScrollRef.current = isScrolledToBottom(event.currentTarget);
   };
 
-  const sendMessage = async () => {
+  const sendMessage = async (options: { deferWhenBusy?: boolean } = {}) => {
     const content = input.trim();
     if (
       (!content && readyImages.length === 0) ||
@@ -399,61 +547,60 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     const previousHistoryCursor = historyCursor;
     const submittedAt = Date.now();
     const normalizedContent = content || contentPartsToText(parts);
-    const pendingMessage = createPendingHumanMessage(
-      normalizedContent,
-      parts,
-      submittedAt,
-    );
-    setSending(true);
-    setHistoryCursor(null);
-    setInputState("");
-    setDraftImages([]);
-    setPendingAssistantMessages((current) => [...current, pendingMessage]);
-
-    try {
-      const response = await sendAssistantMessageRequest({
-        content: normalizedContent,
-        parts,
-      });
-      if (response.status === "command_executed") {
-        setPendingAssistantMessages((current) =>
-          removePendingAssistantMessage(current, {
-            content: normalizedContent,
-            timestamp: submittedAt,
-          }),
-        );
-      } else if (response.message_id) {
-        setPendingAssistantMessages((current) =>
-          current.map((message) =>
-            message.timestamp === submittedAt &&
-            message.content === normalizedContent
-              ? { ...message, message_id: response.message_id }
-              : message,
-          ),
-        );
-      }
-      appendAssistantInputHistoryEntry({
-        text: previousInput,
-        images: toInputHistoryImages(previousDraftImages),
-        timestamp: submittedAt,
-      });
-      revokeDraftImageUrls(previousDraftImages);
-    } catch (error) {
-      setPendingAssistantMessages((current) =>
-        removePendingAssistantMessage(current, {
+    const historyEntry = {
+      text: previousInput,
+      images: toInputHistoryImages(previousDraftImages),
+      timestamp: submittedAt,
+    };
+    const replacingBlockedPending =
+      options.deferWhenBusy &&
+      assistantId &&
+      pendingSendRef.current?.target_id === assistantId &&
+      (assistantState === "error" || assistantState === "terminated");
+    if (
+      options.deferWhenBusy &&
+      assistantId &&
+      (assistantState === "running" ||
+        assistantState === "sleeping" ||
+        replacingBlockedPending)
+    ) {
+      setPendingSend(
+        createPendingSendMessage({
           content: normalizedContent,
+          historyEntry,
+          historyScope: "assistant",
+          parts,
+          targetId: assistantId,
+          targetState: assistantState,
           timestamp: submittedAt,
         }),
       );
-      setInputState(previousInput);
-      setDraftImages(previousDraftImages);
-      setHistoryCursor(previousHistoryCursor);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to send message",
-      );
-    } finally {
-      setSending(false);
+      setHistoryCursor(null);
+      setInputState("");
+      setDraftImages([]);
+      revokeDraftImageUrls(previousDraftImages);
+      return;
     }
+
+    if (assistantState === "error" || assistantState === "terminated") {
+      toast.error("Resolve the current chat before sending");
+      return;
+    }
+
+    setHistoryCursor(null);
+    setInputState("");
+    setDraftImages([]);
+    await submitParts({
+      content: normalizedContent,
+      parts,
+      history: historyEntry,
+      pendingMessageTimestamp: submittedAt,
+      restoreDraft: {
+        input: previousInput,
+        images: previousDraftImages,
+        historyCursor: previousHistoryCursor,
+      },
+    });
   };
 
   const addImages = useCallback(
@@ -602,6 +749,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     try {
       await clearAssistantChatRequest(assistantId);
       setPendingAssistantMessages([]);
+      setPendingSend(null);
       clearAgentHistory(assistantId);
       const data = await fetchNodeDetail(assistantId);
       setDetail(data);
@@ -699,7 +847,19 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     }
   }, [assistantId, clearAgentHistory, clearHistorySnapshot]);
 
+  const cancelPendingSend = useCallback((pendingId: string) => {
+    setPendingSend((current) => (current?.id === pendingId ? null : current));
+  }, []);
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Tab" && !event.shiftKey) {
+      if (input.trim() || readyImages.length > 0) {
+        event.preventDefault();
+        void sendMessage({ deferWhenBusy: true });
+      }
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void sendMessage();
@@ -723,6 +883,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     clearing,
     sending,
     clearChat,
+    cancelPendingSend,
     sendMessage,
     setInput,
     stopAssistant,

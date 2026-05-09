@@ -23,6 +23,7 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
     addImages = async () => {},
     assistantActivity = { running: false, runningHint: null },
     clearChat,
+    cancelPendingSend,
     clearing = false,
     connected,
     draftImages = [],
@@ -88,6 +89,7 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
           items={timelineItems}
           nodes={agents}
           onRetryHumanMessage={(messageId) => void retryMessage(messageId)}
+          onCancelPendingSend={cancelPendingSend}
           onScroll={onMessagesScroll}
           retryImageInputEnabled={supportsInputImage}
           retryingMessageId={retryingMessageId}

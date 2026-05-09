@@ -535,6 +535,7 @@ export function LeaderChatPanel({
   const {
     activeTab,
     addImages = async () => {},
+    cancelPendingSend,
     clearChat,
     clearing = false,
     connected,
@@ -623,6 +624,7 @@ export function LeaderChatPanel({
           items={timelineItems}
           nodes={agents}
           onRetryHumanMessage={(messageId) => void retryMessage(messageId)}
+          onCancelPendingSend={cancelPendingSend}
           onScroll={onMessagesScroll}
           retryImageInputEnabled={supportsInputImage}
           retryingMessageId={retryingMessageId}

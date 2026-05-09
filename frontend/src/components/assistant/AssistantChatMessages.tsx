@@ -13,6 +13,7 @@ import {
   MessageSquare,
   RotateCcw,
   Send,
+  SendHorizonal,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -40,6 +41,7 @@ interface AssistantChatMessagesProps {
   items: AssistantChatItem[];
   nodes?: Map<string, Node>;
   onRetryHumanMessage?: (messageId: string) => void;
+  onCancelPendingSend?: (pendingId: string) => void;
   onScroll: UIEventHandler<HTMLDivElement>;
   retryImageInputEnabled?: boolean;
   retryingMessageId?: string | null;
@@ -53,6 +55,7 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
   items,
   nodes,
   onRetryHumanMessage,
+  onCancelPendingSend,
   onScroll,
   retryImageInputEnabled = true,
   retryingMessageId = null,
@@ -86,6 +89,7 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
               item={item}
               nodes={nodes}
               onRetryHumanMessage={onRetryHumanMessage}
+              onCancelPendingSend={onCancelPendingSend}
               retryImageInputEnabled={retryImageInputEnabled}
               retryingMessageId={retryingMessageId}
             />
@@ -140,6 +144,7 @@ const TimelineItem = memo(function TimelineItem({
   item,
   nodes,
   onRetryHumanMessage,
+  onCancelPendingSend,
   retryImageInputEnabled,
   retryingMessageId,
 }: {
@@ -147,6 +152,7 @@ const TimelineItem = memo(function TimelineItem({
   item: AssistantChatItem;
   nodes?: Map<string, Node>;
   onRetryHumanMessage?: (messageId: string) => void;
+  onCancelPendingSend?: (pendingId: string) => void;
   retryImageInputEnabled?: boolean;
   retryingMessageId?: string | null;
 }) {
@@ -157,6 +163,20 @@ const TimelineItem = memo(function TimelineItem({
         parts={item.parts}
         retrying={false}
         pending
+      />
+    );
+  }
+
+  if (item.type === "PendingSendMessage") {
+    return (
+      <PendingSendBubble
+        content={item.content}
+        onCancel={
+          onCancelPendingSend ? () => onCancelPendingSend(item.id) : undefined
+        }
+        parts={item.parts}
+        sendFailed={item.send_failed}
+        targetState={item.target_state}
       />
     );
   }
@@ -256,6 +276,74 @@ const TimelineItem = memo(function TimelineItem({
       return null;
   }
 });
+
+function PendingSendBubble({
+  content,
+  onCancel,
+  parts,
+  sendFailed,
+  targetState,
+}: {
+  content: string;
+  onCancel?: () => void;
+  parts?: ContentPart[] | null;
+  sendFailed?: boolean;
+  targetState?: string | null;
+}) {
+  const waitingOnIssue =
+    sendFailed || targetState === "error" || targetState === "terminated";
+  const statusLabel = waitingOnIssue
+    ? "Needs attention"
+    : targetState === "sleeping"
+      ? "Waiting for wake-up"
+      : "Waiting to send";
+
+  return (
+    <div className="group mt-2 flex min-w-0 flex-col items-end">
+      <div
+        className={cn(
+          "min-w-0 overflow-hidden px-2.5 py-1.5 text-[13px] [overflow-wrap:anywhere]",
+          "max-w-[84%] rounded-lg border bg-background/50 text-foreground",
+          waitingOnIssue ? "border-destructive/45" : "border-ring/35",
+        )}
+      >
+        <div className="flex min-w-0 flex-col gap-2">
+          <RichContentBlock
+            content={content}
+            layout="human-attachments-top"
+            markdownClassName="text-sm text-foreground"
+            parts={parts}
+            preClassName="text-foreground/90"
+          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                waitingOnIssue
+                  ? "border-destructive/35 bg-destructive/10 text-destructive"
+                  : "border-ring/25 bg-ring/10 text-foreground/80",
+              )}
+            >
+              <SendHorizonal className="size-3" />
+              {statusLabel}
+            </span>
+            {onCancel ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={onCancel}
+                className="h-auto rounded-full border border-border bg-accent/35 px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-accent/45 hover:text-foreground"
+              >
+                Cancel
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function HumanBubble({
   allowRetry = true,
@@ -634,7 +722,10 @@ function formatToolLabel(value: string | null | undefined) {
 }
 
 function getTimelineItemKey(item: AssistantChatItem, index: number) {
-  if (item.type === "PendingHumanMessage") {
+  if (
+    item.type === "PendingHumanMessage" ||
+    item.type === "PendingSendMessage"
+  ) {
     return item.id;
   }
 

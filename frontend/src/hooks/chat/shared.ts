@@ -4,6 +4,7 @@ import type {
   AssistantInputHistoryImage,
   ContentPart,
   PendingAssistantChatMessage,
+  PendingSendChatMessage,
 } from "@/types";
 
 const SCROLL_BOTTOM_EPSILON = 10;
@@ -132,6 +133,32 @@ export function createPendingHumanMessage(
     parts,
     timestamp,
     message_id: null,
+  };
+}
+
+export function createPendingSendMessage(input: {
+  content: string;
+  historyEntry: AssistantInputHistoryEntry;
+  historyScope: string;
+  parts: ContentPart[];
+  targetId: string;
+  targetState?: PendingSendChatMessage["target_state"];
+  sendFailed?: boolean;
+  timestamp: number;
+}): PendingSendChatMessage {
+  return {
+    id: `pending-send-${input.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    type: "PendingSendMessage",
+    from: "human",
+    content: input.content,
+    parts: input.parts,
+    timestamp: input.timestamp,
+    message_id: null,
+    target_id: input.targetId,
+    target_state: input.targetState ?? null,
+    history_entry: input.historyEntry,
+    history_entry_scope: input.historyScope,
+    send_failed: input.sendFailed,
   };
 }
 

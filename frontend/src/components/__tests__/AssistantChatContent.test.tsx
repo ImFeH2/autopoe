@@ -259,6 +259,74 @@ describe("AssistantChatMessages", () => {
     expect(screen.getByText("manage_roles")).toBeInTheDocument();
   });
 
+  it("renders a cancellable pending send placeholder", () => {
+    const scrollRef = createRef<HTMLDivElement>();
+    const onCancelPendingSend = vi.fn();
+
+    renderWithImageViewer(
+      <AssistantChatMessages
+        items={[
+          {
+            type: "PendingSendMessage",
+            id: "pending-send-1",
+            from: "human",
+            content: "Send this when ready",
+            parts: [{ type: "text", text: "Send this when ready" }],
+            target_id: "assistant",
+            target_state: "running",
+            timestamp: 10,
+            history_entry: {
+              text: "Send this when ready",
+              images: [],
+              timestamp: 10,
+            },
+            history_entry_scope: "assistant",
+          },
+        ]}
+        onCancelPendingSend={onCancelPendingSend}
+        onScroll={() => {}}
+        scrollRef={scrollRef}
+      />,
+    );
+
+    expect(screen.getByText("Send this when ready")).toBeInTheDocument();
+    expect(screen.getByText("Waiting to send")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancelPendingSend).toHaveBeenCalledWith("pending-send-1");
+  });
+
+  it("keeps a pending send visible when the target needs attention", () => {
+    const scrollRef = createRef<HTMLDivElement>();
+
+    render(
+      <AssistantChatMessages
+        items={[
+          {
+            type: "PendingSendMessage",
+            id: "pending-send-error",
+            from: "human",
+            content: "Retry after fixing the chat",
+            target_id: "assistant",
+            target_state: "error",
+            timestamp: 10,
+            history_entry: {
+              text: "Retry after fixing the chat",
+              images: [],
+              timestamp: 10,
+            },
+            history_entry_scope: "assistant",
+          },
+        ]}
+        onScroll={() => {}}
+        scrollRef={scrollRef}
+      />,
+    );
+
+    expect(screen.getByText("Needs attention")).toBeInTheDocument();
+  });
+
   it("shows the empty state when only system entries remain after a chat clear", () => {
     const scrollRef = createRef<HTMLDivElement>();
 

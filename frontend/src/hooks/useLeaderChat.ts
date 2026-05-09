@@ -40,6 +40,7 @@ import {
 import {
   buildMessageParts,
   createPendingHumanMessage,
+  createPendingSendMessage,
   createUploadingImageDrafts,
   draftImagesMatchHistoryEntry,
   isReadyDraftImage,
@@ -54,10 +55,12 @@ import { getWorkflowLeaderNode } from "@/lib/workflow";
 import type {
   AssistantChatItem,
   AssistantInputHistoryEntry,
+  AssistantInputHistoryImage,
   ContentPart,
   HistoryEntry,
   NodeDetail,
   PendingAssistantChatMessage,
+  PendingSendChatMessage,
 } from "@/types";
 
 interface UseLeaderChatOptions {
@@ -102,9 +105,16 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
   const [pendingMessages, setPendingMessages] = useState<
     PendingAssistantChatMessage[]
   >([]);
+  const [pendingSends, setPendingSends] = useState<
+    Map<string, PendingSendChatMessage>
+  >(() => new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const draftImagesRef = useRef<DraftChatImage[]>([]);
+  const pendingSendsRef = useRef<Map<string, PendingSendChatMessage>>(
+    new Map(),
+  );
+  const autoSendingPendingSendIdsRef = useRef(new Set<string>());
   const supportsInputImage = leaderNode?.capabilities?.input_image ?? false;
   const historyClearedAtMs = leaderId
     ? (historyClearedAt.get(leaderId) ?? 0)
@@ -132,6 +142,92 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     currentHistoryEntry !== null &&
     input === currentHistoryEntry.text &&
     draftImagesMatchHistoryEntry(draftImages, currentHistoryEntry);
+  const leaderState = leaderNode?.state ?? detail?.state ?? null;
+
+  const submitParts = useCallback(
+    async (input: {
+      content: string;
+      parts: ContentPart[];
+      targetId: string;
+      visiblePending?: boolean;
+      history: {
+        scope: string;
+        entry: {
+          text: string;
+          images: AssistantInputHistoryImage[];
+          timestamp: number;
+        };
+      };
+      pendingMessageTimestamp?: number;
+      restoreDraft?: {
+        input: string;
+        images: DraftChatImage[];
+        historyCursor: number | null;
+      };
+    }) => {
+      const pendingAt = input.pendingMessageTimestamp ?? Date.now();
+      const pendingMessage = createPendingHumanMessage(
+        input.content,
+        input.parts,
+        pendingAt,
+      );
+      const visiblePending = input.visiblePending ?? true;
+
+      setSending(true);
+      if (visiblePending) {
+        setPendingMessages((current) => [...current, pendingMessage]);
+      }
+
+      try {
+        const response = await dispatchNodeMessageRequest(input.targetId, {
+          content: input.content,
+          parts: input.parts,
+        });
+        if (visiblePending && response.status === "command_executed") {
+          setPendingMessages((current) =>
+            removePendingAssistantMessage(current, {
+              content: input.content,
+              timestamp: pendingAt,
+            }),
+          );
+        } else if (visiblePending) {
+          setPendingMessages((current) =>
+            current.map((message) =>
+              message.id === pendingMessage.id
+                ? {
+                    ...message,
+                    message_id: response.message_id ?? null,
+                  }
+                : message,
+            ),
+          );
+        }
+        appendChatInputHistoryEntry(input.history.scope, input.history.entry);
+        if (input.restoreDraft) {
+          revokeDraftImageUrls(input.restoreDraft.images);
+        }
+        return true;
+      } catch (error) {
+        if (visiblePending) {
+          setPendingMessages((current) =>
+            current.filter((message) => message.id !== pendingMessage.id),
+          );
+        }
+        if (input.restoreDraft) {
+          setInputState(input.restoreDraft.input);
+          setDraftImages(input.restoreDraft.images);
+          setHistoryCursor(input.restoreDraft.historyCursor);
+        }
+        toast.error(
+          error instanceof Error ? error.message : "Failed to send message",
+        );
+        return false;
+      } finally {
+        setSending(false);
+      }
+    },
+    [],
+  );
 
   const restoreHistoryEntry = useCallback(
     (entry: AssistantInputHistoryEntry | null, cursor: number | null) => {
@@ -150,6 +246,10 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
   useEffect(() => {
     draftImagesRef.current = draftImages;
   }, [draftImages]);
+
+  useEffect(() => {
+    pendingSendsRef.current = pendingSends;
+  }, [pendingSends]);
 
   useEffect(
     () => () => {
@@ -173,6 +273,16 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     }
 
     setPendingMessages([]);
+    if (leaderId) {
+      setPendingSends((current) => {
+        if (!current.has(leaderId)) {
+          return current;
+        }
+        const next = new Map(current);
+        next.delete(leaderId);
+        return next;
+      });
+    }
     setDetail((current) =>
       current
         ? {
@@ -182,7 +292,7 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
         : current,
     );
     setFetchedAt(Date.now());
-  }, [historyClearedAtMs]);
+  }, [historyClearedAtMs, leaderId]);
 
   useEffect(() => {
     if (!historyInvalidatedAtMs || !historySnapshot) {
@@ -199,6 +309,105 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     );
     setFetchedAt(Date.now());
   }, [historyInvalidatedAtMs, historySnapshot]);
+
+  useEffect(() => {
+    if (pendingSendsRef.current.size === 0) {
+      return;
+    }
+
+    setPendingSends((pending) => {
+      let next: Map<string, PendingSendChatMessage> | null = null;
+
+      for (const [targetId, pendingSend] of pending) {
+        if (pendingSend.send_failed) {
+          continue;
+        }
+        const targetState =
+          targetId === leaderId
+            ? leaderState
+            : (agents.get(targetId)?.state ?? pendingSend.target_state ?? null);
+        if (pendingSend.target_state === targetState) {
+          continue;
+        }
+        next ??= new Map(pending);
+        next.set(targetId, { ...pendingSend, target_state: targetState });
+      }
+
+      return next ?? pending;
+    });
+  }, [agents, leaderId, leaderState, pendingSends]);
+
+  useEffect(() => {
+    if (pendingSendsRef.current.size === 0 || sending) {
+      return;
+    }
+
+    for (const [targetId, current] of pendingSendsRef.current) {
+      if (current.send_failed) {
+        continue;
+      }
+
+      const targetState =
+        targetId === leaderId
+          ? leaderState
+          : (agents.get(targetId)?.state ?? current.target_state ?? null);
+
+      if (
+        targetState !== "idle" ||
+        autoSendingPendingSendIdsRef.current.has(targetId)
+      ) {
+        continue;
+      }
+
+      autoSendingPendingSendIdsRef.current.add(targetId);
+      setPendingSends((pending) => {
+        if (!pending.has(targetId)) {
+          return pending;
+        }
+        const next = new Map(pending);
+        next.delete(targetId);
+        return next;
+      });
+
+      void submitParts({
+        content: current.content,
+        parts: current.parts ?? [],
+        targetId,
+        visiblePending: targetId === leaderId,
+        history: {
+          scope: current.history_entry_scope,
+          entry: current.history_entry,
+        },
+        pendingMessageTimestamp: current.timestamp,
+      })
+        .then((sent) => {
+          autoSendingPendingSendIdsRef.current.delete(targetId);
+          if (!sent) {
+            setPendingSends((pending) => {
+              const next = new Map(pending);
+              next.set(targetId, {
+                ...current,
+                send_failed: true,
+                target_state: "error",
+              });
+              return next;
+            });
+          }
+        })
+        .catch(() => {
+          autoSendingPendingSendIdsRef.current.delete(targetId);
+          setPendingSends((pending) => {
+            const next = new Map(pending);
+            next.set(targetId, {
+              ...current,
+              send_failed: true,
+              target_state: "error",
+            });
+            return next;
+          });
+        });
+    }
+  }, [agents, leaderId, leaderState, pendingSends, sending, submitParts]);
 
   useEffect(() => {
     if (!connected || !leaderId) {
@@ -288,16 +497,21 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     );
   }, [leaderId, mergedHistory, pendingMessages.length]);
 
+  const currentPendingSend = leaderId
+    ? (pendingSends.get(leaderId) ?? null)
+    : null;
+
   const timelineItems = useMemo<AssistantChatItem[]>(
     () => [
       ...mergedHistory,
+      ...(currentPendingSend ? [{ ...currentPendingSend }] : []),
       ...pendingMessages.map((message) => ({ ...message })),
     ],
-    [mergedHistory, pendingMessages],
+    [currentPendingSend, mergedHistory, pendingMessages],
   );
 
   const leaderActivity = useMemo(() => {
-    const pendingCount = pendingMessages.length;
+    const pendingCount = pendingMessages.length + (currentPendingSend ? 1 : 0);
     const deltas = leaderId ? (streamingDeltas.get(leaderId) ?? []) : [];
     const running =
       connected &&
@@ -354,6 +568,7 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     connected,
     leaderId,
     leaderNode?.state,
+    currentPendingSend,
     pendingMessages.length,
     streamingDeltas,
     timelineItems,
@@ -395,7 +610,7 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     autoScrollRef.current = isScrolledToBottom(event.currentTarget);
   };
 
-  const sendMessage = async () => {
+  const sendMessage = async (options: { deferWhenBusy?: boolean } = {}) => {
     if (!leaderId) {
       return;
     }
@@ -415,61 +630,69 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     const previousDraftImages = draftImages;
     const previousHistoryCursor = historyCursor;
     const submittedAt = Date.now();
-    const pendingMessage = createPendingHumanMessage(
-      content || contentPartsToText(parts),
-      parts,
-      submittedAt,
-    );
+    const normalizedContent = content || contentPartsToText(parts);
+    const historyEntry = {
+      text: previousInput,
+      images: toInputHistoryImages(previousDraftImages),
+      timestamp: submittedAt,
+    };
+    const replacingBlockedPending =
+      options.deferWhenBusy &&
+      pendingSendsRef.current.has(leaderId) &&
+      (leaderState === "error" || leaderState === "terminated");
 
-    setSending(true);
-    setPendingMessages((current) => [...current, pendingMessage]);
-    setHistoryCursor(null);
-    setInputState("");
-    setDraftImages([]);
-
-    try {
-      const response = await dispatchNodeMessageRequest(leaderId, {
-        content: content || contentPartsToText(parts),
-        parts,
-      });
-      if (response.status === "command_executed") {
-        setPendingMessages((current) =>
-          removePendingAssistantMessage(current, {
-            content: content || contentPartsToText(parts),
+    if (
+      options.deferWhenBusy &&
+      (leaderState === "running" ||
+        leaderState === "sleeping" ||
+        replacingBlockedPending)
+    ) {
+      setPendingSends((current) => {
+        const next = new Map(current);
+        next.set(
+          leaderId,
+          createPendingSendMessage({
+            content: normalizedContent,
+            historyEntry,
+            historyScope: inputHistoryScope,
+            parts,
+            targetId: leaderId,
+            targetState: leaderState,
             timestamp: submittedAt,
           }),
         );
-      } else {
-        setPendingMessages((current) =>
-          current.map((message) =>
-            message.id === pendingMessage.id
-              ? {
-                  ...message,
-                  message_id: response.message_id ?? null,
-                }
-              : message,
-          ),
-        );
-      }
-      appendChatInputHistoryEntry(inputHistoryScope, {
-        text: previousInput,
-        images: toInputHistoryImages(previousDraftImages),
-        timestamp: submittedAt,
+        return next;
       });
+      setHistoryCursor(null);
+      setInputState("");
+      setDraftImages([]);
       revokeDraftImageUrls(previousDraftImages);
-    } catch (error) {
-      setPendingMessages((current) =>
-        current.filter((message) => message.id !== pendingMessage.id),
-      );
-      setInputState(previousInput);
-      setDraftImages(previousDraftImages);
-      setHistoryCursor(previousHistoryCursor);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to send message",
-      );
-    } finally {
-      setSending(false);
+      return;
     }
+
+    if (leaderState === "error" || leaderState === "terminated") {
+      toast.error("Resolve the current chat before sending");
+      return;
+    }
+
+    setHistoryCursor(null);
+    setInputState("");
+    setDraftImages([]);
+    await submitParts({
+      content: normalizedContent,
+      parts,
+      targetId: leaderId,
+      history: {
+        scope: inputHistoryScope,
+        entry: historyEntry,
+      },
+      pendingMessageTimestamp: submittedAt,
+      restoreDraft: {
+        input: previousInput,
+        images: previousDraftImages,
+        historyCursor: previousHistoryCursor,
+      },
+    });
   };
 
   const addImages = useCallback(
@@ -645,6 +868,14 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     try {
       await clearNodeChatRequest(leaderId);
       setPendingMessages([]);
+      setPendingSends((current) => {
+        if (!current.has(leaderId)) {
+          return current;
+        }
+        const next = new Map(current);
+        next.delete(leaderId);
+        return next;
+      });
       clearAgentHistory(leaderId);
       const data = await fetchNodeDetail(leaderId);
       if (data) {
@@ -705,7 +936,29 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     ],
   );
 
+  const cancelPendingSend = useCallback((pendingId: string) => {
+    setPendingSends((current) => {
+      const entry = Array.from(current.entries()).find(
+        ([, pending]) => pending.id === pendingId,
+      );
+      if (!entry) {
+        return current;
+      }
+      const next = new Map(current);
+      next.delete(entry[0]);
+      return next;
+    });
+  }, []);
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Tab" && !event.shiftKey) {
+      if (input.trim() || readyImages.length > 0) {
+        event.preventDefault();
+        void sendMessage({ deferWhenBusy: true });
+      }
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void sendMessage();
@@ -715,6 +968,7 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
   return {
     activeTab,
     addImages,
+    cancelPendingSend,
     connected,
     clearChat,
     clearing,

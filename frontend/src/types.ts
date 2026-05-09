@@ -96,6 +96,15 @@ export interface PendingAssistantChatMessage extends AssistantChatMessage {
   type: "PendingHumanMessage";
 }
 
+export interface PendingSendChatMessage extends AssistantChatMessage {
+  type: "PendingSendMessage";
+  target_id: string;
+  target_state?: AgentState | null;
+  history_entry: AssistantInputHistoryEntry;
+  history_entry_scope: string;
+  send_failed?: boolean;
+}
+
 export interface AssistantInputHistoryImage {
   assetId: string;
   mimeType: string | null;
@@ -159,7 +168,10 @@ export interface HistoryEntry {
   streaming?: boolean;
 }
 
-export type AssistantChatItem = HistoryEntry | PendingAssistantChatMessage;
+export type AssistantChatItem =
+  | HistoryEntry
+  | PendingAssistantChatMessage
+  | PendingSendChatMessage;
 
 export interface ContactSummary {
   id: string;

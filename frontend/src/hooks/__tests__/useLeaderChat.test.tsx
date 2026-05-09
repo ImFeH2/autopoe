@@ -1,4 +1,5 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import type { KeyboardEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLeaderChat } from "@/hooks/useLeaderChat";
 import { clearChatInputHistoryForTests } from "@/lib/chatInputHistory";
@@ -486,5 +487,422 @@ describe("useLeaderChat", () => {
     expect(clearAgentHistoryMock).toHaveBeenCalledWith("leader");
     expect(clearHistorySnapshotMock).toHaveBeenCalledWith("leader");
     expect(result.current.timelineItems).toEqual([]);
+  });
+
+  it("stores a Tab submitted workflow draft as pending send while the leader is running", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("running")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("next workflow step");
+    });
+
+    const preventDefault = vi.fn();
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault,
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(preventDefault).toHaveBeenCalled();
+    expect(dispatchNodeMessageRequestMock).not.toHaveBeenCalled();
+    expect(result.current.input).toBe("");
+    expect(result.current.timelineItems).toHaveLength(1);
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "next workflow step",
+      target_id: "leader",
+      target_state: "running",
+    });
+  });
+
+  it("keeps workflow pending sends bound to their original workflow", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([
+        ["leader", buildLeaderNode("running")],
+        [
+          "leader-2",
+          {
+            ...buildLeaderNode("idle"),
+            id: "leader-2",
+            tab_id: "tab-2",
+          },
+        ],
+      ]),
+    });
+    useAgentTabsRuntimeMock.mockReturnValue({
+      tabs: new Map([
+        ["tab-1", buildActiveTab()],
+        [
+          "tab-2",
+          {
+            ...buildActiveTab(),
+            id: "tab-2",
+            title: "Second workflow",
+            leader_id: "leader-2",
+          },
+        ],
+      ]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("stay with first workflow");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      target_id: "leader",
+    });
+
+    useAgentUIMock.mockReturnValue({
+      activeTabId: "tab-2",
+    });
+    rerender();
+
+    expect(result.current.timelineItems).toEqual([]);
+    expect(dispatchNodeMessageRequestMock).not.toHaveBeenCalled();
+
+    useAgentUIMock.mockReturnValue({
+      activeTabId: "tab-1",
+    });
+    rerender();
+
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "stay with first workflow",
+      target_id: "leader",
+    });
+  });
+
+  it("sends a workflow pending send to its original leader while another workflow is selected", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([
+        ["leader", buildLeaderNode("running")],
+        [
+          "leader-2",
+          {
+            ...buildLeaderNode("idle"),
+            id: "leader-2",
+            tab_id: "tab-2",
+          },
+        ],
+      ]),
+    });
+    useAgentTabsRuntimeMock.mockReturnValue({
+      tabs: new Map([
+        ["tab-1", buildActiveTab()],
+        [
+          "tab-2",
+          {
+            ...buildActiveTab(),
+            id: "tab-2",
+            title: "Second workflow",
+            leader_id: "leader-2",
+          },
+        ],
+      ]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("send to first leader");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    dispatchNodeMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-background",
+    });
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([
+        ["leader", buildLeaderNode("idle")],
+        [
+          "leader-2",
+          {
+            ...buildLeaderNode("idle"),
+            id: "leader-2",
+            tab_id: "tab-2",
+          },
+        ],
+      ]),
+    });
+    useAgentUIMock.mockReturnValue({
+      activeTabId: "tab-2",
+    });
+
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(dispatchNodeMessageRequestMock).toHaveBeenCalledWith("leader", {
+        content: "send to first leader",
+        parts: [{ type: "text", text: "send to first leader" }],
+      });
+    });
+    expect(result.current.timelineItems).toEqual([]);
+  });
+
+  it("automatically sends a workflow pending send when its leader returns to idle", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("sleeping")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "sleeping"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("wake up follow-up");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(dispatchNodeMessageRequestMock).not.toHaveBeenCalled();
+
+    dispatchNodeMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-workflow-auto",
+    });
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("idle")]]),
+    });
+
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(dispatchNodeMessageRequestMock).toHaveBeenCalledWith("leader", {
+        content: "wake up follow-up",
+        parts: [{ type: "text", text: "wake up follow-up" }],
+      });
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "wake up follow-up",
+      message_id: "msg-workflow-auto",
+    });
+  });
+
+  it("does not turn Enter into a workflow pending send while the leader is running", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("running")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+    dispatchNodeMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-enter-workflow",
+    });
+
+    const { result } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("workflow enter should send");
+    });
+    await act(async () => {
+      result.current.handleKeyDown({
+        key: "Enter",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+      await Promise.resolve();
+    });
+
+    expect(dispatchNodeMessageRequestMock).toHaveBeenCalledWith("leader", {
+      content: "workflow enter should send",
+      parts: [{ type: "text", text: "workflow enter should send" }],
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "workflow enter should send",
+    });
+  });
+
+  it("keeps a failed workflow auto-send visible without retrying automatically", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("running")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("failed workflow auto send");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    dispatchNodeMessageRequestMock.mockRejectedValueOnce(
+      new Error("send failed"),
+    );
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("idle")]]),
+    });
+
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(dispatchNodeMessageRequestMock).toHaveBeenCalledTimes(1);
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "failed workflow auto send",
+      send_failed: true,
+      target_state: "error",
+    });
+
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+    });
+
+    expect(dispatchNodeMessageRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps workflow pending send visible when the leader enters error", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("running")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("keep workflow draft visible");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("error")]]),
+    });
+    rerender();
+
+    expect(dispatchNodeMessageRequestMock).not.toHaveBeenCalled();
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "keep workflow draft visible",
+      target_state: "error",
+    });
+  });
+
+  it("replaces workflow pending send while the leader needs attention", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("running")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("first workflow draft");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("error")]]),
+    });
+    rerender();
+
+    act(() => {
+      result.current.setInput("replacement workflow draft");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(dispatchNodeMessageRequestMock).not.toHaveBeenCalled();
+    expect(result.current.timelineItems).toHaveLength(1);
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "replacement workflow draft",
+      target_state: "error",
+    });
   });
 });

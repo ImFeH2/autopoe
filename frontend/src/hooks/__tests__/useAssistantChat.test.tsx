@@ -7,6 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import type { KeyboardEvent } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAssistantChat } from "@/hooks/useAssistantChat";
 import {
@@ -219,6 +220,7 @@ describe("useAssistantChat", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("falls back to thinking after a completed tool call finishes", async () => {
@@ -1062,6 +1064,392 @@ describe("useAssistantChat", () => {
 
     await waitFor(() => {
       expect(result.current.timelineItems).toEqual([]);
+    });
+  });
+
+  it("stores a Tab submitted draft as pending send while the assistant is running", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("send after the current reply");
+    });
+
+    const preventDefault = vi.fn();
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault,
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(preventDefault).toHaveBeenCalled();
+    expect(sendAssistantMessageRequestMock).not.toHaveBeenCalled();
+    expect(result.current.input).toBe("");
+    expect(result.current.timelineItems).toHaveLength(1);
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "send after the current reply",
+      target_id: "assistant",
+      target_state: "running",
+    });
+  });
+
+  it("replaces an assistant pending send instead of queuing multiple drafts", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("sleeping")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "sleeping"));
+
+    const { result } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("first pending draft");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    act(() => {
+      result.current.setInput("replacement pending draft");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(sendAssistantMessageRequestMock).not.toHaveBeenCalled();
+    expect(result.current.timelineItems).toHaveLength(1);
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "replacement pending draft",
+      target_state: "sleeping",
+    });
+  });
+
+  it("automatically sends an assistant pending send after the assistant returns to idle", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("send when idle");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(sendAssistantMessageRequestMock).not.toHaveBeenCalled();
+
+    sendAssistantMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-auto",
+    });
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("idle")]]),
+    });
+
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(sendAssistantMessageRequestMock).toHaveBeenCalledWith({
+        content: "send when idle",
+        parts: [{ type: "text", text: "send when idle" }],
+      });
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "send when idle",
+      message_id: "msg-auto",
+    });
+
+    act(() => {
+      expect(
+        result.current.navigateInputHistory(-1, { start: 0, end: 0 }),
+      ).toBe(true);
+    });
+    expect(result.current.input).toBe("send when idle");
+  });
+
+  it("does not turn Enter into an assistant pending send while the assistant is running", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    sendAssistantMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-enter",
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("enter should send");
+    });
+    await act(async () => {
+      result.current.handleKeyDown({
+        key: "Enter",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+      await Promise.resolve();
+    });
+
+    expect(sendAssistantMessageRequestMock).toHaveBeenCalledWith({
+      content: "enter should send",
+      parts: [{ type: "text", text: "enter should send" }],
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "enter should send",
+    });
+  });
+
+  it("keeps a failed assistant auto-send visible without retrying automatically", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("failed auto send");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    sendAssistantMessageRequestMock.mockRejectedValueOnce(
+      new Error("send failed"),
+    );
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("idle")]]),
+    });
+
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(sendAssistantMessageRequestMock).toHaveBeenCalledTimes(1);
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "failed auto send",
+      send_failed: true,
+      target_state: "error",
+    });
+
+    await act(async () => {
+      rerender();
+      await Promise.resolve();
+    });
+
+    expect(sendAssistantMessageRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps assistant pending send visible when the assistant enters error", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("keep this visible");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("error")]]),
+    });
+    rerender();
+
+    expect(sendAssistantMessageRequestMock).not.toHaveBeenCalled();
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "keep this visible",
+      target_state: "error",
+    });
+  });
+
+  it("cancels assistant pending send without adding it to input history", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("cancel this pending draft");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    const pending = result.current.timelineItems[0];
+    expect(pending).toMatchObject({ type: "PendingSendMessage" });
+    if (pending?.type !== "PendingSendMessage") {
+      throw new Error("Expected pending send message");
+    }
+
+    act(() => {
+      result.current.cancelPendingSend(pending.id);
+    });
+
+    expect(result.current.timelineItems).toEqual([]);
+    act(() => {
+      expect(
+        result.current.navigateInputHistory(-1, { start: 0, end: 0 }),
+      ).toBe(false);
+    });
+  });
+
+  it("replaces assistant pending send while the assistant needs attention", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("first blocked draft");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("error")]]),
+    });
+    rerender();
+
+    act(() => {
+      result.current.setInput("replacement blocked draft");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(sendAssistantMessageRequestMock).not.toHaveBeenCalled();
+    expect(result.current.timelineItems).toHaveLength(1);
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "replacement blocked draft",
+      target_state: "error",
     });
   });
 
