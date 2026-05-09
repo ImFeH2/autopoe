@@ -27,6 +27,59 @@ export type ActivityFilter =
   | "resource"
   | "prompt";
 
+export interface ServerSummaryCounts {
+  authRequired: number;
+  configured: number;
+  connected: number;
+  error: number;
+}
+
+export interface McpServerDialogState {
+  draft: MCPServerConfig;
+  editingServerName: string | null;
+  open: boolean;
+  openCreateDialog: () => void;
+  openEditDialog: (record: MCPServerRecord) => void;
+  pending: boolean;
+  saveServer: () => Promise<void>;
+  setDraft: (draft: MCPServerConfig) => void;
+  setOpen: (open: boolean) => void;
+}
+
+export interface QuickAddState {
+  error: string | null;
+  input: string;
+  nameValue: string;
+  parse: {
+    draft: MCPServerConfig | null;
+    error: string | null;
+  };
+  pending: boolean;
+  setInput: (value: string) => void;
+  setName: (value: string) => void;
+  submit: () => Promise<void>;
+}
+
+export interface PromptPreviewState {
+  argumentsText: string;
+  loading: boolean;
+  preview: Record<string, unknown> | null;
+  previewCurrent: () => void;
+  selectPrompt: (serverName: string, promptName: string) => void;
+  selectedPrompt: MCPPromptDescriptor | null;
+  selectedPromptName: string | null;
+  setArgumentsText: (value: string) => void;
+}
+
+export interface McpServerActions {
+  deleteServer: (serverName: string) => Promise<void>;
+  login: (serverName: string) => Promise<void>;
+  logout: (serverName: string) => Promise<void>;
+  refreshAll: () => Promise<void>;
+  refreshServer: (serverName: string) => Promise<void>;
+  toggleEnabled: (record: MCPServerRecord) => Promise<void>;
+}
+
 export const DETAIL_TABS: DetailTab[] = [
   "overview",
   "capabilities",

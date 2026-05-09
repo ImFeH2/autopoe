@@ -5,9 +5,9 @@ import {
   DeleteTabDialog,
 } from "@/components/workspace/WorkspaceDialogs";
 import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
-import { useHomePageState } from "@/pages/home/useHomePageState";
+import { useWorkspacePageState } from "@/pages/workspace/useWorkspacePageState";
 
-export function HomePage() {
+export function WorkspacePage() {
   const {
     activeDialog,
     activeTab,
@@ -80,7 +80,7 @@ export function HomePage() {
     workflowNodeOptions,
     workspaceRef,
     workflowLocked,
-  } = useHomePageState();
+  } = useWorkspacePageState();
 
   return (
     <>

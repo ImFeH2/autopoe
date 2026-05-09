@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HomePage } from "@/pages/HomePage";
+import { WorkspacePage } from "@/pages/WorkspacePage";
 import type { Node, TaskTab } from "@/types";
 import { useRef, useState, type ReactNode } from "react";
 
@@ -63,8 +63,8 @@ const {
   useAgentUIMock: vi.fn(),
 }));
 
-const { useHomePageStateMock } = vi.hoisted(() => ({
-  useHomePageStateMock: vi.fn(),
+const { useWorkspacePageStateMock } = vi.hoisted(() => ({
+  useWorkspacePageStateMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -142,11 +142,11 @@ vi.mock("@/hooks/useMeasuredHeight", () => ({
   }),
 }));
 
-vi.mock("@/pages/home/useHomePageState", () => ({
-  useHomePageState: () =>
+vi.mock("@/pages/workspace/useWorkspacePageState", () => ({
+  useWorkspacePageState: () =>
     (
-      useHomePageStateMock as unknown as () => ReturnType<
-        typeof useMockHomePageState
+      useWorkspacePageStateMock as unknown as () => ReturnType<
+        typeof useMockWorkspacePageState
       >
     )(),
 }));
@@ -235,7 +235,7 @@ function buildRole(
   };
 }
 
-interface HomePageScenario {
+interface WorkspacePageScenario {
   activeTabId?: string | null;
   connected?: boolean;
   leaderNode?: Node | null;
@@ -246,19 +246,19 @@ interface HomePageScenario {
   tabs?: Map<string, TaskTab>;
 }
 
-let homePageScenario: HomePageScenario = {};
+let workspacePageScenario: WorkspacePageScenario = {};
 
-function useMockHomePageState() {
-  const roles = homePageScenario.roles ?? [
+function useMockWorkspacePageState() {
+  const roles = workspacePageScenario.roles ?? [
     buildRole({ name: "Worker", description: "General execution role" }),
     buildRole({ name: "Reviewer", description: "Review results carefully" }),
     buildRole({ name: "Designer", description: "Frontend design role" }),
   ];
   const tabs =
-    homePageScenario.tabs ??
+    workspacePageScenario.tabs ??
     new Map([["tab-1", buildTab({ leader_id: "leader-1" })]]);
   const [activeTabIdState, setActiveTabIdState] = useState<string | null>(
-    homePageScenario.activeTabId ?? "tab-1",
+    workspacePageScenario.activeTabId ?? "tab-1",
   );
   const [activeDialog, setActiveDialog] = useState<
     "create-tab" | "create-node" | "connect-ports" | "delete-tab" | null
@@ -300,19 +300,19 @@ function useMockHomePageState() {
   const [panelOpen, setPanelOpen] = useState(true);
   const graphRef = useRef(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const selectedAgent = homePageScenario.selectedAgent ?? null;
+  const selectedAgent = workspacePageScenario.selectedAgent ?? null;
   const activeTab = activeTabIdState
     ? (tabs.get(activeTabIdState) ?? null)
     : null;
   const leaderNode =
-    homePageScenario.leaderNode ??
+    workspacePageScenario.leaderNode ??
     buildNode({
       id: "leader-1",
       is_leader: true,
       role_name: "Conductor",
     });
   const setActiveTabId = (nextValue: string | null) => {
-    homePageScenario.setActiveTabIdSpy?.(nextValue);
+    workspacePageScenario.setActiveTabIdSpy?.(nextValue);
     setActiveTabIdState(nextValue);
   };
   const selectedCreateNodeRole =
@@ -322,7 +322,7 @@ function useMockHomePageState() {
     activeDialog,
     activeTab,
     activeTabId: activeTabIdState,
-    connected: homePageScenario.connected ?? true,
+    connected: workspacePageScenario.connected ?? true,
     connectSourceId,
     connectSourcePortKey,
     connectTargetId,
@@ -425,7 +425,7 @@ function useMockHomePageState() {
     panelVisible: panelOpen || Boolean(selectedAgent),
     pendingAction,
     regularTabAgents:
-      homePageScenario.regularTabAgents ??
+      workspacePageScenario.regularTabAgents ??
       (selectedAgent && !selectedAgent.is_leader ? [selectedAgent] : []),
     requestDeleteTab: (tabId: string, title: string, nodeCount?: number) => {
       setDeleteTabTarget({ id: tabId, title, nodeCount });
@@ -464,7 +464,7 @@ function useMockHomePageState() {
   };
 }
 
-describe("HomePage", () => {
+describe("WorkspacePage", () => {
   afterEach(() => {
     cleanup();
   });
@@ -485,8 +485,8 @@ describe("HomePage", () => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
     updateBlueprintRequestMock.mockReset();
-    useHomePageStateMock.mockImplementation(useMockHomePageState);
-    homePageScenario = {};
+    useWorkspacePageStateMock.mockImplementation(useMockWorkspacePageState);
+    workspacePageScenario = {};
 
     const assistant = buildNode({
       id: "assistant",
@@ -552,7 +552,7 @@ describe("HomePage", () => {
 
   it("creates a tab through the custom dialog instead of a browser prompt", async () => {
     const setActiveTabId = vi.fn();
-    homePageScenario = { setActiveTabIdSpy: setActiveTabId };
+    workspacePageScenario = { setActiveTabIdSpy: setActiveTabId };
     createTabRequestMock.mockResolvedValue({
       id: "tab-2",
       title: "Release Prep",
@@ -561,7 +561,7 @@ describe("HomePage", () => {
       write_dirs: [],
     });
 
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     fireEvent.click(screen.getByLabelText("Create workflow"));
     fireEvent.change(screen.getByLabelText("Workflow title"), {
@@ -580,7 +580,7 @@ describe("HomePage", () => {
   }, 10000);
 
   it("does not expose removed blueprint actions in the workspace toolbar", async () => {
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     await waitFor(() =>
       expect(
@@ -590,7 +590,7 @@ describe("HomePage", () => {
   });
 
   it("keeps the workspace toolbar centered while constraining overflow inside the background", () => {
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     const toolbars = screen.getAllByTestId("workspace-toolbar");
 
@@ -605,7 +605,7 @@ describe("HomePage", () => {
   });
 
   it("shows workflow chat context in the chat header", () => {
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     expect(screen.queryByText("Editable")).not.toBeInTheDocument();
     const chatHeader = screen.getByText("Workflow chat").closest("div");
@@ -621,7 +621,7 @@ describe("HomePage", () => {
   it("adds an agent node through the custom dialog", async () => {
     createTabNodeRequestMock.mockResolvedValue(undefined);
 
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     fireEvent.click(screen.getAllByRole("button", { name: "Add Node" })[0]);
     const dialog = await screen.findByRole("dialog");
@@ -657,7 +657,7 @@ describe("HomePage", () => {
     useAgentNodesRuntimeMock.mockReturnValue({
       agents: new Map([[leader.id, leader]]),
     });
-    homePageScenario = { leaderNode: leader, selectedAgent: null };
+    workspacePageScenario = { leaderNode: leader, selectedAgent: null };
     useAgentDetailMock.mockReturnValue({
       detail: {
         id: leader.id,
@@ -681,7 +681,7 @@ describe("HomePage", () => {
     });
     interruptNodeMock.mockResolvedValue(undefined);
 
-    const view = render(<HomePage />);
+    const view = render(<WorkspacePage />);
 
     expect(
       within(view.container).queryByRole("button", { name: "Interrupt" }),
@@ -708,7 +708,7 @@ describe("HomePage", () => {
   });
 
   it("exposes a workflow clear chat action in the workspace panel", () => {
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     fireEvent.click(screen.getByRole("button", { name: "Clear Chat" }));
 
@@ -733,7 +733,7 @@ describe("HomePage", () => {
         [worker.id, worker],
       ]),
     });
-    homePageScenario = { selectedAgent: worker };
+    workspacePageScenario = { selectedAgent: worker };
     useAgentDetailMock.mockReturnValue({
       detail: {
         id: worker.id,
@@ -756,7 +756,7 @@ describe("HomePage", () => {
     });
     interruptNodeMock.mockResolvedValue(undefined);
 
-    const view = render(<HomePage />);
+    const view = render(<WorkspacePage />);
 
     const interruptButtons = within(view.container).getAllByRole("button", {
       name: "Interrupt",
@@ -788,7 +788,7 @@ describe("HomePage", () => {
         [worker.id, worker],
       ]),
     });
-    homePageScenario = { selectedAgent: worker };
+    workspacePageScenario = { selectedAgent: worker };
     useAgentDetailMock.mockReturnValue({
       detail: {
         id: worker.id,
@@ -811,7 +811,7 @@ describe("HomePage", () => {
     });
     interruptNodeMock.mockResolvedValue(undefined);
 
-    const view = render(<HomePage />);
+    const view = render(<WorkspacePage />);
 
     const interruptButtons = within(view.container).getAllByRole("button", {
       name: "Interrupt",
@@ -828,7 +828,7 @@ describe("HomePage", () => {
   it("deletes a tab through the confirmation dialog", async () => {
     deleteTabRequestMock.mockResolvedValue(undefined);
 
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     fireEvent.click(screen.getAllByLabelText("Delete Example Tab")[0]);
     fireEvent.click(screen.getByRole("button", { name: "Delete Workflow" }));
@@ -841,7 +841,7 @@ describe("HomePage", () => {
   it("middle-clicks a tab into the same delete flow without activating it first", async () => {
     const setActiveTabId = vi.fn();
     deleteTabRequestMock.mockResolvedValue(undefined);
-    homePageScenario = {
+    workspacePageScenario = {
       activeTabId: "tab-2",
       setActiveTabIdSpy: setActiveTabId,
       tabs: new Map([
@@ -857,7 +857,7 @@ describe("HomePage", () => {
       ]),
     };
 
-    render(<HomePage />);
+    render(<WorkspacePage />);
 
     fireEvent(
       screen.getAllByRole("button", { name: "Example Tab" })[0],

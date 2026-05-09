@@ -17,7 +17,7 @@ import type { Node, Role, TaskTab, WorkflowNodeType } from "@/types";
 import type {
   WorkspaceEditorMode,
   WorkspacePendingAction,
-} from "@/pages/home/useHomePageState";
+} from "@/pages/workspace/useWorkspacePageState";
 import type {
   WorkspaceNodeOption,
   WorkspacePortOption,

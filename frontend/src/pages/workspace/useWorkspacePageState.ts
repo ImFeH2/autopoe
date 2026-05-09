@@ -80,7 +80,7 @@ function formatPortLabel(port: WorkflowPort): string {
   return `${port.key} · ${port.type}`;
 }
 
-export function useHomePageState() {
+export function useWorkspacePageState() {
   const { agents } = useAgentNodesRuntime();
   const { tabs } = useAgentTabsRuntime();
   const { connected } = useAgentConnectionRuntime();
