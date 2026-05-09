@@ -190,7 +190,7 @@ export function SidebarActivityTicker({ width }: SidebarActivityTickerProps) {
       className="flex items-center gap-2.5 overflow-hidden"
       style={responsiveStyles}
     >
-      <div className="flex shrink-0 items-center gap-2 text-[10px] font-semibold text-muted-foreground/62">
+      <div className="flex shrink-0 items-center gap-2 text-[10px] font-semibold text-muted-foreground/76">
         <span
           className={cn(
             "size-1.5 rounded-full transition-all duration-300",
@@ -205,7 +205,7 @@ export function SidebarActivityTicker({ width }: SidebarActivityTickerProps) {
       <div className="min-w-0 flex-1 overflow-hidden">
         {!currentItem ? (
           <div
-            className="flex min-w-0 items-center text-muted-foreground/72"
+            className="flex min-w-0 items-center text-muted-foreground/82"
             style={{
               height: ROW_HEIGHT,
               fontSize: TICKER_FONT_SIZE,
@@ -230,7 +230,7 @@ export function SidebarActivityTicker({ width }: SidebarActivityTickerProps) {
                   duration: 0.24,
                   ease: [0.22, 1, 0.36, 1],
                 }}
-                className="absolute inset-0 flex min-w-0 items-center text-muted-foreground/84"
+                className="absolute inset-0 flex min-w-0 items-center text-muted-foreground/92"
                 style={{
                   fontSize: TICKER_FONT_SIZE,
                   gap: ITEM_GAP,

@@ -79,12 +79,12 @@ export function Sidebar({
                       : "bg-graph-status-idle shadow-[0_0_10px_var(--graph-status-idle)]",
                   )}
                 />
-                <span className="text-[9px] font-medium uppercase tracking-wider text-sidebar-foreground/62">
+                <span className="text-[9px] font-medium uppercase tracking-wider text-sidebar-foreground/80">
                   {connected ? "Connected" : "Reconnecting"}
                 </span>
               </div>
             </div>
-            <p className="text-[11px] font-medium text-sidebar-foreground/48">
+            <p className="text-[11px] font-medium text-sidebar-foreground/64">
               Agent Studio
             </p>
           </div>
@@ -100,7 +100,7 @@ export function Sidebar({
                   index > 0 && "pt-4",
                 )}
               >
-                <div className="ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 text-xs font-normal text-muted-foreground">
+                <div className="ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 text-xs font-normal text-sidebar-foreground/62">
                   {group.label}
                 </div>
                 <div className="w-full text-sm py-1">
@@ -116,7 +116,7 @@ export function Sidebar({
                             data-active={isActive}
                             className={cn(
                               "flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left outline-hidden ring-sidebar-ring transition-[width,height,padding] focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 data-[active=true]:font-bold data-[active=true]:text-[#6366F1] data-[active=true]:bg-sidebar-accent/50 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground h-8 text-sm",
-                              !isActive && "text-sidebar-foreground/70",
+                              !isActive && "text-sidebar-foreground/82",
                             )}
                           >
                             <Icon
@@ -124,7 +124,7 @@ export function Sidebar({
                                 "size-4 shrink-0 transition-colors duration-200",
                                 isActive
                                   ? "text-[#6366F1]"
-                                  : "text-sidebar-foreground/48 group-hover:text-sidebar-accent-foreground/88",
+                                  : "text-sidebar-foreground/66 group-hover:text-sidebar-accent-foreground",
                               )}
                             />
                             <span className="block truncate flex-1">
@@ -148,7 +148,7 @@ export function Sidebar({
             onClick={() => {
               void logout();
             }}
-            className="mb-3 flex w-full items-center justify-start gap-2.5 rounded-md border border-sidebar-border bg-sidebar-accent/25 px-3 py-2 text-left text-[12px] font-medium text-sidebar-foreground/74 transition-colors hover:bg-sidebar-accent/45 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="mb-3 flex w-full items-center justify-start gap-2.5 rounded-md border border-sidebar-border bg-sidebar-accent/25 px-3 py-2 text-left text-[12px] font-medium text-sidebar-foreground/84 transition-colors hover:bg-sidebar-accent/45 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <LogOut className="size-3.5" />
             <span>Logout</span>
