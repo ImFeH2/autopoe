@@ -854,7 +854,7 @@ describe("AssistantChatComposer", () => {
 
     const stopButton = screen.getByRole("button", { name: "Stop Assistant" });
     expect(stopButton).toHaveTextContent("Stop");
-    expect(stopButton.className).toContain("bg-destructive/18");
+    expect(stopButton).toHaveAttribute("data-variant", "destructive");
 
     fireEvent.click(stopButton);
 

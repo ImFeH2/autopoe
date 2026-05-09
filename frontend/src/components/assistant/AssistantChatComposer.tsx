@@ -374,7 +374,7 @@ export function AssistantChatComposer({
           />
           <Button
             type="button"
-            variant={!busy ? "default" : "ghost"}
+            variant={!busy ? "default" : "destructive"}
             size="sm"
             onClick={busy ? onStop : onSend}
             disabled={actionDisabled}
@@ -384,9 +384,6 @@ export function AssistantChatComposer({
             className={cn(
               "shrink-0 rounded-full transition-all duration-300 active:scale-[0.96] disabled:opacity-30",
               "h-8 gap-1.5 px-3.5",
-              busy
-                ? "bg-destructive/18 text-destructive hover:bg-destructive/24"
-                : "bg-primary text-primary-foreground hover:bg-primary/90",
             )}
           >
             {busy ? (

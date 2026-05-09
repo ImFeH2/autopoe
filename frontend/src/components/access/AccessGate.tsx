@@ -12,9 +12,6 @@ import { useAccess } from "@/context/useAccess";
 const accessInputClass =
   "h-12 w-full rounded-xl border border-input bg-background/55 px-4 pr-12 font-mono text-[15px] tracking-[0.04em] text-foreground transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground/70 focus:bg-background/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50";
 
-const accessButtonClass =
-  "group flex h-11 w-full items-center justify-center gap-2 rounded-full bg-primary text-[13px] font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
-
 function formatAccessError(error: unknown) {
   if (!(error instanceof Error)) {
     return "Failed to verify access code";
@@ -149,7 +146,7 @@ export function AccessGate() {
                   type="submit"
                   variant="default"
                   disabled={isSubmitting || accessUnavailable}
-                  className={accessButtonClass}
+                  className="group h-11 w-full text-[13px]"
                 >
                   {isSubmitting ? (
                     <>

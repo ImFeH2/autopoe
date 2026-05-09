@@ -16,7 +16,7 @@ import {
 } from "@/components/WorkspaceCommandDialog";
 
 const mcpOutlineButtonClass =
-  "border-border bg-accent/20 text-foreground hover:bg-accent/35";
+  "border-border/70 bg-background/45 hover:border-ring/35 hover:bg-accent/65";
 
 function parseStringList(value: string) {
   return value

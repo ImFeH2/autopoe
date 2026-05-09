@@ -216,7 +216,6 @@ export function ChannelsPage() {
                             variant="outline"
                             size="xs"
                             onClick={() => void handleApprove(chat.chat_id)}
-                            className="border-border bg-accent/20 text-foreground hover:bg-accent/35"
                           >
                             <Check className="size-3.5" />
                             Approve

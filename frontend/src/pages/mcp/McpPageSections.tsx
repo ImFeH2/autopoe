@@ -56,9 +56,9 @@ const mcpPanelClass = "bg-card/20";
 const mcpPanelTextClass = "text-[13px] text-muted-foreground";
 const mcpEyebrowClass = mutedLabelClass;
 export const mcpOutlineButtonClass =
-  "border-border bg-accent/20 text-foreground hover:bg-accent/35";
+  "border-border/70 bg-background/45 hover:border-ring/35 hover:bg-accent/65";
 const mcpDestructiveButtonClass =
-  "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/18";
+  "border-graph-status-error/35 bg-graph-status-error/10 text-graph-status-error hover:bg-graph-status-error/18";
 const mcpCodeBlockClass =
   "mt-4 max-h-48 bg-background/55 p-3 text-foreground/70";
 const mcpDescriptionLineClass =

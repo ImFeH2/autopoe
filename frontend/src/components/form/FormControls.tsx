@@ -20,7 +20,7 @@ export const formSelectTriggerClass =
 export const formReadOnlyClass = "cursor-default opacity-60 focus:outline-none";
 
 const formIconButtonClass =
-  "rounded-md border border-border/70 bg-accent/20 text-muted-foreground hover:bg-accent/45 hover:text-foreground";
+  "border border-border/70 bg-background/45 text-muted-foreground hover:border-ring/35 hover:bg-accent/65 hover:text-foreground";
 
 interface FormInputProps extends Omit<
   React.ComponentProps<typeof Input>,
