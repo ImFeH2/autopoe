@@ -357,7 +357,7 @@ describe("ProvidersPage", () => {
 
     expect(screen.getByText("manual-model")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Provider" }));
 
     await waitFor(() =>
       expect(updateProviderMock).toHaveBeenCalledWith(

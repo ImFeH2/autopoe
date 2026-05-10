@@ -26,7 +26,7 @@ import {
   type ProviderDraft,
   type ProviderModelEditorDraft,
   type ProviderModelEditorState,
-  type ProviderModelTestState,
+  type ProviderModelTestResult,
 } from "@/pages/providers/lib";
 
 export function useProvidersPageState() {
@@ -43,8 +43,8 @@ export function useProvidersPageState() {
     useState<ProviderModelEditorState>(null);
   const [modelEditorDraft, setModelEditorDraft] =
     useState<ProviderModelEditorDraft>(createProviderModelEditorDraft());
-  const [modelTestStates, setModelTestStates] = useState<
-    Record<string, ProviderModelTestState>
+  const [modelTestResults, setModelTestResults] = useState<
+    Record<string, ProviderModelTestResult>
   >({});
 
   const {
@@ -59,7 +59,7 @@ export function useProvidersPageState() {
       setSelectedId(null);
       setIsCreating(false);
       setDraft(createProviderDraft());
-      setModelTestStates({});
+      setModelTestResults({});
       setClearModelsConfirmOpen(false);
     },
   });
@@ -95,6 +95,25 @@ export function useProvidersPageState() {
     return serializeProviderDraft(draft) !== serializeProviderDraft(baseline);
   }, [draft, isCreating, selectedProvider]);
 
+  const updateProviderDraft = useCallback((nextDraft: ProviderDraft) => {
+    setDraft(nextDraft);
+  }, []);
+
+  const updateProviderModelDraft = useCallback(
+    (nextDraft: ProviderModelEditorDraft) => {
+      setModelEditorDraft(nextDraft);
+    },
+    [],
+  );
+
+  const requestDeleteProvider = useCallback((provider: Provider) => {
+    setProviderToDelete(provider);
+  }, []);
+
+  const cancelDeleteProvider = useCallback(() => {
+    setProviderToDelete(null);
+  }, []);
+
   const refreshProviders = useCallback(async () => {
     await mutateProviders();
   }, [mutateProviders]);
@@ -103,7 +122,7 @@ export function useProvidersPageState() {
     setSelectedId(provider.id);
     setIsCreating(false);
     setDraft(createProviderDraft(provider));
-    setModelTestStates({});
+    setModelTestResults({});
     setModelEditorState(null);
     setClearModelsConfirmOpen(false);
   }, []);
@@ -112,7 +131,7 @@ export function useProvidersPageState() {
     setIsCreating(true);
     setSelectedId(null);
     setDraft(createProviderDraft());
-    setModelTestStates({});
+    setModelTestResults({});
     setModelEditorState(null);
     setClearModelsConfirmOpen(false);
   }, []);
@@ -124,7 +143,7 @@ export function useProvidersPageState() {
     } else {
       setDraft(createProviderDraft(selectedProvider));
     }
-    setModelTestStates({});
+    setModelTestResults({});
     setModelEditorState(null);
     setClearModelsConfirmOpen(false);
   }, [isCreating, selectedProvider]);
@@ -175,7 +194,7 @@ export function useProvidersPageState() {
         setDraft(createProviderDraft(updated));
         toast.success("Provider updated");
       }
-      setModelTestStates({});
+      setModelTestResults({});
       setClearModelsConfirmOpen(false);
     } catch {
       toast.error(
@@ -212,7 +231,7 @@ export function useProvidersPageState() {
         setSelectedId(null);
         setDraft(createProviderDraft());
       }
-      setModelTestStates({});
+      setModelTestResults({});
       toast.success("Provider deleted");
     } catch {
       toast.error("Failed to delete provider");
@@ -272,7 +291,7 @@ export function useProvidersPageState() {
         models: [...current.models, nextEntry],
       };
     });
-    setModelTestStates((current) => {
+    setModelTestResults((current) => {
       const next = { ...current };
       if (
         modelEditorState?.originalModel &&
@@ -290,7 +309,7 @@ export function useProvidersPageState() {
       ...current,
       models: current.models.filter((entry) => entry.model !== modelId),
     }));
-    setModelTestStates((current) => {
+    setModelTestResults((current) => {
       const next = { ...current };
       delete next[modelId];
       return next;
@@ -313,7 +332,7 @@ export function useProvidersPageState() {
       ...current,
       models: [],
     }));
-    setModelTestStates({});
+    setModelTestResults({});
     setClearModelsConfirmOpen(false);
   }, []);
 
@@ -375,7 +394,7 @@ export function useProvidersPageState() {
         return;
       }
 
-      setModelTestStates((current) => ({
+      setModelTestResults((current) => ({
         ...current,
         [entry.model]: { state: "running" },
       }));
@@ -389,7 +408,7 @@ export function useProvidersPageState() {
           ),
           model: entry.model,
         });
-        setModelTestStates((current) => ({
+        setModelTestResults((current) => ({
           ...current,
           [entry.model]: result.ok
             ? {
@@ -402,7 +421,7 @@ export function useProvidersPageState() {
               },
         }));
       } catch (error) {
-        setModelTestStates((current) => ({
+        setModelTestResults((current) => ({
           ...current,
           [entry.model]: {
             state: "error",
@@ -443,7 +462,7 @@ export function useProvidersPageState() {
     loading,
     modelEditorDraft,
     modelEditorState,
-    modelTestStates,
+    modelTestResults,
     openCreateModelDialog,
     openEditModelDialog,
     panelWidth,
@@ -455,9 +474,10 @@ export function useProvidersPageState() {
     saving,
     selectedId,
     selectedProvider,
-    setDraft,
-    setModelEditorDraft,
-    setProviderToDelete,
+    updateProviderDraft,
+    updateProviderModelDraft,
+    requestDeleteProvider,
+    cancelDeleteProvider,
     startDrag,
     closeModelDialog,
   };

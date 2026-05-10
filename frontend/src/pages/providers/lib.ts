@@ -30,7 +30,7 @@ export type ProviderModelEditorState = {
   originalModel: string | null;
 } | null;
 
-export type ProviderModelTestState =
+export type ProviderModelTestResult =
   | {
       state: "running";
     }
@@ -175,23 +175,25 @@ export function mergeFetchedModelsIntoDraft(
   return merged;
 }
 
-export function buildModelSummary(entry: ProviderModelCatalogEntry): string {
+export function formatProviderModelCapabilities(
+  entry: ProviderModelCatalogEntry,
+): string {
   const parts: string[] = [];
   if (entry.context_window_tokens !== null) {
     parts.push(`${entry.context_window_tokens.toLocaleString()} tokens`);
   }
   if (entry.input_image !== null) {
-    parts.push(`input_image=${entry.input_image ? "true" : "false"}`);
+    parts.push(entry.input_image ? "Image input" : "No image input");
   }
   if (entry.output_image !== null) {
-    parts.push(`output_image=${entry.output_image ? "true" : "false"}`);
+    parts.push(entry.output_image ? "Image output" : "No image output");
   }
   if (
     entry.structured_output !== null &&
     entry.structured_output !== undefined
   ) {
     parts.push(
-      `structured_output=${entry.structured_output ? "true" : "false"}`,
+      entry.structured_output ? "Structured output" : "No structured output",
     );
   }
   return parts.length > 0 ? parts.join(" · ") : "No capability metadata";
@@ -209,6 +211,17 @@ export function findDuplicateModelId(
     seenModelIds.add(modelId);
   }
   return null;
+}
+
+export function parseNonNegativeIntegerInput(value: string): number | null {
+  const nextValue = value.trim();
+  if (!/^\d+$/.test(nextValue)) {
+    return null;
+  }
+  const parsedValue = Number.parseInt(nextValue, 10);
+  return Number.isSafeInteger(parsedValue) && parsedValue >= 0
+    ? parsedValue
+    : null;
 }
 
 export function validateProviderModelEditorDraft(
