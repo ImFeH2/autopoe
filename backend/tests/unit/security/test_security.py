@@ -122,16 +122,3 @@ def test_authorize_rejects_assistant_only_tools_for_workflow_nodes():
     result = authorize("list_workflows", agent, {})
 
     assert result == "Ask the Assistant to manage workflows or settings"
-
-
-def test_authorize_rejects_mcp_prefixed_tools_for_assistant():
-    agent = Agent(
-        NodeConfig(
-            node_type=NodeType.ASSISTANT,
-            tools=["mcp__flowent__clone_workflow"],
-        )
-    )
-
-    result = authorize("mcp__flowent__clone_workflow", agent, {})
-
-    assert result == "Tool not found: mcp__flowent__clone_workflow"

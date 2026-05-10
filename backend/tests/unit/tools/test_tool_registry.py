@@ -114,16 +114,16 @@ def test_tool_registry_ignores_mcp_prefixed_tools_for_workflow_nodes():
             node_type=NodeType.AGENT,
             role_name="Worker",
             tools=[
-                "mcp__flowent__list_workflows",
-                "mcp__flowent__search_notes",
+                "mcp__external__search_notes",
+                "mcp__external__lookup",
             ],
         )
     )
 
     tools = build_tool_registry().get_tools_for_agent(agent)
 
-    assert "mcp__flowent__list_workflows" not in {tool.name for tool in tools}
-    assert "mcp__flowent__search_notes" not in {tool.name for tool in tools}
+    assert "mcp__external__search_notes" not in {tool.name for tool in tools}
+    assert "mcp__external__lookup" not in {tool.name for tool in tools}
 
 
 def test_tool_registry_ignores_mcp_prefixed_tools_for_assistant():
@@ -131,16 +131,16 @@ def test_tool_registry_ignores_mcp_prefixed_tools_for_assistant():
         NodeConfig(
             node_type=NodeType.ASSISTANT,
             tools=[
-                "mcp__flowent__clone_workflow",
-                "mcp__flowent__search_notes",
+                "mcp__external__summarize",
+                "mcp__external__lookup",
             ],
         )
     )
 
     tools = build_tool_registry().get_tools_for_agent(agent)
 
-    assert "mcp__flowent__clone_workflow" not in {tool.name for tool in tools}
-    assert "mcp__flowent__search_notes" not in {tool.name for tool in tools}
+    assert "mcp__external__summarize" not in {tool.name for tool in tools}
+    assert "mcp__external__lookup" not in {tool.name for tool in tools}
 
 
 def test_build_tools_for_role_filters_mcp_prefixed_tools(monkeypatch):
@@ -154,7 +154,7 @@ def test_build_tools_for_role_filters_mcp_prefixed_tools(monkeypatch):
                 RoleConfig(
                     name="Worker",
                     system_prompt="Do work.",
-                    included_tools=["mcp__flowent__list_workflows", "read"],
+                    included_tools=["mcp__external__search_notes", "read"],
                 )
             ]
         ),
@@ -163,18 +163,17 @@ def test_build_tools_for_role_filters_mcp_prefixed_tools(monkeypatch):
     tools = build_tools_for_role(
         "Worker",
         requested_tools=[
-            "mcp__flowent__delete_workflow",
-            "mcp__flowent__copy_workflow",
-            "mcp__flowent__clone_workflow",
-            "mcp__flowent__search_notes",
+            "mcp__external__lookup",
+            "mcp__external__summarize",
+            "mcp__external__classify",
+            "mcp__external__search_notes",
         ],
     )
 
-    assert "mcp__flowent__list_workflows" not in tools
-    assert "mcp__flowent__delete_workflow" not in tools
-    assert "mcp__flowent__copy_workflow" not in tools
-    assert "mcp__flowent__clone_workflow" not in tools
-    assert "mcp__flowent__search_notes" not in tools
+    assert "mcp__external__lookup" not in tools
+    assert "mcp__external__summarize" not in tools
+    assert "mcp__external__classify" not in tools
+    assert "mcp__external__search_notes" not in tools
 
 
 def test_list_agent_visible_tool_descriptors_excludes_external_tools():

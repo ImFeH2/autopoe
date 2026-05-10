@@ -89,8 +89,8 @@ def test_manage_roles_create_adds_custom_role(monkeypatch):
                     "provider_id": "provider-1",
                     "model": "gpt-4.1-mini",
                 },
-                "included_tools": ["read", "read", "exec", "mcp__flowent__search"],
-                "excluded_tools": ["fetch", "mcp__flowent__search_notes"],
+                "included_tools": ["read", "read", "exec", "mcp__external__search"],
+                "excluded_tools": ["fetch", "mcp__external__lookup"],
             },
         )
     )
@@ -206,8 +206,8 @@ def test_manage_roles_update_renames_and_updates_role(monkeypatch):
                     "provider_id": "provider-1",
                     "model": "gpt-4.1-mini",
                 },
-                "included_tools": ["read", "mcp__flowent__search"],
-                "excluded_tools": ["fetch", "mcp__flowent__search_notes"],
+                "included_tools": ["read", "mcp__external__search"],
+                "excluded_tools": ["fetch", "mcp__external__lookup"],
             },
         )
     )

@@ -435,9 +435,9 @@ def test_load_settings_drops_assistant_only_tools_from_custom_roles(
                             "create_workflow",
                             "delete_workflow",
                             "list_workflows",
-                            "mcp__flowent__list_workflows",
-                            "mcp__flowent__copy_workflow",
-                            "mcp__flowent__clone_workflow",
+                            "mcp__external__search_notes",
+                            "mcp__external__summarize",
+                            "mcp__external__classify",
                             "manage_settings",
                         ],
                     }

@@ -175,12 +175,12 @@ def test_create_role_filters_assistant_only_tools(monkeypatch):
                     "create_workflow",
                     "delete_workflow",
                     "list_workflows",
-                    "mcp__flowent__list_workflows",
-                    "mcp__flowent__copy_workflow",
-                    "mcp__flowent__clone_workflow",
+                    "mcp__external__search_notes",
+                    "mcp__external__summarize",
+                    "mcp__external__classify",
                     "manage_settings",
                 ],
-                excluded_tools=["fetch", "mcp__flowent__search_notes"],
+                excluded_tools=["fetch", "mcp__external__lookup"],
             )
         )
     )
@@ -289,10 +289,10 @@ def test_update_role_filters_assistant_only_tools(monkeypatch):
                     "create_workflow",
                     "delete_workflow",
                     "list_workflows",
-                    "mcp__flowent__list_workflows",
+                    "mcp__external__search_notes",
                     "manage_roles",
                 ],
-                excluded_tools=["fetch", "mcp__flowent__search_notes"],
+                excluded_tools=["fetch", "mcp__external__lookup"],
             ),
         )
     )

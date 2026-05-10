@@ -26,7 +26,7 @@ describe("PromptsPage", () => {
   it("loads and saves both prompt layers", async () => {
     fetchPromptSettings.mockResolvedValue({
       custom_prompt: "Be concise.",
-      custom_post_prompt: "Use @target: for routed messages.",
+      custom_post_prompt: "Summarize decisions before the next step.",
     });
     savePromptSettings.mockResolvedValue({
       custom_prompt: "Stay precise.",
@@ -40,7 +40,9 @@ describe("PromptsPage", () => {
 
     await waitFor(() => {
       expect(customPrompt).toHaveValue("Be concise.");
-      expect(customPostPrompt).toHaveValue("Use @target: for routed messages.");
+      expect(customPostPrompt).toHaveValue(
+        "Summarize decisions before the next step.",
+      );
     });
 
     fireEvent.change(customPrompt, { target: { value: "Stay precise." } });

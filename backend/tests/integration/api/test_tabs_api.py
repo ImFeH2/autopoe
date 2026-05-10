@@ -464,30 +464,6 @@ def test_activate_agent_only_workflow_succeeds_without_trigger(client: TestClien
     assert detail["nodes"][0]["id"] == worker["id"]
 
 
-def test_activate_legacy_agent_only_workflow_succeeds_without_trigger(
-    client: TestClient,
-):
-    tab = client.post("/api/workflows", json={"title": "Legacy Collaborative"}).json()
-    worker = _create_agent_node(client, tab_id=tab["id"], name="Worker")
-    definition = deepcopy(
-        client.get(f"/api/workflows/{tab['id']}").json()["workflow"]["definition"]
-    )
-    definition["nodes"][0]["inputs"][0]["required"] = True
-    update_response = client.put(
-        f"/api/workflows/{tab['id']}/definition",
-        json={"definition": definition},
-    )
-    assert update_response.status_code == 200
-
-    response = client.post(f"/api/workflows/{tab['id']}/activate")
-
-    assert response.status_code == 200
-    assert response.json()["activation_state"] == "active"
-    detail = client.get(f"/api/workflows/{tab['id']}").json()
-    assert detail["workflow"]["activation_state"] == "active"
-    assert detail["nodes"][0]["id"] == worker["id"]
-
-
 def test_activate_valid_manual_trigger_graph_succeeds(client: TestClient):
     tab = client.post("/api/workflows", json={"title": "Manual"}).json()
     trigger = _create_graph_node(

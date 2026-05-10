@@ -10,7 +10,7 @@ def test_manage_prompts_get_returns_current_prompt(monkeypatch):
     agent = Agent(NodeConfig(node_type=NodeType.ASSISTANT, tools=["manage_prompts"]))
     settings = Settings(
         custom_prompt="Be concise.",
-        custom_post_prompt="Stay routed.",
+        custom_post_prompt="Summarize decisions before the next step.",
     )
 
     monkeypatch.setattr("flowent.settings.get_settings", lambda: settings)
@@ -19,7 +19,7 @@ def test_manage_prompts_get_returns_current_prompt(monkeypatch):
 
     assert result == {
         "custom_prompt": "Be concise.",
-        "custom_post_prompt": "Stay routed.",
+        "custom_post_prompt": "Summarize decisions before the next step.",
     }
 
 
@@ -39,17 +39,17 @@ def test_manage_prompts_update_saves_custom_prompt(monkeypatch):
             {
                 "action": "update",
                 "custom_prompt": "Always prefer terse answers.",
-                "custom_post_prompt": "Only route with @target.",
+                "custom_post_prompt": "Summarize decisions before the next step.",
             },
         )
     )
 
     assert result == {
         "custom_prompt": "Always prefer terse answers.",
-        "custom_post_prompt": "Only route with @target.",
+        "custom_post_prompt": "Summarize decisions before the next step.",
     }
     assert settings.custom_prompt == "Always prefer terse answers."
-    assert settings.custom_post_prompt == "Only route with @target."
+    assert settings.custom_post_prompt == "Summarize decisions before the next step."
     assert saved == [settings]
 
 

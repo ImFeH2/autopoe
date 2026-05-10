@@ -38,7 +38,6 @@ def test_workspace_store_normalizes_relative_write_dirs_on_load(
                     }
                 ],
                 "edges": [],
-                "blueprints": [],
             }
         ),
         encoding="utf-8",
@@ -103,7 +102,6 @@ def test_workspace_store_prefers_legacy_workspace_data_when_state_db_is_still_em
                     }
                 ],
                 "edges": [],
-                "blueprints": [],
             }
         ),
         encoding="utf-8",
@@ -157,7 +155,6 @@ def test_workspace_store_does_not_overwrite_state_db_with_legacy_workspace_data(
                     }
                 ],
                 "edges": [],
-                "blueprints": [],
             }
         ),
         encoding="utf-8",
