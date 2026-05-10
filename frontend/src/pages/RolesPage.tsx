@@ -8,6 +8,7 @@ import { RoleDeleteDialog } from "@/pages/roles/RoleDeleteDialog";
 import { RoleDetailPanel } from "@/pages/roles/RoleDetailPanel";
 import { RoleList } from "@/pages/roles/RoleList";
 import { useRolesPageState } from "@/pages/roles/useRolesPageState";
+import { getRoutePathForPage, pushBrowserPath } from "@/lib/urlNavigation";
 
 export function RolesPage() {
   const agentUI = useOptionalAgentUI();
@@ -35,7 +36,12 @@ export function RolesPage() {
   } = useRolesPageState();
   const roleActions = {
     ...actions,
-    openProvidersPage: () => agentUI?.setCurrentPage("providers"),
+    openProvidersPage: () => {
+      agentUI?.navigateToPage("providers");
+      if (!agentUI) {
+        pushBrowserPath(getRoutePathForPage("providers"));
+      }
+    },
   };
 
   if (loading && !isPanelOpen) {
@@ -61,15 +67,12 @@ export function RolesPage() {
                   className={cn("size-4", loading && "animate-spin")}
                 />
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={actions.openCreate}
-                disabled={isPanelOpen}
-              >
-                <Plus className="size-4" />
-                New Role
-              </Button>
+              {isPanelOpen ? null : (
+                <Button type="button" size="sm" onClick={actions.openCreate}>
+                  <Plus className="size-4" />
+                  New Role
+                </Button>
+              )}
             </>
           }
         />

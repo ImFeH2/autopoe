@@ -1,5 +1,11 @@
 import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
 import type { Node } from "@xyflow/react";
+import { afterEach } from "vitest";
+
+afterEach(() => {
+  cleanup();
+});
 
 if (!window.requestAnimationFrame) {
   window.requestAnimationFrame = (callback) =>

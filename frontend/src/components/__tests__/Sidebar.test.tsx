@@ -34,7 +34,7 @@ vi.mock("@/components/SidebarActivityTicker", () => ({
 }));
 
 describe("Sidebar", () => {
-  const setCurrentPage = vi.fn();
+  const navigateToPage = vi.fn();
   const logout = vi.fn();
 
   afterEach(() => {
@@ -42,12 +42,12 @@ describe("Sidebar", () => {
   });
 
   beforeEach(() => {
-    setCurrentPage.mockReset();
+    navigateToPage.mockReset();
     logout.mockReset();
     useAgentConnectionRuntime.mockReturnValue({ connected: true });
     useAgentUI.mockReturnValue({
       currentPage: "workspace",
-      setCurrentPage,
+      navigateToPage,
     });
     useAccess.mockReturnValue({ logout });
   });
@@ -80,7 +80,7 @@ describe("Sidebar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
 
-    expect(setCurrentPage).toHaveBeenCalledWith("providers");
+    expect(navigateToPage).toHaveBeenCalledWith("providers");
     expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 

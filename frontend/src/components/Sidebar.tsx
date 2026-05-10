@@ -28,7 +28,7 @@ export function Sidebar({
   onWidthChange,
 }: SidebarProps) {
   const { connected } = useAgentConnectionRuntime();
-  const { currentPage, setCurrentPage } = useAgentUI();
+  const { currentPage, navigateToPage } = useAgentUI();
   const { logout } = useAccess();
 
   const { isDragging, startDrag } = usePanelDrag(width, onWidthChange, "right");
@@ -37,7 +37,7 @@ export function Sidebar({
   const titleFontSizeRem = 1.05 + widthProgress * 0.1;
 
   const navigate = (page: PageId) => {
-    setCurrentPage(page);
+    navigateToPage(page);
     onNavigate?.();
   };
 

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RolesPage } from "@/pages/RolesPage";
 
 const {
@@ -33,6 +33,10 @@ vi.mock("sonner", () => ({
 }));
 
 describe("RolesPage", () => {
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/roles");
+  });
+
   it("shows role descriptions in the list", async () => {
     fetchRolesBootstrapMock.mockResolvedValue({
       roles: [

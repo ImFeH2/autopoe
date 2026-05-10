@@ -9,6 +9,7 @@ import type { AgentEvent, TaskTab } from "@/types";
 
 export function useTabs() {
   const [tabs, setTabs] = useState<Map<string, TaskTab>>(new Map());
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     fetchTabs()
@@ -19,7 +20,8 @@ export function useTabs() {
         }
         setTabs(next);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, []);
 
   const handleUpdateEvent = useCallback((event: AgentEvent) => {
@@ -71,5 +73,5 @@ export function useTabs() {
     });
   }, []);
 
-  return { tabs, handleUpdateEvent };
+  return { tabs, loaded, handleUpdateEvent };
 }

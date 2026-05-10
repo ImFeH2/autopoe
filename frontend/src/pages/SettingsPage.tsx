@@ -11,8 +11,23 @@ import {
   SettingsHeader,
 } from "@/pages/settings/SettingsSections";
 import { useSettingsPageState } from "@/pages/settings/useSettingsPageState";
+import {
+  getRoutePathForSettings,
+  pushBrowserPath,
+  type SettingsSectionId,
+} from "@/lib/urlNavigation";
+import { useAppRoute } from "@/hooks/useAppRoute";
+
+const SETTINGS_SECTIONS: SettingsSectionId[] = [
+  "model",
+  "assistant",
+  "leader",
+  "access",
+  "path",
+];
 
 export function SettingsPage() {
+  const route = useAppRoute();
   const {
     accessDraft,
     accessDraftError,
@@ -57,9 +72,17 @@ export function SettingsPage() {
             settings={settings}
           />
 
-          <Tabs defaultValue="model" className="w-full">
+          <Tabs
+            value={route.settingsSection}
+            onValueChange={(value) => {
+              pushBrowserPath(
+                getRoutePathForSettings(value as SettingsSectionId),
+              );
+            }}
+            className="w-full"
+          >
             <TabsList className="mb-8 w-full justify-start h-auto flex-wrap bg-transparent p-0 gap-6 border-b border-border/40 rounded-none">
-              {["model", "assistant", "leader", "access", "path"].map((t) => (
+              {SETTINGS_SECTIONS.map((t) => (
                 <TabsTrigger
                   key={t}
                   value={t}

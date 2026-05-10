@@ -3,6 +3,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -23,6 +24,13 @@ import {
   filterStreamingDeltas,
 } from "@/context/agentRuntimeState";
 import { getDeletedTabNodeIds, getTabEventId } from "@/lib/tabEvents";
+import {
+  getRoutePathForPage,
+  getRoutePathForWorkspace,
+  parseAppRouteFromLocation,
+  pushBrowserPath,
+  replaceBrowserPath,
+} from "@/lib/urlNavigation";
 import type {
   AgentEvent,
   HistoryEntry,
@@ -69,6 +77,7 @@ interface AgentNodesContextValue {
 
 interface AgentTabsContextValue {
   tabs: Map<string, TaskTab>;
+  tabsLoaded: boolean;
 }
 
 interface AgentConnectionContextValue {
@@ -99,6 +108,7 @@ interface AgentUIContextValue {
   setActiveTabId: (id: string | null) => void;
   currentPage: PageId;
   setCurrentPage: (page: PageId) => void;
+  navigateToPage: (page: PageId) => void;
 }
 
 const AgentNodesContext = createContext<AgentNodesContextValue | null>(null);
@@ -130,10 +140,16 @@ function shouldTrackFeedEntry(entry: HistoryEntry): boolean {
 
 export function AgentProvider({ children }: { children: ReactNode }) {
   const { agents, handleUpdateEvent } = useAgents();
-  const { tabs, handleUpdateEvent: handleTabEvent } = useTabs();
+  const {
+    tabs,
+    loaded: tabsLoaded,
+    handleUpdateEvent: handleTabEvent,
+  } = useTabs();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
-  const [selectedTabId, setSelectedTabId] = useState<string | null>(null);
+  const [selectedTabId, setSelectedTabId] = useState<string | null>(
+    () => parseAppRouteFromLocation(window.location).workspaceTabId,
+  );
   const [agentHistories, setAgentHistories] = useState<
     Map<string, HistoryEntry[]>
   >(() => new Map());
@@ -156,7 +172,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [recentActivities, setRecentActivities] = useState<ActivityFeedEntry[]>(
     [],
   );
-  const [currentPage, setCurrentPage] = useState<PageId>("assistant");
+  const [currentPage, setCurrentPage] = useState<PageId>(
+    () => parseAppRouteFromLocation(window.location).page,
+  );
   const msgTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
@@ -169,9 +187,12 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     if (selectedTabId && tabs.has(selectedTabId)) {
       return selectedTabId;
     }
+    if (selectedTabId && !tabsLoaded) {
+      return selectedTabId;
+    }
     const firstTabId = tabs.keys().next().value;
     return typeof firstTabId === "string" ? firstTabId : null;
-  }, [selectedTabId, tabs]);
+  }, [selectedTabId, tabs, tabsLoaded]);
 
   const clearAgentHistory = useCallback((agentId: string) => {
     setAgentHistories((prev) => deleteMapEntry(prev, agentId));
@@ -497,6 +518,44 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     [agents],
   );
 
+  const setActiveTabId = useCallback((id: string | null) => {
+    setSelectedTabId(id);
+    if (parseAppRouteFromLocation(window.location).page === "workspace") {
+      pushBrowserPath(getRoutePathForWorkspace(id));
+    }
+  }, []);
+
+  const navigateToPage = useCallback((page: PageId) => {
+    setCurrentPage(page);
+    pushBrowserPath(getRoutePathForPage(page));
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextRoute = parseAppRouteFromLocation(window.location);
+      setCurrentPage(nextRoute.page);
+      if (nextRoute.page === "workspace") {
+        setSelectedTabId(nextRoute.workspaceTabId);
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (currentPage !== "workspace") {
+      return;
+    }
+
+    const route = parseAppRouteFromLocation(window.location);
+    if (route.workspaceTabId === activeTabId) {
+      return;
+    }
+
+    replaceBrowserPath(getRoutePathForWorkspace(activeTabId));
+  }, [activeTabId, currentPage]);
+
   const nodesValue = useMemo(
     () => ({
       agents,
@@ -507,8 +566,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const tabsValue = useMemo(
     () => ({
       tabs,
+      tabsLoaded,
     }),
-    [tabs],
+    [tabs, tabsLoaded],
   );
 
   const connectionValue = useMemo(
@@ -561,11 +621,20 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       hoveredAgentId,
       setHoveredAgentId,
       activeTabId,
-      setActiveTabId: setSelectedTabId,
+      setActiveTabId,
       currentPage,
       setCurrentPage,
+      navigateToPage,
     }),
-    [selectedAgentId, selectAgent, hoveredAgentId, activeTabId, currentPage],
+    [
+      selectedAgentId,
+      selectAgent,
+      hoveredAgentId,
+      activeTabId,
+      setActiveTabId,
+      currentPage,
+      navigateToPage,
+    ],
   );
 
   return (

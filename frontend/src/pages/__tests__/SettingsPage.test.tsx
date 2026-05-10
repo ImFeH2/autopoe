@@ -186,6 +186,7 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requireReauth.mockReset();
+    window.history.replaceState(null, "", "/settings/model");
   });
 
   afterEach(() => {

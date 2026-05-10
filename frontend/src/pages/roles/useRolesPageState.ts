@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -28,13 +28,26 @@ import {
   type RoleDraft,
 } from "@/pages/roles/lib";
 import { cloneModelParams } from "@/lib/modelParams";
+import {
+  getRoutePathForRole,
+  getRoutePathForRoleCreate,
+  pushBrowserPath,
+  replaceBrowserPath,
+} from "@/lib/urlNavigation";
+import { useAppRoute } from "@/hooks/useAppRoute";
 
 export function useRolesPageState() {
-  const [panelMode, setPanelMode] = useState<RolePanelMode | null>(null);
-  const [activeRoleName, setActiveRoleName] = useState<string | null>(null);
+  const route = useAppRoute();
+  const [panelMode, setPanelMode] = useState<RolePanelMode | null>(
+    route.roleMode,
+  );
+  const [activeRoleName, setActiveRoleName] = useState<string | null>(
+    route.roleName,
+  );
   const [draft, setDraft] = useState<RoleDraft>(createEmptyRoleDraft());
   const [saving, setSaving] = useState(false);
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
+  const appliedRouteKeyRef = useRef<string | null>(null);
 
   const {
     data: bootstrapData,
@@ -86,6 +99,56 @@ export function useRolesPageState() {
   const panelTitle = getRolePanelTitle(panelMode, activeRole);
   const canSave = canSaveRoleChanges(draft, saving);
 
+  useEffect(() => {
+    if (route.page !== "roles") {
+      return;
+    }
+
+    const routeKey =
+      route.roleMode === "create"
+        ? "create"
+        : route.roleName
+          ? `${route.roleMode ?? "view"}:${route.roleName}`
+          : "list";
+
+    if (appliedRouteKeyRef.current === routeKey) {
+      return;
+    }
+
+    if (route.roleMode === "create") {
+      appliedRouteKeyRef.current = routeKey;
+      setPanelMode("create");
+      setActiveRoleName(null);
+      setDraft(createEmptyRoleDraft());
+      return;
+    }
+
+    if (route.roleName) {
+      const role = roles.find((candidate) => candidate.name === route.roleName);
+      if (!role) {
+        if (!loading) {
+          appliedRouteKeyRef.current = "list";
+          setPanelMode(null);
+          setActiveRoleName(null);
+          setDraft(createEmptyRoleDraft());
+          replaceBrowserPath(getRoutePathForRole(null));
+        }
+        return;
+      }
+
+      appliedRouteKeyRef.current = routeKey;
+      setPanelMode(route.roleMode === "edit" ? "edit" : "view");
+      setActiveRoleName(role.name);
+      setDraft(createRoleDraft(role));
+      return;
+    }
+
+    appliedRouteKeyRef.current = routeKey;
+    setPanelMode(null);
+    setActiveRoleName(null);
+    setDraft(createEmptyRoleDraft());
+  }, [loading, roles, route.page, route.roleMode, route.roleName]);
+
   const updateBootstrapRoles = useCallback(
     (nextRoles: Role[]) => {
       void mutateRolesBootstrap(
@@ -105,27 +168,35 @@ export function useRolesPageState() {
   }, [mutateRolesBootstrap]);
 
   const closePanel = useCallback(() => {
+    appliedRouteKeyRef.current = "list";
     setPanelMode(null);
     setActiveRoleName(null);
     setDraft(createEmptyRoleDraft());
+    pushBrowserPath(getRoutePathForRole(null));
   }, []);
 
   const openCreate = useCallback(() => {
+    appliedRouteKeyRef.current = "create";
     setPanelMode("create");
     setActiveRoleName(null);
     setDraft(createEmptyRoleDraft());
+    pushBrowserPath(getRoutePathForRoleCreate());
   }, []);
 
   const openView = useCallback((role: Role) => {
+    appliedRouteKeyRef.current = `view:${role.name}`;
     setPanelMode("view");
     setActiveRoleName(role.name);
     setDraft(createRoleDraft(role));
+    pushBrowserPath(getRoutePathForRole(role.name, "view"));
   }, []);
 
   const openEdit = useCallback((role: Role) => {
+    appliedRouteKeyRef.current = `edit:${role.name}`;
     setPanelMode("edit");
     setActiveRoleName(role.name);
     setDraft(createRoleDraft(role));
+    pushBrowserPath(getRoutePathForRole(role.name, "edit"));
   }, []);
 
   const updateDraft = useCallback(
@@ -204,13 +275,22 @@ export function useRolesPageState() {
         updateBootstrapRoles(
           roles.map((role) => (role.name === activeRoleName ? updated : role)),
         );
+        appliedRouteKeyRef.current = `view:${updated.name}`;
+        setPanelMode("view");
+        setActiveRoleName(updated.name);
+        setDraft(createRoleDraft(updated));
+        replaceBrowserPath(getRoutePathForRole(updated.name, "view"));
         toast.success("Role updated");
       } else {
         const created = await createRole(nextDraft);
         updateBootstrapRoles([created, ...roles]);
+        appliedRouteKeyRef.current = `view:${created.name}`;
+        setPanelMode("view");
+        setActiveRoleName(created.name);
+        setDraft(createRoleDraft(created));
+        replaceBrowserPath(getRoutePathForRole(created.name, "view"));
         toast.success("Role created");
       }
-      closePanel();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to save role",
@@ -221,7 +301,6 @@ export function useRolesPageState() {
   }, [
     activeRole,
     activeRoleName,
-    closePanel,
     draft,
     panelMode,
     roles,
@@ -246,7 +325,11 @@ export function useRolesPageState() {
       await deleteRole(name);
       updateBootstrapRoles(roles.filter((role) => role.name !== name));
       if (activeRoleName === name) {
-        closePanel();
+        appliedRouteKeyRef.current = "list";
+        setPanelMode(null);
+        setActiveRoleName(null);
+        setDraft(createEmptyRoleDraft());
+        replaceBrowserPath(getRoutePathForRole(null));
       }
       toast.success("Role deleted");
     } catch (error) {
@@ -254,7 +337,7 @@ export function useRolesPageState() {
         error instanceof Error ? error.message : "Failed to delete role",
       );
     }
-  }, [activeRoleName, closePanel, roleToDelete, roles, updateBootstrapRoles]);
+  }, [activeRoleName, roleToDelete, roles, updateBootstrapRoles]);
 
   const cycleRoleToolState = useCallback(
     (toolName: string) => {

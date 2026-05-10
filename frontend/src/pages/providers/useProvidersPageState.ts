@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -12,6 +12,13 @@ import {
 import { usePanelDrag, usePanelWidth } from "@/hooks/usePanelDrag";
 import { parseProviderHeadersInput } from "@/lib/providerHeaders";
 import { buildProviderRequestPreview } from "@/lib/providerUrls";
+import {
+  getRoutePathForProvider,
+  getRoutePathForProviderCreate,
+  pushBrowserPath,
+  replaceBrowserPath,
+} from "@/lib/urlNavigation";
+import { useAppRoute } from "@/hooks/useAppRoute";
 import type { Provider, ProviderModelCatalogEntry } from "@/types";
 import {
   buildProviderDraftRequestPayload,
@@ -30,9 +37,12 @@ import {
 } from "@/pages/providers/lib";
 
 export function useProvidersPageState() {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [draft, setDraft] = useState<ProviderDraft>(createProviderDraft());
+  const route = useAppRoute();
+  const [selectedId, setSelectedId] = useState<string | null>(route.providerId);
+  const [isCreating, setIsCreating] = useState(route.providerMode === "create");
+  const [draft, setDraft] = useState<ProviderDraft>(() =>
+    createProviderDraft(),
+  );
   const [saving, setSaving] = useState(false);
   const [providerToDelete, setProviderToDelete] = useState<Provider | null>(
     null,
@@ -46,6 +56,7 @@ export function useProvidersPageState() {
   const [modelTestResults, setModelTestResults] = useState<
     Record<string, ProviderModelTestResult>
   >({});
+  const appliedRouteKeyRef = useRef<string | null>(null);
 
   const {
     data: providers = [],
@@ -80,6 +91,69 @@ export function useProvidersPageState() {
     () => providers.find((provider) => provider.id === selectedId),
     [providers, selectedId],
   );
+
+  useEffect(() => {
+    if (route.page !== "providers") {
+      return;
+    }
+
+    const routeKey =
+      route.providerMode === "create"
+        ? "create"
+        : route.providerId
+          ? `detail:${route.providerId}`
+          : "list";
+
+    if (appliedRouteKeyRef.current === routeKey) {
+      return;
+    }
+
+    if (route.providerMode === "create") {
+      appliedRouteKeyRef.current = routeKey;
+      setIsCreating(true);
+      setSelectedId(null);
+      setDraft(createProviderDraft());
+      setModelTestResults({});
+      setModelEditorState(null);
+      setClearModelsConfirmOpen(false);
+      return;
+    }
+
+    if (route.providerId) {
+      const provider = providers.find(
+        (candidate) => candidate.id === route.providerId,
+      );
+      if (!provider) {
+        if (!loading) {
+          appliedRouteKeyRef.current = "list";
+          setSelectedId(null);
+          setIsCreating(false);
+          setDraft(createProviderDraft());
+          setModelTestResults({});
+          setModelEditorState(null);
+          setClearModelsConfirmOpen(false);
+          replaceBrowserPath(getRoutePathForProvider(null));
+        }
+        return;
+      }
+      appliedRouteKeyRef.current = routeKey;
+      setSelectedId(provider.id);
+      setIsCreating(false);
+      setDraft(createProviderDraft(provider));
+      setModelTestResults({});
+      setModelEditorState(null);
+      setClearModelsConfirmOpen(false);
+      return;
+    }
+
+    appliedRouteKeyRef.current = routeKey;
+    setSelectedId(null);
+    setIsCreating(false);
+    setDraft(createProviderDraft());
+    setModelTestResults({});
+    setModelEditorState(null);
+    setClearModelsConfirmOpen(false);
+  }, [loading, providers, route.page, route.providerId, route.providerMode]);
   const endpointPreview = useMemo(
     () => buildProviderRequestPreview(draft.type, draft.base_url),
     [draft.base_url, draft.type],
@@ -119,27 +193,33 @@ export function useProvidersPageState() {
   }, [mutateProviders]);
 
   const handleSelect = useCallback((provider: Provider) => {
+    appliedRouteKeyRef.current = `detail:${provider.id}`;
     setSelectedId(provider.id);
     setIsCreating(false);
     setDraft(createProviderDraft(provider));
     setModelTestResults({});
     setModelEditorState(null);
     setClearModelsConfirmOpen(false);
+    pushBrowserPath(getRoutePathForProvider(provider.id));
   }, []);
 
   const handleCreateNew = useCallback(() => {
+    appliedRouteKeyRef.current = "create";
     setIsCreating(true);
     setSelectedId(null);
     setDraft(createProviderDraft());
     setModelTestResults({});
     setModelEditorState(null);
     setClearModelsConfirmOpen(false);
+    pushBrowserPath(getRoutePathForProviderCreate());
   }, []);
 
   const handleCancel = useCallback(() => {
     if (isCreating) {
+      appliedRouteKeyRef.current = "list";
       setIsCreating(false);
       setDraft(createProviderDraft());
+      pushBrowserPath(getRoutePathForProvider(null));
     } else {
       setDraft(createProviderDraft(selectedProvider));
     }
@@ -179,9 +259,11 @@ export function useProvidersPageState() {
       if (isCreating) {
         const created = await createProvider(payload);
         void mutateProviders([...providers, created], false);
+        appliedRouteKeyRef.current = `detail:${created.id}`;
         setIsCreating(false);
         setSelectedId(created.id);
         setDraft(createProviderDraft(created));
+        replaceBrowserPath(getRoutePathForProvider(created.id));
         toast.success("Provider created");
       } else if (selectedId) {
         const updated = await updateProvider(selectedId, payload);
@@ -228,8 +310,10 @@ export function useProvidersPageState() {
         false,
       );
       if (selectedId === providerId) {
+        appliedRouteKeyRef.current = "list";
         setSelectedId(null);
         setDraft(createProviderDraft());
+        replaceBrowserPath(getRoutePathForProvider(null));
       }
       setModelTestResults({});
       toast.success("Provider deleted");
