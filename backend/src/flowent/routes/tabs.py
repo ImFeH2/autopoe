@@ -13,7 +13,6 @@ from flowent.graph_service import (
     delete_agent_node,
     delete_edge,
     delete_tab,
-    duplicate_tab,
     list_node_connection_ids,
     list_tab_edges,
     list_workflow_nodes,
@@ -123,17 +122,6 @@ async def create_workflow_route(req: CreateTabRequest) -> dict[str, object]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return serialize_tab_summary(tab)
-
-
-@router.post("/api/workflows/{tab_id}/duplicate")
-async def duplicate_workflow_route(tab_id: str) -> dict[str, object]:
-    duplicated, error = duplicate_tab(tab_id=tab_id)
-    if error is not None or duplicated is None:
-        raise HTTPException(
-            status_code=404 if error and error.endswith("not found") else 400,
-            detail=error or "Failed to duplicate workflow",
-        )
-    return serialize_tab_summary(duplicated)
 
 
 @router.post("/api/workflows/{tab_id}/activate")

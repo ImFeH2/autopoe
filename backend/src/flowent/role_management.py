@@ -70,6 +70,7 @@ def resolve_role_tool_config(
     from flowent.tools import (
         is_assistant_only_mcp_tool_name,
         is_assistant_only_tool_name,
+        is_removed_workflow_copy_mcp_tool_name,
     )
 
     next_included = normalize_tool_names(
@@ -83,7 +84,8 @@ def resolve_role_tool_config(
         next_included = [
             tool_name
             for tool_name in next_included
-            if not is_assistant_only_tool_name(tool_name)
+            if not is_removed_workflow_copy_mcp_tool_name(tool_name)
+            and not is_assistant_only_tool_name(tool_name)
             and not is_assistant_only_mcp_tool_name(tool_name)
         ]
     next_excluded = normalize_tool_names(

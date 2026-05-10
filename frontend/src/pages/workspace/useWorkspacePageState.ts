@@ -16,7 +16,6 @@ import {
   createTabRequest,
   deactivateWorkflowRequest,
   deleteTabRequest,
-  duplicateTabRequest,
   fetchRoles,
   updateTabDefinitionRequest,
 } from "@/lib/api";
@@ -61,7 +60,6 @@ export type WorkspacePendingAction =
   | "create-node"
   | "connect-ports"
   | "delete-tab"
-  | "duplicate-tab"
   | "save-definition"
   | "activate-workflow"
   | "deactivate-workflow"
@@ -441,24 +439,6 @@ export function useWorkspacePageState() {
     setActiveTabId,
   ]);
 
-  const handleDuplicateTab = useCallback(async () => {
-    if (!activeTabId) {
-      toast.error("Create or select a workflow first");
-      return;
-    }
-    setPendingAction("duplicate-tab");
-    try {
-      const duplicated = await duplicateTabRequest(activeTabId);
-      setActiveTabId(duplicated.id);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to duplicate workflow",
-      );
-    } finally {
-      setPendingAction(null);
-    }
-  }, [activeTabId, setActiveTabId]);
-
   const handleToggleActivation = useCallback(async () => {
     if (!activeTabId) {
       toast.error("Create or select a workflow first");
@@ -705,7 +685,6 @@ export function useWorkspacePageState() {
     handleCreateNode,
     handleCreateTab,
     handleDeleteTab,
-    handleDuplicateTab,
     handleOpenLeaderDetails,
     handleSaveDefinition,
     handleToggleActivation,

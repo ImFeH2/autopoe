@@ -42,10 +42,6 @@ ASSISTANT_ONLY_MCP_TOOL_NAMES = frozenset(
         "create_workflows",
         "delete_workflow",
         "delete_workflows",
-        "duplicate_workflow",
-        "duplicate_workflows",
-        "copy_workflow",
-        "copy_workflows",
         "list_workflow",
         "list_workflows",
         "select_workflow",
@@ -63,19 +59,43 @@ ASSISTANT_ONLY_MCP_TOOL_NAMES = frozenset(
     }
 )
 
+REMOVED_WORKFLOW_COPY_MCP_TOOL_NAMES = frozenset(
+    {
+        "duplicate_workflow",
+        "duplicate_workflows",
+        "copy_workflow",
+        "copy_workflows",
+        "clone_workflow",
+        "clone_workflows",
+    }
+)
+
 
 def is_assistant_only_tool_name(tool_name: str) -> bool:
     return tool_name in ASSISTANT_ONLY_TOOLS
 
 
-def is_assistant_only_mcp_tool_name(tool_name: str) -> bool:
+def _normalized_mcp_tool_name(tool_name: str) -> tuple[str, str]:
     normalized = tool_name.strip().lower().replace("-", "_")
     candidate = (
         normalized.rsplit("__", 1)[-1] if normalized.startswith("mcp__") else normalized
     )
+    return normalized, candidate
+
+
+def is_assistant_only_mcp_tool_name(tool_name: str) -> bool:
+    normalized, candidate = _normalized_mcp_tool_name(tool_name)
     return (
         normalized in ASSISTANT_ONLY_MCP_TOOL_NAMES
         or candidate in ASSISTANT_ONLY_MCP_TOOL_NAMES
+    )
+
+
+def is_removed_workflow_copy_mcp_tool_name(tool_name: str) -> bool:
+    normalized, candidate = _normalized_mcp_tool_name(tool_name)
+    return (
+        normalized in REMOVED_WORKFLOW_COPY_MCP_TOOL_NAMES
+        or candidate in REMOVED_WORKFLOW_COPY_MCP_TOOL_NAMES
     )
 
 
@@ -136,6 +156,7 @@ class ToolRegistry:
         dynamic_tools = [
             DynamicMCPTool(descriptor=descriptor)
             for descriptor in mcp_service.list_discovered_tools()
+            if not is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name)
         ]
         tools.extend(dynamic_tools)
         if not agent_visible_only:
@@ -161,6 +182,7 @@ class ToolRegistry:
             for descriptor in mcp_service.list_agent_dynamic_tools(agent)
             if descriptor.fully_qualified_id in allowed
             and descriptor.fully_qualified_id not in excluded
+            and not is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name)
             and (
                 agent.node_type == NodeType.ASSISTANT
                 or not is_assistant_only_mcp_tool_name(descriptor.tool_name)
@@ -265,6 +287,10 @@ def list_agent_visible_tool_descriptors(
         )
     for descriptor in mcp_service.list_discovered_tool_descriptors():
         tool_name = descriptor.get("tool_name")
+        if isinstance(tool_name, str) and is_removed_workflow_copy_mcp_tool_name(
+            tool_name
+        ):
+            continue
         if (
             not include_assistant_only
             and isinstance(tool_name, str)

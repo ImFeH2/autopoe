@@ -268,7 +268,6 @@ function useMockWorkspacePageState() {
     | "create-node"
     | "connect-ports"
     | "delete-tab"
-    | "duplicate-tab"
     | "save-definition"
     | "activate-workflow"
     | "deactivate-workflow"
@@ -401,7 +400,6 @@ function useMockWorkspacePageState() {
       setPendingAction(null);
       setDeleteTabTarget(null);
     },
-    handleDuplicateTab: () => {},
     handleOpenLeaderDetails: () => {
       setLeaderDetailVisible(true);
     },
@@ -585,6 +583,16 @@ describe("WorkspacePage", () => {
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: /Blueprint/i }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does not expose workflow duplicate actions", async () => {
+    render(<WorkspacePage />);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /Duplicate/i }),
       ).not.toBeInTheDocument(),
     );
   });

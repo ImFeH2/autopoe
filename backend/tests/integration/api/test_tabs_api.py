@@ -335,7 +335,7 @@ def test_tab_edge_creation_enforces_directed_ports_and_single_input(
     )
 
 
-def test_duplicate_tab_copies_definition_and_runtime_agents(client: TestClient):
+def test_duplicate_workflow_route_is_not_available(client: TestClient):
     source_tab = client.post(
         "/api/workflows",
         json={
@@ -344,67 +344,12 @@ def test_duplicate_tab_copies_definition_and_runtime_agents(client: TestClient):
             "write_dirs": ["/tmp"],
         },
     ).json()
-    source_tab_id = source_tab["id"]
 
-    reviewer = _create_agent_node(client, tab_id=source_tab_id, name="Reviewer")
-    formatter = _create_graph_node(
-        client,
-        tab_id=source_tab_id,
-        node_type="code",
-        name="Formatter",
-        config={"language": "python"},
-    )
-    source_detail = client.get(f"/api/workflows/{source_tab_id}").json()
-    source_definition = deepcopy(source_detail["workflow"]["definition"])
-    source_definition["view"] = {
-        "positions": {
-            reviewer["id"]: {"x": 20, "y": 40},
-            formatter["id"]: {"x": 180, "y": 40},
-        }
-    }
-    source_definition["edges"] = [
-        {
-            "id": "edge-review",
-            "from_node_id": reviewer["id"],
-            "from_port_key": "out",
-            "to_node_id": formatter["id"],
-            "to_port_key": "in",
-        }
-    ]
-    update_response = client.put(
-        f"/api/workflows/{source_tab_id}/definition",
-        json={"definition": source_definition},
-    )
-    assert update_response.status_code == 200
+    response = client.post(f"/api/workflows/{source_tab['id']}/duplicate")
 
-    duplicate_response = client.post(f"/api/workflows/{source_tab_id}/duplicate")
-
-    assert duplicate_response.status_code == 200
-    duplicated_tab = duplicate_response.json()
-    assert duplicated_tab["title"] == "Original Workflow Copy"
-    assert "goal" not in duplicated_tab
-    assert duplicated_tab["node_count"] == 2
-    assert duplicated_tab["edge_count"] == 1
-    assert duplicated_tab["id"] != source_tab_id
-    assert duplicated_tab["leader_id"] != source_tab["leader_id"]
-    assert duplicated_tab["activation_state"] == "inactive"
-    assert duplicated_tab["allow_network"] is True
-    assert duplicated_tab["write_dirs"] == ["/tmp"]
-
-    duplicated_detail = client.get(f"/api/workflows/{duplicated_tab['id']}").json()
-    assert "goal" not in duplicated_detail["workflow"]
-    assert duplicated_detail["workflow"]["allow_network"] is True
-    assert duplicated_detail["workflow"]["write_dirs"] == ["/tmp"]
-    assert {node["name"] for node in duplicated_detail["nodes"]} == {
-        "Reviewer",
-        "Formatter",
-    }
-    duplicated_node_ids = {node["id"] for node in duplicated_detail["nodes"]}
-    source_node_ids = {node["id"] for node in source_detail["nodes"]}
-    assert duplicated_node_ids.isdisjoint(source_node_ids)
-    assert duplicated_detail["edges"][0]["from_node_id"] in duplicated_node_ids
-    assert duplicated_detail["edges"][0]["to_node_id"] in duplicated_node_ids
-    assert duplicated_detail["workflow"]["definition"]["view"]["positions"]
+    assert response.status_code == 405
+    workflows = client.get("/api/workflows").json()["workflows"]
+    assert [workflow["id"] for workflow in workflows] == [source_tab["id"]]
 
 
 def test_update_tab_definition_updates_metadata_and_positions(client: TestClient):

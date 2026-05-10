@@ -26,6 +26,7 @@ class ListRolesTool(Tool):
             build_tool_registry,
             is_assistant_only_mcp_tool_name,
             is_assistant_only_tool_name,
+            is_removed_workflow_copy_mcp_tool_name,
         )
 
         settings = get_settings()
@@ -34,9 +35,10 @@ class ListRolesTool(Tool):
         for tool in tool_registry.list_tools(agent_visible_only=True):
             descriptor = getattr(tool, "_descriptor", None)
             descriptor_tool_name = getattr(descriptor, "tool_name", None)
-            if isinstance(
-                descriptor_tool_name, str
-            ) and is_assistant_only_mcp_tool_name(descriptor_tool_name):
+            if isinstance(descriptor_tool_name, str) and (
+                is_removed_workflow_copy_mcp_tool_name(descriptor_tool_name)
+                or is_assistant_only_mcp_tool_name(descriptor_tool_name)
+            ):
                 continue
             all_tool_names.append(tool.name)
         if agent.node_type != NodeType.ASSISTANT:
@@ -53,7 +55,8 @@ class ListRolesTool(Tool):
                 builtin_tools = [
                     tool_name
                     for tool_name in builtin_tools
-                    if not is_assistant_only_tool_name(tool_name)
+                    if not is_removed_workflow_copy_mcp_tool_name(tool_name)
+                    and not is_assistant_only_tool_name(tool_name)
                     and not is_assistant_only_mcp_tool_name(tool_name)
                 ]
             optional_tools = [

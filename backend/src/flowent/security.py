@@ -14,6 +14,7 @@ def authorize(tool_name: str, agent: Agent, args: dict[str, Any]) -> str | None:
     from flowent.tools import (
         is_assistant_only_mcp_tool_name,
         is_assistant_only_tool_name,
+        is_removed_workflow_copy_mcp_tool_name,
     )
 
     if agent.node_type != NodeType.ASSISTANT and is_assistant_only_tool_name(tool_name):
@@ -27,6 +28,8 @@ def authorize(tool_name: str, agent: Agent, args: dict[str, Any]) -> str | None:
 
         descriptor = mcp_service.get_dynamic_tool_descriptor(tool_name)
         if descriptor is None:
+            return f"MCP tool not found: {tool_name}"
+        if is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name):
             return f"MCP tool not found: {tool_name}"
         if agent.node_type != NodeType.ASSISTANT and is_assistant_only_mcp_tool_name(
             descriptor.tool_name

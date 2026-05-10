@@ -176,6 +176,8 @@ def test_create_role_filters_assistant_only_tools(monkeypatch):
                     "delete_workflow",
                     "list_workflows",
                     "mcp__flowent__list_workflows",
+                    "mcp__flowent__copy_workflow",
+                    "mcp__flowent__clone_workflow",
                     "manage_settings",
                 ],
             )

@@ -13,6 +13,9 @@ class _FakeMCPService:
     def list_discovered_tools(self):
         return list(self._descriptors)
 
+    def list_discovered_tool_descriptors(self):
+        return [descriptor.serialize() for descriptor in self._descriptors]
+
 
 def test_empty_tools_list_grants_minimum_tools():
     agent = Agent(NodeConfig(node_type=NodeType.AGENT, tools=[]))
@@ -154,6 +157,39 @@ def test_tool_registry_filters_assistant_only_mcp_tools_for_workflow_nodes(
     assert "mcp__flowent__search_notes" in {tool.name for tool in tools}
 
 
+def test_tool_registry_filters_removed_workflow_copy_mcp_tools_for_assistant(
+    monkeypatch,
+):
+    from flowent.mcp_service import MCPToolDescriptor
+
+    clone_tool = MCPToolDescriptor(
+        server_name="flowent",
+        tool_name="clone_workflow",
+        fully_qualified_id="mcp__flowent__clone_workflow",
+    )
+    regular_tool = MCPToolDescriptor(
+        server_name="flowent",
+        tool_name="search_notes",
+        fully_qualified_id="mcp__flowent__search_notes",
+    )
+    fake_service = _FakeMCPService([clone_tool, regular_tool])
+    monkeypatch.setattr("flowent.mcp_service.mcp_service", fake_service)
+    agent = Agent(
+        NodeConfig(
+            node_type=NodeType.ASSISTANT,
+            tools=[
+                "mcp__flowent__clone_workflow",
+                "mcp__flowent__search_notes",
+            ],
+        )
+    )
+
+    tools = build_tool_registry().get_tools_for_agent(agent)
+
+    assert "mcp__flowent__clone_workflow" not in {tool.name for tool in tools}
+    assert "mcp__flowent__search_notes" in {tool.name for tool in tools}
+
+
 def test_build_tools_for_role_filters_assistant_only_mcp_tools(monkeypatch):
     from flowent.graph_service import build_tools_for_role
     from flowent.settings import RoleConfig, Settings
@@ -173,12 +209,54 @@ def test_build_tools_for_role_filters_assistant_only_mcp_tools(monkeypatch):
 
     tools = build_tools_for_role(
         "Worker",
-        requested_tools=["mcp__flowent__delete_workflow", "mcp__flowent__search_notes"],
+        requested_tools=[
+            "mcp__flowent__delete_workflow",
+            "mcp__flowent__copy_workflow",
+            "mcp__flowent__clone_workflow",
+            "mcp__flowent__search_notes",
+        ],
     )
 
     assert "mcp__flowent__list_workflows" not in tools
     assert "mcp__flowent__delete_workflow" not in tools
+    assert "mcp__flowent__copy_workflow" not in tools
+    assert "mcp__flowent__clone_workflow" not in tools
     assert "mcp__flowent__search_notes" in tools
+
+
+def test_list_agent_visible_tool_descriptors_hides_removed_workflow_copy_tools(
+    monkeypatch,
+):
+    from flowent.mcp_service import MCPToolDescriptor
+    from flowent.tools import list_agent_visible_tool_descriptors
+
+    copy_tool = MCPToolDescriptor(
+        server_name="flowent",
+        tool_name="duplicate_workflow",
+        fully_qualified_id="mcp__flowent__duplicate_workflow",
+    )
+    regular_tool = MCPToolDescriptor(
+        server_name="flowent",
+        tool_name="search_notes",
+        fully_qualified_id="mcp__flowent__search_notes",
+    )
+    fake_service = _FakeMCPService([copy_tool, regular_tool])
+    monkeypatch.setattr("flowent.mcp_service.mcp_service", fake_service)
+
+    tool_names = {
+        descriptor["name"] for descriptor in list_agent_visible_tool_descriptors()
+    }
+
+    assert "mcp__flowent__duplicate_workflow" not in tool_names
+    assert "mcp__flowent__search_notes" in tool_names
+
+
+def test_removed_workflow_copy_tool_name_detection_covers_clone_aliases():
+    from flowent.tools import is_removed_workflow_copy_mcp_tool_name
+
+    assert is_removed_workflow_copy_mcp_tool_name("clone_workflow")
+    assert is_removed_workflow_copy_mcp_tool_name("clone_workflows")
+    assert is_removed_workflow_copy_mcp_tool_name("mcp__flowent__clone_workflow")
 
 
 def test_tool_registry_shows_management_tools_in_agent_visible_list():

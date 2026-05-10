@@ -122,3 +122,31 @@ def test_authorize_rejects_assistant_only_tools_for_workflow_nodes():
     result = authorize("list_workflows", agent, {})
 
     assert result == "Ask the Assistant to manage workflows or settings"
+
+
+def test_authorize_rejects_removed_workflow_copy_mcp_tools_for_assistant(
+    monkeypatch,
+):
+    from flowent.mcp_service import MCPToolDescriptor
+
+    clone_tool = MCPToolDescriptor(
+        server_name="flowent",
+        tool_name="clone_workflow",
+        fully_qualified_id="mcp__flowent__clone_workflow",
+    )
+
+    class FakeMCPService:
+        def get_dynamic_tool_descriptor(self, tool_name):
+            return clone_tool if tool_name == clone_tool.fully_qualified_id else None
+
+    monkeypatch.setattr("flowent.mcp_service.mcp_service", FakeMCPService())
+    agent = Agent(
+        NodeConfig(
+            node_type=NodeType.ASSISTANT,
+            tools=["mcp__flowent__clone_workflow"],
+        )
+    )
+
+    result = authorize("mcp__flowent__clone_workflow", agent, {})
+
+    assert result == "MCP tool not found: mcp__flowent__clone_workflow"

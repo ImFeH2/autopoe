@@ -1619,22 +1619,32 @@ class MCPService:
         self,
         fully_qualified_id: str,
     ) -> MCPToolDescriptor | None:
+        from flowent.tools import is_removed_workflow_copy_mcp_tool_name
+
         for descriptor in self.list_discovered_tools():
+            if is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name):
+                continue
             if descriptor.fully_qualified_id == fully_qualified_id:
                 return descriptor
         return None
 
     def list_agent_dynamic_tools(self, agent: Agent) -> list[MCPToolDescriptor]:
         from flowent.models import NodeType
-        from flowent.tools import is_assistant_only_mcp_tool_name
+        from flowent.tools import (
+            is_assistant_only_mcp_tool_name,
+            is_removed_workflow_copy_mcp_tool_name,
+        )
 
         tools: list[MCPToolDescriptor] = []
         for snapshot in self._visible_snapshots_for_agent(agent):
             tools.extend(
                 descriptor
                 for descriptor in snapshot.tools
-                if agent.node_type == NodeType.ASSISTANT
-                or not is_assistant_only_mcp_tool_name(descriptor.tool_name)
+                if not is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name)
+                and (
+                    agent.node_type == NodeType.ASSISTANT
+                    or not is_assistant_only_mcp_tool_name(descriptor.tool_name)
+                )
             )
         return tools
 

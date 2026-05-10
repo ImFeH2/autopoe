@@ -14,7 +14,6 @@ export {
   activateWorkflowRequest,
   createTabRequest,
   deactivateWorkflowRequest,
-  duplicateTabRequest,
   updateTabDefinitionRequest,
   deleteTabRequest,
   fetchTabDetail,

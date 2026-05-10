@@ -2176,12 +2176,14 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
         from flowent.tools import (
             is_assistant_only_mcp_tool_name,
             is_assistant_only_tool_name,
+            is_removed_workflow_copy_mcp_tool_name,
         )
 
         filtered_included_tools = [
             tool_name
             for tool_name in included_tools
-            if not is_assistant_only_tool_name(tool_name)
+            if not is_removed_workflow_copy_mcp_tool_name(tool_name)
+            and not is_assistant_only_tool_name(tool_name)
             and not is_assistant_only_mcp_tool_name(tool_name)
         ]
         migrated = migrated or filtered_included_tools != included_tools

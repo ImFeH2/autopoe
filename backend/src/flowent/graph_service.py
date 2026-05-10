@@ -53,6 +53,7 @@ from flowent.tools import (
     MINIMUM_TOOLS,
     is_assistant_only_mcp_tool_name,
     is_assistant_only_tool_name,
+    is_removed_workflow_copy_mcp_tool_name,
 )
 from flowent.workspace_store import workspace_store
 
@@ -116,6 +117,8 @@ def build_tools_for_role(
     seen_tools: set[str] = set()
     for tool_name in [*MINIMUM_TOOLS, *included_tools, *(requested_tools or [])]:
         if tool_name in seen_tools:
+            continue
+        if is_removed_workflow_copy_mcp_tool_name(tool_name):
             continue
         if not assistant_boundary and (
             is_assistant_only_tool_name(tool_name)
@@ -1079,111 +1082,6 @@ def create_tab(
         )
     )
     return tab
-
-
-def duplicate_tab(
-    *,
-    tab_id: str,
-) -> tuple[Tab | None, str | None]:
-    source_tab = workspace_store.get_tab(tab_id)
-    if source_tab is None:
-        return None, f"Tab '{tab_id}' not found"
-
-    _sync_tab_permissions_from_legacy_leader(source_tab)
-    duplicated_definition = WorkflowDefinition.from_mapping(
-        source_tab.definition.serialize()
-    )
-    id_map: dict[str, str] = {}
-    duplicated_nodes: list[WorkflowNodeDefinition] = []
-
-    for node in duplicated_definition.nodes:
-        new_node_id = str(uuid.uuid4())
-        id_map[node.id] = new_node_id
-        duplicated_node = build_workflow_node_definition(
-            node_id=new_node_id,
-            node_kind=node.type,
-            config=node.config,
-        )
-        duplicated_nodes.append(duplicated_node)
-
-    duplicated_edges = [
-        GraphEdge(
-            id=str(uuid.uuid4()),
-            from_node_id=id_map.get(edge.from_node_id, edge.from_node_id),
-            from_port_key=edge.from_port_key,
-            to_node_id=id_map.get(edge.to_node_id, edge.to_node_id),
-            to_port_key=edge.to_port_key,
-            kind=edge.kind,
-        )
-        for edge in duplicated_definition.edges
-    ]
-    duplicated_view_positions = {
-        id_map.get(node_id, node_id): position
-        for node_id, position in duplicated_definition.view.positions.items()
-        if id_map.get(node_id, node_id) in id_map.values()
-    }
-
-    settings = settings_module.get_settings()
-    new_tab = Tab(
-        id=str(uuid.uuid4()),
-        title=f"{source_tab.title} Copy",
-        leader_id=str(uuid.uuid4()),
-        allow_network=source_tab.allow_network,
-        write_dirs=list(source_tab.write_dirs),
-        permissions_initialized=True,
-        definition=WorkflowDefinition(
-            version=duplicated_definition.version,
-            nodes=duplicated_nodes,
-            edges=duplicated_edges,
-            view=duplicated_definition.view.__class__(
-                positions=duplicated_view_positions
-            ),
-        ),
-    )
-    assert new_tab.leader_id is not None
-    workspace_store.upsert_tab(new_tab)
-    workspace_store.upsert_node_record(
-        _build_leader_record(
-            tab_id=new_tab.id,
-            leader_id=new_tab.leader_id,
-            settings=settings,
-        )
-    )
-
-    for node in source_tab.definition.nodes:
-        if node.type != WorkflowNodeKind.AGENT:
-            continue
-        duplicated_node_id = id_map.get(node.id)
-        if duplicated_node_id is None:
-            continue
-        config, error = build_node_config(
-            role_name=str(node.config.get("role_name", "")),
-            tab_id=new_tab.id,
-            name=str(node.config["name"])
-            if isinstance(node.config.get("name"), str)
-            else None,
-        )
-        if error is not None or config is None:
-            return None, error or "Failed to duplicate workflow"
-        workspace_store.upsert_node_record(
-            GraphNodeRecord(
-                id=duplicated_node_id,
-                config=config,
-                state=AgentState.INITIALIZING,
-                position=duplicated_view_positions.get(duplicated_node_id),
-            )
-        )
-
-    if registry.get_all():
-        _start_tab_runtime(new_tab.id)
-    event_bus.emit(
-        Event(
-            type=EventType.TAB_CREATED,
-            agent_id="assistant",
-            data=serialize_tab_summary(new_tab),
-        )
-    )
-    return new_tab, None
 
 
 def _is_path_within_boundary(path: str, boundary_dirs: list[str]) -> bool:

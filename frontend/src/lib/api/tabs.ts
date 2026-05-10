@@ -52,13 +52,6 @@ export async function createTabRequest(
   });
 }
 
-export async function duplicateTabRequest(tabId: string): Promise<TaskTab> {
-  return requestJson<TaskTab, TaskTab>(`/api/workflows/${tabId}/duplicate`, {
-    method: "POST",
-    errorMessage: "Failed to duplicate workflow",
-  });
-}
-
 export async function activateWorkflowRequest(tabId: string): Promise<TaskTab> {
   return requestJson<TaskTab, TaskTab>(`/api/workflows/${tabId}/activate`, {
     method: "POST",

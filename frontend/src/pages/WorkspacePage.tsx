@@ -34,7 +34,6 @@ export function WorkspacePage() {
     handleCreateNode,
     handleCreateTab,
     handleDeleteTab,
-    handleDuplicateTab,
     handleOpenLeaderDetails,
     handleSaveDefinition,
     handleToggleActivation,
@@ -104,7 +103,6 @@ export function WorkspacePage() {
         onCreateTab={openCreateTabDialog}
         onDefinitionDraftChange={setDefinitionDraft}
         onDeleteTab={requestDeleteTab}
-        onDuplicateTab={handleDuplicateTab}
         onEditorModeChange={setEditorMode}
         onOpenLeaderDetails={handleOpenLeaderDetails}
         onOpenConnectDialog={openConnectDialog}

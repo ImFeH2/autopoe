@@ -24,7 +24,6 @@ import type {
 } from "@/components/workspace/WorkspaceDialogs";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  Copy,
   FileJson2,
   GitGraph,
   Link2,
@@ -108,7 +107,6 @@ interface WorkspaceShellProps {
   onCreateTab: () => void;
   onDefinitionDraftChange: (nextValue: string) => void;
   onDeleteTab: (tabId: string, title: string, nodeCount?: number) => void;
-  onDuplicateTab: () => void;
   onEditorModeChange: (nextValue: WorkspaceEditorMode) => void;
   onOpenLeaderDetails: () => void;
   onOpenConnectDialog: () => void;
@@ -152,7 +150,6 @@ export function WorkspaceShell({
   onCreateTab,
   onDefinitionDraftChange,
   onDeleteTab,
-  onDuplicateTab,
   onEditorModeChange,
   onOpenLeaderDetails,
   onOpenConnectDialog,
@@ -230,22 +227,6 @@ export function WorkspaceShell({
                 >
                   <div className="truncate leading-tight">{tab.title}</div>
                 </Button>
-                {activeTabId === tab.id ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    title="Duplicate workflow"
-                    aria-label={`Duplicate ${tab.title}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDuplicateTab();
-                    }}
-                    className="absolute right-6 top-1/2 z-20 size-5 -translate-y-1/2 rounded-sm p-1 text-foreground/70 transition-all duration-200 hover:bg-accent/45 hover:text-foreground"
-                  >
-                    <Copy className="size-3" />
-                  </Button>
-                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -451,11 +432,6 @@ export function WorkspaceShell({
               >
                 <Link2 className="size-4 opacity-70" />
                 Connect Ports
-              </ToolbarButton>
-              <ToolbarDivider />
-              <ToolbarButton disabled={!activeTabId} onClick={onDuplicateTab}>
-                <Copy className="size-4 opacity-70" />
-                Duplicate
               </ToolbarButton>
             </div>
           </div>
