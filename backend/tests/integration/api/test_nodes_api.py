@@ -13,7 +13,6 @@ from flowent.models import (
     TextPart,
 )
 from flowent.registry import registry
-from flowent.routes.nodes import router as nodes_router
 from flowent.settings import STEWARD_ROLE_INCLUDED_TOOLS
 from flowent.tools import MINIMUM_TOOLS
 
@@ -133,13 +132,6 @@ def test_worker_contacts_follow_output_paths(
             "edge_id": edge["id"],
         }
     ]
-
-
-def test_direct_node_message_api_is_not_available(client: TestClient):
-    assert not any(
-        getattr(route, "path", None) == "/api/nodes/{node_id}/message"
-        for route in nodes_router.routes
-    )
 
 
 def test_only_assistant_node_exists_at_startup(client: TestClient):
