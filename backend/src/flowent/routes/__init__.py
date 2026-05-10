@@ -3,7 +3,6 @@ from fastapi import APIRouter
 from flowent.routes.access import router as access_router
 from flowent.routes.assistant import router as assistant_router
 from flowent.routes.image_assets import router as image_assets_router
-from flowent.routes.mcp import router as mcp_router
 from flowent.routes.meta import router as meta_router
 from flowent.routes.nodes import router as nodes_router
 from flowent.routes.prompts import router as prompts_router
@@ -18,7 +17,6 @@ router.include_router(access_router)
 router.include_router(nodes_router)
 router.include_router(assistant_router)
 router.include_router(image_assets_router)
-router.include_router(mcp_router)
 router.include_router(roles_router)
 router.include_router(providers_router)
 router.include_router(prompts_router)

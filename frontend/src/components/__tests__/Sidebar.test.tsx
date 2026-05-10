@@ -65,7 +65,6 @@ describe("Sidebar", () => {
       "Roles",
       "Prompts",
       "Tools",
-      "MCP",
       "Channels",
       "Settings",
       "Logout",

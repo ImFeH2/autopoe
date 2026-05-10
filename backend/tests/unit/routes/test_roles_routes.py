@@ -180,12 +180,15 @@ def test_create_role_filters_assistant_only_tools(monkeypatch):
                     "mcp__flowent__clone_workflow",
                     "manage_settings",
                 ],
+                excluded_tools=["fetch", "mcp__flowent__search_notes"],
             )
         )
     )
 
     assert result["included_tools"] == ["read"]
+    assert result["excluded_tools"] == ["fetch"]
     assert settings.roles[0].included_tools == ["read"]
+    assert settings.roles[0].excluded_tools == ["fetch"]
 
 
 def test_create_role_rejects_duplicate_name(monkeypatch):
@@ -289,12 +292,15 @@ def test_update_role_filters_assistant_only_tools(monkeypatch):
                     "mcp__flowent__list_workflows",
                     "manage_roles",
                 ],
+                excluded_tools=["fetch", "mcp__flowent__search_notes"],
             ),
         )
     )
 
     assert result["included_tools"] == ["read"]
+    assert result["excluded_tools"] == ["fetch"]
     assert settings.roles[0].included_tools == ["read"]
+    assert settings.roles[0].excluded_tools == ["fetch"]
 
 
 def test_update_role_rejects_duplicate_name(monkeypatch):

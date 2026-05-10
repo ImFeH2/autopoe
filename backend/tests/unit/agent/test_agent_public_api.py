@@ -672,11 +672,6 @@ def test_list_roles_tool_returns_registered_roles(monkeypatch):
                 "fetch",
                 "list_roles",
                 "list_tools",
-                "list_mcp_resources",
-                "list_mcp_resource_templates",
-                "read_mcp_resource",
-                "list_mcp_prompts",
-                "get_mcp_prompt",
             ],
         },
         {
@@ -699,11 +694,6 @@ def test_list_roles_tool_returns_registered_roles(monkeypatch):
                 "exec",
                 "list_roles",
                 "list_tools",
-                "list_mcp_resources",
-                "list_mcp_resource_templates",
-                "read_mcp_resource",
-                "list_mcp_prompts",
-                "get_mcp_prompt",
             ],
         },
     ]
@@ -735,11 +725,6 @@ def test_list_tools_tool_returns_registered_tool_names_and_descriptions():
         "connect",
         "list_roles",
         "list_tools",
-        "list_mcp_resources",
-        "list_mcp_resource_templates",
-        "read_mcp_resource",
-        "list_mcp_prompts",
-        "get_mcp_prompt",
     }
     assert all(
         {"name", "description", "source", "parameters"} <= set(item) for item in result

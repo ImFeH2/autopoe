@@ -36,7 +36,6 @@ import {
   PageState,
   StatusChip,
 } from "@/components/ui/surface";
-import { useOptionalAgentUI } from "@/context/AgentContext";
 import { cn } from "@/lib/utils";
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -100,11 +99,7 @@ function ToolCard({
       <code className="block text-[13px] font-mono font-medium text-foreground">
         {tool.name}
       </code>
-      <p className="mt-2 text-[10px] text-muted-foreground/75">
-        {tool.source === "mcp"
-          ? `MCP · ${tool.server_name ?? "unknown"}`
-          : "Builtin"}
-      </p>
+      <p className="mt-2 text-[10px] text-muted-foreground/75">Built-in</p>
       <p className="mt-2 line-clamp-1 text-[12px] leading-relaxed text-muted-foreground">
         {shortToolDescription(tool.description)}
       </p>
@@ -120,33 +115,6 @@ function ToolCard({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mt-4 border-t border-border pt-4">
-              {tool.source === "mcp" ? (
-                <div className="mb-4 space-y-2 text-[11px] text-muted-foreground">
-                  <div>
-                    Raw Tool Name{" "}
-                    <code className="font-mono text-foreground/82">
-                      {tool.tool_name ?? "unknown"}
-                    </code>
-                  </div>
-                  <div>
-                    Fully Qualified ID{" "}
-                    <code className="font-mono text-foreground/82">
-                      {tool.fully_qualified_id ?? tool.name}
-                    </code>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {tool.read_only_hint ? (
-                      <StatusChip tone="primary">readOnly</StatusChip>
-                    ) : null}
-                    {tool.destructive_hint ? (
-                      <StatusChip tone="danger">destructive</StatusChip>
-                    ) : null}
-                    {tool.open_world_hint ? (
-                      <StatusChip tone="idle">openWorld</StatusChip>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
               <p className="mb-2 text-[10px] font-medium text-muted-foreground/75">
                 Parameters
               </p>
@@ -163,7 +131,6 @@ function ToolCard({
 
 export function ToolsPage() {
   const { data: tools = [], isLoading: loading } = useSWR("tools", fetchTools);
-  const agentUI = useOptionalAgentUI();
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -173,7 +140,7 @@ export function ToolsPage() {
       return tools;
     }
     return tools.filter((tool) =>
-      [tool.name, tool.description, tool.server_name ?? "", tool.source ?? ""]
+      [tool.name, tool.description, tool.source ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(normalizedQuery),
@@ -243,15 +210,6 @@ export function ToolsPage() {
               <PageState
                 icon={Wrench}
                 title="No tools available"
-                action={
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => agentUI?.setCurrentPage("mcp")}
-                  >
-                    Open MCP
-                  </Button>
-                }
                 className="border-transparent bg-transparent"
               />
             </motion.div>

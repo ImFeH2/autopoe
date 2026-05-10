@@ -12,9 +12,7 @@ def authorize(tool_name: str, agent: Agent, args: dict[str, Any]) -> str | None:
     from flowent.graph_service import resolve_effective_permissions_for_agent
     from flowent.models import NodeType
     from flowent.tools import (
-        is_assistant_only_mcp_tool_name,
         is_assistant_only_tool_name,
-        is_removed_workflow_copy_mcp_tool_name,
     )
 
     if agent.node_type != NodeType.ASSISTANT and is_assistant_only_tool_name(tool_name):
@@ -23,28 +21,7 @@ def authorize(tool_name: str, agent: Agent, args: dict[str, Any]) -> str | None:
     allow_network, write_dirs = resolve_effective_permissions_for_agent(agent)
 
     if tool_name.startswith("mcp__"):
-        from flowent.mcp_service import mcp_service
-        from flowent.settings import find_mcp_server, get_settings
-
-        descriptor = mcp_service.get_dynamic_tool_descriptor(tool_name)
-        if descriptor is None:
-            return f"MCP tool not found: {tool_name}"
-        if is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name):
-            return f"MCP tool not found: {tool_name}"
-        if agent.node_type != NodeType.ASSISTANT and is_assistant_only_mcp_tool_name(
-            descriptor.tool_name
-        ):
-            return "Ask the Assistant to manage workflows or settings"
-        server = find_mcp_server(get_settings(), descriptor.server_name)
-        if (
-            server is not None
-            and server.transport == "streamable_http"
-            and not allow_network
-        ):
-            return "Network access is disabled for this workflow"
-        if descriptor.open_world_hint and not allow_network:
-            return "Network access is disabled for this workflow"
-        return None
+        return f"Tool not found: {tool_name}"
 
     if tool_name == "edit":
         if not write_dirs:

@@ -57,7 +57,6 @@ function buildSettings(overrides: Partial<UserSettings> = {}): UserSettings {
       },
       ...(overrides.model ?? {}),
     },
-    mcp_servers: overrides.mcp_servers ?? [],
   };
 }
 

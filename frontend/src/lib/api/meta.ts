@@ -8,14 +8,8 @@ export interface AppMeta {
 export interface ToolInfo {
   name: string;
   description: string;
-  source?: "builtin" | "mcp";
+  source?: "builtin";
   parameters?: Record<string, unknown>;
-  server_name?: string;
-  tool_name?: string;
-  fully_qualified_id?: string;
-  read_only_hint?: boolean;
-  destructive_hint?: boolean;
-  open_world_hint?: boolean;
 }
 
 export async function fetchAppMeta(): Promise<AppMeta> {

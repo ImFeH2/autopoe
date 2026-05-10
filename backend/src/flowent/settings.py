@@ -151,7 +151,6 @@ MODEL_REASONING_EFFORT_OPTIONS = frozenset({"none", "low", "medium", "high", "xh
 MODEL_VERBOSITY_OPTIONS = frozenset({"low", "medium", "high"})
 MODEL_RETRY_POLICY_OPTIONS = frozenset({"no_retry", "limited", "unlimited"})
 PROVIDER_MODEL_SOURCE_OPTIONS = frozenset({"discovered", "manual"})
-MCP_TRANSPORT_OPTIONS = frozenset({"stdio", "streamable_http"})
 REMOVED_TOOL_NAMES = frozenset({"exit", "list_connections"})
 RENAMED_TOOL_NAMES = {
     "create_tab": "create_workflow",
@@ -166,8 +165,6 @@ DEFAULT_LLM_RETRY_MAX_DELAY_SECONDS = 8.0
 DEFAULT_LLM_RETRY_BACKOFF_CAP_RETRIES = 5
 DEFAULT_LLM_AUTO_COMPACT_TOKEN_LIMIT: int | None = None
 DEFAULT_ASSISTANT_ALLOW_NETWORK = True
-DEFAULT_MCP_SERVER_STARTUP_TIMEOUT_SEC = 10
-DEFAULT_MCP_SERVER_TOOL_TIMEOUT_SEC = 30
 
 
 def build_default_app_data_dir() -> str:
@@ -266,14 +263,6 @@ def _normalize_assistant_write_dir(
     return str(resolve_path(raw_write_dir, base_dir=base_dir, strict=False))
 
 
-def _normalize_mcp_server_cwd(
-    raw_cwd: str,
-    *,
-    base_dir: str | Path | None = None,
-) -> str:
-    return str(resolve_path(raw_cwd, base_dir=base_dir, strict=False))
-
-
 def build_working_dir(
     raw_working_dir: object,
     *,
@@ -307,30 +296,6 @@ class RoleConfig:
     model_params: ModelParams | None = None
     included_tools: list[str] = field(default_factory=list)
     excluded_tools: list[str] = field(default_factory=list)
-
-
-@dataclass
-class MCPServerConfig:
-    name: str
-    transport: str
-    enabled: bool = True
-    required: bool = False
-    startup_timeout_sec: int = DEFAULT_MCP_SERVER_STARTUP_TIMEOUT_SEC
-    tool_timeout_sec: int = DEFAULT_MCP_SERVER_TOOL_TIMEOUT_SEC
-    enabled_tools: list[str] = field(default_factory=list)
-    disabled_tools: list[str] = field(default_factory=list)
-    scopes: list[str] = field(default_factory=list)
-    oauth_resource: str = ""
-    launcher: str = ""
-    command: str = ""
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    env_vars: list[str] = field(default_factory=list)
-    cwd: str = ""
-    url: str = ""
-    bearer_token_env_var: str = ""
-    http_headers: dict[str, str] = field(default_factory=dict)
-    env_http_headers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -401,7 +366,6 @@ class Settings:
     custom_post_prompt: str = ""
     providers: list[ProviderConfig] = field(default_factory=list)
     roles: list[RoleConfig] = field(default_factory=list)
-    mcp_servers: list[MCPServerConfig] = field(default_factory=list)
 
 
 _cached_settings: Settings | None = None
@@ -672,27 +636,6 @@ def build_assistant_write_dirs(
     return normalized
 
 
-def build_mcp_server_mounts(
-    raw_server_names: object,
-    *,
-    field_name: str,
-) -> list[str]:
-    if not isinstance(raw_server_names, list):
-        raise ValueError(f"{field_name} must be an array of strings")
-
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for raw_item in raw_server_names:
-        if not isinstance(raw_item, str):
-            raise ValueError(f"{field_name} must be an array of strings")
-        name = raw_item.strip()
-        if not name or name in seen:
-            continue
-        normalized.append(name)
-        seen.add(name)
-    return normalized
-
-
 def build_model_retry_policy(
     raw_retry_policy: object,
     *,
@@ -773,79 +716,6 @@ def build_model_timeout_ms(
     if raw_timeout_ms <= 0:
         raise ValueError(f"{field_name} must be greater than 0")
     return raw_timeout_ms
-
-
-def build_mcp_transport(
-    raw_transport: object,
-    *,
-    field_name: str = "transport",
-) -> str:
-    if not isinstance(raw_transport, str):
-        raise ValueError(f"{field_name} must be a string")
-    transport = raw_transport.strip().lower()
-    if transport not in MCP_TRANSPORT_OPTIONS:
-        raise ValueError(
-            f"{field_name} must be one of: " + ", ".join(sorted(MCP_TRANSPORT_OPTIONS))
-        )
-    return transport
-
-
-def build_mcp_timeout_seconds(
-    raw_timeout_seconds: object,
-    *,
-    field_name: str,
-) -> int:
-    if isinstance(raw_timeout_seconds, bool) or not isinstance(
-        raw_timeout_seconds, int
-    ):
-        raise ValueError(f"{field_name} must be an integer")
-    if raw_timeout_seconds <= 0:
-        raise ValueError(f"{field_name} must be greater than 0")
-    return raw_timeout_seconds
-
-
-def build_mcp_string_list(
-    raw_items: object,
-    *,
-    field_name: str,
-) -> list[str]:
-    if not isinstance(raw_items, list):
-        raise ValueError(f"{field_name} must be an array of strings")
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for raw_item in raw_items:
-        if not isinstance(raw_item, str):
-            raise ValueError(f"{field_name} must be an array of strings")
-        item = raw_item.strip()
-        if not item or item in seen:
-            continue
-        normalized.append(item)
-        seen.add(item)
-    return normalized
-
-
-def build_mcp_env_var_names(
-    raw_items: object,
-    *,
-    field_name: str,
-) -> list[str]:
-    return build_mcp_string_list(raw_items, field_name=field_name)
-
-
-def build_mcp_cwd(
-    raw_cwd: object,
-    *,
-    field_name: str,
-    base_dir: str | Path | None = None,
-) -> str:
-    if raw_cwd is None:
-        return ""
-    if not isinstance(raw_cwd, str):
-        raise ValueError(f"{field_name} must be a string")
-    cwd = raw_cwd.strip()
-    if not cwd:
-        return ""
-    return _normalize_mcp_server_cwd(cwd, base_dir=base_dir)
 
 
 def build_provider_headers(
@@ -1012,31 +882,6 @@ def serialize_provider(provider: ProviderConfig) -> dict[str, object]:
     }
 
 
-def serialize_mcp_server(server: MCPServerConfig) -> dict[str, object]:
-    return {
-        "name": server.name,
-        "transport": server.transport,
-        "enabled": server.enabled,
-        "required": server.required,
-        "startup_timeout_sec": server.startup_timeout_sec,
-        "tool_timeout_sec": server.tool_timeout_sec,
-        "enabled_tools": list(server.enabled_tools),
-        "disabled_tools": list(server.disabled_tools),
-        "scopes": list(server.scopes),
-        "oauth_resource": server.oauth_resource,
-        "launcher": server.launcher,
-        "command": server.command,
-        "args": list(server.args),
-        "env": dict(server.env),
-        "env_vars": list(server.env_vars),
-        "cwd": server.cwd,
-        "url": server.url,
-        "bearer_token_env_var": server.bearer_token_env_var,
-        "http_headers": dict(server.http_headers),
-        "env_http_headers": list(server.env_http_headers),
-    }
-
-
 def serialize_role(role: RoleConfig) -> dict[str, object]:
     return {
         "name": role.name,
@@ -1105,9 +950,6 @@ def serialize_settings(
             and settings.access.code_salt.strip()
         )
     }
-    data["mcp_servers"] = [
-        serialize_mcp_server(server) for server in settings.mcp_servers
-    ]
     return data
 
 
@@ -1396,247 +1238,6 @@ def _normalize_required_string(raw_value: object) -> tuple[str, bool]:
         return "", raw_value is not None
     stripped = raw_value.strip()
     return stripped, stripped != raw_value
-
-
-def _normalize_mcp_mount_list(raw_values: object) -> tuple[list[str], bool]:
-    if raw_values is None:
-        return [], False
-    if not isinstance(raw_values, list):
-        return [], True
-    normalized: list[str] = []
-    seen: set[str] = set()
-    migrated = False
-    for raw_value in raw_values:
-        if not isinstance(raw_value, str):
-            migrated = True
-            continue
-        value = raw_value.strip()
-        if not value:
-            migrated = True
-            continue
-        if value in seen:
-            migrated = True
-            continue
-        if value != raw_value:
-            migrated = True
-        normalized.append(value)
-        seen.add(value)
-    return normalized, migrated
-
-
-def _normalize_mcp_bool(raw_value: object, *, default: bool) -> tuple[bool, bool]:
-    if raw_value is None:
-        return default, True
-    if not isinstance(raw_value, bool):
-        return default, True
-    return raw_value, False
-
-
-def _normalize_mcp_timeout(
-    raw_value: object,
-    *,
-    default: int,
-) -> tuple[int, bool]:
-    if raw_value is None:
-        return default, True
-    try:
-        return build_mcp_timeout_seconds(raw_value, field_name="timeout"), False
-    except ValueError:
-        return default, True
-
-
-def _normalize_mcp_headers(raw_headers: object) -> tuple[dict[str, str], bool]:
-    if raw_headers is None:
-        return {}, False
-    try:
-        return build_provider_headers(raw_headers, field_name="headers"), False
-    except ValueError:
-        return {}, True
-
-
-def _build_mcp_server_config(
-    raw_server: object,
-    *,
-    base_dir: str | Path | None = None,
-) -> tuple[MCPServerConfig | None, bool]:
-    if not isinstance(raw_server, dict):
-        return None, True
-
-    raw_name = raw_server.get("name", raw_server.get("server_name"))
-    if not isinstance(raw_name, str) or not raw_name.strip():
-        return None, True
-    name = raw_name.strip()
-    migrated = name != raw_name or "server_name" in raw_server
-
-    raw_transport = raw_server.get("transport", "stdio")
-    try:
-        transport = build_mcp_transport(raw_transport)
-    except ValueError:
-        transport = "stdio"
-        migrated = True
-
-    enabled, enabled_migrated = _normalize_mcp_bool(
-        raw_server.get("enabled"),
-        default=True,
-    )
-    required, required_migrated = _normalize_mcp_bool(
-        raw_server.get("required"),
-        default=False,
-    )
-    startup_timeout_sec, startup_timeout_migrated = _normalize_mcp_timeout(
-        raw_server.get("startup_timeout_sec"),
-        default=DEFAULT_MCP_SERVER_STARTUP_TIMEOUT_SEC,
-    )
-    tool_timeout_sec, tool_timeout_migrated = _normalize_mcp_timeout(
-        raw_server.get("tool_timeout_sec"),
-        default=DEFAULT_MCP_SERVER_TOOL_TIMEOUT_SEC,
-    )
-    enabled_tools, enabled_tools_migrated = _normalize_mcp_mount_list(
-        raw_server.get("enabled_tools")
-    )
-    disabled_tools, disabled_tools_migrated = _normalize_mcp_mount_list(
-        raw_server.get("disabled_tools")
-    )
-    scopes, scopes_migrated = _normalize_mcp_mount_list(raw_server.get("scopes"))
-    env_vars, env_vars_migrated = _normalize_mcp_mount_list(raw_server.get("env_vars"))
-    env_http_headers, env_http_headers_migrated = _normalize_mcp_mount_list(
-        raw_server.get("env_http_headers")
-    )
-    env, env_migrated = _normalize_mcp_headers(raw_server.get("env"))
-    http_headers, http_headers_migrated = _normalize_mcp_headers(
-        raw_server.get("http_headers")
-    )
-
-    raw_args = raw_server.get("args")
-    if raw_args is None:
-        args: list[str] = []
-        args_migrated = False
-    else:
-        args, args_migrated = _normalize_mcp_mount_list(raw_args)
-
-    raw_oauth_resource = raw_server.get("oauth_resource")
-    oauth_resource = (
-        raw_oauth_resource.strip() if isinstance(raw_oauth_resource, str) else ""
-    )
-    raw_launcher = raw_server.get("launcher")
-    launcher = raw_launcher.strip() if isinstance(raw_launcher, str) else ""
-    if isinstance(raw_launcher, str) and launcher != raw_launcher:
-        migrated = True
-    if raw_launcher not in {None, ""} and not isinstance(raw_launcher, str):
-        migrated = True
-    raw_command = raw_server.get("command")
-    command = raw_command.strip() if isinstance(raw_command, str) else ""
-    cwd_raw = raw_server.get("cwd")
-    cwd = ""
-    if isinstance(cwd_raw, str) and cwd_raw.strip():
-        cwd = _normalize_mcp_server_cwd(cwd_raw.strip(), base_dir=base_dir)
-        migrated = migrated or cwd != cwd_raw
-    elif cwd_raw not in {None, ""}:
-        migrated = True
-    raw_url = raw_server.get("url")
-    url = raw_url.strip() if isinstance(raw_url, str) else ""
-    raw_bearer_token_env_var = raw_server.get("bearer_token_env_var")
-    bearer_token_env_var = (
-        raw_bearer_token_env_var.strip()
-        if isinstance(raw_bearer_token_env_var, str)
-        else ""
-    )
-
-    if transport == "stdio":
-        if (
-            scopes
-            or oauth_resource
-            or url
-            or bearer_token_env_var
-            or http_headers
-            or env_http_headers
-        ):
-            migrated = True
-        scopes = []
-        oauth_resource = ""
-        url = ""
-        bearer_token_env_var = ""
-        http_headers = {}
-        env_http_headers = []
-    else:
-        if command or args or env or env_vars or cwd:
-            migrated = True
-        command = ""
-        args = []
-        env = {}
-        env_vars = []
-        cwd = ""
-
-    migrated = (
-        migrated
-        or enabled_migrated
-        or required_migrated
-        or startup_timeout_migrated
-        or tool_timeout_migrated
-        or enabled_tools_migrated
-        or disabled_tools_migrated
-        or scopes_migrated
-        or args_migrated
-        or env_migrated
-        or env_vars_migrated
-        or http_headers_migrated
-        or env_http_headers_migrated
-    )
-
-    return (
-        MCPServerConfig(
-            name=name,
-            transport=transport,
-            enabled=enabled,
-            required=required,
-            startup_timeout_sec=startup_timeout_sec,
-            tool_timeout_sec=tool_timeout_sec,
-            enabled_tools=enabled_tools,
-            disabled_tools=disabled_tools,
-            scopes=scopes,
-            oauth_resource=oauth_resource,
-            launcher=launcher,
-            command=command,
-            args=args,
-            env=env,
-            env_vars=env_vars,
-            cwd=cwd,
-            url=url,
-            bearer_token_env_var=bearer_token_env_var,
-            http_headers=http_headers,
-            env_http_headers=env_http_headers,
-        ),
-        migrated,
-    )
-
-
-def _normalize_mcp_servers(
-    raw_servers: object,
-    *,
-    base_dir: str | Path | None = None,
-) -> tuple[list[MCPServerConfig], bool]:
-    if raw_servers is None:
-        return [], False
-    if not isinstance(raw_servers, list):
-        return [], True
-
-    normalized: list[MCPServerConfig] = []
-    seen: set[str] = set()
-    migrated = False
-    for raw_server in raw_servers:
-        server, server_migrated = _build_mcp_server_config(
-            raw_server,
-            base_dir=base_dir,
-        )
-        migrated = migrated or server_migrated
-        if server is None:
-            continue
-        if server.name in seen:
-            migrated = True
-            continue
-        seen.add(server.name)
-        normalized.append(server)
-    return normalized, migrated
 
 
 def _build_pending_chat(raw_chat: object) -> tuple[TelegramPendingChat | None, bool]:
@@ -2173,20 +1774,24 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
         included_tools = normalize_tool_names(
             [name for name in included_tools_raw if isinstance(name, str)]
         )
-        from flowent.tools import (
-            is_assistant_only_mcp_tool_name,
-            is_assistant_only_tool_name,
-            is_removed_workflow_copy_mcp_tool_name,
-        )
+        from flowent.tools import is_assistant_only_tool_name
 
         filtered_included_tools = [
             tool_name
             for tool_name in included_tools
-            if not is_removed_workflow_copy_mcp_tool_name(tool_name)
+            if not tool_name.startswith("mcp__")
             and not is_assistant_only_tool_name(tool_name)
-            and not is_assistant_only_mcp_tool_name(tool_name)
         ]
         migrated = migrated or filtered_included_tools != included_tools
+        excluded_tools = normalize_tool_names(
+            [name for name in excluded_tools_raw if isinstance(name, str)]
+        )
+        filtered_excluded_tools = [
+            tool_name
+            for tool_name in excluded_tools
+            if not tool_name.startswith("mcp__")
+        ]
+        migrated = migrated or filtered_excluded_tools != excluded_tools
 
         roles.append(
             RoleConfig(
@@ -2196,17 +1801,12 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
                 model=role_model,
                 model_params=role_model_params,
                 included_tools=filtered_included_tools,
-                excluded_tools=normalize_tool_names(
-                    [name for name in excluded_tools_raw if isinstance(name, str)]
-                ),
+                excluded_tools=filtered_excluded_tools,
             )
         )
 
-    mcp_servers, mcp_servers_migrated = _normalize_mcp_servers(
-        data.get("mcp_servers"),
-        base_dir=working_dir,
-    )
-    migrated = migrated or mcp_servers_migrated
+    if "mcp_servers" in data:
+        migrated = True
 
     return (
         Settings(
@@ -2222,7 +1822,6 @@ def _build_settings(data: dict[str, object]) -> tuple[Settings, bool]:
             custom_post_prompt=custom_post_prompt,
             providers=providers,
             roles=roles,
-            mcp_servers=mcp_servers,
         ),
         migrated,
     )
@@ -2363,13 +1962,6 @@ def find_role(settings: Settings, role_name: str) -> RoleConfig | None:
     for r in settings.roles:
         if r.name == role_name:
             return r
-    return None
-
-
-def find_mcp_server(settings: Settings, server_name: str) -> MCPServerConfig | None:
-    for server in settings.mcp_servers:
-        if server.name == server_name:
-            return server
     return None
 
 

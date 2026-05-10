@@ -50,7 +50,6 @@ def bootstrap_runtime() -> None:
         ensure_tab_leaders,
         resolve_effective_permissions_for_node_record,
     )
-    from flowent.mcp_service import mcp_service
     from flowent.models import AgentState, NodeConfig, NodeType
     from flowent.settings import (
         ensure_builtin_roles,
@@ -60,13 +59,11 @@ def bootstrap_runtime() -> None:
     from flowent.workspace_store import workspace_store
 
     workspace_store.reset_cache()
-    mcp_service.clear_runtime_state()
     settings = get_settings()
     settings_changed = ensure_builtin_roles(settings)
     generated_access_code = ensure_access_bootstrap(settings)
     if settings_changed or generated_access_code is not None:
         save_settings(settings)
-    mcp_service.bootstrap()
     assistant_tools = build_assistant_tools(settings=settings)
 
     assistant_record = next(
@@ -146,12 +143,10 @@ def bootstrap_runtime() -> None:
 
 
 def shutdown_runtime(timeout: float = SYSTEM_NODE_TIMEOUT) -> None:
-    from flowent.mcp_service import mcp_service
     from flowent.models import NodeType
 
     logger.info("Shutting down runtime")
     _stop_telegram_channel()
-    mcp_service.clear_runtime_state()
     persistent_agents = []
     for agent in registry.get_all():
         if agent.node_type == NodeType.ASSISTANT or agent.config.tab_id:

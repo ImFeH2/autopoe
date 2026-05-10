@@ -16,14 +16,6 @@ MINIMUM_TOOLS = (
     "send",
 )
 
-MCP_BROWSING_TOOLS = (
-    "list_mcp_resources",
-    "list_mcp_resource_templates",
-    "read_mcp_resource",
-    "list_mcp_prompts",
-    "get_mcp_prompt",
-)
-
 ASSISTANT_ONLY_TOOLS = frozenset(
     {
         "create_workflow",
@@ -36,67 +28,9 @@ ASSISTANT_ONLY_TOOLS = frozenset(
     }
 )
 
-ASSISTANT_ONLY_MCP_TOOL_NAMES = frozenset(
-    {
-        "create_workflow",
-        "create_workflows",
-        "delete_workflow",
-        "delete_workflows",
-        "list_workflow",
-        "list_workflows",
-        "select_workflow",
-        "select_workflows",
-        "switch_workflow",
-        "switch_workflows",
-        "manage_provider",
-        "manage_providers",
-        "manage_role",
-        "manage_roles",
-        "manage_setting",
-        "manage_settings",
-        "manage_prompt",
-        "manage_prompts",
-    }
-)
-
-REMOVED_WORKFLOW_COPY_MCP_TOOL_NAMES = frozenset(
-    {
-        "duplicate_workflow",
-        "duplicate_workflows",
-        "copy_workflow",
-        "copy_workflows",
-        "clone_workflow",
-        "clone_workflows",
-    }
-)
-
 
 def is_assistant_only_tool_name(tool_name: str) -> bool:
     return tool_name in ASSISTANT_ONLY_TOOLS
-
-
-def _normalized_mcp_tool_name(tool_name: str) -> tuple[str, str]:
-    normalized = tool_name.strip().lower().replace("-", "_")
-    candidate = (
-        normalized.rsplit("__", 1)[-1] if normalized.startswith("mcp__") else normalized
-    )
-    return normalized, candidate
-
-
-def is_assistant_only_mcp_tool_name(tool_name: str) -> bool:
-    normalized, candidate = _normalized_mcp_tool_name(tool_name)
-    return (
-        normalized in ASSISTANT_ONLY_MCP_TOOL_NAMES
-        or candidate in ASSISTANT_ONLY_MCP_TOOL_NAMES
-    )
-
-
-def is_removed_workflow_copy_mcp_tool_name(tool_name: str) -> bool:
-    normalized, candidate = _normalized_mcp_tool_name(tool_name)
-    return (
-        normalized in REMOVED_WORKFLOW_COPY_MCP_TOOL_NAMES
-        or candidate in REMOVED_WORKFLOW_COPY_MCP_TOOL_NAMES
-    )
 
 
 class Tool(ABC):
@@ -137,37 +71,17 @@ class ToolRegistry:
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Tool | None:
-        tool = self._tools.get(name)
-        if tool is not None:
-            return tool
-        from flowent.mcp_service import mcp_service
-        from flowent.tools.mcp import DynamicMCPTool
-
-        descriptor = mcp_service.get_dynamic_tool_descriptor(name)
-        if descriptor is None:
-            return None
-        return DynamicMCPTool(descriptor=descriptor)
+        return self._tools.get(name)
 
     def list_tools(self, *, agent_visible_only: bool = False) -> list[Tool]:
         tools = list(self._tools.values())
-        from flowent.mcp_service import mcp_service
-        from flowent.tools.mcp import DynamicMCPTool
-
-        dynamic_tools = [
-            DynamicMCPTool(descriptor=descriptor)
-            for descriptor in mcp_service.list_discovered_tools()
-            if not is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name)
-        ]
-        tools.extend(dynamic_tools)
         if not agent_visible_only:
             return tools
         return [tool for tool in tools if tool.agent_visible]
 
     def get_tools_for_agent(self, agent: Agent) -> list[Tool]:
-        from flowent.mcp_service import mcp_service
         from flowent.models import NodeType
         from flowent.settings import find_role, get_settings
-        from flowent.tools.mcp import DynamicMCPTool
 
         allowed = set(agent.config.tools) | set(MINIMUM_TOOLS)
         if agent.node_type != NodeType.ASSISTANT:
@@ -177,18 +91,7 @@ class ToolRegistry:
         ]
         role = find_role(get_settings(), agent.config.role_name or "")
         excluded = set(role.excluded_tools) if role is not None else set()
-        dynamic_tools = [
-            DynamicMCPTool(descriptor=descriptor)
-            for descriptor in mcp_service.list_agent_dynamic_tools(agent)
-            if descriptor.fully_qualified_id in allowed
-            and descriptor.fully_qualified_id not in excluded
-            and not is_removed_workflow_copy_mcp_tool_name(descriptor.tool_name)
-            and (
-                agent.node_type == NodeType.ASSISTANT
-                or not is_assistant_only_mcp_tool_name(descriptor.tool_name)
-            )
-        ]
-        return [*visible_tools, *dynamic_tools]
+        return [tool for tool in visible_tools if tool.name not in excluded]
 
     def get_tools_schema(self, agent: Agent) -> list[dict[str, Any]]:
         return [t.to_schema() for t in self.get_tools_for_agent(agent)]
@@ -211,13 +114,6 @@ def build_tool_registry() -> ToolRegistry:
     from flowent.tools.manage_providers import ManageProvidersTool
     from flowent.tools.manage_roles import ManageRolesTool
     from flowent.tools.manage_settings import ManageSettingsTool
-    from flowent.tools.mcp import (
-        GetMCPPromptTool,
-        ListMCPPromptsTool,
-        ListMCPResourcesTool,
-        ListMCPResourceTemplatesTool,
-        ReadMCPResourceTool,
-    )
     from flowent.tools.read import ReadTool
     from flowent.tools.send import SendTool
     from flowent.tools.set_permissions import SetPermissionsTool
@@ -247,11 +143,6 @@ def build_tool_registry() -> ToolRegistry:
         ListRolesTool,
         ListTabsTool,
         ListToolsTool,
-        ListMCPResourcesTool,
-        ListMCPResourceTemplatesTool,
-        ReadMCPResourceTool,
-        ListMCPPromptsTool,
-        GetMCPPromptTool,
     ]:
         reg.register(tool_cls())  # type: ignore[abstract]
     return reg
@@ -262,12 +153,9 @@ def list_agent_visible_tool_descriptors(
     include_assistant_only: bool = True,
 ) -> list[dict[str, Any]]:
     registry = build_tool_registry()
-    from flowent.mcp_service import mcp_service
 
     descriptors: list[dict[str, Any]] = []
     for tool in registry.list_tools(agent_visible_only=True):
-        if tool.name.startswith("mcp__"):
-            continue
         if not include_assistant_only and is_assistant_only_tool_name(tool.name):
             continue
         schema = tool.to_schema()
@@ -285,17 +173,4 @@ def list_agent_visible_tool_descriptors(
                 "source": "builtin",
             }
         )
-    for descriptor in mcp_service.list_discovered_tool_descriptors():
-        tool_name = descriptor.get("tool_name")
-        if isinstance(tool_name, str) and is_removed_workflow_copy_mcp_tool_name(
-            tool_name
-        ):
-            continue
-        if (
-            not include_assistant_only
-            and isinstance(tool_name, str)
-            and is_assistant_only_mcp_tool_name(tool_name)
-        ):
-            continue
-        descriptors.append(descriptor)
     return descriptors

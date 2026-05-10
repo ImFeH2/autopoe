@@ -3,7 +3,6 @@ import {
   Shield,
   LayoutDashboard,
   MessageSquareQuote,
-  PlugZap,
   Radio,
   Server,
   Settings,
@@ -45,7 +44,6 @@ export const PAGE_NAVIGATION_GROUPS: PageNavigationGroup[] = [
   {
     label: "Integrations & System",
     items: [
-      { id: "mcp", label: "MCP", icon: PlugZap },
       { id: "channels", label: "Channels", icon: Radio },
       { id: "settings", label: "Settings", icon: Settings },
     ],

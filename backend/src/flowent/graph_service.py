@@ -51,9 +51,7 @@ from flowent.settings import (
 )
 from flowent.tools import (
     MINIMUM_TOOLS,
-    is_assistant_only_mcp_tool_name,
     is_assistant_only_tool_name,
-    is_removed_workflow_copy_mcp_tool_name,
 )
 from flowent.workspace_store import workspace_store
 
@@ -118,12 +116,9 @@ def build_tools_for_role(
     for tool_name in [*MINIMUM_TOOLS, *included_tools, *(requested_tools or [])]:
         if tool_name in seen_tools:
             continue
-        if is_removed_workflow_copy_mcp_tool_name(tool_name):
+        if tool_name.startswith("mcp__"):
             continue
-        if not assistant_boundary and (
-            is_assistant_only_tool_name(tool_name)
-            or is_assistant_only_mcp_tool_name(tool_name)
-        ):
+        if not assistant_boundary and is_assistant_only_tool_name(tool_name):
             continue
         if tool_name in excluded_tools and tool_name not in MINIMUM_TOOLS:
             continue

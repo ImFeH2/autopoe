@@ -140,7 +140,6 @@ def test_get_settings_bootstrap_returns_related_resources(monkeypatch):
                     "excluded_tools": [],
                 }
             ],
-            "mcp_servers": [],
         },
         "providers": [
             {

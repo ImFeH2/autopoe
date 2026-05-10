@@ -56,6 +56,8 @@ def open_state_db(*, create: bool) -> sqlite3.Connection | None:
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
+        DROP TABLE IF EXISTS mcp_snapshots;
+        DROP TABLE IF EXISTS mcp_activities;
         CREATE TABLE IF NOT EXISTS tabs (
             id TEXT PRIMARY KEY,
             payload TEXT NOT NULL,
@@ -102,19 +104,5 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_compact_records_ended_at
             ON compact_records(ended_at);
-        CREATE TABLE IF NOT EXISTS mcp_snapshots (
-            server_name TEXT PRIMARY KEY,
-            payload TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS mcp_activities (
-            id TEXT PRIMARY KEY,
-            server_name TEXT NOT NULL,
-            ended_at REAL NOT NULL,
-            payload TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_mcp_activities_server_name
-            ON mcp_activities(server_name);
-        CREATE INDEX IF NOT EXISTS idx_mcp_activities_ended_at
-            ON mcp_activities(ended_at);
         """
     )

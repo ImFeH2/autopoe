@@ -4,7 +4,6 @@ import {
   type TriStateCapability,
 } from "@/lib/triState";
 import type {
-  MCPServerConfig,
   ModelCapabilities,
   ModelParams,
   Provider,
@@ -53,7 +52,6 @@ export interface UserSettings {
     auto_compact_token_limit: number | null;
     params: ModelParams;
   };
-  mcp_servers: MCPServerConfig[];
 }
 
 export interface SettingsBootstrapData {

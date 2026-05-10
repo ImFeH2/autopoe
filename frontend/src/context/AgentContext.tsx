@@ -42,7 +42,6 @@ export type PageId =
   | "assistant"
   | "workspace"
   | "providers"
-  | "mcp"
   | "roles"
   | "prompts"
   | "tools"
