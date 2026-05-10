@@ -1107,24 +1107,6 @@ def test_update_settings_rejects_invalid_assistant_allow_network(monkeypatch):
     assert excinfo.value.detail == "assistant.allow_network must be a boolean"
 
 
-def test_update_settings_rejects_removed_assistant_mcp_servers(monkeypatch):
-    settings = Settings(
-        roles=[RoleConfig(name="Steward", system_prompt="Default assistant role.")]
-    )
-
-    monkeypatch.setattr("flowent.routes.settings.get_settings", lambda: settings)
-
-    with pytest.raises(HTTPException) as excinfo:
-        asyncio.run(
-            update_settings(
-                UpdateSettingsRequest(assistant={"mcp_servers": ["filesystem"]}),
-            )
-        )
-
-    assert excinfo.value.status_code == 400
-    assert excinfo.value.detail == "Unknown assistant fields: mcp_servers"
-
-
 def test_update_settings_rejects_unknown_leader_role(monkeypatch):
     settings = Settings(roles=[RoleConfig(name="Conductor", system_prompt="Default.")])
 

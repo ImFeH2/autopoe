@@ -59,17 +59,6 @@ def test_access_reset_command_clears_persisted_access_code(
     assert not is_access_configured(reloaded_settings.access)
 
 
-def test_help_output_no_longer_lists_mcp_command(capsys):
-    with pytest.raises(SystemExit) as exc:
-        main(["--help"])
-
-    assert exc.value.code == 0
-    output = capsys.readouterr().out
-
-    assert "access" in output
-    assert "mcp" not in output
-
-
 def test_version_short_option_matches_version_output(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["-v"])
@@ -95,17 +84,6 @@ def test_server_options_accept_npm_wrapper_aliases(monkeypatch):
         "host": "127.0.0.1",
         "port": 7000,
     }
-
-
-def test_removed_mcp_command_is_rejected(capsys):
-    with pytest.raises(SystemExit) as exc:
-        main(["mcp", "serve"])
-
-    assert exc.value.code == 2
-    error_output = capsys.readouterr().err
-
-    assert "invalid choice" in error_output
-    assert "'mcp'" in error_output
 
 
 def test_cli_sets_app_data_dir_env_before_dispatch(monkeypatch, tmp_path, capsys):

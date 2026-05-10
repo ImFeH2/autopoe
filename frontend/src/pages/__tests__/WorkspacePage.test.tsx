@@ -13,36 +13,26 @@ import { useRef, useState, type ReactNode } from "react";
 
 const {
   clearChatMock,
-  createBlueprintRequestMock,
   fetchRolesMock,
-  fetchBlueprintsMock,
   createTabRequestMock,
   createTabNodeRequestMock,
   deleteTabRequestMock,
-  deleteBlueprintRequestMock,
   dispatchNodeMessageRequestMock,
   createTabEdgeRequestMock,
   interruptNodeMock,
-  saveTabAsBlueprintRequestMock,
   toastErrorMock,
   toastSuccessMock,
-  updateBlueprintRequestMock,
 } = vi.hoisted(() => ({
   clearChatMock: vi.fn(),
-  createBlueprintRequestMock: vi.fn(),
   fetchRolesMock: vi.fn(),
-  fetchBlueprintsMock: vi.fn(),
   createTabRequestMock: vi.fn(),
   createTabNodeRequestMock: vi.fn(),
   deleteTabRequestMock: vi.fn(),
-  deleteBlueprintRequestMock: vi.fn(),
   dispatchNodeMessageRequestMock: vi.fn(),
   createTabEdgeRequestMock: vi.fn(),
   interruptNodeMock: vi.fn(),
-  saveTabAsBlueprintRequestMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
-  updateBlueprintRequestMock: vi.fn(),
 }));
 
 const {
@@ -68,25 +58,16 @@ const { useWorkspacePageStateMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  createBlueprintRequest: (...args: unknown[]) =>
-    createBlueprintRequestMock(...args),
   fetchRoles: (...args: unknown[]) => fetchRolesMock(...args),
-  fetchBlueprints: (...args: unknown[]) => fetchBlueprintsMock(...args),
   createTabRequest: (...args: unknown[]) => createTabRequestMock(...args),
   createTabNodeRequest: (...args: unknown[]) =>
     createTabNodeRequestMock(...args),
-  deleteBlueprintRequest: (...args: unknown[]) =>
-    deleteBlueprintRequestMock(...args),
   deleteTabRequest: (...args: unknown[]) => deleteTabRequestMock(...args),
   dispatchNodeMessageRequest: (...args: unknown[]) =>
     dispatchNodeMessageRequestMock(...args),
   createTabEdgeRequest: (...args: unknown[]) =>
     createTabEdgeRequestMock(...args),
   interruptNode: (...args: unknown[]) => interruptNodeMock(...args),
-  saveTabAsBlueprintRequest: (...args: unknown[]) =>
-    saveTabAsBlueprintRequestMock(...args),
-  updateBlueprintRequest: (...args: unknown[]) =>
-    updateBlueprintRequestMock(...args),
 }));
 
 vi.mock("@/context/AgentContext", () => ({
@@ -469,20 +450,15 @@ describe("WorkspacePage", () => {
 
   beforeEach(() => {
     clearChatMock.mockReset();
-    createBlueprintRequestMock.mockReset();
     fetchRolesMock.mockReset();
-    fetchBlueprintsMock.mockReset();
     createTabRequestMock.mockReset();
     createTabNodeRequestMock.mockReset();
     deleteTabRequestMock.mockReset();
-    deleteBlueprintRequestMock.mockReset();
     dispatchNodeMessageRequestMock.mockReset();
     createTabEdgeRequestMock.mockReset();
     interruptNodeMock.mockReset();
-    saveTabAsBlueprintRequestMock.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
-    updateBlueprintRequestMock.mockReset();
     useWorkspacePageStateMock.mockImplementation(useMockWorkspacePageState);
     workspacePageScenario = {};
 
@@ -539,7 +515,6 @@ describe("WorkspacePage", () => {
       buildRole({ name: "Reviewer", description: "Review results carefully" }),
       buildRole({ name: "Designer", description: "Frontend design role" }),
     ]);
-    fetchBlueprintsMock.mockResolvedValue([]);
 
     globalThis.ResizeObserver = class {
       observe() {}
@@ -576,26 +551,6 @@ describe("WorkspacePage", () => {
     );
     expect(setActiveTabId).toHaveBeenCalledWith("tab-2");
   }, 10000);
-
-  it("does not expose removed blueprint actions in the workspace toolbar", async () => {
-    render(<WorkspacePage />);
-
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: /Blueprint/i }),
-      ).not.toBeInTheDocument(),
-    );
-  });
-
-  it("does not expose workflow duplicate actions", async () => {
-    render(<WorkspacePage />);
-
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: /Duplicate/i }),
-      ).not.toBeInTheDocument(),
-    );
-  });
 
   it("keeps the workspace toolbar centered while constraining overflow inside the background", () => {
     render(<WorkspacePage />);

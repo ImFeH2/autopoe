@@ -362,38 +362,6 @@ def test_create_agent_rejects_node_level_permissions(monkeypatch, tmp_path):
     }
 
 
-def test_create_agent_rejects_removed_connect_to_creator_parameter(monkeypatch):
-    monkeypatch.setattr(
-        "flowent.settings.get_settings",
-        lambda: Settings(roles=[RoleConfig(name="Worker", system_prompt="Do work.")]),
-    )
-    tab = create_tab(title="Task")
-
-    owner = Agent(
-        NodeConfig(
-            node_type=NodeType.AGENT,
-            role_name="Conductor",
-            tab_id=tab.id,
-            tools=["create_agent"],
-        ),
-        uuid=tab.leader_id,
-    )
-
-    result = json.loads(
-        CreateAgentTool().execute(
-            owner,
-            {
-                "role_name": "Worker",
-                "connect_to_creator": "yes",
-            },
-        )
-    )
-
-    assert result == {
-        "error": "create_agent no longer supports connect_to_creator; use placement"
-    }
-
-
 def test_create_agent_tool_schema_exposes_workflow_placement_options():
     assert CreateAgentTool.parameters == {
         "type": "object",

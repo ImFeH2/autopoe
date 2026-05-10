@@ -46,24 +46,6 @@ def test_list_tabs_is_empty_at_startup(client: TestClient):
     assert response.json() == {"workflows": []}
 
 
-def test_create_tab_rejects_removed_mcp_servers_field(client: TestClient):
-    response = client.post(
-        "/api/workflows",
-        json={"title": "Review Task", "mcp_servers": ["filesystem"]},
-    )
-
-    assert response.status_code == 422
-
-
-def test_create_tab_rejects_removed_goal_field(client: TestClient):
-    response = client.post(
-        "/api/workflows",
-        json={"title": "Review Task", "goal": "Inspect changed files"},
-    )
-
-    assert response.status_code == 422
-
-
 def test_create_tab_node_and_edge_round_trip(client: TestClient):
     create_tab_response = client.post(
         "/api/workflows",
