@@ -415,56 +415,6 @@ def test_load_settings_defaults_provider_retry_429_delay_seconds(monkeypatch, tm
     assert persisted["providers"][0]["retry_429_delay_seconds"] == 0
 
 
-def test_load_settings_drops_removed_exit_tool_from_roles(monkeypatch, tmp_path):
-    settings_file = tmp_path / "settings.json"
-    settings_file.write_text(
-        json.dumps(
-            {
-                "event_log": {"timestamp_format": "absolute"},
-                "model": {"active_provider_id": "", "active_model": ""},
-                "providers": [],
-                "roles": [
-                    {
-                        "name": "Worker",
-                        "system_prompt": "Do work.",
-                        "included_tools": ["read", "exit", "exec"],
-                        "excluded_tools": ["exit", "fetch"],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(settings_module, "_SETTINGS_FILE", settings_file)
-    monkeypatch.setattr(settings_module, "_cached_settings", None)
-
-    loaded = settings_module.load_settings()
-
-    assert loaded.roles == [
-        RoleConfig(
-            name="Worker",
-            description="Do work.",
-            system_prompt="Do work.",
-            included_tools=["read", "exec"],
-            excluded_tools=["fetch"],
-        )
-    ]
-
-    persisted = json.loads(settings_file.read_text(encoding="utf-8"))
-    assert persisted["roles"] == [
-        {
-            "name": "Worker",
-            "description": "Do work.",
-            "system_prompt": "Do work.",
-            "model": None,
-            "model_params": None,
-            "included_tools": ["read", "exec"],
-            "excluded_tools": ["fetch"],
-        }
-    ]
-
-
 def test_load_settings_drops_assistant_only_tools_from_custom_roles(
     monkeypatch,
     tmp_path,

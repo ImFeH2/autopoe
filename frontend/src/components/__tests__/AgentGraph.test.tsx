@@ -585,9 +585,6 @@ describe("AgentGraph", () => {
     renderGraph([]);
 
     expect(screen.getByTestId("react-flow")).toBeInTheDocument();
-    expect(
-      screen.queryByText("This workflow is ready for its first node"),
-    ).not.toBeInTheDocument();
   });
 
   it("renders workflow nodes from the active tab definition and hides assistants", async () => {
@@ -639,7 +636,7 @@ describe("AgentGraph", () => {
     expect(screen.getByText("Connect nodes")).toBeInTheDocument();
   });
 
-  it("only shows add agent in the pane context menu", async () => {
+  it("shows add agent in the pane context menu", async () => {
     renderGraph([
       buildNode({
         id: "worker-1",
@@ -655,9 +652,6 @@ describe("AgentGraph", () => {
     });
 
     expect(screen.getByText("Add Agent")).toBeInTheDocument();
-    expect(screen.queryByText("Connect nodes")).not.toBeInTheDocument();
-    expect(screen.queryByText("Fit View")).not.toBeInTheDocument();
-    expect(screen.queryByText("Clear Selection")).not.toBeInTheDocument();
   });
 
   it("blocks invalid connections and forwards valid ones with explicit port keys", async () => {

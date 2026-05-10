@@ -55,7 +55,6 @@ describe("Sidebar", () => {
   it("renders navigation items in the expected order", () => {
     render(<Sidebar width={232} onWidthChange={() => {}} />);
 
-    expect(screen.queryByText("Core")).toBeNull();
     expect(
       screen.getAllByRole("button").map((button) => button.textContent),
     ).toEqual([

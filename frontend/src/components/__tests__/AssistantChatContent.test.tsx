@@ -91,9 +91,9 @@ describe("AssistantChatMessages", () => {
     const items: AssistantChatItem[] = [
       {
         type: "ToolCall",
-        tool_name: "create_root",
+        tool_name: "create_agent",
         tool_call_id: "tool-1",
-        arguments: { role: "Worker" },
+        arguments: { role_name: "Worker" },
         result: '{"agent_id":"worker-1"}',
         timestamp: 3,
         streaming: false,
@@ -127,12 +127,13 @@ describe("AssistantChatMessages", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: /Create Root/i }),
+      screen.getByRole("button", { name: /Create Agent/i }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Create Root/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Create Agent/i }));
     expect(
       screen.getByText(
-        (_, element) => element?.textContent === '{\n    "role": "Worker"\n}',
+        (_, element) =>
+          element?.textContent === '{\n    "role_name": "Worker"\n}',
       ),
     ).toBeInTheDocument();
     expect(

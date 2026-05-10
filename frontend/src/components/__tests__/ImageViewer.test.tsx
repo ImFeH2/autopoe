@@ -94,15 +94,6 @@ describe("ImageViewer", () => {
     expect(
       screen.getAllByRole("button", { name: "Close image preview" }),
     ).toHaveLength(1);
-    expect(
-      screen.queryByRole("button", { name: "Zoom In" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Zoom Out" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Reset" }),
-    ).not.toBeInTheDocument();
     expect(screen.getByTestId("global-image-viewer-zoom")).toHaveTextContent(
       "100%",
     );

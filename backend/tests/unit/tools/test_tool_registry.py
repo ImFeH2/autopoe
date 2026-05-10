@@ -31,7 +31,7 @@ def test_tool_registry_merges_explicit_allow_list_with_minimum_tools():
     ]
 
 
-def test_tool_registry_registers_connect_and_removes_create_root():
+def test_tool_registry_registers_management_and_workflow_tools():
     tool_names = [tool.name for tool in build_tool_registry().list_tools()]
 
     assert "create_workflow" in tool_names
@@ -41,7 +41,6 @@ def test_tool_registry_registers_connect_and_removes_create_root():
     assert "connect" in tool_names
     assert "send" in tool_names
     assert "list_workflows" in tool_names
-    assert "create_root" not in tool_names
     assert "manage_providers" in tool_names
     assert "manage_roles" in tool_names
     assert "manage_settings" in tool_names

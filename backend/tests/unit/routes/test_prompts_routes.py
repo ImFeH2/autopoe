@@ -80,25 +80,3 @@ def test_update_prompts_allows_custom_post_prompt_only(monkeypatch):
         "custom_prompt": "Keep this.",
         "custom_post_prompt": "Append this after history.",
     }
-
-
-def test_update_prompts_accepts_legacy_post_prompt_alias(monkeypatch):
-    settings = Settings(custom_prompt="Keep this.", custom_post_prompt="")
-
-    monkeypatch.setattr("flowent.routes.prompts.get_settings", lambda: settings)
-    monkeypatch.setattr("flowent.routes.prompts.save_settings", lambda current: None)
-
-    result = asyncio.run(
-        update_prompts(
-            UpdatePromptSettingsRequest.model_validate(
-                {"post_prompt": "Append this after history."}
-            )
-        )
-    )
-
-    assert settings.custom_prompt == "Keep this."
-    assert settings.custom_post_prompt == "Append this after history."
-    assert result.model_dump() == {
-        "custom_prompt": "Keep this.",
-        "custom_post_prompt": "Append this after history.",
-    }

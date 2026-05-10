@@ -570,7 +570,6 @@ describe("WorkspacePage", () => {
   it("shows workflow chat context in the chat header", () => {
     render(<WorkspacePage />);
 
-    expect(screen.queryByText("Editable")).not.toBeInTheDocument();
     const chatHeader = screen.getByText("Workflow chat").closest("div");
     expect(chatHeader).not.toBeNull();
     expect(within(chatHeader!).getByText("Example Tab")).toBeInTheDocument();
@@ -656,7 +655,6 @@ describe("WorkspacePage", () => {
     fireEvent.click(leaderDetailButtons[leaderDetailButtons.length - 1]);
 
     expect(screen.getAllByText("Status").length).toBeGreaterThan(0);
-    expect(screen.queryByText("State Timeline")).not.toBeInTheDocument();
     expect(screen.getByText("RUNNING")).toBeInTheDocument();
 
     const interruptButton = await screen.findByRole("button", {

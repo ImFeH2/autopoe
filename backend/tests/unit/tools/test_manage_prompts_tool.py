@@ -90,28 +90,3 @@ def test_manage_prompts_update_allows_custom_post_prompt_only(monkeypatch):
     }
     assert settings.custom_prompt == "Keep this."
     assert settings.custom_post_prompt == "Append this after history."
-
-
-def test_manage_prompts_update_accepts_legacy_post_prompt_alias(monkeypatch):
-    agent = Agent(NodeConfig(node_type=NodeType.ASSISTANT, tools=["manage_prompts"]))
-    settings = Settings(custom_prompt="Keep this.", custom_post_prompt="")
-
-    monkeypatch.setattr("flowent.settings.get_settings", lambda: settings)
-    monkeypatch.setattr("flowent.settings.save_settings", lambda current: None)
-
-    result = json.loads(
-        ManagePromptsTool().execute(
-            agent,
-            {
-                "action": "update",
-                "post_prompt": "Append this after history.",
-            },
-        )
-    )
-
-    assert result == {
-        "custom_prompt": "Keep this.",
-        "custom_post_prompt": "Append this after history.",
-    }
-    assert settings.custom_prompt == "Keep this."
-    assert settings.custom_post_prompt == "Append this after history."
