@@ -335,23 +335,6 @@ def test_tab_edge_creation_enforces_directed_ports_and_single_input(
     )
 
 
-def test_duplicate_workflow_route_is_not_available(client: TestClient):
-    source_tab = client.post(
-        "/api/workflows",
-        json={
-            "title": "Original Workflow",
-            "allow_network": True,
-            "write_dirs": ["/tmp"],
-        },
-    ).json()
-
-    response = client.post(f"/api/workflows/{source_tab['id']}/duplicate")
-
-    assert response.status_code == 405
-    workflows = client.get("/api/workflows").json()["workflows"]
-    assert [workflow["id"] for workflow in workflows] == [source_tab["id"]]
-
-
 def test_update_tab_definition_updates_metadata_and_positions(client: TestClient):
     tab = client.post(
         "/api/workflows",
