@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import React, { useRef } from "react";
 
 interface PanelResizerProps {
@@ -70,7 +71,12 @@ export function PanelResizer({
     event.stopPropagation();
     const pointerStart = pointerStartRef.current;
     pointerStartRef.current = null;
-    if (!onToggle || !pointerStart) {
+    if (!onToggle) {
+      return;
+    }
+
+    if (!pointerStart) {
+      onToggle();
       return;
     }
 
@@ -101,15 +107,17 @@ export function PanelResizer({
         )}
       />
       {onToggle ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label={toggleLabel}
           aria-pressed={togglePressed}
           onMouseDown={handleToggleMouseDown}
           onClick={handleToggleClick}
           className={cn(
             "absolute top-1/2 z-10 flex h-14 w-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-sidebar-border bg-sidebar/92 shadow-[0_10px_28px_rgba(0,0,0,0.28)] backdrop-blur-md outline-hidden transition-[opacity,transform,background-color,border-color,box-shadow] duration-180",
-            "opacity-45 duration-[180ms] hover:scale-105 hover:border-sidebar-ring/40 hover:bg-sidebar-accent hover:opacity-100 hover:shadow-[0_12px_34px_rgba(0,0,0,0.34)] focus-visible:scale-105 focus-visible:border-sidebar-ring/55 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40",
+            "opacity-45 duration-[180ms] hover:scale-105 hover:border-sidebar-ring/40 hover:bg-sidebar-accent hover:opacity-100 hover:shadow-[0_12px_34px_rgba(0,0,0,0.34)] focus-visible:scale-105 focus-visible:border-sidebar-ring/55 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 active:-translate-y-1/2",
             position === "left"
               ? "left-0 -translate-x-1/2"
               : "right-0 translate-x-1/2",
@@ -124,7 +132,7 @@ export function PanelResizer({
                 : "group-hover/resizer:bg-sidebar-foreground/66",
             )}
           />
-        </button>
+        </Button>
       ) : null}
     </div>
   );

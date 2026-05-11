@@ -71,6 +71,39 @@ describe("PanelResizer", () => {
     );
   });
 
+  it("renders the toggle through the shared button primitive", () => {
+    render(
+      <PanelResizer
+        position="right"
+        isDragging={false}
+        onMouseDown={() => {}}
+        onToggle={() => {}}
+        toggleLabel="Condense navigation"
+      />,
+    );
+
+    expect(screen.getByLabelText("Condense navigation")).toHaveAttribute(
+      "data-slot",
+      "button",
+    );
+  });
+
+  it("keeps the toggle centered while pressed", () => {
+    render(
+      <PanelResizer
+        position="right"
+        isDragging={false}
+        onMouseDown={() => {}}
+        onToggle={() => {}}
+        toggleLabel="Condense navigation"
+      />,
+    );
+
+    expect(screen.getByLabelText("Condense navigation")).toHaveClass(
+      "active:-translate-y-1/2",
+    );
+  });
+
   it("starts resizing from the toggle control", () => {
     const onMouseDown = vi.fn();
     const onToggle = vi.fn();
@@ -112,6 +145,24 @@ describe("PanelResizer", () => {
     const toggle = screen.getByLabelText("Condense navigation");
     fireEvent.mouseDown(toggle, { clientX: 240, clientY: 20 });
     fireEvent.click(toggle, { clientX: 241, clientY: 20 });
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggles from the control when it is keyboard activated", () => {
+    const onToggle = vi.fn();
+
+    render(
+      <PanelResizer
+        position="right"
+        isDragging={false}
+        onMouseDown={() => {}}
+        onToggle={onToggle}
+        toggleLabel="Condense navigation"
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Condense navigation"));
 
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
