@@ -1,31 +1,30 @@
 import { describe, expect, it } from "vitest";
 import {
-  getNextSidebarToggleWidth,
-  isSidebarCondensed,
+  getSidebarRenderWidth,
   shouldRememberSidebarWidth,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  SIDEBAR_RAIL_WIDTH,
 } from "@/lib/sidebarLayout";
 
 describe("sidebarLayout", () => {
-  it("toggles an expanded sidebar to the minimum complete navigation width", () => {
-    expect(getNextSidebarToggleWidth(280, 280)).toBe(SIDEBAR_MIN_WIDTH);
+  it("uses the saved full navigation width while expanded", () => {
+    expect(getSidebarRenderWidth(280, false)).toBe(280);
   });
 
-  it("restores the last expanded width from the condensed boundary", () => {
-    expect(getNextSidebarToggleWidth(SIDEBAR_MIN_WIDTH, 284)).toBe(284);
+  it("uses a dedicated icon rail width while compressed", () => {
+    expect(getSidebarRenderWidth(280, true)).toBe(SIDEBAR_RAIL_WIDTH);
   });
 
-  it("uses the default width when the remembered width is too narrow", () => {
-    expect(getNextSidebarToggleWidth(SIDEBAR_MIN_WIDTH, 198)).toBe(
+  it("clamps full navigation widths to the desktop sidebar bounds", () => {
+    expect(getSidebarRenderWidth(120, false)).toBe(SIDEBAR_MIN_WIDTH);
+    expect(getSidebarRenderWidth(420, false)).toBe(SIDEBAR_MAX_WIDTH);
+  });
+
+  it("keeps the default width within the complete navigation range", () => {
+    expect(getSidebarRenderWidth(SIDEBAR_DEFAULT_WIDTH, false)).toBe(
       SIDEBAR_DEFAULT_WIDTH,
-    );
-  });
-
-  it("keeps restored widths within the desktop sidebar bounds", () => {
-    expect(getNextSidebarToggleWidth(SIDEBAR_MIN_WIDTH, 420)).toBe(
-      SIDEBAR_MAX_WIDTH,
     );
   });
 
@@ -33,10 +32,5 @@ describe("sidebarLayout", () => {
     expect(shouldRememberSidebarWidth(SIDEBAR_MIN_WIDTH)).toBe(false);
     expect(shouldRememberSidebarWidth(SIDEBAR_MIN_WIDTH + 4)).toBe(false);
     expect(shouldRememberSidebarWidth(SIDEBAR_MIN_WIDTH + 12)).toBe(true);
-  });
-
-  it("treats the lower bound as the condensed state", () => {
-    expect(isSidebarCondensed(SIDEBAR_MIN_WIDTH)).toBe(true);
-    expect(isSidebarCondensed(SIDEBAR_MIN_WIDTH + 4)).toBe(false);
   });
 });

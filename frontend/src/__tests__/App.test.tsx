@@ -1,8 +1,9 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import type { AccessState } from "@/types";
+import { SIDEBAR_RAIL_WIDTH } from "@/lib/sidebarLayout";
 
 const accessStateRef: { value: AccessState } = vi.hoisted(() => ({
   value: {
@@ -15,6 +16,29 @@ const accessStateRef: { value: AccessState } = vi.hoisted(() => ({
 
 vi.mock("@/context/AccessContext", () => ({
   AccessProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("@/context/AgentContext", async () => {
+  const actual = await vi.importActual<typeof import("@/context/AgentContext")>(
+    "@/context/AgentContext",
+  );
+  return {
+    ...actual,
+    AgentProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+    useAgentConnectionRuntime: () => ({ connected: true }),
+    useAgentUI: () => ({
+      currentPage: "assistant",
+      navigateToPage: vi.fn(),
+    }),
+  };
+});
+
+vi.mock("@/pages/AssistantPage", () => ({
+  AssistantPage: () => <div>Assistant page</div>,
+}));
+
+vi.mock("@/components/SidebarActivityTicker", () => ({
+  SidebarActivityTicker: () => null,
 }));
 
 vi.mock("@/context/useAccess", () => ({
@@ -80,5 +104,33 @@ describe("App access gate", () => {
         /Access was reset locally\. Restart Flowent to generate a new access code\./i,
       ),
     ).toBeInTheDocument();
+  });
+
+  it("keeps the main content beside the icon navigation after desktop compression", async () => {
+    accessStateRef.value = {
+      authenticated: true,
+      configured: true,
+      bootstrap_generated: false,
+      requires_restart: false,
+    };
+
+    render(<App />);
+
+    const main = screen.getByRole("main");
+    expect(main).toHaveStyle({ marginLeft: "232px" });
+
+    fireEvent.mouseDown(screen.getByLabelText("Show icon navigation"), {
+      clientX: 232,
+      clientY: 20,
+    });
+    fireEvent.click(screen.getByLabelText("Show icon navigation"), {
+      clientX: 232,
+      clientY: 20,
+    });
+
+    expect(main).toHaveStyle({ marginLeft: `${SIDEBAR_RAIL_WIDTH}px` });
+    expect(
+      await screen.findByRole("button", { name: "Assistant" }),
+    ).toHaveClass("size-10");
   });
 });

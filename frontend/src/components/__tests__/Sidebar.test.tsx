@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/Sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const { useAgentConnectionRuntime, useAgentUI } = vi.hoisted(() => ({
   useAgentConnectionRuntime: vi.fn(),
@@ -26,7 +28,11 @@ vi.mock("@/context/useAccess", () => ({
 }));
 
 vi.mock("@/components/PanelResizer", () => ({
-  PanelResizer: () => null,
+  PanelResizer: ({
+    onMouseDown,
+  }: {
+    onMouseDown: React.MouseEventHandler<HTMLDivElement>;
+  }) => <div data-testid="panel-resizer" onMouseDown={onMouseDown} />,
 }));
 
 vi.mock("@/components/SidebarActivityTicker", () => ({
@@ -36,6 +42,14 @@ vi.mock("@/components/SidebarActivityTicker", () => ({
 describe("Sidebar", () => {
   const navigateToPage = vi.fn();
   const logout = vi.fn();
+  const renderSidebar = (
+    props?: Partial<React.ComponentProps<typeof Sidebar>>,
+  ) =>
+    render(
+      <TooltipProvider>
+        <Sidebar width={232} onWidthChange={() => {}} {...props} />
+      </TooltipProvider>,
+    );
 
   afterEach(() => {
     cleanup();
@@ -53,7 +67,7 @@ describe("Sidebar", () => {
   });
 
   it("renders navigation items in the expected order", () => {
-    render(<Sidebar width={232} onWidthChange={() => {}} />);
+    renderSidebar();
 
     expect(
       screen.getAllByRole("button").map((button) => button.textContent),
@@ -73,9 +87,7 @@ describe("Sidebar", () => {
   it("navigates to the selected page", () => {
     const onNavigate = vi.fn();
 
-    render(
-      <Sidebar width={232} onWidthChange={() => {}} onNavigate={onNavigate} />,
-    );
+    renderSidebar({ onNavigate });
 
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
 
@@ -84,7 +96,7 @@ describe("Sidebar", () => {
   });
 
   it("left aligns navigation and logout actions", () => {
-    render(<Sidebar width={232} onWidthChange={() => {}} />);
+    renderSidebar();
 
     expect(screen.getByRole("button", { name: "Workspace" })).toHaveClass(
       "text-left",
@@ -92,5 +104,63 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: "Logout" })).toHaveClass(
       "text-left",
     );
+  });
+
+  it("renders icon-only navigation while compressed", () => {
+    renderSidebar({ iconRail: true, width: 68 });
+
+    expect(screen.queryByText("Agent Studio")).not.toBeInTheDocument();
+    expect(screen.queryByText("Configuration")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Assistant" })).toHaveClass(
+      "size-10",
+    );
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Logout" })).toHaveClass(
+      "size-10",
+    );
+  });
+
+  it("keeps all primary pages available from the icon rail", () => {
+    renderSidebar({ iconRail: true, width: 68 });
+
+    expect(
+      screen
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual([
+      "Assistant",
+      "Workspace",
+      "Providers",
+      "Roles",
+      "Prompts",
+      "Tools",
+      "Channels",
+      "Settings",
+      "Logout",
+    ]);
+  });
+
+  it("keeps drag width updates on the full navigation while compressed", () => {
+    const onWidthChange = vi.fn();
+
+    renderSidebar({
+      expandedWidth: 232,
+      iconRail: true,
+      width: 68,
+      onWidthChange,
+    });
+
+    fireEvent.mouseDown(screen.getByTestId("panel-resizer"), {
+      clientX: 68,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(document, { clientX: 100, clientY: 20 });
+    fireEvent.mouseUp(document);
+
+    expect(onWidthChange).toHaveBeenCalledWith(264);
   });
 });

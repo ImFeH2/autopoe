@@ -20,7 +20,7 @@ import { AccessProvider } from "@/context/AccessContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { useAccess } from "@/context/useAccess";
 import {
-  getNextSidebarToggleWidth,
+  getSidebarRenderWidth,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
@@ -97,26 +97,30 @@ function AppContent() {
   const [lastExpandedSidebarWidth, setLastExpandedSidebarWidth] = useState(
     SIDEBAR_DEFAULT_WIDTH,
   );
+  const [sidebarIconRail, setSidebarIconRail] = useState(false);
   const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
 
   const LazyPage = lazyPageMap[currentPage];
   const sidebarOpen = isCompactLayout && sidebarDrawerOpen;
+  const desktopSidebarWidth = getSidebarRenderWidth(
+    sidebarWidth,
+    sidebarIconRail,
+  );
   const updateSidebarWidth = (nextWidth: number) => {
     setSidebarWidth(nextWidth);
     if (shouldRememberSidebarWidth(nextWidth)) {
       setLastExpandedSidebarWidth(nextWidth);
     }
   };
-  const toggleSidebarWidth = () => {
-    const nextWidth = getNextSidebarToggleWidth(
-      sidebarWidth,
-      lastExpandedSidebarWidth,
-    );
-
-    setSidebarWidth(nextWidth);
-    if (shouldRememberSidebarWidth(nextWidth)) {
-      setLastExpandedSidebarWidth(nextWidth);
+  const toggleSidebarMode = () => {
+    if (!sidebarIconRail && shouldRememberSidebarWidth(sidebarWidth)) {
+      setLastExpandedSidebarWidth(sidebarWidth);
     }
+
+    if (sidebarIconRail) {
+      setSidebarWidth(lastExpandedSidebarWidth);
+    }
+    setSidebarIconRail((current) => !current);
   };
 
   const renderPage = () => {
@@ -195,9 +199,11 @@ function AppContent() {
         </AnimatePresence>
       ) : (
         <Sidebar
-          width={sidebarWidth}
+          iconRail={sidebarIconRail}
+          width={desktopSidebarWidth}
+          expandedWidth={sidebarWidth}
           onWidthChange={updateSidebarWidth}
-          onToggleWidth={toggleSidebarWidth}
+          onToggleMode={toggleSidebarMode}
         />
       )}
 
@@ -207,8 +213,8 @@ function AppContent() {
           isCompactLayout
             ? { marginLeft: 0, width: "100%" }
             : {
-                marginLeft: sidebarWidth,
-                width: `calc(100% - ${sidebarWidth}px)`,
+                marginLeft: desktopSidebarWidth,
+                width: `calc(100% - ${desktopSidebarWidth}px)`,
               }
         }
         transition={{
@@ -219,8 +225,8 @@ function AppContent() {
           isCompactLayout
             ? undefined
             : {
-                marginLeft: `${sidebarWidth}px`,
-                width: `calc(100% - ${sidebarWidth}px)`,
+                marginLeft: `${desktopSidebarWidth}px`,
+                width: `calc(100% - ${desktopSidebarWidth}px)`,
               }
         }
       >
