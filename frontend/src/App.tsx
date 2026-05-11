@@ -19,6 +19,13 @@ import { AgentProvider, useAgentUI, type PageId } from "@/context/AgentContext";
 import { AccessProvider } from "@/context/AccessContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { useAccess } from "@/context/useAccess";
+import {
+  getNextSidebarToggleWidth,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  shouldRememberSidebarWidth,
+} from "@/lib/sidebarLayout";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { usePanelWidth } from "@/hooks/usePanelDrag";
@@ -83,14 +90,34 @@ function AppContent() {
   const isCompactLayout = useMediaQuery("(max-width: 980px)");
   const [sidebarWidth, setSidebarWidth] = usePanelWidth(
     "sidebar-width",
-    232,
-    196,
-    320,
+    SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+    SIDEBAR_MAX_WIDTH,
+  );
+  const [lastExpandedSidebarWidth, setLastExpandedSidebarWidth] = useState(
+    SIDEBAR_DEFAULT_WIDTH,
   );
   const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
 
   const LazyPage = lazyPageMap[currentPage];
   const sidebarOpen = isCompactLayout && sidebarDrawerOpen;
+  const updateSidebarWidth = (nextWidth: number) => {
+    setSidebarWidth(nextWidth);
+    if (shouldRememberSidebarWidth(nextWidth)) {
+      setLastExpandedSidebarWidth(nextWidth);
+    }
+  };
+  const toggleSidebarWidth = () => {
+    const nextWidth = getNextSidebarToggleWidth(
+      sidebarWidth,
+      lastExpandedSidebarWidth,
+    );
+
+    setSidebarWidth(nextWidth);
+    if (shouldRememberSidebarWidth(nextWidth)) {
+      setLastExpandedSidebarWidth(nextWidth);
+    }
+  };
 
   const renderPage = () => {
     return (
@@ -158,8 +185,8 @@ function AppContent() {
               >
                 <Sidebar
                   autoHide
-                  width={Math.min(sidebarWidth, 320)}
-                  onWidthChange={setSidebarWidth}
+                  width={Math.min(sidebarWidth, SIDEBAR_MAX_WIDTH)}
+                  onWidthChange={updateSidebarWidth}
                   onNavigate={() => setSidebarDrawerOpen(false)}
                 />
               </motion.div>
@@ -167,11 +194,27 @@ function AppContent() {
           ) : null}
         </AnimatePresence>
       ) : (
-        <Sidebar width={sidebarWidth} onWidthChange={setSidebarWidth} />
+        <Sidebar
+          width={sidebarWidth}
+          onWidthChange={updateSidebarWidth}
+          onToggleWidth={toggleSidebarWidth}
+        />
       )}
 
-      <main
+      <motion.main
         className="relative z-10 h-full isolate"
+        animate={
+          isCompactLayout
+            ? { marginLeft: 0, width: "100%" }
+            : {
+                marginLeft: sidebarWidth,
+                width: `calc(100% - ${sidebarWidth}px)`,
+              }
+        }
+        transition={{
+          duration: 0.24,
+          ease: [0.22, 1, 0.36, 1],
+        }}
         style={
           isCompactLayout
             ? undefined
@@ -229,7 +272,7 @@ function AppContent() {
         ) : (
           <div className="h-full [contain:paint]">{pageContent}</div>
         )}
-      </main>
+      </motion.main>
     </ShellBackground>
   );
 }

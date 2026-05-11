@@ -9,13 +9,16 @@ import { usePanelDrag } from "@/hooks/usePanelDrag";
 import { PanelResizer } from "@/components/PanelResizer";
 import { SidebarActivityTicker } from "@/components/SidebarActivityTicker";
 import { Button } from "@/components/ui/button";
+import { isSidebarCondensed } from "@/lib/sidebarLayout";
 import { LogOut } from "lucide-react";
+import { motion } from "motion/react";
 import { PAGE_NAVIGATION_GROUPS } from "@/lib/pageNavigation";
 
 interface SidebarProps {
   autoHide?: boolean;
   className?: string;
   onNavigate?: () => void;
+  onToggleWidth?: () => void;
   width: number;
   onWidthChange: (w: number) => void;
 }
@@ -24,6 +27,7 @@ export function Sidebar({
   autoHide = false,
   className,
   onNavigate,
+  onToggleWidth,
   width,
   onWidthChange,
 }: SidebarProps) {
@@ -32,6 +36,7 @@ export function Sidebar({
   const { logout } = useAccess();
 
   const { isDragging, startDrag } = usePanelDrag(width, onWidthChange, "right");
+  const condensed = isSidebarCondensed(width);
   const widthProgress = Math.max(0, Math.min(1, (width - 180) / 220));
   const headerPaddingY = 16 + widthProgress * 4;
   const titleFontSizeRem = 1.05 + widthProgress * 0.1;
@@ -42,10 +47,12 @@ export function Sidebar({
   };
 
   return (
-    <aside
+    <motion.aside
+      animate={{ width }}
+      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
       style={{ width: `${width}px` }}
       className={cn(
-        "text-sidebar-foreground relative isolate z-40 flex flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-colors",
+        "text-sidebar-foreground relative isolate z-40 flex flex-col overflow-visible border-r border-sidebar-border bg-sidebar shadow-[18px_0_44px_rgba(0,0,0,0.18)] transition-colors",
         autoHide ? "h-full" : "fixed inset-y-0 left-0 h-auto",
         className,
       )}
@@ -162,7 +169,11 @@ export function Sidebar({
         position="right"
         isDragging={isDragging}
         onMouseDown={startDrag}
+        onToggle={onToggleWidth}
+        toggleLabel={condensed ? "Expand navigation" : "Condense navigation"}
+        togglePressed={condensed}
+        className="w-4 -mx-2"
       />
-    </aside>
+    </motion.aside>
   );
 }
