@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from copy import deepcopy
+from dataclasses import dataclass
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -62,77 +63,15 @@ class UpdateTelegramSettingsRequest(BaseModel):
     bot_token: str | None = None
 
 
-@router.post("/api/settings")
-async def update_settings(req: UpdateSettingsRequest) -> dict[str, object]:
-    from flowent.graph_service import sync_assistant_role, sync_tab_leaders
-    from flowent.providers.gateway import gateway
+@dataclass(frozen=True, slots=True)
+class AssistantSettingsPatch:
+    role_name: str | None = None
+    allow_network: object = MISSING
+    write_dirs: object = MISSING
 
-    source_settings = get_settings()
-    current = deepcopy(source_settings)
-    next_access_code: str | None = None
-    reauth_required = False
 
-    if req.access is not None:
-        raw_new_code = req.access.get("new_code", "")
-        raw_confirm_code = req.access.get("confirm_code", "")
-        if raw_new_code is not None and not isinstance(raw_new_code, str):
-            raise HTTPException(
-                status_code=400, detail="access.new_code must be a string"
-            )
-        if raw_confirm_code is not None and not isinstance(raw_confirm_code, str):
-            raise HTTPException(
-                status_code=400,
-                detail="access.confirm_code must be a string",
-            )
-        new_code = raw_new_code if isinstance(raw_new_code, str) else ""
-        confirm_code = raw_confirm_code if isinstance(raw_confirm_code, str) else ""
-        if new_code or confirm_code:
-            if not new_code.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail="access.new_code must not be empty",
-                )
-            if confirm_code != new_code:
-                raise HTTPException(
-                    status_code=400,
-                    detail="access.confirm_code must match access.new_code",
-                )
-            next_access_code = new_code
-
-    assistant_role_name: str | None = None
-    assistant_allow_network: object = MISSING
-    assistant_write_dirs: object = MISSING
-    if req.assistant is not None:
-        assistant_unknown_fields = sorted(
-            set(req.assistant) - {"role_name", "allow_network", "write_dirs"}
-        )
-        if assistant_unknown_fields:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Unknown assistant fields: " + ", ".join(assistant_unknown_fields)
-                ),
-            )
-        if "allow_network" in req.assistant:
-            assistant_allow_network = req.assistant.get("allow_network")
-        if "write_dirs" in req.assistant:
-            assistant_write_dirs = req.assistant.get("write_dirs")
-        raw_role_name = req.assistant.get("role_name")
-        if isinstance(raw_role_name, str) and raw_role_name.strip():
-            assistant_role_name = raw_role_name
-
-    leader_role_name: str | None = None
-    if req.leader is not None:
-        raw_role_name = req.leader.get("role_name")
-        if isinstance(raw_role_name, str) and raw_role_name.strip():
-            leader_role_name = raw_role_name
-
-    timestamp_format: str | None = None
-    if req.event_log is not None:
-        raw_timestamp_format = req.event_log.get("timestamp_format")
-        if isinstance(raw_timestamp_format, str):
-            timestamp_format = raw_timestamp_format
-
+@dataclass(frozen=True, slots=True)
+class ModelSettingsPatch:
     active_provider_id: str | None = None
     active_model: str | None = None
     context_window_tokens: object = MISSING
@@ -146,61 +85,173 @@ async def update_settings(req: UpdateSettingsRequest) -> dict[str, object]:
     retry_max_delay_seconds: object = MISSING
     retry_backoff_cap_retries: object = MISSING
     auto_compact_token_limit: object = MISSING
-    model_params: object = MISSING
-    if req.model is not None:
-        raw_active_provider_id = req.model.get("active_provider_id")
-        if isinstance(raw_active_provider_id, str):
-            active_provider_id = raw_active_provider_id
-        raw_active_model = req.model.get("active_model")
-        if isinstance(raw_active_model, str):
-            active_model = raw_active_model
-        if "context_window_tokens" in req.model:
-            context_window_tokens = req.model.get("context_window_tokens")
-        if "input_image" in req.model:
-            input_image = req.model.get("input_image")
-        if "output_image" in req.model:
-            output_image = req.model.get("output_image")
-        if "structured_output" in req.model:
-            structured_output = req.model.get("structured_output")
-        if "timeout_ms" in req.model:
-            timeout_ms = req.model.get("timeout_ms")
-        if "retry_policy" in req.model:
-            retry_policy = req.model.get("retry_policy")
-        if "max_retries" in req.model:
-            max_retries = req.model.get("max_retries")
-        if "retry_initial_delay_seconds" in req.model:
-            retry_initial_delay_seconds = req.model.get("retry_initial_delay_seconds")
-        if "retry_max_delay_seconds" in req.model:
-            retry_max_delay_seconds = req.model.get("retry_max_delay_seconds")
-        if "retry_backoff_cap_retries" in req.model:
-            retry_backoff_cap_retries = req.model.get("retry_backoff_cap_retries")
-        if "auto_compact_token_limit" in req.model:
-            auto_compact_token_limit = req.model.get("auto_compact_token_limit")
-        if "params" in req.model:
-            model_params = req.model.get("params")
+    params: object = MISSING
+
+
+def _extract_access_code_rotation(access: dict[str, object] | None) -> str | None:
+    if access is None:
+        return None
+
+    raw_new_code = access.get("new_code", "")
+    raw_confirm_code = access.get("confirm_code", "")
+    if raw_new_code is not None and not isinstance(raw_new_code, str):
+        raise HTTPException(status_code=400, detail="access.new_code must be a string")
+    if raw_confirm_code is not None and not isinstance(raw_confirm_code, str):
+        raise HTTPException(
+            status_code=400,
+            detail="access.confirm_code must be a string",
+        )
+
+    new_code = raw_new_code if isinstance(raw_new_code, str) else ""
+    confirm_code = raw_confirm_code if isinstance(raw_confirm_code, str) else ""
+    if not new_code and not confirm_code:
+        return None
+    if not new_code.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="access.new_code must not be empty",
+        )
+    if confirm_code != new_code:
+        raise HTTPException(
+            status_code=400,
+            detail="access.confirm_code must match access.new_code",
+        )
+    return new_code
+
+
+def _extract_assistant_settings_patch(
+    assistant: dict[str, object] | None,
+) -> AssistantSettingsPatch:
+    if assistant is None:
+        return AssistantSettingsPatch()
+
+    unknown_fields = sorted(
+        set(assistant) - {"role_name", "allow_network", "write_dirs"}
+    )
+    if unknown_fields:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown assistant fields: " + ", ".join(unknown_fields),
+        )
+
+    raw_role_name = assistant.get("role_name")
+    return AssistantSettingsPatch(
+        role_name=(
+            raw_role_name
+            if isinstance(raw_role_name, str) and raw_role_name.strip()
+            else None
+        ),
+        allow_network=(
+            assistant.get("allow_network") if "allow_network" in assistant else MISSING
+        ),
+        write_dirs=assistant.get("write_dirs")
+        if "write_dirs" in assistant
+        else MISSING,
+    )
+
+
+def _extract_role_name(payload: dict[str, object] | None) -> str | None:
+    if payload is None:
+        return None
+    raw_role_name = payload.get("role_name")
+    if isinstance(raw_role_name, str) and raw_role_name.strip():
+        return raw_role_name
+    return None
+
+
+def _extract_timestamp_format(payload: dict[str, object] | None) -> str | None:
+    if payload is None:
+        return None
+    raw_timestamp_format = payload.get("timestamp_format")
+    return raw_timestamp_format if isinstance(raw_timestamp_format, str) else None
+
+
+def _extract_model_settings_patch(
+    model: dict[str, object] | None,
+) -> ModelSettingsPatch:
+    if model is None:
+        return ModelSettingsPatch()
+
+    raw_active_provider_id = model.get("active_provider_id")
+    raw_active_model = model.get("active_model")
+    return ModelSettingsPatch(
+        active_provider_id=(
+            raw_active_provider_id if isinstance(raw_active_provider_id, str) else None
+        ),
+        active_model=raw_active_model if isinstance(raw_active_model, str) else None,
+        context_window_tokens=(
+            model.get("context_window_tokens")
+            if "context_window_tokens" in model
+            else MISSING
+        ),
+        input_image=model.get("input_image") if "input_image" in model else MISSING,
+        output_image=model.get("output_image") if "output_image" in model else MISSING,
+        structured_output=(
+            model.get("structured_output") if "structured_output" in model else MISSING
+        ),
+        timeout_ms=model.get("timeout_ms") if "timeout_ms" in model else MISSING,
+        retry_policy=model.get("retry_policy") if "retry_policy" in model else MISSING,
+        max_retries=model.get("max_retries") if "max_retries" in model else MISSING,
+        retry_initial_delay_seconds=(
+            model.get("retry_initial_delay_seconds")
+            if "retry_initial_delay_seconds" in model
+            else MISSING
+        ),
+        retry_max_delay_seconds=(
+            model.get("retry_max_delay_seconds")
+            if "retry_max_delay_seconds" in model
+            else MISSING
+        ),
+        retry_backoff_cap_retries=(
+            model.get("retry_backoff_cap_retries")
+            if "retry_backoff_cap_retries" in model
+            else MISSING
+        ),
+        auto_compact_token_limit=(
+            model.get("auto_compact_token_limit")
+            if "auto_compact_token_limit" in model
+            else MISSING
+        ),
+        params=model.get("params") if "params" in model else MISSING,
+    )
+
+
+@router.post("/api/settings")
+async def update_settings(req: UpdateSettingsRequest) -> dict[str, object]:
+    from flowent.graph_service import sync_assistant_role, sync_tab_leaders
+    from flowent.providers.gateway import gateway
+
+    source_settings = get_settings()
+    current = deepcopy(source_settings)
+    next_access_code = _extract_access_code_rotation(req.access)
+    reauth_required = False
+    assistant_patch = _extract_assistant_settings_patch(req.assistant)
+    leader_role_name = _extract_role_name(req.leader)
+    timestamp_format = _extract_timestamp_format(req.event_log)
+    model_patch = _extract_model_settings_patch(req.model)
 
     try:
         resolved = resolve_settings_update(
             current,
             working_dir=req.working_dir,
-            assistant_role_name=assistant_role_name,
-            assistant_allow_network=assistant_allow_network,
-            assistant_write_dirs=assistant_write_dirs,
+            assistant_role_name=assistant_patch.role_name,
+            assistant_allow_network=assistant_patch.allow_network,
+            assistant_write_dirs=assistant_patch.write_dirs,
             leader_role_name=leader_role_name,
-            active_provider_id=active_provider_id,
-            active_model=active_model,
-            context_window_tokens=context_window_tokens,
-            input_image=input_image,
-            output_image=output_image,
-            structured_output=structured_output,
-            max_retries=max_retries,
-            retry_policy=retry_policy,
-            timeout_ms=timeout_ms,
-            retry_initial_delay_seconds=retry_initial_delay_seconds,
-            retry_max_delay_seconds=retry_max_delay_seconds,
-            retry_backoff_cap_retries=retry_backoff_cap_retries,
-            auto_compact_token_limit=auto_compact_token_limit,
-            model_params=model_params,
+            active_provider_id=model_patch.active_provider_id,
+            active_model=model_patch.active_model,
+            context_window_tokens=model_patch.context_window_tokens,
+            input_image=model_patch.input_image,
+            output_image=model_patch.output_image,
+            structured_output=model_patch.structured_output,
+            max_retries=model_patch.max_retries,
+            retry_policy=model_patch.retry_policy,
+            timeout_ms=model_patch.timeout_ms,
+            retry_initial_delay_seconds=model_patch.retry_initial_delay_seconds,
+            retry_max_delay_seconds=model_patch.retry_max_delay_seconds,
+            retry_backoff_cap_retries=model_patch.retry_backoff_cap_retries,
+            auto_compact_token_limit=model_patch.auto_compact_token_limit,
+            model_params=model_patch.params,
             timestamp_format=timestamp_format,
         )
     except ValueError as exc:
