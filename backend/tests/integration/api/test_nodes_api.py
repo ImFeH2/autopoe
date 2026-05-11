@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 from uuid import UUID
 
@@ -7,11 +8,13 @@ from fastapi.testclient import TestClient
 from flowent.models import (
     AgentState,
     AssistantText,
+    ErrorEntry,
     ImagePart,
     LLMResponse,
     ReceivedMessage,
     TextPart,
 )
+from flowent.providers.errors import LLMProviderError
 from flowent.registry import registry
 from flowent.settings import STEWARD_ROLE_INCLUDED_TOOLS
 from flowent.tools import MINIMUM_TOOLS
@@ -298,6 +301,76 @@ def test_unknown_slash_input_can_be_sent_directly_to_workflow_leader(
         and entry["content"] == "/unknown investigate the failure"
         for entry in history
     )
+
+
+def test_leader_accepts_new_message_after_error(monkeypatch, client: TestClient):
+    tab = client.post(
+        "/api/workflows",
+        json={"title": "Execution", "allow_network": True},
+    ).json()
+    leader = registry.get(tab["leader_id"])
+    assert leader is not None
+    chat_started = threading.Event()
+    release_chat = threading.Event()
+
+    def fake_chat(**kwargs):
+        chat_started.set()
+        release_chat.wait(timeout=2)
+        raise LLMProviderError(
+            "LLM API error\nDetail: still invalid",
+            transient=False,
+        )
+
+    monkeypatch.setattr("flowent.agent.gateway.chat", fake_chat)
+    leader.history.append(ErrorEntry(content="LLM API error\nDetail: Invalid key"))
+    leader.set_state(AgentState.ERROR, "LLM API error")
+
+    try:
+        response = client.post(
+            f"/api/nodes/{tab['leader_id']}/messages",
+            json={"content": "Continue the workflow chat"},
+        )
+
+        assert response.status_code == 200
+        message_id = response.json()["message_id"]
+        assert isinstance(message_id, str)
+        assert chat_started.wait(timeout=1)
+
+        detail = client.get(f"/api/nodes/{tab['leader_id']}").json()
+        history = detail["history"]
+        assert any(
+            entry["type"] == "ErrorEntry"
+            and entry["content"] == "LLM API error\nDetail: Invalid key"
+            for entry in history
+        )
+        assert any(
+            entry["type"] == "ReceivedMessage"
+            and entry["from_id"] == "human"
+            and entry["message_id"] == message_id
+            and entry["content"] == "Continue the workflow chat"
+            for entry in history
+        )
+        assert registry.get(tab["leader_id"]).state == AgentState.RUNNING
+    finally:
+        release_chat.set()
+
+
+def test_leader_rejects_message_when_terminated(client: TestClient):
+    tab = client.post(
+        "/api/workflows",
+        json={"title": "Execution"},
+    ).json()
+    leader = registry.get(tab["leader_id"])
+    assert leader is not None
+    leader.set_state(AgentState.TERMINATED, "done")
+
+    response = client.post(
+        f"/api/nodes/{tab['leader_id']}/messages",
+        json={"content": "Continue the workflow chat"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "This workflow chat is no longer available"
 
 
 def test_leader_help_command_returns_visible_command_feedback(client: TestClient):

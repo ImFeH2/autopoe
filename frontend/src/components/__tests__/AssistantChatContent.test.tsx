@@ -300,6 +300,7 @@ describe("AssistantChatMessages", () => {
 
   it("keeps a pending send visible when the target needs attention", () => {
     const scrollRef = createRef<HTMLDivElement>();
+    const onSendPendingSend = vi.fn();
 
     render(
       <AssistantChatMessages
@@ -320,12 +321,15 @@ describe("AssistantChatMessages", () => {
             history_entry_scope: "assistant",
           },
         ]}
+        onSendPendingSend={onSendPendingSend}
         onScroll={() => {}}
         scrollRef={scrollRef}
       />,
     );
 
     expect(screen.getByText("Needs attention")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSendPendingSend).toHaveBeenCalledWith("pending-send-error");
   });
 
   it("shows the empty state when only system entries remain after a chat clear", () => {

@@ -554,6 +554,7 @@ export function LeaderChatPanel({
     scrollRef,
     sending,
     sendMessage,
+    sendPendingSend,
     setInput,
     stopLeader,
     supportsInputImage = false,
@@ -625,6 +626,7 @@ export function LeaderChatPanel({
           nodes={agents}
           onRetryHumanMessage={(messageId) => void retryMessage(messageId)}
           onCancelPendingSend={cancelPendingSend}
+          onSendPendingSend={(pendingId) => void sendPendingSend(pendingId)}
           onScroll={onMessagesScroll}
           retryImageInputEnabled={supportsInputImage}
           retryingMessageId={retryingMessageId}

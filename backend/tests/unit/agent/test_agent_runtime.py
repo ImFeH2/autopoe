@@ -1118,6 +1118,50 @@ def test_execute_compact_command_replaces_history_with_summary(monkeypatch):
     assert "Compacted this chat for future replies." not in serialized
 
 
+def test_compacted_context_normalizes_legacy_traceback_summary(monkeypatch):
+    monkeypatch.setattr("flowent.agent.get_settings", lambda: Settings())
+
+    assistant = Agent(NodeConfig(node_type=NodeType.ASSISTANT), uuid="assistant")
+    assistant._set_execution_context(
+        summary=(
+            "## Current Goal\nRecover the chat.\n\n"
+            "Traceback (most recent call last):\n"
+            '  File "/tmp/example.py", line 1, in <module>\n'
+            "RuntimeError: boom"
+        ),
+        history_cutoff=0,
+    )
+
+    messages = assistant._build_messages()
+    serialized = json.dumps(messages)
+
+    assert "Compacted execution context" in serialized
+    assert "Recover the chat." in serialized
+    assert "Traceback" not in serialized
+    assert "/tmp/example.py" not in serialized
+
+
+def test_compacted_context_normalizes_legacy_html_summary(monkeypatch):
+    monkeypatch.setattr("flowent.agent.get_settings", lambda: Settings())
+
+    assistant = Agent(NodeConfig(node_type=NodeType.ASSISTANT), uuid="assistant")
+    assistant._set_execution_context(
+        summary=(
+            "## Current Goal\nRecover the chat.\n\n"
+            "<!doctype html><html><body>Bad Gateway</body></html>"
+        ),
+        history_cutoff=0,
+    )
+
+    messages = assistant._build_messages()
+    serialized = json.dumps(messages)
+
+    assert "Compacted execution context" in serialized
+    assert "unexpected error response" in serialized
+    assert "<!doctype html" not in serialized
+    assert "<html" not in serialized
+
+
 def test_compact_command_excludes_queued_messages_from_summary(monkeypatch):
     assistant = Agent(NodeConfig(node_type=NodeType.ASSISTANT), uuid="assistant")
     assistant.history.extend(
@@ -2668,15 +2712,117 @@ def test_build_messages_keeps_error_entries_in_context(monkeypatch):
 
     agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent")
     agent._append_history(ReceivedMessage(content="begin", from_id="human"))
-    agent._append_history(ErrorEntry(content="RuntimeError: boom\n\ntraceback"))
+    agent._append_history(ErrorEntry(content="RuntimeError: boom"))
 
     messages = agent._build_messages()
 
     assert any(
         msg.get("role") == "user"
         and msg.get("content")
-        == "<system>Previous runtime error:\nRuntimeError: boom\n\ntraceback</system>"
+        == "<system>Previous runtime error:\nRuntimeError: boom</system>"
         for msg in messages
+    )
+
+
+def test_build_messages_normalizes_legacy_traceback_errors(monkeypatch):
+    monkeypatch.setattr("flowent.agent.get_settings", lambda: Settings())
+
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent")
+    agent._append_history(
+        ErrorEntry(
+            content=(
+                "RuntimeError: boom\n\n"
+                "Traceback (most recent call last):\n"
+                '  File "/tmp/example.py", line 1, in <module>\n'
+                "RuntimeError: boom"
+            )
+        )
+    )
+
+    messages = agent._build_messages()
+
+    assert any(
+        msg.get("role") == "user"
+        and msg.get("content")
+        == "<system>Previous runtime error:\nRuntimeError: boom</system>"
+        for msg in messages
+    )
+    assert not any("Traceback" in str(msg.get("content")) for msg in messages)
+
+
+def test_build_messages_normalizes_legacy_html_errors(monkeypatch):
+    monkeypatch.setattr("flowent.agent.get_settings", lambda: Settings())
+
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent")
+    agent._append_history(
+        ErrorEntry(content="<html><body><pre>Internal Server Error</pre></body></html>")
+    )
+
+    messages = agent._build_messages()
+    serialized = json.dumps(messages)
+
+    assert "Upstream returned an unexpected error response" in serialized
+    assert "<html" not in serialized
+    assert "<pre>" not in serialized
+
+
+def test_build_messages_keeps_provider_error_text_in_context(monkeypatch):
+    monkeypatch.setattr("flowent.agent.get_settings", lambda: Settings())
+
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT), uuid="agent")
+    agent._append_history(ErrorEntry(content="LLMProviderError: provider offline"))
+
+    messages = agent._build_messages()
+
+    assert any(
+        msg.get("role") == "user"
+        and msg.get("content")
+        == (
+            "<system>Previous runtime error:\n"
+            "LLMProviderError: provider offline</system>"
+        )
+        for msg in messages
+    )
+
+
+def test_unhandled_runtime_error_history_omits_traceback(monkeypatch):
+    agent = Agent(NodeConfig(node_type=NodeType.AGENT, allow_network=True))
+    wait_calls = 0
+    chat_calls = 0
+
+    def fake_wait_for_input() -> None:
+        nonlocal wait_calls
+        wait_calls += 1
+        if wait_calls == 1:
+            agent._append_history(ReceivedMessage(content="start", from_id="human"))
+            agent.set_state(AgentState.RUNNING, "received message from human")
+            return
+        agent.request_termination("done")
+
+    def fake_chat(
+        messages,
+        tools=None,
+        on_chunk=None,
+        register_interrupt=None,
+        role_name=None,
+    ):
+        nonlocal chat_calls
+        chat_calls += 1
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(agent, "_wait_for_input", fake_wait_for_input)
+    monkeypatch.setattr("flowent.agent.gateway.chat", fake_chat)
+
+    agent._run()
+
+    assert chat_calls == 1
+    assert any(
+        isinstance(entry, ErrorEntry) and entry.content == "RuntimeError: boom"
+        for entry in agent.get_history_snapshot()
+    )
+    assert not any(
+        isinstance(entry, ErrorEntry) and "traceback" in entry.content.lower()
+        for entry in agent.get_history_snapshot()
     )
 
 

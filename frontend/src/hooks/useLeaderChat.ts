@@ -670,7 +670,7 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
       return;
     }
 
-    if (leaderState === "error" || leaderState === "terminated") {
+    if (leaderState === "terminated") {
       toast.error("Resolve the current chat before sending");
       return;
     }
@@ -950,6 +950,63 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     });
   }, []);
 
+  const sendPendingSend = useCallback(
+    async (pendingId: string) => {
+      const entry = Array.from(pendingSendsRef.current.entries()).find(
+        ([, pending]) => pending.id === pendingId,
+      );
+      if (
+        !entry ||
+        sending ||
+        autoSendingPendingSendIdsRef.current.has(entry[0])
+      ) {
+        return;
+      }
+
+      const [targetId, current] = entry;
+      const targetState =
+        targetId === leaderId
+          ? leaderState
+          : (agents.get(targetId)?.state ?? current.target_state ?? null);
+      if (targetState === "terminated") {
+        return;
+      }
+
+      setPendingSends((pending) => {
+        if (!pending.has(targetId)) {
+          return pending;
+        }
+        const next = new Map(pending);
+        next.delete(targetId);
+        return next;
+      });
+
+      const sent = await submitParts({
+        content: current.content,
+        parts: current.parts ?? [],
+        targetId,
+        visiblePending: targetId === leaderId,
+        history: {
+          scope: current.history_entry_scope,
+          entry: current.history_entry,
+        },
+        pendingMessageTimestamp: current.timestamp,
+      });
+      if (!sent) {
+        setPendingSends((pending) => {
+          const next = new Map(pending);
+          next.set(targetId, {
+            ...current,
+            send_failed: true,
+            target_state: "error",
+          });
+          return next;
+        });
+      }
+    },
+    [agents, leaderId, leaderState, sending, submitParts],
+  );
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Tab" && !event.shiftKey) {
       if (input.trim() || readyImages.length > 0) {
@@ -986,6 +1043,7 @@ export function useLeaderChat(options: UseLeaderChatOptions = {}) {
     retryingMessageId,
     scrollRef,
     sendMessage,
+    sendPendingSend,
     sending,
     setInput,
     stopLeader,

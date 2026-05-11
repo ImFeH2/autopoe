@@ -1,13 +1,17 @@
 import base64
+import threading
 from uuid import UUID
 
 from flowent.models import (
+    AgentState,
     AssistantText,
+    ErrorEntry,
     ImagePart,
     LLMResponse,
     ReceivedMessage,
     TextPart,
 )
+from flowent.providers.errors import LLMProviderError
 from flowent.registry import registry
 
 _ONE_PIXEL_PNG = base64.b64decode(
@@ -75,6 +79,70 @@ def test_clear_command_clears_history_back_to_empty_state(client):
         entry["type"] == "CommandResultEntry" and entry["command_name"] == "/clear"
         for entry in detail["history"]
     )
+
+
+def test_assistant_accepts_new_message_after_error(monkeypatch, client):
+    assistant_id = _get_assistant_id(client)
+    assistant = registry.get(assistant_id)
+    assert assistant is not None
+    chat_started = threading.Event()
+    release_chat = threading.Event()
+
+    def fake_chat(**kwargs):
+        chat_started.set()
+        release_chat.wait(timeout=2)
+        raise LLMProviderError(
+            "LLM API error\nDetail: still invalid",
+            transient=False,
+        )
+
+    monkeypatch.setattr("flowent.agent.gateway.chat", fake_chat)
+    assistant.history.append(ErrorEntry(content="LLM API error\nDetail: Invalid key"))
+    assistant.set_state(AgentState.ERROR, "LLM API error")
+
+    try:
+        response = client.post(
+            "/api/assistant/message",
+            json={"content": "Continue with a safer plan"},
+        )
+
+        assert response.status_code == 200
+        message_id = response.json()["message_id"]
+        assert isinstance(message_id, str)
+        assert chat_started.wait(timeout=1)
+
+        detail = client.get(f"/api/nodes/{assistant_id}").json()
+        history = detail["history"]
+        assert any(
+            entry["type"] == "ErrorEntry"
+            and entry["content"] == "LLM API error\nDetail: Invalid key"
+            for entry in history
+        )
+        assert any(
+            entry["type"] == "ReceivedMessage"
+            and entry["from_id"] == "human"
+            and entry["message_id"] == message_id
+            and entry["content"] == "Continue with a safer plan"
+            for entry in history
+        )
+        assert registry.get(assistant_id).state == AgentState.RUNNING
+    finally:
+        release_chat.set()
+
+
+def test_assistant_rejects_message_when_terminated(client):
+    assistant_id = _get_assistant_id(client)
+    assistant = registry.get(assistant_id)
+    assert assistant is not None
+    assistant.set_state(AgentState.TERMINATED, "done")
+
+    response = client.post(
+        "/api/assistant/message",
+        json={"content": "Continue"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Assistant is no longer available"
 
 
 def test_compact_command_replaces_history_with_summary(monkeypatch, client):

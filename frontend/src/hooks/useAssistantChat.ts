@@ -582,7 +582,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
       return;
     }
 
-    if (assistantState === "error" || assistantState === "terminated") {
+    if (assistantState === "terminated") {
       toast.error("Resolve the current chat before sending");
       return;
     }
@@ -851,6 +851,39 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     setPendingSend((current) => (current?.id === pendingId ? null : current));
   }, []);
 
+  const sendPendingSend = useCallback(
+    async (pendingId: string) => {
+      const current = pendingSendRef.current;
+      if (
+        !current ||
+        current.id !== pendingId ||
+        !assistantId ||
+        current.target_id !== assistantId ||
+        sending ||
+        autoSendingPendingSendRef.current ||
+        assistantState === "terminated"
+      ) {
+        return;
+      }
+
+      setPendingSend(null);
+      const sent = await submitParts({
+        content: current.content,
+        parts: current.parts ?? [],
+        history: current.history_entry,
+        pendingMessageTimestamp: current.timestamp,
+      });
+      if (!sent) {
+        setPendingSend({
+          ...current,
+          send_failed: true,
+          target_state: "error",
+        });
+      }
+    },
+    [assistantId, assistantState, sending, submitParts],
+  );
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Tab" && !event.shiftKey) {
       if (input.trim() || readyImages.length > 0) {
@@ -884,6 +917,7 @@ export function useAssistantChat(options: UseAssistantChatOptions = {}) {
     sending,
     clearChat,
     cancelPendingSend,
+    sendPendingSend,
     sendMessage,
     setInput,
     stopAssistant,

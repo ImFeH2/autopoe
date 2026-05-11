@@ -42,6 +42,7 @@ interface AssistantChatMessagesProps {
   nodes?: Map<string, Node>;
   onRetryHumanMessage?: (messageId: string) => void;
   onCancelPendingSend?: (pendingId: string) => void;
+  onSendPendingSend?: (pendingId: string) => void;
   onScroll: UIEventHandler<HTMLDivElement>;
   retryImageInputEnabled?: boolean;
   retryingMessageId?: string | null;
@@ -56,6 +57,7 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
   nodes,
   onRetryHumanMessage,
   onCancelPendingSend,
+  onSendPendingSend,
   onScroll,
   retryImageInputEnabled = true,
   retryingMessageId = null,
@@ -90,6 +92,7 @@ export const AssistantChatMessages = memo(function AssistantChatMessages({
               nodes={nodes}
               onRetryHumanMessage={onRetryHumanMessage}
               onCancelPendingSend={onCancelPendingSend}
+              onSendPendingSend={onSendPendingSend}
               retryImageInputEnabled={retryImageInputEnabled}
               retryingMessageId={retryingMessageId}
             />
@@ -145,6 +148,7 @@ const TimelineItem = memo(function TimelineItem({
   nodes,
   onRetryHumanMessage,
   onCancelPendingSend,
+  onSendPendingSend,
   retryImageInputEnabled,
   retryingMessageId,
 }: {
@@ -153,6 +157,7 @@ const TimelineItem = memo(function TimelineItem({
   nodes?: Map<string, Node>;
   onRetryHumanMessage?: (messageId: string) => void;
   onCancelPendingSend?: (pendingId: string) => void;
+  onSendPendingSend?: (pendingId: string) => void;
   retryImageInputEnabled?: boolean;
   retryingMessageId?: string | null;
 }) {
@@ -173,6 +178,9 @@ const TimelineItem = memo(function TimelineItem({
         content={item.content}
         onCancel={
           onCancelPendingSend ? () => onCancelPendingSend(item.id) : undefined
+        }
+        onSend={
+          onSendPendingSend ? () => onSendPendingSend(item.id) : undefined
         }
         parts={item.parts}
         sendFailed={item.send_failed}
@@ -280,18 +288,21 @@ const TimelineItem = memo(function TimelineItem({
 function PendingSendBubble({
   content,
   onCancel,
+  onSend,
   parts,
   sendFailed,
   targetState,
 }: {
   content: string;
   onCancel?: () => void;
+  onSend?: () => void;
   parts?: ContentPart[] | null;
   sendFailed?: boolean;
   targetState?: string | null;
 }) {
   const waitingOnIssue =
     sendFailed || targetState === "error" || targetState === "terminated";
+  const canSendNow = Boolean(onSend) && targetState === "error";
   const statusLabel = waitingOnIssue
     ? "Needs attention"
     : targetState === "sleeping"
@@ -327,6 +338,18 @@ function PendingSendBubble({
               <SendHorizonal className="size-3" />
               {statusLabel}
             </span>
+            {canSendNow ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={onSend}
+                className="h-auto rounded-full border-border bg-background/40 px-2.5 py-1 text-[11px] text-foreground hover:bg-accent/45"
+              >
+                <Send className="size-3" />
+                Send now
+              </Button>
+            ) : null}
             {onCancel ? (
               <Button
                 type="button"

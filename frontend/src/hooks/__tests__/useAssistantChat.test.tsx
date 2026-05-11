@@ -1356,6 +1356,156 @@ describe("useAssistantChat", () => {
     });
   });
 
+  it("sends a new assistant message after an error", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("error")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "error"));
+    sendAssistantMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-after-error",
+    });
+
+    const { result } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("continue after the error");
+    });
+
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+
+    expect(sendAssistantMessageRequestMock).toHaveBeenCalledWith({
+      content: "continue after the error",
+      parts: [{ type: "text", text: "continue after the error" }],
+    });
+    expect(toastErrorMock).not.toHaveBeenCalledWith(
+      "Resolve the current chat before sending",
+    );
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "continue after the error",
+      message_id: "msg-after-error",
+    });
+  });
+
+  it("explicitly sends an assistant pending send after an error", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("send after visible error");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("error")]]),
+    });
+    rerender();
+    const pending = result.current.timelineItems[0];
+    if (pending?.type !== "PendingSendMessage") {
+      throw new Error("Expected pending send message");
+    }
+
+    sendAssistantMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-pending-after-error",
+    });
+
+    await act(async () => {
+      await result.current.sendPendingSend(pending.id);
+    });
+
+    expect(sendAssistantMessageRequestMock).toHaveBeenCalledWith({
+      content: "send after visible error",
+      parts: [{ type: "text", text: "send after visible error" }],
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "send after visible error",
+      message_id: "msg-pending-after-error",
+    });
+  });
+
+  it("keeps an assistant pending send visible when explicit send fails", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("running")]]),
+    });
+    useAgentActivityRuntimeMock.mockReturnValue({
+      activeMessages: [],
+      activeToolCalls: new Map(),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useAssistantChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("still needs sending");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["assistant", buildAssistantNode("error")]]),
+    });
+    rerender();
+    const pending = result.current.timelineItems[0];
+    if (pending?.type !== "PendingSendMessage") {
+      throw new Error("Expected pending send message");
+    }
+
+    sendAssistantMessageRequestMock.mockRejectedValueOnce(
+      new Error("send failed"),
+    );
+
+    await act(async () => {
+      await result.current.sendPendingSend(pending.id);
+    });
+
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "still needs sending",
+      send_failed: true,
+      target_state: "error",
+    });
+  });
+
   it("cancels assistant pending send without adding it to input history", async () => {
     useAgentNodesRuntimeMock.mockReturnValue({
       agents: new Map([["assistant", buildAssistantNode("running")]]),

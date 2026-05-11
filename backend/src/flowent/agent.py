@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time as _time
-import traceback
 import uuid as _uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -132,7 +132,91 @@ class ResolvedModelSource:
 
 
 def build_error_context(content: str) -> str:
-    return f"<system>Previous runtime error:\n{content}</system>"
+    return (
+        f"<system>Previous runtime error:\n{normalize_error_context(content)}</system>"
+    )
+
+
+_RAW_HTML_DOCUMENT_PATTERN = re.compile(
+    r"<!doctype\s+html|</?html\b|</?head\b|</?body\b|<title\b",
+    re.IGNORECASE,
+)
+_RAW_HTML_FRAGMENT_LINE_PATTERN = re.compile(
+    r"^\s*</?(?:div|span|pre|code|p|br|h[1-6]|script|style)\b",
+    re.IGNORECASE,
+)
+_ERROR_RESPONSE_TEXT_PATTERN = re.compile(
+    r"\b(?:bad gateway|gateway timeout|internal server error|service unavailable|"
+    r"not found|forbidden|unauthorized|upstream|exception|runtimeerror|error)\b",
+    re.IGNORECASE,
+)
+_TRACEBACK_PATTERN = re.compile(r"(^|\n)\s*traceback\b", re.IGNORECASE)
+
+
+def contains_raw_error_response(content: str) -> bool:
+    if _RAW_HTML_DOCUMENT_PATTERN.search(content):
+        return True
+    if not _ERROR_RESPONSE_TEXT_PATTERN.search(content):
+        return False
+    return any(
+        _RAW_HTML_FRAGMENT_LINE_PATTERN.search(line) for line in content.splitlines()
+    )
+
+
+def normalize_error_context(content: str) -> str:
+    normalized = content.strip()
+    if not normalized:
+        return "Runtime error"
+
+    if contains_raw_error_response(normalized):
+        return "Upstream returned an unexpected error response"
+
+    traceback_match = _TRACEBACK_PATTERN.search(normalized)
+    if traceback_match is None:
+        return normalized
+
+    prefix = normalized[: traceback_match.start()].strip()
+    if prefix:
+        return prefix
+
+    for line in reversed(normalized.splitlines()):
+        candidate = line.strip()
+        if not candidate:
+            continue
+        if candidate.lower().startswith("traceback"):
+            continue
+        if candidate.startswith(("File ", "^")):
+            continue
+        if candidate.startswith("The above exception") or candidate.startswith(
+            "During handling"
+        ):
+            continue
+        return candidate
+    return "Runtime error"
+
+
+def normalize_compacted_execution_context(content: str) -> str:
+    normalized = content.strip()
+    if not normalized:
+        return ""
+    if contains_raw_error_response(normalized):
+        return "Previous compacted execution context contained an unexpected error response."
+
+    traceback_match = _TRACEBACK_PATTERN.search(normalized)
+    if traceback_match is None:
+        return normalized
+
+    prefix = normalized[: traceback_match.start()].strip()
+    if prefix:
+        return prefix
+    return normalize_error_context(normalized)
+
+
+def build_runtime_error_summary(exc: Exception) -> str:
+    message = str(exc).strip()
+    if not message:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {message}"
 
 
 class Agent:
@@ -1139,11 +1223,9 @@ class Agent:
                     self._interrupt_requested.clear()
                     self.set_interrupt_callback(None)
                     self._log.exception("Agent error")
-                    tb_str = traceback.format_exc()
-                    self._append_history(
-                        ErrorEntry(content=f"{type(exc).__name__}: {exc}\n\n{tb_str}"),
-                    )
-                    self.set_state(AgentState.ERROR, f"{type(exc).__name__}: {exc}")
+                    error_summary = build_runtime_error_summary(exc)
+                    self._append_history(ErrorEntry(content=error_summary))
+                    self.set_state(AgentState.ERROR, error_summary)
                     self._wait_for_input()
                     if self._terminate.is_set():
                         break
@@ -2050,7 +2132,8 @@ class Agent:
         if summary:
             messages.append(
                 self._build_runtime_system_message(
-                    f"Compacted execution context:\n{summary}"
+                    "Compacted execution context:\n"
+                    f"{normalize_compacted_execution_context(summary)}"
                 )
             )
         messages.extend(self._build_history_messages(history_snapshot[history_cutoff:]))

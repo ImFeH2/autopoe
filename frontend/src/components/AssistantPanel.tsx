@@ -39,6 +39,7 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
     scrollRef,
     sending,
     sendMessage,
+    sendPendingSend,
     setInput,
     stopAssistant,
     supportsInputImage = false,
@@ -90,6 +91,7 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
           nodes={agents}
           onRetryHumanMessage={(messageId) => void retryMessage(messageId)}
           onCancelPendingSend={cancelPendingSend}
+          onSendPendingSend={(pendingId) => void sendPendingSend(pendingId)}
           onScroll={onMessagesScroll}
           retryImageInputEnabled={supportsInputImage}
           retryingMessageId={retryingMessageId}

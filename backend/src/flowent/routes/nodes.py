@@ -344,7 +344,12 @@ async def clear_node_chat(node_id: str) -> dict:
 @router.post("/api/nodes/{node_id}/messages")
 async def dispatch_node_message(node_id: str, req: DispatchNodeMessageRequest) -> dict:
     from flowent.graph_service import dispatch_node_message
-    from flowent.models import NodeType, content_parts_to_text, has_image_parts
+    from flowent.models import (
+        AgentState,
+        NodeType,
+        content_parts_to_text,
+        has_image_parts,
+    )
     from flowent.models import TextPart as ModelTextPart
 
     node = registry.get(node_id)
@@ -366,6 +371,11 @@ async def dispatch_node_message(node_id: str, req: DispatchNodeMessageRequest) -
         raise HTTPException(
             status_code=400,
             detail="Human input can only target Assistant or a Workflow Leader",
+        )
+    if node.state == AgentState.TERMINATED:
+        raise HTTPException(
+            status_code=409,
+            detail="This workflow chat is no longer available",
         )
 
     try:

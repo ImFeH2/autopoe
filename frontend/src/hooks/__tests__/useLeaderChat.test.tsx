@@ -858,6 +858,144 @@ describe("useLeaderChat", () => {
     });
   });
 
+  it("sends a new workflow message after a leader error", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("error")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "error"));
+    dispatchNodeMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-workflow-after-error",
+    });
+
+    const { result } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("continue workflow chat");
+    });
+
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+
+    expect(dispatchNodeMessageRequestMock).toHaveBeenCalledWith("leader", {
+      content: "continue workflow chat",
+      parts: [{ type: "text", text: "continue workflow chat" }],
+    });
+    expect(toastErrorMock).not.toHaveBeenCalledWith(
+      "Resolve the current chat before sending",
+    );
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "continue workflow chat",
+      message_id: "msg-workflow-after-error",
+    });
+  });
+
+  it("explicitly sends a workflow pending send after a leader error", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("running")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("send workflow draft after error");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("error")]]),
+    });
+    rerender();
+    const pending = result.current.timelineItems[0];
+    if (pending?.type !== "PendingSendMessage") {
+      throw new Error("Expected pending send message");
+    }
+
+    dispatchNodeMessageRequestMock.mockResolvedValue({
+      status: "sent",
+      message_id: "msg-workflow-pending-after-error",
+    });
+
+    await act(async () => {
+      await result.current.sendPendingSend(pending.id);
+    });
+
+    expect(dispatchNodeMessageRequestMock).toHaveBeenCalledWith("leader", {
+      content: "send workflow draft after error",
+      parts: [{ type: "text", text: "send workflow draft after error" }],
+    });
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingHumanMessage",
+      content: "send workflow draft after error",
+      message_id: "msg-workflow-pending-after-error",
+    });
+  });
+
+  it("keeps a workflow pending send visible when explicit send fails", async () => {
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("running")]]),
+    });
+    fetchNodeDetailMock.mockResolvedValue(buildDetail([], "running"));
+
+    const { result, rerender } = renderHook(() => useLeaderChat());
+
+    await waitFor(() => {
+      expect(fetchNodeDetailMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.setInput("workflow draft still pending");
+    });
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Tab",
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    useAgentNodesRuntimeMock.mockReturnValue({
+      agents: new Map([["leader", buildLeaderNode("error")]]),
+    });
+    rerender();
+    const pending = result.current.timelineItems[0];
+    if (pending?.type !== "PendingSendMessage") {
+      throw new Error("Expected pending send message");
+    }
+
+    dispatchNodeMessageRequestMock.mockRejectedValueOnce(
+      new Error("send failed"),
+    );
+
+    await act(async () => {
+      await result.current.sendPendingSend(pending.id);
+    });
+
+    expect(result.current.timelineItems[0]).toMatchObject({
+      type: "PendingSendMessage",
+      content: "workflow draft still pending",
+      send_failed: true,
+      target_state: "error",
+    });
+  });
+
   it("replaces workflow pending send while the leader needs attention", async () => {
     useAgentNodesRuntimeMock.mockReturnValue({
       agents: new Map([["leader", buildLeaderNode("running")]]),

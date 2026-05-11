@@ -12,6 +12,7 @@ from flowent.assistant_commands import (
 )
 from flowent.image_assets import require_image_asset
 from flowent.models import (
+    AgentState,
     Message,
     content_parts_to_text,
     has_image_parts,
@@ -90,6 +91,8 @@ async def send_assistant_message(req: AssistantMessageRequest) -> dict:
     assistant = _get_assistant()
     if assistant is None:
         raise HTTPException(status_code=404, detail="Assistant not found")
+    if assistant.state == AgentState.TERMINATED:
+        raise HTTPException(status_code=409, detail="Assistant is no longer available")
 
     try:
         parts = _parse_request_parts(req)
