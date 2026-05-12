@@ -156,8 +156,8 @@ export function Sidebar({
                           className={cn(
                             "outline-hidden ring-sidebar-ring cursor-pointer transition-[width,height,padding,background-color,border-color,color] focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 data-[active=true]:text-sidebar-primary hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                             iconRail
-                              ? "mx-auto flex size-10 items-center justify-center rounded-sm border border-transparent p-0 text-sidebar-foreground/74 data-[active=true]:border-sidebar-ring/35 data-[active=true]:shadow-[inset_3px_0_0_var(--sidebar-ring)]"
-                              : "flex h-8 w-full items-center gap-2 overflow-hidden rounded-sm p-2 text-left text-sm",
+                              ? "mx-auto flex size-11 items-center justify-center rounded-sm border border-transparent p-1 text-sidebar-foreground/74 data-[active=true]:border-sidebar-ring/35 data-[active=true]:shadow-[inset_3px_0_0_var(--sidebar-ring)]"
+                              : "flex min-h-9 w-full items-center gap-2 overflow-hidden rounded-sm px-3 py-2.5 text-left text-sm",
                             !isActive && "text-sidebar-foreground/82",
                           )}
                         >

@@ -129,6 +129,8 @@ describe("Sidebar", () => {
 
     expect(screen.getByRole("button", { name: "Providers" })).toHaveClass(
       "cursor-pointer",
+      "px-3",
+      "py-2.5",
       "rounded-sm",
       "hover:bg-sidebar-accent",
     );
@@ -141,8 +143,9 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Configuration")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Assistant" })).toHaveClass(
-      "size-10",
+      "size-11",
       "cursor-pointer",
+      "p-1",
       "rounded-sm",
       "hover:bg-sidebar-accent",
     );

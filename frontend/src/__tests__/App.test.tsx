@@ -131,6 +131,6 @@ describe("App access gate", () => {
     expect(main).toHaveStyle({ marginLeft: `${SIDEBAR_RAIL_WIDTH}px` });
     expect(
       await screen.findByRole("button", { name: "Assistant" }),
-    ).toHaveClass("size-10");
+    ).toHaveClass("size-11");
   });
 });
