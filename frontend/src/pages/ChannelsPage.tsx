@@ -17,7 +17,7 @@ import {
 } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { Button } from "@/components/ui/button";
-import { PanelCard, StatusChip } from "@/components/ui/surface";
+import { PanelCard, StatusChip } from "@/components/surface";
 import { formatLocalTimestamp } from "@/lib/datetime";
 import type {
   TelegramApprovedChat,

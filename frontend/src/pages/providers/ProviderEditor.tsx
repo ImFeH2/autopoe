@@ -2,7 +2,7 @@ import { Check, Server } from "lucide-react";
 import { motion } from "motion/react";
 import { FormSection, SettingsRow } from "@/components/layout/PageScaffold";
 import { Button } from "@/components/ui/button";
-import { PageState } from "@/components/ui/surface";
+import { PageState } from "@/components/surface";
 import type { Provider } from "@/types";
 import { ProviderEndpointSection } from "@/pages/providers/ProviderEndpointSection";
 import { ProviderIdentitySection } from "@/pages/providers/ProviderIdentitySection";

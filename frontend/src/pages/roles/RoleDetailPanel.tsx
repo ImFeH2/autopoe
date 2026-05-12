@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PanelCard, StatusChip } from "@/components/ui/surface";
+import { PanelCard, StatusChip } from "@/components/surface";
 import type { ToolInfo } from "@/lib/api/meta";
 import type { RoleDraft, RolePanelMode, ToolState } from "@/pages/roles/lib";
 import { RoleIdentitySection } from "@/pages/roles/RoleIdentitySection";

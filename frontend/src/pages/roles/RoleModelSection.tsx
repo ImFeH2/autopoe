@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { PanelCard, StatusChip } from "@/components/ui/surface";
+import { PanelCard, StatusChip } from "@/components/surface";
 import { cn } from "@/lib/utils";
 import type { RoleDraft } from "@/pages/roles/lib";
 import { RoleModeSwitch } from "@/pages/roles/RoleModeSwitch";

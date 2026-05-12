@@ -8,7 +8,7 @@ import {
 import { HistoryView } from "@/components/HistoryView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DetailSection } from "@/components/ui/surface";
+import { DetailSection } from "@/components/surface";
 import {
   useAgentNodesRuntime,
   useAgentTabsRuntime,

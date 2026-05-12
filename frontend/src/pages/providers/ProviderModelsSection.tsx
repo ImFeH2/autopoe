@@ -1,7 +1,7 @@
 import { PencilLine, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { FormSection } from "@/components/layout/PageScaffold";
 import { Button } from "@/components/ui/button";
-import { PanelCard, StatusChip } from "@/components/ui/surface";
+import { PanelCard, StatusChip } from "@/components/surface";
 import { cn } from "@/lib/utils";
 import type { ProviderModelCatalogEntry } from "@/types";
 import {

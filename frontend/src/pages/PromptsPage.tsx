@@ -6,7 +6,7 @@ import { FormTextarea } from "@/components/form/FormControls";
 import { PageScaffold, PageTitleBar } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { Button } from "@/components/ui/button";
-import { PanelCard, StatusChip } from "@/components/ui/surface";
+import { PanelCard, StatusChip } from "@/components/surface";
 import {
   Tooltip,
   TooltipContent,

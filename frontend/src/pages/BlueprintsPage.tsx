@@ -36,7 +36,7 @@ import {
 } from "@/components/form/FormControls";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MotionButton } from "@/components/ui/motion-button";
+import { MotionButton } from "@/components/motion-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,

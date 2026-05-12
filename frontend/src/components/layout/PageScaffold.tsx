@@ -7,7 +7,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
-import { PanelCard } from "@/components/ui/surface";
+import { PanelCard } from "@/components/surface";
 import { cn } from "@/lib/utils";
 
 interface PageScaffoldProps {

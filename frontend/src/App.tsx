@@ -13,7 +13,7 @@ import {
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { ShellHeader } from "@/components/layout/ShellHeader";
 import { Button } from "@/components/ui/button";
-import { MotionButton } from "@/components/ui/motion-button";
+import { MotionButton } from "@/components/motion-button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AgentProvider, useAgentUI, type PageId } from "@/context/AgentContext";
 import { AccessProvider } from "@/context/AccessContext";

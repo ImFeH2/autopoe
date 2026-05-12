@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { StatusChip } from "@/components/ui/surface";
+import { StatusChip } from "@/components/surface";
 import { cn } from "@/lib/utils";
 
 interface RoleModeSwitchProps {

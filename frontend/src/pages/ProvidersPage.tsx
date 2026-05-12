@@ -1,5 +1,5 @@
 import { PageScaffold, PageTitleBar } from "@/components/layout/PageScaffold";
-import { PanelCard } from "@/components/ui/surface";
+import { PanelCard } from "@/components/surface";
 import { ProviderActionDialogs } from "@/pages/providers/ProviderActionDialogs";
 import { ProviderEditor } from "@/pages/providers/ProviderEditor";
 import { ProviderModelDialog } from "@/pages/providers/ProviderModelDialog";

@@ -35,7 +35,7 @@ import {
   PanelCard,
   PageState,
   StatusChip,
-} from "@/components/ui/surface";
+} from "@/components/surface";
 import { cn } from "@/lib/utils";
 
 const TOOL_ICONS: Record<string, LucideIcon> = {

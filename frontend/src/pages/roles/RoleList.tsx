@@ -2,7 +2,7 @@ import { motion } from "motion/react";
 import { Edit2, Eye, Plus, Trash2, Users } from "lucide-react";
 import { FormIconButton } from "@/components/form/FormControls";
 import { Button } from "@/components/ui/button";
-import { PageState, StatusChip } from "@/components/ui/surface";
+import { PageState, StatusChip } from "@/components/surface";
 import { getRoleModelSummary, getRoleToolSummary } from "@/pages/roles/lib";
 import { cn } from "@/lib/utils";
 import type { Provider, Role } from "@/types";

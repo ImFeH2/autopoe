@@ -1,7 +1,7 @@
 import { AgentGraph, type AgentGraphHandle } from "@/components/AgentGraph";
 import { PanelResizer } from "@/components/PanelResizer";
 import { Button } from "@/components/ui/button";
-import { MotionButton } from "@/components/ui/motion-button";
+import { MotionButton } from "@/components/motion-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AgentDetailPanel,

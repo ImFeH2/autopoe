@@ -2,7 +2,7 @@ import { Info } from "lucide-react";
 import { ModelParamsFields } from "@/components/ModelParamsFields";
 import { FormSection } from "@/components/layout/PageScaffold";
 import { Button } from "@/components/ui/button";
-import { PanelCard, StatusChip } from "@/components/ui/surface";
+import { PanelCard, StatusChip } from "@/components/surface";
 import {
   Tooltip,
   TooltipContent,
