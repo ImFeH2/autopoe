@@ -106,6 +106,14 @@ describe("Sidebar", () => {
     );
   });
 
+  it("keeps the active navigation item at the same font weight", () => {
+    renderSidebar();
+
+    const workspace = screen.getByRole("button", { name: "Workspace" });
+    expect(workspace).toHaveAttribute("data-active", "true");
+    expect(workspace.className).not.toContain("font-bold");
+  });
+
   it("renders icon-only navigation while compressed", () => {
     renderSidebar({ iconRail: true, width: 68 });
 
