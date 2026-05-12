@@ -1,5 +1,6 @@
 import {
   type ClipboardEventHandler,
+  type FormEvent,
   type KeyboardEventHandler,
   useLayoutEffect,
   useRef,
@@ -7,9 +8,16 @@ import {
 } from "react";
 import { ArrowUp, ImagePlus, Square, X } from "lucide-react";
 import { type AssistantComposerImage } from "@/components/assistant/shared";
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputButton,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { useImageViewer } from "@/context/imageViewer";
 import {
   insertAssistantCommand,
@@ -72,6 +80,7 @@ export function AssistantChatComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const actionLabel = busy ? (stopping ? "Stopping..." : "Stop") : "Send";
   const actionDisabled = busy ? stopping || !onStop : disabled;
+  const promptStatus = busy ? "streaming" : "ready";
   const {
     filtered: commandOptions,
     isCommandInput,
@@ -254,6 +263,18 @@ export function AssistantChatComposer({
     onAddImages(pastedImages);
   };
 
+  const handleComposerSubmit = (
+    _message: { text: string },
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    if (busy) {
+      onStop?.();
+      return;
+    }
+    onSend();
+  };
+
   return (
     <div
       className={cn(
@@ -308,9 +329,14 @@ export function AssistantChatComposer({
           )}
         </div>
       ) : null}
-      <div className="rounded-md border border-border bg-background/30 px-2 py-1 shadow-sm transition-[border-color,background-color,box-shadow] duration-200 hover:border-ring/35 focus-within:border-ring/45 focus-within:ring-[3px] focus-within:ring-ring/35">
+      <PromptInput
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        className="pointer-events-auto"
+        maxFiles={0}
+        onSubmit={handleComposerSubmit}
+      >
         {images.length > 0 ? (
-          <div className="flex flex-wrap gap-2 border-b border-border px-0.5 py-2">
+          <PromptInputBody className="flex flex-wrap gap-2 border-b border-border px-2.5 py-2.5">
             {images.map((image) => (
               <PendingImagePreviewTile
                 key={image.id}
@@ -318,44 +344,10 @@ export function AssistantChatComposer({
                 onRemove={() => onRemoveImage(image.id)}
               />
             ))}
-          </div>
+          </PromptInputBody>
         ) : null}
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1">
-          <Input
-            ref={fileInputRef}
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            className="hidden"
-            multiple
-            onChange={(event) => {
-              if (event.target.files && event.target.files.length > 0) {
-                resetCommandState();
-                onAddImages(event.target.files);
-              }
-              event.currentTarget.value = "";
-            }}
-            type="file"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={
-              imageInputEnabled
-                ? "Add images"
-                : "Current model does not support image input"
-            }
-            disabled={!imageInputEnabled}
-            onClick={() => fileInputRef.current?.click()}
-            className={cn(
-              "shrink-0 rounded-full transition-colors disabled:opacity-35",
-              imageInputEnabled
-                ? "bg-accent/55 text-foreground hover:bg-accent"
-                : "bg-accent/20 text-muted-foreground",
-            )}
-          >
-            <ImagePlus className="size-4" />
-          </Button>
-          <Textarea
+        <PromptInputBody>
+          <PromptInputTextarea
             ref={textareaRef}
             value={input}
             onChange={(event) => handleInputChange(event.target.value)}
@@ -367,34 +359,68 @@ export function AssistantChatComposer({
             }
             rows={1}
             className={cn(
-              "min-h-5 w-full resize-none self-center border-0 bg-transparent px-0.5 py-0 text-[13px] leading-5 text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0",
-              "rounded-sm",
+              "max-h-none min-h-5 resize-none px-2.5 py-2 text-[13px] leading-5",
               input.length === 0 && "truncate",
             )}
           />
-          <Button
-            type="button"
-            variant={!busy ? "default" : "destructive"}
-            size="sm"
-            onClick={busy ? onStop : onSend}
-            disabled={actionDisabled}
+        </PromptInputBody>
+        <PromptInputFooter className="px-1.5 py-1.5">
+          <PromptInputTools>
+            <input
+              ref={fileInputRef}
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                if (event.target.files && event.target.files.length > 0) {
+                  resetCommandState();
+                  onAddImages(event.target.files);
+                }
+                event.currentTarget.value = "";
+              }}
+              type="file"
+            />
+            <PromptInputButton
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={
+                imageInputEnabled
+                  ? "Add images"
+                  : "Current model does not support image input"
+              }
+              disabled={!imageInputEnabled}
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-full disabled:opacity-35"
+            >
+              <ImagePlus className="size-4" />
+            </PromptInputButton>
+          </PromptInputTools>
+          <PromptInputSubmit
             aria-label={
               busy ? `Stop ${targetLabel}` : `Send ${targetLabel} message`
             }
-            className={cn(
-              "shrink-0 rounded-full transition-all duration-300 active:scale-[0.96] disabled:opacity-30",
-              "h-8 gap-1.5 px-3.5",
-            )}
+            disabled={actionDisabled}
+            onStop={onStop}
+            size="sm"
+            status={promptStatus}
+            variant={!busy ? "default" : "destructive"}
+            className="rounded-full transition-all duration-300 active:scale-[0.96] disabled:opacity-30"
           >
             {busy ? (
-              <Square className="size-3.5 fill-current" strokeWidth={2.4} />
+              <>
+                <Square className="size-3.5 fill-current" strokeWidth={2.4} />
+                <span className="text-[11px] font-medium">{actionLabel}</span>
+              </>
             ) : (
-              <ArrowUp className="size-4" strokeWidth={2.5} />
+              <>
+                <ArrowUp className="size-4" strokeWidth={2.5} />
+                <span className="text-[11px] font-medium">{actionLabel}</span>
+              </>
             )}
-            <span className="text-[11px] font-medium">{actionLabel}</span>
-          </Button>
-        </div>
-      </div>
+          </PromptInputSubmit>
+        </PromptInputFooter>
+      </PromptInput>
       {!imageInputEnabled ? (
         <div className="px-1.5 pt-2 text-[11px] text-muted-foreground">
           Current model does not support image input.
