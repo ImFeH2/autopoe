@@ -114,6 +114,16 @@ describe("Sidebar", () => {
     expect(workspace.className).not.toContain("font-bold");
   });
 
+  it("uses a compact hover treatment for navigation items", () => {
+    renderSidebar();
+
+    expect(screen.getByRole("button", { name: "Providers" })).toHaveClass(
+      "cursor-pointer",
+      "rounded-sm",
+      "hover:bg-sidebar-accent",
+    );
+  });
+
   it("renders icon-only navigation while compressed", () => {
     renderSidebar({ iconRail: true, width: 68 });
 
@@ -122,6 +132,9 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Assistant" })).toHaveClass(
       "size-10",
+      "cursor-pointer",
+      "rounded-sm",
+      "hover:bg-sidebar-accent",
     );
     expect(screen.getByRole("button", { name: "Workspace" })).toHaveAttribute(
       "data-active",
