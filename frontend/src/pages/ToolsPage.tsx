@@ -230,7 +230,7 @@ export function ToolsPage() {
                     onClick={() => setQuery("")}
                   >
                     <X className="size-4" />
-                    Clear Search
+                    Clear
                   </Button>
                 }
                 className="border-transparent bg-transparent"

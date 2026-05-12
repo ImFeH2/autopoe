@@ -605,7 +605,7 @@ export function LeaderChatPanel({
             disabled={clearing}
             onClick={() => void clearChat()}
           >
-            {clearing ? "Clearing..." : "Clear Chat"}
+            {clearing ? "Clearing..." : "Clear"}
           </Button>
           <Button
             type="button"
@@ -613,7 +613,7 @@ export function LeaderChatPanel({
             variant="outline"
             onClick={onOpenDetails}
           >
-            Leader Details
+            Detail
           </Button>
         </div>
       </div>

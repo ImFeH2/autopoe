@@ -183,7 +183,7 @@ function PanelHeader({
           disabled={clearing}
           onClick={onClearChat}
         >
-          {clearing ? "Clearing..." : "Clear Chat"}
+          {clearing ? "Clearing..." : "Clear"}
         </Button>
         <Button
           type="button"
@@ -192,7 +192,7 @@ function PanelHeader({
           disabled={!onOpenDetails}
           onClick={onOpenDetails}
         >
-          Assistant Details
+          Detail
         </Button>
       </div>
     </div>

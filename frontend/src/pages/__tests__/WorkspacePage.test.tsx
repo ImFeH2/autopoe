@@ -650,7 +650,7 @@ describe("WorkspacePage", () => {
     ).toBeNull();
 
     const leaderDetailButtons = screen.getAllByRole("button", {
-      name: "Leader Details",
+      name: "Detail",
     });
     fireEvent.click(leaderDetailButtons[leaderDetailButtons.length - 1]);
 
@@ -671,7 +671,7 @@ describe("WorkspacePage", () => {
   it("exposes a workflow clear chat action in the workspace panel", () => {
     render(<WorkspacePage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear Chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
 
     expect(clearChatMock).toHaveBeenCalledTimes(1);
   });
