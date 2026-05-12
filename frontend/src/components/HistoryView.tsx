@@ -423,7 +423,7 @@ function CollapsibleBlock({
           variant="ghost"
           aria-expanded={open}
           onClick={toggle}
-          className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-md bg-transparent px-0 py-0 text-left text-inherit shadow-none hover:bg-transparent hover:text-inherit focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-md bg-transparent px-0 py-0 text-left text-inherit shadow-none hover:bg-transparent hover:text-inherit focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-transparent"
         >
           <span className="shrink-0 flex items-center justify-center">
             {icon}

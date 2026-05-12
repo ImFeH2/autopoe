@@ -697,7 +697,7 @@ function ActivityDisclosure({
         variant="ghost"
         size="sm"
         onClick={() => setOpen((current) => !current)}
-        className="h-auto w-full justify-start gap-2 px-0 py-0 text-left hover:bg-transparent hover:text-inherit"
+        className="h-auto w-full justify-start gap-2 px-0 py-0 text-left hover:bg-transparent hover:text-inherit dark:hover:bg-transparent"
       >
         <span className="flex size-5 shrink-0 translate-y-px items-center justify-center text-muted-foreground">
           {icon}
