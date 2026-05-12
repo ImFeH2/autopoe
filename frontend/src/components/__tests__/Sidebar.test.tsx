@@ -114,6 +114,16 @@ describe("Sidebar", () => {
     expect(workspace.className).not.toContain("font-bold");
   });
 
+  it("does not keep a gray background on the active navigation item", () => {
+    renderSidebar();
+
+    const workspace = screen.getByRole("button", { name: "Workspace" });
+    expect(workspace).toHaveAttribute("data-active", "true");
+    expect(workspace.className).not.toContain(
+      "data-[active=true]:bg-sidebar-accent",
+    );
+  });
+
   it("uses a compact hover treatment for navigation items", () => {
     renderSidebar();
 
