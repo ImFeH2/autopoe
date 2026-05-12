@@ -331,12 +331,12 @@ export function AssistantChatComposer({
       ) : null}
       <PromptInput
         accept="image/png,image/jpeg,image/gif,image/webp"
-        className="pointer-events-auto"
+        className="pointer-events-auto [&>[data-slot=input-group]]:rounded-xl [&>[data-slot=input-group]]:border-border [&>[data-slot=input-group]]:bg-background dark:[&>[data-slot=input-group]]:bg-graph-bg"
         maxFiles={0}
         onSubmit={handleComposerSubmit}
       >
         {images.length > 0 ? (
-          <PromptInputBody className="flex flex-wrap gap-2 border-b border-border px-2.5 py-2.5">
+          <PromptInputBody className="flex flex-wrap gap-2 rounded-t-xl border-b border-border px-2.5 py-2.5">
             {images.map((image) => (
               <PendingImagePreviewTile
                 key={image.id}
@@ -346,7 +346,12 @@ export function AssistantChatComposer({
             ))}
           </PromptInputBody>
         ) : null}
-        <PromptInputBody>
+        <PromptInputBody
+          className={cn(
+            "border-b border-border",
+            images.length > 0 ? "rounded-none" : "rounded-t-xl",
+          )}
+        >
           <PromptInputTextarea
             ref={textareaRef}
             value={input}
@@ -359,12 +364,12 @@ export function AssistantChatComposer({
             }
             rows={1}
             className={cn(
-              "max-h-none min-h-5 resize-none px-2.5 py-2 text-[13px] leading-5",
+              "max-h-none min-h-5 resize-none bg-background px-2.5 py-2 text-[13px] leading-5 dark:bg-graph-bg",
               input.length === 0 && "truncate",
             )}
           />
         </PromptInputBody>
-        <PromptInputFooter className="px-1.5 py-1.5">
+        <PromptInputFooter className="rounded-b-xl px-1.5 py-1.5">
           <PromptInputTools>
             <input
               ref={fileInputRef}
