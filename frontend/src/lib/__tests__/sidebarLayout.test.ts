@@ -6,6 +6,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   SIDEBAR_RAIL_WIDTH,
+  SIDEBAR_WIDTH_TRANSITION,
 } from "@/lib/sidebarLayout";
 
 describe("sidebarLayout", () => {
@@ -32,5 +33,9 @@ describe("sidebarLayout", () => {
     expect(shouldRememberSidebarWidth(SIDEBAR_MIN_WIDTH)).toBe(false);
     expect(shouldRememberSidebarWidth(SIDEBAR_MIN_WIDTH + 4)).toBe(false);
     expect(shouldRememberSidebarWidth(SIDEBAR_MIN_WIDTH + 12)).toBe(true);
+  });
+
+  it("keeps the sidebar mode change easy to follow", () => {
+    expect(SIDEBAR_WIDTH_TRANSITION.duration).toBeGreaterThanOrEqual(0.35);
   });
 });

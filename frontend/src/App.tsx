@@ -24,6 +24,7 @@ import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  SIDEBAR_WIDTH_TRANSITION,
   shouldRememberSidebarWidth,
 } from "@/lib/sidebarLayout";
 import { cn } from "@/lib/utils";
@@ -218,8 +219,7 @@ function AppContent() {
               }
         }
         transition={{
-          duration: 0.24,
-          ease: [0.22, 1, 0.36, 1],
+          ...SIDEBAR_WIDTH_TRANSITION,
         }}
         style={
           isCompactLayout

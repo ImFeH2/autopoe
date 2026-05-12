@@ -17,6 +17,7 @@ import {
 import { LogOut } from "lucide-react";
 import { motion } from "motion/react";
 import { PAGE_NAVIGATION_GROUPS } from "@/lib/pageNavigation";
+import { SIDEBAR_WIDTH_TRANSITION } from "@/lib/sidebarLayout";
 
 interface SidebarProps {
   autoHide?: boolean;
@@ -60,7 +61,7 @@ export function Sidebar({
   return (
     <motion.aside
       animate={{ width }}
-      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+      transition={SIDEBAR_WIDTH_TRANSITION}
       style={{ width: `${width}px` }}
       className={cn(
         "text-sidebar-foreground relative isolate z-40 flex flex-col overflow-visible border-r border-sidebar-border bg-sidebar shadow-[18px_0_44px_rgba(0,0,0,0.18)] transition-colors",
