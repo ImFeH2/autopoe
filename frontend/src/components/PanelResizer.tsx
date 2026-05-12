@@ -10,6 +10,7 @@ interface PanelResizerProps {
   onToggle?: () => void;
   toggleLabel?: string;
   togglePressed?: boolean;
+  showToggleControl?: boolean;
 }
 
 export function PanelResizer({
@@ -20,6 +21,7 @@ export function PanelResizer({
   onToggle,
   toggleLabel,
   togglePressed,
+  showToggleControl = true,
 }: PanelResizerProps) {
   const pointerStartRef = useRef<{
     x: number;
@@ -92,6 +94,26 @@ export function PanelResizer({
     <div
       onMouseDown={handleMouseDown}
       onClick={handleClick}
+      role={onToggle && !showToggleControl ? "button" : undefined}
+      aria-label={
+        onToggle && !showToggleControl && toggleLabel ? toggleLabel : undefined
+      }
+      aria-pressed={
+        onToggle && !showToggleControl && togglePressed !== undefined
+          ? togglePressed
+          : undefined
+      }
+      tabIndex={onToggle && !showToggleControl ? 0 : undefined}
+      onKeyDown={
+        onToggle && !showToggleControl
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onToggle();
+              }
+            }
+          : undefined
+      }
       className={cn(
         "absolute top-0 bottom-0 z-50 w-2 cursor-col-resize flex items-center justify-center -mx-1 group/resizer",
         position === "left" ? "left-0" : "right-0",
@@ -106,7 +128,7 @@ export function PanelResizer({
             : "bg-transparent group-hover/resizer:bg-primary/30",
         )}
       />
-      {onToggle ? (
+      {onToggle && showToggleControl ? (
         <Button
           type="button"
           variant="ghost"

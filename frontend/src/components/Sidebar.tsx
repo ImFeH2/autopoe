@@ -249,6 +249,7 @@ export function Sidebar({
         onToggle={onToggleMode}
         toggleLabel={iconRail ? "Show full navigation" : "Show icon navigation"}
         togglePressed={iconRail}
+        showToggleControl={false}
         className="w-4 -mx-2"
       />
     </motion.aside>
