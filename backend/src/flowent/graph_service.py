@@ -26,7 +26,6 @@ from flowent.models import (
     PortType,
     ReceivedMessage,
     Tab,
-    WorkflowActivationState,
     WorkflowDefinition,
     WorkflowNodeDefinition,
     WorkflowNodeKind,
@@ -56,9 +55,6 @@ from flowent.tools import (
 from flowent.workspace_store import workspace_store
 
 LEADER_NODE_NAME = "Leader"
-AGENT_ACTIVATION_GATE_MESSAGE = (
-    "Activate this workflow before sending work to agent nodes."
-)
 _PORT_TYPES = {item.value for item in PortType}
 _TRIGGER_KINDS = {"manual", "cron"}
 _LLM_RESPONSE_FORMAT_KINDS = {"text", "json_schema"}
@@ -765,13 +761,6 @@ def dispatch_port_value(
     )
     if edge is None:
         return None, "Send path is not connected"
-    if (
-        target_node.type == WorkflowNodeKind.AGENT
-        and not is_tab_leader(node_id=target_node_id, tab_id=tab_id)
-        and tab.activation_state != WorkflowActivationState.ACTIVE
-    ):
-        return None, AGENT_ACTIVATION_GATE_MESSAGE
-
     value_summary = _summarize_port_value(value, port_type=source_port.type)
     payload: dict[str, object] = {
         "status": "sent",
@@ -905,7 +894,6 @@ def serialize_tab_summary(tab: Tab) -> dict[str, object]:
         "id": tab.id,
         "title": tab.title,
         "leader_id": tab.leader_id,
-        "activation_state": tab.activation_state.value,
         "allow_network": tab.allow_network,
         "write_dirs": list(tab.write_dirs),
         "created_at": tab.created_at,
@@ -1306,18 +1294,6 @@ def delete_tab(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
-    if _is_active(tab):
-        _, deactivate_error = deactivate_tab(
-            tab_id=tab_id,
-            actor_id="assistant",
-            timeout=timeout,
-        )
-        if deactivate_error is not None:
-            return None, deactivate_error
-        tab = workspace_store.get_tab(tab_id)
-        if tab is None:
-            return None, f"Tab '{tab_id}' not found"
-
     stored_nodes = list_tab_nodes(tab_id)
     live_nodes = [node for node in registry.get_all() if node.config.tab_id == tab_id]
 
@@ -1331,6 +1307,20 @@ def delete_tab(
         )
     )
     removed_edge_ids = [edge.id for edge in tab.definition.edges]
+
+    lingering_active_node_ids: list[str] = []
+    for node in live_nodes:
+        if node.state in {AgentState.RUNNING, AgentState.SLEEPING}:
+            node.request_interrupt()
+            if not node.wait_until_idle(timeout=timeout):
+                lingering_active_node_ids.append(node.uuid)
+
+    if lingering_active_node_ids:
+        return (
+            None,
+            "Failed to delete workflow because some nodes did not stop: "
+            + ", ".join(node_id[:8] for node_id in lingering_active_node_ids),
+        )
 
     for node in live_nodes:
         node.request_termination("tab_deleted")
@@ -1399,10 +1389,6 @@ def _persist_tab(tab: Tab, *, actor_id: str) -> Tab:
     workspace_store.upsert_tab(tab)
     _emit_tab_updated(tab_id=tab.id, agent_id=actor_id)
     return tab
-
-
-def _is_active(tab: Tab) -> bool:
-    return tab.activation_state == WorkflowActivationState.ACTIVE
 
 
 def create_graph_node(
@@ -1999,65 +1985,6 @@ def validate_workflow_node_config(
     elif node.type == WorkflowNodeKind.CODE:
         _validate_code_node(node, errors)
     return errors
-
-
-def activate_tab(
-    *,
-    tab_id: str,
-    actor_id: str = "assistant",
-) -> tuple[Tab | None, list[dict[str, str]] | None, str | None]:
-    tab = workspace_store.get_tab(tab_id)
-    if tab is None:
-        return None, None, f"Tab '{tab_id}' not found"
-    if tab.activation_state != WorkflowActivationState.ACTIVE:
-        tab.activation_state = WorkflowActivationState.ACTIVE
-        _persist_tab(tab, actor_id=actor_id)
-    return tab, None, None
-
-
-def deactivate_tab(
-    *,
-    tab_id: str,
-    actor_id: str = "assistant",
-    timeout: float = SYSTEM_NODE_TIMEOUT,
-) -> tuple[Tab | None, str | None]:
-    tab = workspace_store.get_tab(tab_id)
-    if tab is None:
-        return None, f"Tab '{tab_id}' not found"
-
-    lingering_node_ids: list[str] = []
-    ordinary_node_ids = {
-        node.id
-        for node in tab.definition.nodes
-        if node.type == WorkflowNodeKind.AGENT
-        and not is_tab_leader(node_id=node.id, tab_id=tab_id)
-    }
-    for node_id in ordinary_node_ids:
-        live_node = registry.get(node_id)
-        if live_node is not None:
-            if live_node.state in {AgentState.RUNNING, AgentState.SLEEPING}:
-                live_node.request_interrupt()
-                if not live_node.wait_until_idle(timeout=timeout):
-                    lingering_node_ids.append(live_node.uuid)
-            continue
-        record = workspace_store.get_node_record(node_id)
-        if record is None:
-            continue
-        if record.state in {AgentState.RUNNING, AgentState.SLEEPING}:
-            record.state = AgentState.IDLE
-            workspace_store.upsert_node_record(record)
-
-    if lingering_node_ids:
-        return (
-            None,
-            "Failed to deactivate workflow because some nodes did not stop: "
-            + ", ".join(node_id[:8] for node_id in lingering_node_ids),
-        )
-
-    if tab.activation_state != WorkflowActivationState.INACTIVE:
-        tab.activation_state = WorkflowActivationState.INACTIVE
-        _persist_tab(tab, actor_id=actor_id)
-    return tab, None
 
 
 def create_edge(

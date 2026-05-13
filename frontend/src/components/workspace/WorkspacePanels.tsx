@@ -19,13 +19,7 @@ import { useMeasuredHeight } from "@/hooks/useMeasuredHeight";
 import { interruptNode } from "@/lib/api";
 import { getNodeLabel, nodeTypeIcon } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type {
-  AgentState,
-  ContactEntry,
-  ContactPath,
-  Node,
-  WorkflowActivationState,
-} from "@/types";
+import type { AgentState, ContactEntry, ContactPath, Node } from "@/types";
 
 const workspaceSelectionBadgeClass =
   "rounded-md bg-accent/45 px-2 py-1 text-xs text-foreground";
@@ -90,29 +84,6 @@ export function BadgeChip({
     >
       {children}
     </div>
-  );
-}
-
-export function ActivationBadge({
-  state,
-  compact = false,
-}: {
-  state?: WorkflowActivationState;
-  compact?: boolean;
-}) {
-  const active = state === "active";
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-full border font-medium transition-colors",
-        compact ? "px-1.5 py-0.5 text-[9px]" : "px-2.5 py-0.5 text-[10px]",
-        active
-          ? "border-graph-status-running/18 bg-graph-status-running/[0.12] text-graph-status-running"
-          : "border-graph-status-idle/18 bg-graph-status-idle/[0.08] text-graph-status-idle/78",
-      )}
-    >
-      {active ? "Active" : "Inactive"}
-    </span>
   );
 }
 
@@ -622,7 +593,6 @@ export function LeaderChatPanel({
           >
             {connected ? "Online" : "Connecting..."}
           </span>
-          <ActivationBadge state={activeTab.activation_state} />
         </div>
         <div className="flex items-center gap-1.5">
           <Button

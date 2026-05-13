@@ -4,12 +4,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from flowent.graph_service import (
-    activate_tab,
     create_agent_node,
     create_edge,
     create_graph_node,
     create_tab,
-    deactivate_tab,
     delete_agent_node,
     delete_edge,
     delete_tab,
@@ -122,30 +120,6 @@ async def create_workflow_route(req: CreateTabRequest) -> dict[str, object]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return serialize_tab_summary(tab)
-
-
-@router.post("/api/workflows/{tab_id}/activate")
-async def activate_workflow_route(tab_id: str) -> dict[str, object]:
-    updated, errors, error = activate_tab(tab_id=tab_id, actor_id=tab_id)
-    if errors:
-        raise HTTPException(status_code=400, detail={"errors": errors})
-    if error is not None or updated is None:
-        raise HTTPException(
-            status_code=404 if error and error.endswith("not found") else 400,
-            detail=error or "Failed to activate workflow",
-        )
-    return serialize_tab_summary(updated)
-
-
-@router.post("/api/workflows/{tab_id}/deactivate")
-async def deactivate_workflow_route(tab_id: str) -> dict[str, object]:
-    updated, error = deactivate_tab(tab_id=tab_id, actor_id=tab_id)
-    if error is not None or updated is None:
-        raise HTTPException(
-            status_code=404 if error and error.endswith("not found") else 400,
-            detail=error or "Failed to deactivate workflow",
-        )
-    return serialize_tab_summary(updated)
 
 
 @router.get("/api/workflows/{tab_id}")

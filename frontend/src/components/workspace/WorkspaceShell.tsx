@@ -5,7 +5,6 @@ import { MotionButton } from "@/components/motion-button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AgentDetailPanel,
-  ActivationBadge,
   BadgeChip,
   LeaderChatPanel,
   PanelToggleButton,
@@ -29,7 +28,6 @@ import {
   GitGraph,
   Link2,
   Plus,
-  Power,
   Radio,
   Redo2,
   Save,
@@ -113,7 +111,6 @@ interface WorkspaceShellProps {
   onOpenLeaderDetails: () => void;
   onOpenConnectDialog: () => void;
   onSaveDefinition: () => void;
-  onToggleActivation: () => void;
   panelVisible: boolean;
   pendingAction: WorkspacePendingAction;
   regularTabAgents: Node[];
@@ -129,7 +126,6 @@ interface WorkspaceShellProps {
   sourcePortOptions: WorkspacePortOption[];
   targetPortOptions: WorkspacePortOption[];
   workspaceRef: RefObject<HTMLDivElement | null>;
-  workflowReceivingWork: boolean;
 }
 
 export function WorkspaceShell({
@@ -156,7 +152,6 @@ export function WorkspaceShell({
   onOpenLeaderDetails,
   onOpenConnectDialog,
   onSaveDefinition,
-  onToggleActivation,
   panelVisible,
   pendingAction,
   resolvedPanelWidth,
@@ -169,7 +164,6 @@ export function WorkspaceShell({
   togglePanel,
   workflowNodeOptions,
   workspaceRef,
-  workflowReceivingWork,
 }: WorkspaceShellProps) {
   const renderPrimaryPanel = () => {
     if (leaderDetailVisible && leaderNode) {
@@ -228,7 +222,6 @@ export function WorkspaceShell({
                   )}
                 >
                   <div className="truncate leading-tight">{tab.title}</div>
-                  <ActivationBadge state={tab.activation_state} compact />
                 </Button>
                 <Button
                   type="button"
@@ -341,11 +334,6 @@ export function WorkspaceShell({
             </BadgeChip>
             {activeTab ? (
               <BadgeChip>
-                <ActivationBadge state={activeTab.activation_state} compact />
-              </BadgeChip>
-            ) : null}
-            {activeTab ? (
-              <BadgeChip>
                 {activeTab.node_count ?? activeTab.definition.nodes.length}{" "}
                 nodes
               </BadgeChip>
@@ -376,20 +364,6 @@ export function WorkspaceShell({
                 <Redo2 className="size-4 opacity-70" />
                 Redo
               </ToolbarButton>
-              <ToolbarDivider />
-              <ToolbarButton
-                disabled={
-                  !activeTabId ||
-                  pendingAction === "activate-workflow" ||
-                  pendingAction === "deactivate-workflow"
-                }
-                active={workflowReceivingWork}
-                onClick={onToggleActivation}
-              >
-                <Power className="size-4 opacity-70" />
-                {workflowReceivingWork ? "Deactivate" : "Activate"}
-              </ToolbarButton>
-              <ToolbarDivider />
               <ToolbarButton
                 disabled={!activeTabId}
                 active={editorMode === "graph"}

@@ -37,7 +37,6 @@ export function WorkspacePage() {
     handleDeleteTab,
     handleOpenLeaderDetails,
     handleSaveDefinition,
-    handleToggleActivation,
     isCompactWorkspace,
     isDragging,
     leaderDetailVisible,
@@ -79,7 +78,6 @@ export function WorkspacePage() {
     togglePanel,
     workflowNodeOptions,
     workspaceRef,
-    workflowReceivingWork,
   } = useWorkspacePageState();
 
   return (
@@ -108,7 +106,6 @@ export function WorkspacePage() {
         onOpenLeaderDetails={handleOpenLeaderDetails}
         onOpenConnectDialog={openConnectDialog}
         onSaveDefinition={handleSaveDefinition}
-        onToggleActivation={handleToggleActivation}
         panelVisible={panelVisible}
         pendingAction={pendingAction}
         regularTabAgents={regularTabAgents}
@@ -124,7 +121,6 @@ export function WorkspacePage() {
         sourcePortOptions={sourcePortOptions}
         targetPortOptions={targetPortOptions}
         workspaceRef={workspaceRef}
-        workflowReceivingWork={workflowReceivingWork}
       />
 
       <CreateTabDialog

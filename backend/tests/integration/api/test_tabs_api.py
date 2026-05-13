@@ -1,6 +1,7 @@
 from copy import deepcopy
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -63,7 +64,7 @@ def test_create_tab_node_and_edge_round_trip(client: TestClient):
     assert "goal" not in tab
     assert tab["node_count"] == 0
     assert tab["edge_count"] == 0
-    assert tab["activation_state"] == "inactive"
+    assert "activation_state" not in tab
     assert tab["allow_network"] is True
     assert tab["write_dirs"] == ["/tmp"]
     assert tab["definition"] == {"version": 1, "nodes": [], "edges": []}
@@ -113,6 +114,7 @@ def test_create_tab_node_and_edge_round_trip(client: TestClient):
     tab_detail = tab_detail_response.json()
     assert tab_detail["workflow"]["id"] == tab_id
     assert "goal" not in tab_detail["workflow"]
+    assert "activation_state" not in tab_detail["workflow"]
     assert tab_detail["workflow"]["allow_network"] is True
     assert tab_detail["workflow"]["write_dirs"] == ["/tmp"]
     assert tab_detail["workflow"]["node_count"] == 2
@@ -464,31 +466,26 @@ def test_update_tab_definition_rejects_agent_set_changes(client: TestClient):
     assert untouched.status_code == 200
 
 
-def test_activate_empty_workflow_succeeds_without_graph_validation(client: TestClient):
-    tab = client.post("/api/workflows", json={"title": "Empty"}).json()
+def test_workflow_has_no_activation_routes(client: TestClient):
+    tab = client.post("/api/workflows", json={"title": "Always Ready"}).json()
 
-    response = client.post(f"/api/workflows/{tab['id']}/activate")
+    activate_response = client.post(f"/api/workflows/{tab['id']}/activate")
+    deactivate_response = client.post(f"/api/workflows/{tab['id']}/deactivate")
 
-    assert response.status_code == 200
-    assert response.json()["activation_state"] == "active"
-    detail = client.get(f"/api/workflows/{tab['id']}").json()
-    assert detail["workflow"]["activation_state"] == "active"
+    assert activate_response.status_code == 405
+    assert deactivate_response.status_code == 405
 
 
-def test_activate_agent_only_workflow_succeeds_without_trigger(client: TestClient):
+def test_agent_only_workflow_is_available_without_trigger(client: TestClient):
     tab = client.post("/api/workflows", json={"title": "Collaborative"}).json()
     worker = _create_agent_node(client, tab_id=tab["id"], name="Worker")
 
-    response = client.post(f"/api/workflows/{tab['id']}/activate")
-
-    assert response.status_code == 200
-    assert response.json()["activation_state"] == "active"
     detail = client.get(f"/api/workflows/{tab['id']}").json()
-    assert detail["workflow"]["activation_state"] == "active"
+    assert "activation_state" not in detail["workflow"]
     assert detail["nodes"][0]["id"] == worker["id"]
 
 
-def test_activate_valid_manual_trigger_graph_succeeds(client: TestClient):
+def test_manual_trigger_workflow_is_available_after_creation(client: TestClient):
     tab = client.post("/api/workflows", json={"title": "Manual"}).json()
     trigger = _create_graph_node(
         client,
@@ -498,16 +495,12 @@ def test_activate_valid_manual_trigger_graph_succeeds(client: TestClient):
         config={"kind": "manual", "output_type": "string", "message": "Run"},
     )
 
-    response = client.post(f"/api/workflows/{tab['id']}/activate")
-
-    assert response.status_code == 200
-    assert response.json()["activation_state"] == "active"
     detail = client.get(f"/api/workflows/{tab['id']}").json()
-    assert detail["workflow"]["activation_state"] == "active"
+    assert "activation_state" not in detail["workflow"]
     assert detail["nodes"][0]["id"] == trigger["id"]
 
 
-def test_active_workflow_allows_graph_and_json_edits(
+def test_workflow_allows_graph_and_json_edits(
     client: TestClient,
 ):
     tab = client.post("/api/workflows", json={"title": "Editable"}).json()
@@ -518,7 +511,6 @@ def test_active_workflow_allows_graph_and_json_edits(
         name="Manual start",
         config={"kind": "manual", "output_type": "string", "message": "Run"},
     )
-    assert client.post(f"/api/workflows/{tab['id']}/activate").status_code == 200
 
     create_response = client.post(
         f"/api/workflows/{tab['id']}/nodes",
@@ -535,7 +527,7 @@ def test_active_workflow_allows_graph_and_json_edits(
         json={"definition": definition},
     )
     assert semantic_response.status_code == 200
-    assert semantic_response.json()["activation_state"] == "active"
+    assert "activation_state" not in semantic_response.json()
     assert semantic_response.json()["definition"]["nodes"][0]["config"]["message"] == (
         "Changed"
     )
@@ -549,21 +541,23 @@ def test_active_workflow_allows_graph_and_json_edits(
         json={"definition": view_definition},
     )
     assert view_response.status_code == 200
-    assert view_response.json()["activation_state"] == "active"
+    assert "activation_state" not in view_response.json()
     assert view_response.json()["definition"]["view"]["positions"][trigger["id"]] == {
         "x": 12.0,
         "y": 24.0,
     }
 
 
-def test_deactivate_interrupts_running_workflow_nodes(
+@pytest.mark.parametrize("active_state", ["running", "sleeping"])
+def test_delete_workflow_requests_active_nodes_to_stop(
+    active_state: str,
     monkeypatch,
     client: TestClient,
 ):
     from flowent.models import AgentState
     from flowent.registry import registry
 
-    tab = client.post("/api/workflows", json={"title": "Deactivate"}).json()
+    tab = client.post("/api/workflows", json={"title": "Delete Running"}).json()
     trigger = _create_graph_node(
         client,
         tab_id=tab["id"],
@@ -583,10 +577,9 @@ def test_deactivate_interrupts_running_workflow_nodes(
         ).status_code
         == 200
     )
-    assert client.post(f"/api/workflows/{tab['id']}/activate").status_code == 200
     live_worker = registry.get(worker["id"])
     assert live_worker is not None
-    live_worker.set_state(AgentState.RUNNING, "test")
+    live_worker.set_state(AgentState(active_state), "test")
     interrupted: list[str] = []
 
     def fake_request_interrupt() -> bool:
@@ -596,15 +589,47 @@ def test_deactivate_interrupts_running_workflow_nodes(
 
     monkeypatch.setattr(live_worker, "request_interrupt", fake_request_interrupt)
 
-    response = client.post(f"/api/workflows/{tab['id']}/deactivate")
+    response = client.delete(f"/api/workflows/{tab['id']}")
 
     assert response.status_code == 200
-    assert response.json()["activation_state"] == "inactive"
+    assert response.json()["id"] == tab["id"]
     assert interrupted == [worker["id"]]
-    assert live_worker.state == AgentState.IDLE
 
 
-def test_activate_does_not_run_whole_graph_port_validation(client: TestClient):
+def test_delete_workflow_keeps_records_when_active_node_does_not_stop(
+    monkeypatch,
+    client: TestClient,
+):
+    from flowent.models import AgentState
+    from flowent.registry import registry
+    from flowent.workspace_store import workspace_store
+
+    tab = client.post("/api/workflows", json={"title": "Delete Timeout"}).json()
+    worker = _create_agent_node(client, tab_id=tab["id"], name="Worker")
+    live_worker = registry.get(worker["id"])
+    assert live_worker is not None
+    live_worker.set_state(AgentState.SLEEPING, "test")
+    interrupted: list[str] = []
+
+    def fake_request_interrupt() -> bool:
+        interrupted.append(live_worker.uuid)
+        return True
+
+    monkeypatch.setattr(live_worker, "request_interrupt", fake_request_interrupt)
+    monkeypatch.setattr(live_worker, "wait_until_idle", lambda timeout=None: False)
+
+    response = client.delete(f"/api/workflows/{tab['id']}")
+
+    assert response.status_code == 400
+    assert "some nodes did not stop" in response.json()["detail"]
+    assert interrupted == [worker["id"]]
+    assert workspace_store.get_tab(tab["id"]) is not None
+    assert workspace_store.get_node_record(worker["id"]) is not None
+
+
+def test_workflow_detail_tolerates_existing_invalid_port_connection(
+    client: TestClient,
+):
     from flowent.models import GraphEdge
     from flowent.workspace_store import workspace_store
 
@@ -655,12 +680,9 @@ def test_activate_does_not_run_whole_graph_port_validation(client: TestClient):
     )
     workspace_store.upsert_tab(stored_tab)
 
-    response = client.post(f"/api/workflows/{tab['id']}/activate")
-
-    assert response.status_code == 200
-    assert response.json()["activation_state"] == "active"
     detail = client.get(f"/api/workflows/{tab['id']}").json()
-    assert detail["workflow"]["activation_state"] == "active"
+    assert detail["workflow"]["id"] == tab["id"]
+    assert "activation_state" not in detail["workflow"]
 
 
 def test_save_definition_validates_llm_model_capabilities(client: TestClient):
@@ -699,7 +721,7 @@ def test_save_definition_validates_llm_model_capabilities(client: TestClient):
     assert response.json()["detail"] == "llm model does not support structured_output"
 
 
-def test_activate_does_not_validate_existing_llm_model_capabilities(
+def test_workflow_detail_does_not_validate_existing_llm_model_capabilities(
     client: TestClient,
 ):
     provider = client.post(
@@ -711,7 +733,7 @@ def test_activate_does_not_validate_existing_llm_model_capabilities(
             "models": [{"model": "gpt-5", "structured_output": False}],
         },
     ).json()
-    tab = client.post("/api/workflows", json={"title": "Structured Activate"}).json()
+    tab = client.post("/api/workflows", json={"title": "Structured"}).json()
     llm_response = client.post(
         f"/api/workflows/{tab['id']}/nodes",
         json={
@@ -744,7 +766,7 @@ def test_activate_does_not_validate_existing_llm_model_capabilities(
     stored_node.config["output_type"] = "json"
     workspace_store.upsert_tab(stored_tab)
 
-    response = client.post(f"/api/workflows/{tab['id']}/activate")
+    detail = client.get(f"/api/workflows/{tab['id']}").json()
 
-    assert response.status_code == 200
-    assert response.json()["activation_state"] == "active"
+    assert detail["workflow"]["id"] == tab["id"]
+    assert "activation_state" not in detail["workflow"]

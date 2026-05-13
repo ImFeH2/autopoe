@@ -12,9 +12,7 @@ import {
   useAgentUI,
 } from "@/context/AgentContext";
 import {
-  activateWorkflowRequest,
   createTabRequest,
-  deactivateWorkflowRequest,
   deleteTabRequest,
   fetchSettings,
   fetchRoles,
@@ -65,8 +63,6 @@ export type WorkspacePendingAction =
   | "connect-ports"
   | "delete-tab"
   | "save-definition"
-  | "activate-workflow"
-  | "deactivate-workflow"
   | null;
 
 export type WorkspacePanelView = "chat" | "detail";
@@ -76,6 +72,7 @@ export interface DeleteTabTarget {
   id: string;
   title: string;
   nodeCount?: number;
+  hasRunningNodes: boolean;
 }
 
 function formatPortLabel(port: WorkflowPort): string {
@@ -243,8 +240,6 @@ export function useWorkspacePageState() {
     ? (agents.get(selectedAgentId) ?? null)
     : null;
   const activeTab = activeTabId ? (tabs.get(activeTabId) ?? null) : null;
-  const activeWorkflowState = activeTab?.activation_state ?? "inactive";
-  const workflowReceivingWork = activeWorkflowState === "active";
   const tabAgents = useMemo(
     () =>
       Array.from(agents.values()).filter(
@@ -466,36 +461,6 @@ export function useWorkspacePageState() {
     setActiveTabId,
   ]);
 
-  const handleToggleActivation = useCallback(async () => {
-    if (!activeTabId) {
-      toast.error("Create or select a workflow first");
-      return;
-    }
-    const nextPendingAction = workflowReceivingWork
-      ? "deactivate-workflow"
-      : "activate-workflow";
-    setPendingAction(nextPendingAction);
-    try {
-      if (workflowReceivingWork) {
-        await deactivateWorkflowRequest(activeTabId);
-        toast.success("Workflow deactivated");
-      } else {
-        await activateWorkflowRequest(activeTabId);
-        toast.success("Workflow activated");
-      }
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : workflowReceivingWork
-            ? "Failed to deactivate workflow"
-            : "Failed to activate workflow",
-      );
-    } finally {
-      setPendingAction(null);
-    }
-  }, [activeTabId, workflowReceivingWork]);
-
   const openCreateNodeDialog = useCallback(() => {
     if (!activeTabId) {
       toast.error("Create or select a workflow first");
@@ -562,9 +527,14 @@ export function useWorkspacePageState() {
 
   const requestDeleteTab = useCallback(
     (tabId: string, title: string, nodeCount?: number) => {
-      setDeleteTabTarget({ id: tabId, title, nodeCount });
+      const hasRunningNodes = Array.from(agents.values()).some(
+        (agent) =>
+          agent.tab_id === tabId &&
+          (agent.state === "running" || agent.state === "sleeping"),
+      );
+      setDeleteTabTarget({ id: tabId, title, nodeCount, hasRunningNodes });
     },
-    [],
+    [agents],
   );
 
   const handleDeleteTab = useCallback(async () => {
@@ -702,7 +672,6 @@ export function useWorkspacePageState() {
     handleDeleteTab,
     handleOpenLeaderDetails,
     handleSaveDefinition,
-    handleToggleActivation,
     isCompactWorkspace,
     isDragging,
     leaderDetailVisible,
@@ -744,6 +713,5 @@ export function useWorkspacePageState() {
     togglePanel,
     workflowNodeOptions,
     workspaceRef,
-    workflowReceivingWork,
   };
 }

@@ -11,9 +11,7 @@ export {
 } from "./nodes";
 export {
   fetchTabs,
-  activateWorkflowRequest,
   createTabRequest,
-  deactivateWorkflowRequest,
   updateTabDefinitionRequest,
   deleteTabRequest,
   fetchTabDetail,

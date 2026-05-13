@@ -581,7 +581,7 @@ afterEach(() => {
 });
 
 describe("AgentGraph", () => {
-  it("shows an empty graph background for an active workflow without nodes", () => {
+  it("shows an empty graph background for a selected workflow without nodes", () => {
     renderGraph([]);
 
     expect(screen.getByTestId("react-flow")).toBeInTheDocument();
@@ -890,7 +890,7 @@ describe("AgentGraph", () => {
     });
   });
 
-  it("renders only nodes from the active workflow and keeps leaders out of the graph", async () => {
+  it("renders only nodes from the selected workflow and keeps leaders out of the graph", async () => {
     renderGraph([
       buildNode({
         id: "leader-1",

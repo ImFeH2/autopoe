@@ -251,8 +251,6 @@ function useMockWorkspacePageState() {
     | "connect-ports"
     | "delete-tab"
     | "save-definition"
-    | "activate-workflow"
-    | "deactivate-workflow"
     | null
   >(null);
   const [createTabTitle, setCreateTabTitle] = useState("");
@@ -271,6 +269,7 @@ function useMockWorkspacePageState() {
     id: string;
     title: string;
     nodeCount?: number;
+    hasRunningNodes: boolean;
   } | null>(null);
   const [definitionDraft, setDefinitionDraft] = useState(
     JSON.stringify({ version: 1, nodes: [], edges: [] }, null, 2),
@@ -292,6 +291,12 @@ function useMockWorkspacePageState() {
       is_leader: true,
       role_name: "Conductor",
     });
+  const regularTabAgents =
+    workspacePageScenario.regularTabAgents ??
+    (selectedAgent && !selectedAgent.is_leader ? [selectedAgent] : []);
+  const workflowAgents = [leaderNode, ...regularTabAgents].filter(
+    (agent): agent is Node => Boolean(agent),
+  );
   const setActiveTabId = (nextValue: string | null) => {
     workspacePageScenario.setActiveTabIdSpy?.(nextValue);
     setActiveTabIdState(nextValue);
@@ -387,7 +392,6 @@ function useMockWorkspacePageState() {
       setLeaderDetailVisible(true);
     },
     handleSaveDefinition: async () => {},
-    handleToggleActivation: async () => {},
     isCompactWorkspace: false,
     isDragging: false,
     leaderDetailVisible,
@@ -405,11 +409,14 @@ function useMockWorkspacePageState() {
     },
     panelVisible: panelOpen || Boolean(selectedAgent),
     pendingAction,
-    regularTabAgents:
-      workspacePageScenario.regularTabAgents ??
-      (selectedAgent && !selectedAgent.is_leader ? [selectedAgent] : []),
+    regularTabAgents,
     requestDeleteTab: (tabId: string, title: string, nodeCount?: number) => {
-      setDeleteTabTarget({ id: tabId, title, nodeCount });
+      const hasRunningNodes = workflowAgents.some(
+        (agent) =>
+          agent.tab_id === tabId &&
+          (agent.state === "running" || agent.state === "sleeping"),
+      );
+      setDeleteTabTarget({ id: tabId, title, nodeCount, hasRunningNodes });
     },
     resolvedPanelWidth: 560,
     roles,
@@ -441,7 +448,6 @@ function useMockWorkspacePageState() {
     },
     workflowNodeOptions: [],
     workspaceRef,
-    workflowReceivingWork: activeTab?.activation_state === "active",
   };
 }
 
@@ -578,7 +584,6 @@ describe("WorkspacePage", () => {
     expect(
       within(chatHeader!).getByText("Role: Conductor"),
     ).toBeInTheDocument();
-    expect(within(chatHeader!).getByText("Inactive")).toBeInTheDocument();
     expect(within(chatHeader!).getByText("Online")).toBeInTheDocument();
   });
 
@@ -821,6 +826,28 @@ describe("WorkspacePage", () => {
     await waitFor(() =>
       expect(deleteTabRequestMock).toHaveBeenCalledWith("tab-1"),
     );
+  });
+
+  it("warns before deleting a workflow with ongoing work", () => {
+    workspacePageScenario = {
+      regularTabAgents: [
+        buildNode({
+          id: "agent-1",
+          state: "sleeping",
+          name: "Worker",
+        }),
+      ],
+    };
+
+    render(<WorkspacePage />);
+
+    fireEvent.click(screen.getAllByLabelText("Delete Example Tab")[0]);
+
+    expect(
+      screen.getByText(
+        /Ongoing work will be stopped before the workflow is removed\./,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("middle-clicks a tab into the same delete flow without activating it first", async () => {

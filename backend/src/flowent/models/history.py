@@ -121,6 +121,53 @@ HistoryEntry = (
     | PortInboundEntry
 )
 
+LEGACY_WORKFLOW_ACTIVATION_MARKERS = (
+    "activate this workflow before sending work to agent nodes.",
+    "workflow activated",
+    "workflow deactivated",
+    "workflow is active",
+    "workflow is inactive",
+    "workflow is activated",
+    "workflow is deactivated",
+    "activation_state",
+)
+
+
+def _contains_legacy_workflow_activation_text(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.lower()
+    return any(marker in text for marker in LEGACY_WORKFLOW_ACTIVATION_MARKERS)
+
+
+def is_legacy_workflow_activation_entry(entry: HistoryEntry) -> bool:
+    if isinstance(
+        entry,
+        (
+            SystemEntry,
+            ReceivedMessage,
+            AssistantText,
+            SentMessage,
+            AssistantThinking,
+            ErrorEntry,
+            CommandResultEntry,
+        ),
+    ):
+        return _contains_legacy_workflow_activation_text(entry.content)
+    if isinstance(entry, ToolCall):
+        return _contains_legacy_workflow_activation_text(entry.result)
+    if isinstance(entry, PortInboundEntry):
+        return _contains_legacy_workflow_activation_text(entry.value_summary)
+    return False
+
+
+def filter_legacy_workflow_activation_entries(
+    entries: list[HistoryEntry],
+) -> list[HistoryEntry]:
+    return [
+        entry for entry in entries if not is_legacy_workflow_activation_entry(entry)
+    ]
+
 
 def deserialize_history_entry(data: dict[str, Any]) -> HistoryEntry:
     entry_type = data.get("type")
@@ -265,8 +312,10 @@ def deserialize_history_entry(data: dict[str, Any]) -> HistoryEntry:
 
 
 def deserialize_history_entries(items: list[dict[str, Any]]) -> list[HistoryEntry]:
-    return [
-        deserialize_history_entry(item)
-        for item in items
-        if item.get("type") != "StateEntry"
-    ]
+    return filter_legacy_workflow_activation_entries(
+        [
+            deserialize_history_entry(item)
+            for item in items
+            if item.get("type") != "StateEntry"
+        ]
+    )

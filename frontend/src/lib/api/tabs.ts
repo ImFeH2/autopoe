@@ -52,22 +52,6 @@ export async function createTabRequest(
   });
 }
 
-export async function activateWorkflowRequest(tabId: string): Promise<TaskTab> {
-  return requestJson<TaskTab, TaskTab>(`/api/workflows/${tabId}/activate`, {
-    method: "POST",
-    errorMessage: "Failed to activate workflow",
-  });
-}
-
-export async function deactivateWorkflowRequest(
-  tabId: string,
-): Promise<TaskTab> {
-  return requestJson<TaskTab, TaskTab>(`/api/workflows/${tabId}/deactivate`, {
-    method: "POST",
-    errorMessage: "Failed to deactivate workflow",
-  });
-}
-
 export async function updateTabDefinitionRequest(
   tabId: string,
   definition: WorkflowDefinition,
@@ -108,7 +92,6 @@ export async function fetchTabDetail(
         leader_id: null,
         created_at: 0,
         updated_at: 0,
-        activation_state: "inactive",
         allow_network: false,
         write_dirs: [],
         definition: { version: 1, nodes: [], edges: [], view: {} },

@@ -35,11 +35,6 @@ class EdgeKind(StrEnum):
     EVENT = "event"
 
 
-class WorkflowActivationState(StrEnum):
-    INACTIVE = "inactive"
-    ACTIVE = "active"
-
-
 def _parse_port_direction(raw_direction: object) -> PortDirection:
     if raw_direction == "input":
         return PortDirection.INPUT

@@ -45,10 +45,10 @@ from flowent.models import (
     TodoItem,
     ToolCall,
     ToolResultDelta,
-    WorkflowActivationState,
     WorkflowNodeKind,
     content_parts_to_text,
     deserialize_content_parts,
+    filter_legacy_workflow_activation_entries,
     has_image_parts,
     parse_content_parts_payload,
 )
@@ -305,7 +305,7 @@ class Agent:
 
     def get_history_snapshot(self) -> list[HistoryEntry]:
         with self._history_lock:
-            return list(self.history)
+            return filter_legacy_workflow_activation_entries(list(self.history))
 
     def get_todos_snapshot(self) -> list[TodoItem]:
         with self._todos_lock:
@@ -1712,7 +1712,6 @@ class Agent:
             return
 
         from flowent.graph_service import is_tab_leader
-        from flowent.workspace_store import workspace_store
 
         if not is_tab_leader(node_id=self.uuid, tab_id=self.config.tab_id):
             return
@@ -1720,12 +1719,6 @@ class Agent:
             return
         if is_tab_leader(node_id=target.uuid, tab_id=target.config.tab_id):
             return
-
-        tab = workspace_store.get_tab(self.config.tab_id)
-        if tab is not None and tab.activation_state != WorkflowActivationState.ACTIVE:
-            raise ValueError(
-                "Activate this workflow before sending work to agent nodes."
-            )
 
     def supports_input_image(self) -> bool:
         _, model_info = self._get_effective_model_info()

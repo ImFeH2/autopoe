@@ -8,7 +8,6 @@ export type NodeType =
   | "merge";
 
 export type WorkflowNodeType = Exclude<NodeType, "assistant">;
-export type WorkflowActivationState = "inactive" | "active";
 export type WorkflowPortType = "parts" | "string" | "json";
 export type WorkflowPortDirection = "in" | "out";
 
@@ -288,7 +287,6 @@ export interface TaskTab {
   created_at: number;
   updated_at: number;
   definition: WorkflowDefinition;
-  activation_state?: WorkflowActivationState;
   allow_network: boolean;
   write_dirs: string[];
   node_count?: number;

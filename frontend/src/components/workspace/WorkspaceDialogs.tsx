@@ -193,7 +193,7 @@ export function CreateNodeDialog({
       <WorkspaceDialogMeta>
         Adding a node to{" "}
         <span className="font-semibold text-foreground">
-          {activeTabTitle ?? "No active workflow"}
+          {activeTabTitle ?? "No selected workflow"}
         </span>
       </WorkspaceDialogMeta>
       <WorkspaceDialogField label="Node Type" hint="Required">
@@ -331,7 +331,7 @@ export function ConnectPortsDialog({
             · {nodeOptions.length} nodes available
           </>
         ) : (
-          "No active workflow"
+          "No selected workflow"
         )}
       </WorkspaceDialogMeta>
       <WorkspaceDialogField label="From Node" hint="Source node">
@@ -429,6 +429,7 @@ interface DeleteTabDialogProps {
     id: string;
     title: string;
     nodeCount?: number;
+    hasRunningNodes: boolean;
   } | null;
 }
 
@@ -463,9 +464,12 @@ export function DeleteTabDialog({
                 <span className="font-semibold text-foreground">
                   {target.title}
                 </span>{" "}
-                and clean up its persisted workflow graph.
+                and its saved workflow setup.
                 {typeof target.nodeCount === "number"
                   ? ` ${target.nodeCount} node${target.nodeCount === 1 ? "" : "s"} will be removed with it.`
+                  : ""}
+                {target.hasRunningNodes
+                  ? " Ongoing work will be stopped before the workflow is removed."
                   : ""}
               </>
             ) : (

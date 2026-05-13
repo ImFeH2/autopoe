@@ -31,7 +31,6 @@ from flowent.models.graph import (
     NodePosition,
     PortDirection,
     PortType,
-    WorkflowActivationState,
     WorkflowDefinition,
     WorkflowNodeDefinition,
     WorkflowNodeKind,
@@ -49,6 +48,7 @@ from flowent.models.history import (
     SentMessage,
     SystemEntry,
     ToolCall,
+    filter_legacy_workflow_activation_entries,
 )
 from flowent.models.llm import (
     LLMOutputImagePart,
@@ -112,7 +112,6 @@ __all__ = [
     "ToolCall",
     "ToolCallResult",
     "ToolResultDelta",
-    "WorkflowActivationState",
     "WorkflowDefinition",
     "WorkflowNodeDefinition",
     "WorkflowNodeKind",
@@ -120,6 +119,7 @@ __all__ = [
     "WorkflowViewDefinition",
     "content_parts_to_text",
     "deserialize_content_parts",
+    "filter_legacy_workflow_activation_entries",
     "has_image_parts",
     "parse_content_parts_payload",
 ]

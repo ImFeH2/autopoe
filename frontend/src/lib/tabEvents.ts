@@ -201,8 +201,6 @@ export function createTaskTabFromEvent(
     leader_id: readTabLeaderId(data) ?? null,
     created_at: readNumberField(data, "created_at") ?? now,
     updated_at: readNumberField(data, "updated_at") ?? now,
-    activation_state:
-      data.activation_state === "active" ? "active" : "inactive",
     definition: isWorkflowDefinition(data.definition)
       ? data.definition
       : EMPTY_WORKFLOW_DEFINITION,
@@ -223,10 +221,6 @@ export function mergeTaskTabUpdate(
   }
 
   const nextLeaderId = readTabLeaderId(data);
-  const nextActivationState =
-    data.activation_state === "active" || data.activation_state === "inactive"
-      ? data.activation_state
-      : undefined;
   const nextWriteDirs = readStringArrayField(data, "write_dirs");
 
   return {
@@ -238,7 +232,6 @@ export function mergeTaskTabUpdate(
         : current.leader_id,
     created_at: readNumberField(data, "created_at") ?? current.created_at,
     updated_at: readNumberField(data, "updated_at") ?? current.updated_at,
-    activation_state: nextActivationState ?? current.activation_state,
     allow_network: hasOwn(data, "allow_network")
       ? (readBooleanField(data, "allow_network") ?? current.allow_network)
       : current.allow_network,

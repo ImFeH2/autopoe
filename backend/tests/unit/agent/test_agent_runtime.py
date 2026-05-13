@@ -39,10 +39,10 @@ from flowent.models import (
     TodoItem,
     ToolCall,
     ToolCallResult,
-    WorkflowActivationState,
     WorkflowDefinition,
     WorkflowNodeKind,
 )
+from flowent.models.history import deserialize_history_entries
 from flowent.observability_service import observability_store
 from flowent.providers.errors import LLMProviderError
 from flowent.registry import registry
@@ -91,11 +91,41 @@ def _register_tab_leader(*, tab_id: str = "tab-1", leader_id: str = "leader") ->
     return leader
 
 
-def _activate_tab(*, tab_id: str = "tab-1") -> None:
-    tab = workspace_store.get_tab(tab_id)
-    assert tab is not None
-    tab.activation_state = WorkflowActivationState.ACTIVE
-    workspace_store.upsert_tab(tab)
+def test_agent_history_snapshot_filters_legacy_workflow_activation_entries():
+    agent = Agent(
+        NodeConfig(node_type=NodeType.AGENT, role_name="Worker"),
+        uuid="agent-1",
+    )
+    agent.history = [
+        ErrorEntry(
+            content="Activate this workflow before sending work to agent nodes."
+        ),
+        AssistantText(content="Workflow activated."),
+        ReceivedMessage(from_id="leader", content="Continue with the plan."),
+    ]
+
+    snapshot = agent.get_history_snapshot()
+
+    assert snapshot == [agent.history[2]]
+
+
+def test_deserialized_history_filters_legacy_workflow_activation_entries():
+    entries = deserialize_history_entries(
+        [
+            {
+                "type": "ToolCall",
+                "tool_name": "set_workflow_status",
+                "tool_call_id": "call-1",
+                "arguments": {},
+                "result": '{"activation_state": "active"}',
+            },
+            {"type": "AssistantText", "content": "Ready to continue."},
+        ]
+    )
+
+    assert len(entries) == 1
+    assert isinstance(entries[0], AssistantText)
+    assert entries[0].content == "Ready to continue."
 
 
 def _add_agent_path(
@@ -1779,7 +1809,6 @@ def test_send_message_delivers_to_single_contact_and_records_histories(monkeypat
     registry.register(child)
     registry.register(peer)
     _add_agent_path(source_id="child", target_id="peer")
-    _activate_tab()
     events = []
 
     monkeypatch.setattr(event_bus, "emit", lambda event: events.append(event))
@@ -1907,7 +1936,6 @@ def test_send_message_reports_error_when_target_lacks_input_image_support():
     registry.register(child)
     registry.register(peer)
     _add_agent_path(source_id="child", target_id="peer")
-    _activate_tab()
 
     try:
         with pytest.raises(
@@ -1924,7 +1952,7 @@ def test_send_message_reports_error_when_target_lacks_input_image_support():
         registry.reset()
 
 
-def test_inactive_leader_cannot_send_work_to_agent_nodes():
+def test_leader_can_send_work_to_agent_nodes():
     registry.reset()
     leader = _register_tab_leader()
     worker = Agent(
@@ -1934,21 +1962,6 @@ def test_inactive_leader_cannot_send_work_to_agent_nodes():
     registry.register(worker)
 
     try:
-        with pytest.raises(
-            ValueError,
-            match=r"Activate this workflow before sending work to agent nodes\.",
-        ):
-            leader.send_message(
-                target_ref="worker",
-                raw_parts=[{"type": "text", "text": "start the task"}],
-            )
-        assert not any(
-            isinstance(entry, ReceivedMessage)
-            for entry in worker.get_history_snapshot()
-        )
-
-        _activate_tab()
-
         result = json.loads(
             leader.send_message(
                 target_ref="worker",
@@ -1960,7 +1973,7 @@ def test_inactive_leader_cannot_send_work_to_agent_nodes():
         registry.reset()
 
 
-def test_inactive_workflow_blocks_port_delivery_to_agent_nodes():
+def test_workflow_delivers_port_values_to_agent_nodes():
     registry.reset()
     _register_tab_leader()
     source = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="source")
@@ -1979,9 +1992,11 @@ def test_inactive_workflow_blocks_port_delivery_to_agent_nodes():
             value=[{"type": "text", "text": "run from port"}],
         )
 
-        assert payload is None
-        assert error == "Activate this workflow before sending work to agent nodes."
-        assert not any(
+        assert error is None
+        assert payload is not None
+        assert payload["status"] == "sent"
+        assert payload["target_id"] == "target"
+        assert any(
             isinstance(entry, (PortInboundEntry, ReceivedMessage))
             for entry in target.get_history_snapshot()
         )
@@ -2024,7 +2039,6 @@ def test_handle_tool_call_send_success_omits_toolcall_history(monkeypatch):
     registry.register(child)
     registry.register(peer)
     _add_agent_path(source_id="child", target_id="peer")
-    _activate_tab()
 
     try:
         result = child._handle_tool_call(
@@ -2102,7 +2116,6 @@ def test_multiple_send_tool_calls_stop_after_first_failure(monkeypatch):
     registry.register(peer)
     registry.register(helper)
     _add_agent_path(source_id="child", target_id="peer")
-    _activate_tab()
 
     wait_calls = 0
     chat_calls = 0
