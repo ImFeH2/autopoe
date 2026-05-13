@@ -13,7 +13,11 @@ from flowent.agent import (
     WakeSignal,
 )
 from flowent.events import event_bus
-from flowent.graph_service import build_workflow_node_definition, create_edge
+from flowent.graph_service import (
+    build_workflow_node_definition,
+    create_edge,
+    dispatch_port_value,
+)
 from flowent.models import (
     AgentState,
     AssistantText,
@@ -27,6 +31,7 @@ from flowent.models import (
     Message,
     NodeConfig,
     NodeType,
+    PortInboundEntry,
     ReceivedMessage,
     SentMessage,
     SystemEntry,
@@ -84,6 +89,13 @@ def _register_tab_leader(*, tab_id: str = "tab-1", leader_id: str = "leader") ->
     )
     registry.register(leader)
     return leader
+
+
+def _activate_tab(*, tab_id: str = "tab-1") -> None:
+    tab = workspace_store.get_tab(tab_id)
+    assert tab is not None
+    tab.activation_state = WorkflowActivationState.ACTIVE
+    workspace_store.upsert_tab(tab)
 
 
 def _add_agent_path(
@@ -1767,6 +1779,7 @@ def test_send_message_delivers_to_single_contact_and_records_histories(monkeypat
     registry.register(child)
     registry.register(peer)
     _add_agent_path(source_id="child", target_id="peer")
+    _activate_tab()
     events = []
 
     monkeypatch.setattr(event_bus, "emit", lambda event: events.append(event))
@@ -1894,6 +1907,7 @@ def test_send_message_reports_error_when_target_lacks_input_image_support():
     registry.register(child)
     registry.register(peer)
     _add_agent_path(source_id="child", target_id="peer")
+    _activate_tab()
 
     try:
         with pytest.raises(
@@ -1933,10 +1947,7 @@ def test_inactive_leader_cannot_send_work_to_agent_nodes():
             for entry in worker.get_history_snapshot()
         )
 
-        tab = workspace_store.get_tab("tab-1")
-        assert tab is not None
-        tab.activation_state = WorkflowActivationState.ACTIVE
-        workspace_store.upsert_tab(tab)
+        _activate_tab()
 
         result = json.loads(
             leader.send_message(
@@ -1945,6 +1956,35 @@ def test_inactive_leader_cannot_send_work_to_agent_nodes():
             )
         )
         assert result == {"status": "sent", "target_id": "worker"}
+    finally:
+        registry.reset()
+
+
+def test_inactive_workflow_blocks_port_delivery_to_agent_nodes():
+    registry.reset()
+    _register_tab_leader()
+    source = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="source")
+    target = Agent(NodeConfig(node_type=NodeType.AGENT, tab_id="tab-1"), uuid="target")
+    registry.register(source)
+    registry.register(target)
+    _add_agent_path(source_id="source", target_id="target")
+
+    try:
+        payload, error = dispatch_port_value(
+            tab_id="tab-1",
+            source_node_id="source",
+            source_output_port_key="out",
+            target_node_id="target",
+            target_input_port_key="in",
+            value=[{"type": "text", "text": "run from port"}],
+        )
+
+        assert payload is None
+        assert error == "Activate this workflow before sending work to agent nodes."
+        assert not any(
+            isinstance(entry, (PortInboundEntry, ReceivedMessage))
+            for entry in target.get_history_snapshot()
+        )
     finally:
         registry.reset()
 
@@ -1984,6 +2024,7 @@ def test_handle_tool_call_send_success_omits_toolcall_history(monkeypatch):
     registry.register(child)
     registry.register(peer)
     _add_agent_path(source_id="child", target_id="peer")
+    _activate_tab()
 
     try:
         result = child._handle_tool_call(
@@ -2061,6 +2102,7 @@ def test_multiple_send_tool_calls_stop_after_first_failure(monkeypatch):
     registry.register(peer)
     registry.register(helper)
     _add_agent_path(source_id="child", target_id="peer")
+    _activate_tab()
 
     wait_calls = 0
     chat_calls = 0

@@ -11,6 +11,7 @@ import type {
   Node as AgentGraphNode,
   NodeType,
   Role,
+  TabEdge,
   WorkflowPort,
   WorkflowPortType,
 } from "@/types";
@@ -158,7 +159,7 @@ export interface AgentGraphProps {
   onDeleteAgent?: (input: {
     tabId: string;
     node: AgentGraphNode;
-    tabAgents: AgentGraphNode[];
+    edges?: TabEdge[];
   }) => Promise<void>;
   onInsertAgentBetween?: (input: {
     tabId: string;

@@ -56,6 +56,28 @@ from flowent.tools import (
 from flowent.workspace_store import workspace_store
 
 LEADER_NODE_NAME = "Leader"
+AGENT_ACTIVATION_GATE_MESSAGE = (
+    "Activate this workflow before sending work to agent nodes."
+)
+_PORT_TYPES = {item.value for item in PortType}
+_TRIGGER_KINDS = {"manual", "cron"}
+_LLM_RESPONSE_FORMAT_KINDS = {"text", "json_schema"}
+_IF_OPERATORS = {
+    "eq",
+    "neq",
+    "contains",
+    "not_contains",
+    "is_empty",
+    "is_not_empty",
+    "gt",
+    "lt",
+    "gte",
+    "lte",
+    "is_truthy",
+    "is_falsy",
+}
+_MERGE_STRATEGIES = {"collect", "named_object", "first_completed"}
+_CODE_RUNTIMES = {"javascript", "python"}
 
 
 @dataclass(frozen=True)
@@ -249,11 +271,83 @@ def _build_code_ports(
     return inputs, outputs
 
 
+def _default_message_for_port_type(port_type: PortType) -> object:
+    if port_type == PortType.STRING:
+        return "Run"
+    if port_type == PortType.JSON:
+        return {"task": "Run"}
+    return [{"type": "text", "text": "Run"}]
+
+
+def _default_node_config(
+    node_kind: WorkflowNodeKind,
+    config: dict[str, object] | None = None,
+) -> dict[str, object]:
+    node_config = deepcopy(config or {})
+    if node_kind == WorkflowNodeKind.TRIGGER:
+        output_type = _coerce_port_type(
+            node_config.get("output_type"),
+            PortType.PARTS,
+        )
+        return {
+            "kind": "manual",
+            "output_type": output_type.value,
+            "message": _default_message_for_port_type(output_type),
+            **node_config,
+        }
+    if node_kind == WorkflowNodeKind.LLM:
+        settings = settings_module.get_settings()
+        model_config: dict[str, object] = {}
+        if settings.model.active_provider_id and settings.model.active_model:
+            model_config = {
+                "model": {
+                    "provider_id": settings.model.active_provider_id,
+                    "model": settings.model.active_model,
+                }
+            }
+        return {
+            "system_prompt": "",
+            "temperature": 0,
+            "max_output_tokens": 1024,
+            "stop_sequences": [],
+            "response_format": {"kind": "text"},
+            "input_type": PortType.PARTS.value,
+            "output_type": PortType.PARTS.value,
+            **model_config,
+            **node_config,
+        }
+    if node_kind == WorkflowNodeKind.CODE:
+        return {
+            "runtime": "javascript",
+            "source": "({ out: inputs.in });",
+            "inputs": [{"key": "in", "type": PortType.PARTS.value}],
+            "outputs": [{"key": "out", "type": PortType.PARTS.value}],
+            **node_config,
+        }
+    if node_kind == WorkflowNodeKind.IF:
+        return {
+            "input_type": PortType.PARTS.value,
+            "expression": {
+                "field": "{{input.in}}",
+                "operator": "is_not_empty",
+            },
+            **node_config,
+        }
+    if node_kind == WorkflowNodeKind.MERGE:
+        return {
+            "strategy": "collect",
+            "input_type": PortType.PARTS.value,
+            "output_type": PortType.JSON.value,
+            **node_config,
+        }
+    return node_config
+
+
 def _default_ports(
     node_kind: WorkflowNodeKind,
     config: dict[str, object] | None = None,
 ) -> tuple[list[WorkflowPort], list[WorkflowPort]]:
-    node_config = config or {}
+    node_config = _default_node_config(node_kind, config)
     if node_kind == WorkflowNodeKind.TRIGGER:
         output_type = _coerce_port_type(node_config.get("output_type"), PortType.PARTS)
         return (
@@ -388,11 +482,12 @@ def build_workflow_node_definition(
     node_kind: WorkflowNodeKind,
     config: dict[str, object] | None = None,
 ) -> WorkflowNodeDefinition:
-    inputs, outputs = _default_ports(node_kind, config)
+    node_config = _default_node_config(node_kind, config)
+    inputs, outputs = _default_ports(node_kind, node_config)
     return WorkflowNodeDefinition(
         id=node_id,
         type=node_kind,
-        config=deepcopy(config or {}),
+        config=node_config,
         inputs=inputs,
         outputs=outputs,
     )
@@ -670,6 +765,12 @@ def dispatch_port_value(
     )
     if edge is None:
         return None, "Send path is not connected"
+    if (
+        target_node.type == WorkflowNodeKind.AGENT
+        and not is_tab_leader(node_id=target_node_id, tab_id=tab_id)
+        and tab.activation_state != WorkflowActivationState.ACTIVE
+    ):
+        return None, AGENT_ACTIVATION_GATE_MESSAGE
 
     value_summary = _summarize_port_value(value, port_type=source_port.type)
     payload: dict[str, object] = {
@@ -1126,8 +1227,6 @@ def set_tab_permissions(
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
     _sync_tab_permissions_from_legacy_leader(tab)
-    if _is_active(tab):
-        return None, _active_edit_error("permissions")
 
     leader_id = get_tab_leader_id(tab_id)
     if not leader_id:
@@ -1306,10 +1405,6 @@ def _is_active(tab: Tab) -> bool:
     return tab.activation_state == WorkflowActivationState.ACTIVE
 
 
-def _active_edit_error(noun: str) -> str:
-    return f"Workflow is active; deactivate it before changing {noun}"
-
-
 def create_graph_node(
     *,
     tab_id: str,
@@ -1320,14 +1415,15 @@ def create_graph_node(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
-    if _is_active(tab):
-        return None, _active_edit_error("nodes")
     node_id = str(uuid.uuid4())
     node = build_workflow_node_definition(
         node_id=node_id,
         node_kind=node_type,
         config=config,
     )
+    errors = validate_workflow_node_config(node)
+    if errors:
+        return None, errors[0]["message"]
     tab.definition.nodes.append(node)
     _persist_tab(tab, actor_id=actor_id)
     return node, None
@@ -1346,8 +1442,6 @@ def create_agent_node(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
-    if _is_active(tab):
-        return None, _active_edit_error("nodes")
 
     config, error = build_node_config(
         role_name=role_name,
@@ -1401,10 +1495,10 @@ def update_tab_definition(
     edge_ids = [edge.id for edge in next_definition.edges]
     if len(edge_ids) != len(set(edge_ids)):
         return None, "Workflow definition contains duplicate edge ids"
-    if _is_active(tab) and _semantic_definition(tab.definition) != _semantic_definition(
-        next_definition
-    ):
-        return None, _active_edit_error("workflow structure")
+    for node in next_definition.nodes:
+        errors = validate_workflow_node_config(node)
+        if errors:
+            return None, errors[0]["message"]
 
     current_agent_ids = {
         node.id for node in tab.definition.nodes if node.type == WorkflowNodeKind.AGENT
@@ -1508,46 +1602,16 @@ def _port_matches(
     )
 
 
-def _semantic_definition(definition: WorkflowDefinition) -> dict[str, object]:
-    payload = definition.serialize()
-    payload.pop("view", None)
-    return payload
-
-
-_PORT_TYPES = {item.value for item in PortType}
-_TRIGGER_KINDS = {"manual", "cron"}
-_LLM_RESPONSE_FORMAT_KINDS = {"text", "json_schema"}
-_IF_OPERATORS = {
-    "eq",
-    "neq",
-    "contains",
-    "not_contains",
-    "is_empty",
-    "is_not_empty",
-    "gt",
-    "lt",
-    "gte",
-    "lte",
-    "is_truthy",
-    "is_falsy",
-}
-_MERGE_STRATEGIES = {"collect", "named_object", "first_completed"}
-_CODE_RUNTIMES = {"javascript", "python"}
-
-
 def _validation_error(
     errors: list[dict[str, str]],
     *,
     message: str,
     node_id: str | None = None,
-    edge_id: str | None = None,
     path: str | None = None,
 ) -> None:
     error: dict[str, str] = {"message": message}
     if node_id is not None:
         error["node_id"] = node_id
-    if edge_id is not None:
-        error["edge_id"] = edge_id
     if path is not None:
         error["path"] = path
     errors.append(error)
@@ -1683,9 +1747,7 @@ def _validate_trigger_node(
             )
 
 
-def _resolve_llm_model(
-    node: WorkflowNodeDefinition,
-) -> tuple[str, str]:
+def _resolve_llm_model(node: WorkflowNodeDefinition) -> tuple[str, str]:
     model_config = node.config.get("model")
     if isinstance(model_config, dict):
         provider_id = model_config.get("provider_id")
@@ -1706,9 +1768,8 @@ def _validate_llm_node(
     node: WorkflowNodeDefinition,
     errors: list[dict[str, str]],
 ) -> None:
-    input_type = _coerce_port_type(node.config.get("input_type"), PortType.PARTS)
     output_type = _coerce_port_type(node.config.get("output_type"), PortType.PARTS)
-    if str(node.config.get("input_type", input_type.value)) not in _PORT_TYPES:
+    if str(node.config.get("input_type", PortType.PARTS.value)) not in _PORT_TYPES:
         _validation_error(
             errors,
             node_id=node.id,
@@ -1923,10 +1984,10 @@ def _validate_code_node(
             )
 
 
-def _validate_node_config(
+def validate_workflow_node_config(
     node: WorkflowNodeDefinition,
-    errors: list[dict[str, str]],
-) -> None:
+) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
     if node.type == WorkflowNodeKind.TRIGGER:
         _validate_trigger_node(node, errors)
     elif node.type == WorkflowNodeKind.LLM:
@@ -1937,135 +1998,6 @@ def _validate_node_config(
         _validate_merge_node(node, errors)
     elif node.type == WorkflowNodeKind.CODE:
         _validate_code_node(node, errors)
-
-
-def _is_legacy_required_agent_input(
-    node: WorkflowNodeDefinition,
-    port: WorkflowPort,
-) -> bool:
-    return (
-        node.type == WorkflowNodeKind.AGENT
-        and port.key == "in"
-        and port.direction == PortDirection.INPUT
-        and port.type == PortType.PARTS
-        and not port.multiple
-    )
-
-
-def validate_workflow_activation(tab: Tab) -> list[dict[str, str]]:
-    errors: list[dict[str, str]] = []
-    if not tab.definition.nodes:
-        _validation_error(
-            errors,
-            message="Add at least one node before activating this workflow",
-            path="definition.nodes",
-        )
-    node_ids = [node.id for node in tab.definition.nodes]
-    if len(node_ids) != len(set(node_ids)):
-        _validation_error(
-            errors,
-            message="workflow definition contains duplicate node ids",
-            path="definition.nodes",
-        )
-    edge_ids = [edge.id for edge in tab.definition.edges]
-    if len(edge_ids) != len(set(edge_ids)):
-        _validation_error(
-            errors,
-            message="workflow definition contains duplicate edge ids",
-            path="definition.edges",
-        )
-    incoming_edges_by_port: dict[tuple[str, str], list[GraphEdge]] = {}
-    seen_edge_endpoints: set[tuple[str, str, str, str]] = set()
-    for edge in tab.definition.edges:
-        edge_endpoint = (
-            edge.from_node_id,
-            edge.from_port_key,
-            edge.to_node_id,
-            edge.to_port_key,
-        )
-        if edge_endpoint in seen_edge_endpoints:
-            _validation_error(
-                errors,
-                edge_id=edge.id,
-                message="duplicate edges are not allowed",
-            )
-        seen_edge_endpoints.add(edge_endpoint)
-        source_node = tab.definition.get_node(edge.from_node_id)
-        target_node = tab.definition.get_node(edge.to_node_id)
-        if source_node is None:
-            _validation_error(
-                errors,
-                edge_id=edge.id,
-                message=f"edge source node '{edge.from_node_id}' does not exist",
-            )
-            continue
-        if target_node is None:
-            _validation_error(
-                errors,
-                edge_id=edge.id,
-                message=f"edge target node '{edge.to_node_id}' does not exist",
-            )
-            continue
-        source_port = _port_matches(
-            source_node.outputs,
-            port_key=edge.from_port_key,
-            direction=PortDirection.OUTPUT,
-        )
-        target_port = _port_matches(
-            target_node.inputs,
-            port_key=edge.to_port_key,
-            direction=PortDirection.INPUT,
-        )
-        if source_port is None:
-            _validation_error(
-                errors,
-                edge_id=edge.id,
-                path="from_port_key",
-                message=f"output port '{edge.from_port_key}' is invalid",
-            )
-            continue
-        if target_port is None:
-            _validation_error(
-                errors,
-                edge_id=edge.id,
-                path="to_port_key",
-                message=f"input port '{edge.to_port_key}' is invalid",
-            )
-            continue
-        if source_port.type != target_port.type:
-            _validation_error(
-                errors,
-                edge_id=edge.id,
-                message=(
-                    f"port type mismatch: '{source_node.id}.{source_port.key}' is {source_port.type.value} "
-                    f"but '{target_node.id}.{target_port.key}' is {target_port.type.value}"
-                ),
-            )
-        incoming_edges_by_port.setdefault(
-            (edge.to_node_id, edge.to_port_key), []
-        ).append(edge)
-    for node in tab.definition.nodes:
-        for port in node.inputs:
-            edges = incoming_edges_by_port.get((node.id, port.key), [])
-            if (
-                port.required
-                and not edges
-                and not _is_legacy_required_agent_input(node, port)
-            ):
-                _validation_error(
-                    errors,
-                    node_id=node.id,
-                    path=f"inputs.{port.key}",
-                    message=f"required input port '{port.key}' has no upstream edge",
-                )
-            if len(edges) > 1 and not port.multiple:
-                _validation_error(
-                    errors,
-                    node_id=node.id,
-                    path=f"inputs.{port.key}",
-                    message=f"input port '{port.key}' accepts only one upstream edge",
-                )
-        _validate_node_config(node, errors)
     return errors
 
 
@@ -2077,9 +2009,6 @@ def activate_tab(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, None, f"Tab '{tab_id}' not found"
-    errors = validate_workflow_activation(tab)
-    if errors:
-        return None, errors, None
     if tab.activation_state != WorkflowActivationState.ACTIVE:
         tab.activation_state = WorkflowActivationState.ACTIVE
         _persist_tab(tab, actor_id=actor_id)
@@ -2154,8 +2083,6 @@ def create_edge(
     tab = workspace_store.get_tab(resolved_tab_id)
     if tab is None:
         return None, f"Tab '{resolved_tab_id}' not found"
-    if _is_active(tab):
-        return None, _active_edit_error("edges")
     if is_tab_leader(node_id=from_node_id, tab_id=resolved_tab_id) or is_tab_leader(
         node_id=to_node_id,
         tab_id=resolved_tab_id,
@@ -2228,8 +2155,6 @@ def delete_edge(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
-    if _is_active(tab):
-        return None, _active_edit_error("edges")
 
     matched_edge: GraphEdge | None = None
     for edge in tab.definition.edges:
@@ -2265,8 +2190,6 @@ def delete_agent_node(
     tab = workspace_store.get_tab(tab_id)
     if tab is None:
         return None, f"Tab '{tab_id}' not found"
-    if _is_active(tab):
-        return None, _active_edit_error("nodes")
 
     node_definition = tab.definition.get_node(node_id)
     if node_definition is None:

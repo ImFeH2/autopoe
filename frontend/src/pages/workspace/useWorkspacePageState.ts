@@ -16,6 +16,7 @@ import {
   createTabRequest,
   deactivateWorkflowRequest,
   deleteTabRequest,
+  fetchSettings,
   fetchRoles,
   updateTabDefinitionRequest,
 } from "@/lib/api";
@@ -30,6 +31,7 @@ import {
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useTabGraphHistory } from "@/hooks/useTabGraphHistory";
 import type { Role, WorkflowNodeType, WorkflowPort } from "@/types";
+import type { UserSettings } from "@/pages/settings/lib";
 import { toast } from "sonner";
 import {
   useCallback,
@@ -47,6 +49,8 @@ const MAX_PANEL_WIDTH = 960;
 const DEFAULT_PANEL_RATIO = 0.34;
 const DEFAULT_PANEL_WIDTH = 448;
 const COMPACT_PANEL_MIN_WIDTH = 300;
+const MODEL_NODE_SETTINGS_MESSAGE =
+  "Choose a model in Settings before adding a Model node.";
 
 export type WorkspaceDialogKind =
   | "create-tab"
@@ -103,6 +107,10 @@ export function useWorkspacePageState() {
     useState<WorkflowNodeType>("agent");
   const [createNodeRoleName, setCreateNodeRoleName] = useState("Worker");
   const [createNodeName, setCreateNodeName] = useState("");
+  const [modelNodeReference, setModelNodeReference] = useState<{
+    provider_id: string;
+    model: string;
+  } | null>(null);
   const [connectSourceId, setConnectSourceId] = useState("");
   const [connectSourcePortKey, setConnectSourcePortKey] = useState("");
   const [connectTargetId, setConnectTargetId] = useState("");
@@ -207,12 +215,36 @@ export function useWorkspacePageState() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettings<UserSettings>()
+      .then((settings) => {
+        if (cancelled) {
+          return;
+        }
+        const providerId = settings.model.active_provider_id.trim();
+        const model = settings.model.active_model.trim();
+        setModelNodeReference(
+          providerId && model ? { provider_id: providerId, model } : null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setModelNodeReference(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectedAgent = selectedAgentId
     ? (agents.get(selectedAgentId) ?? null)
     : null;
   const activeTab = activeTabId ? (tabs.get(activeTabId) ?? null) : null;
   const activeWorkflowState = activeTab?.activation_state ?? "inactive";
-  const workflowLocked = activeWorkflowState === "active";
+  const workflowReceivingWork = activeWorkflowState === "active";
   const tabAgents = useMemo(
     () =>
       Array.from(agents.values()).filter(
@@ -273,6 +305,7 @@ export function useWorkspacePageState() {
     () => roles.find((role) => role.name === createNodeRoleName) ?? null,
     [createNodeRoleName, roles],
   );
+  const canCreateModelNode = modelNodeReference !== null;
 
   const panelVisible = panelOpen || !!selectedAgent;
   const resolvedPanelWidth = useMemo(() => {
@@ -361,13 +394,7 @@ export function useWorkspacePageState() {
 
       event.preventDefault();
       if (event.shiftKey) {
-        if (workflowLocked) {
-          return;
-        }
         void graphHistory.redo(activeTabId).catch(() => undefined);
-        return;
-      }
-      if (workflowLocked) {
         return;
       }
       void graphHistory.undo(activeTabId).catch(() => undefined);
@@ -375,7 +402,7 @@ export function useWorkspacePageState() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeDialog, activeTabId, graphHistory, workflowLocked]);
+  }, [activeDialog, activeTabId, graphHistory]);
 
   const handleOpenLeaderDetails = useCallback(() => {
     setPanelOpen(true);
@@ -444,12 +471,12 @@ export function useWorkspacePageState() {
       toast.error("Create or select a workflow first");
       return;
     }
-    const nextPendingAction = workflowLocked
+    const nextPendingAction = workflowReceivingWork
       ? "deactivate-workflow"
       : "activate-workflow";
     setPendingAction(nextPendingAction);
     try {
-      if (workflowLocked) {
+      if (workflowReceivingWork) {
         await deactivateWorkflowRequest(activeTabId);
         toast.success("Workflow deactivated");
       } else {
@@ -460,39 +487,35 @@ export function useWorkspacePageState() {
       toast.error(
         error instanceof Error
           ? error.message
-          : workflowLocked
+          : workflowReceivingWork
             ? "Failed to deactivate workflow"
             : "Failed to activate workflow",
       );
     } finally {
       setPendingAction(null);
     }
-  }, [activeTabId, workflowLocked]);
+  }, [activeTabId, workflowReceivingWork]);
 
   const openCreateNodeDialog = useCallback(() => {
     if (!activeTabId) {
       toast.error("Create or select a workflow first");
       return;
     }
-    if (workflowLocked) {
-      toast.error("Deactivate workflow before editing");
-      return;
-    }
     setCreateNodeType("agent");
     setCreateNodeRoleName("Worker");
     setCreateNodeName("");
     setActiveDialog("create-node");
-  }, [activeTabId, workflowLocked]);
+  }, [activeTabId]);
 
   const handleCreateNode = useCallback(async () => {
     if (!activeTabId) {
       return;
     }
-    if (workflowLocked) {
-      toast.error("Deactivate workflow before editing");
+    const trimmedName = createNodeName.trim() || undefined;
+    if (createNodeType === "llm" && !modelNodeReference) {
+      toast.error(MODEL_NODE_SETTINGS_MESSAGE);
       return;
     }
-    const trimmedName = createNodeName.trim() || undefined;
     setPendingAction("create-node");
     try {
       if (createNodeType === "agent") {
@@ -511,6 +534,10 @@ export function useWorkspacePageState() {
           tabId: activeTabId,
           nodeType: createNodeType,
           name: trimmedName,
+          config:
+            createNodeType === "llm"
+              ? { model: modelNodeReference }
+              : undefined,
         });
       }
       setActiveDialog(null);
@@ -529,8 +556,8 @@ export function useWorkspacePageState() {
     createNodeName,
     createNodeType,
     graphHistory,
+    modelNodeReference,
     selectedCreateNodeRole?.name,
-    workflowLocked,
   ]);
 
   const requestDeleteTab = useCallback(
@@ -562,10 +589,6 @@ export function useWorkspacePageState() {
       toast.error("Create or select a workflow first");
       return;
     }
-    if (workflowLocked) {
-      toast.error("Deactivate workflow before editing");
-      return;
-    }
     if (workflowNodeOptions.length < 2) {
       toast.error("Add at least two nodes before creating an edge");
       return;
@@ -579,7 +602,7 @@ export function useWorkspacePageState() {
     setConnectSourceId(initialSourceId);
     setConnectTargetId(initialTargetId);
     setActiveDialog("connect-ports");
-  }, [activeTabId, workflowLocked, workflowNodeOptions]);
+  }, [activeTabId, workflowNodeOptions]);
 
   const handleConnectPorts = useCallback(async () => {
     if (
@@ -589,10 +612,6 @@ export function useWorkspacePageState() {
       !connectTargetId ||
       !connectTargetPortKey
     ) {
-      return;
-    }
-    if (workflowLocked) {
-      toast.error("Deactivate workflow before editing");
       return;
     }
     setPendingAction("connect-ports");
@@ -619,15 +638,10 @@ export function useWorkspacePageState() {
     connectTargetId,
     connectTargetPortKey,
     graphHistory,
-    workflowLocked,
   ]);
 
   const handleSaveDefinition = useCallback(async () => {
     if (!activeTabId) {
-      return;
-    }
-    if (workflowLocked) {
-      toast.error("Deactivate workflow before editing");
       return;
     }
     let parsed: unknown;
@@ -657,12 +671,13 @@ export function useWorkspacePageState() {
     } finally {
       setPendingAction(null);
     }
-  }, [activeTabId, definitionDraft, workflowLocked]);
+  }, [activeTabId, definitionDraft]);
 
   return {
     activeDialog,
     activeTab,
     activeTabId,
+    canCreateModelNode,
     connected,
     connectSourceId,
     connectSourcePortKey,
@@ -729,6 +744,6 @@ export function useWorkspacePageState() {
     togglePanel,
     workflowNodeOptions,
     workspaceRef,
-    workflowLocked,
+    workflowReceivingWork,
   };
 }

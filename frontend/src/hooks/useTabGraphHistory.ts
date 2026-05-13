@@ -5,7 +5,7 @@ import {
   deleteTabEdgeRequest,
   deleteTabNodeRequest,
 } from "@/lib/api";
-import type { Node, WorkflowNodeType } from "@/types";
+import type { Node, TabEdge, WorkflowNodeType } from "@/types";
 
 type GraphHistoryCommand = {
   undo: () => Promise<void>;
@@ -22,6 +22,7 @@ type CreateNodeInput = {
   nodeType?: WorkflowNodeType;
   roleName?: string;
   name?: string;
+  config?: Record<string, unknown>;
 };
 
 type CreateLinkedAgentInput = {
@@ -34,7 +35,7 @@ type CreateLinkedAgentInput = {
 type DeleteNodeInput = {
   tabId: string;
   node: Node;
-  tabAgents: Node[];
+  edges?: TabEdge[];
 };
 
 type InsertAgentBetweenInput = {
@@ -77,13 +78,21 @@ export function useTabGraphHistory() {
   );
 
   const createStandaloneNode = useCallback(
-    async ({ tabId, nodeType = "agent", roleName, name }: CreateNodeInput) => {
+    async ({
+      tabId,
+      nodeType = "agent",
+      roleName,
+      name,
+      config,
+    }: CreateNodeInput) => {
       const normalizedName = normalizeOptionalName(name);
+      const nodeConfig = config ? { ...config } : undefined;
       let currentNodeId = (
         await createTabNodeRequest(tabId, {
           node_type: nodeType,
           role_name: roleName,
           name: normalizedName,
+          config: nodeConfig,
         })
       ).id;
 
@@ -97,6 +106,7 @@ export function useTabGraphHistory() {
               node_type: nodeType,
               role_name: roleName,
               name: normalizedName,
+              config: nodeConfig,
             })
           ).id;
         },
@@ -222,15 +232,51 @@ export function useTabGraphHistory() {
   );
 
   const deleteNode = useCallback(
-    async ({ tabId, node, tabAgents }: DeleteNodeInput) => {
-      const connectedNodeIds = Array.from(
-        new Set(
-          [...node.connections].filter((targetId) =>
-            tabAgents.some((candidate) => candidate.id === targetId),
-          ),
-        ),
+    async ({ tabId, node, edges = [] }: DeleteNodeInput) => {
+      const relatedEdges = edges.filter(
+        (edge) => edge.from_node_id === node.id || edge.to_node_id === node.id,
       );
-      const normalizedName = normalizeOptionalName(node.name);
+      const nodeConfig =
+        node.config && typeof node.config === "object"
+          ? { ...node.config }
+          : undefined;
+      const fallbackConfig =
+        !nodeConfig && node.node_type !== "agent" && node.name
+          ? { name: node.name }
+          : undefined;
+      const createConfig = nodeConfig ?? fallbackConfig;
+      const connectedNodeIds = relatedEdges.length
+        ? []
+        : Array.from(
+            new Set(
+              [...node.connections].filter((targetId) => targetId !== node.id),
+            ),
+          );
+      const recreateRelatedEdges = async (nextNodeId: string) => {
+        for (const edge of relatedEdges) {
+          await createTabEdgeRequest(tabId, {
+            fromNodeId:
+              edge.from_node_id === node.id ? nextNodeId : edge.from_node_id,
+            fromPortKey: edge.from_port_key,
+            toNodeId:
+              edge.to_node_id === node.id ? nextNodeId : edge.to_node_id,
+            toPortKey: edge.to_port_key,
+          });
+        }
+        for (const connectedNodeId of connectedNodeIds) {
+          await createTabEdgeRequest(tabId, {
+            fromNodeId: connectedNodeId,
+            toNodeId: nextNodeId,
+          });
+        }
+      };
+      const nodeType = (
+        node.node_type === "assistant" ? "agent" : node.node_type
+      ) as WorkflowNodeType;
+      const isAgentNode = nodeType === "agent";
+      const normalizedName = normalizeOptionalName(
+        isAgentNode ? node.name : undefined,
+      );
       const roleName = node.role_name?.trim() ?? "";
       let currentNodeId = node.id;
 
@@ -240,17 +286,13 @@ export function useTabGraphHistory() {
         undo: async () => {
           currentNodeId = (
             await createTabNodeRequest(tabId, {
-              node_type: node.node_type,
-              role_name: roleName || undefined,
+              node_type: nodeType,
+              role_name: isAgentNode ? roleName || undefined : undefined,
               name: normalizedName,
+              config: createConfig,
             })
           ).id;
-          for (const connectedNodeId of connectedNodeIds) {
-            await createTabEdgeRequest(tabId, {
-              fromNodeId: connectedNodeId,
-              toNodeId: currentNodeId,
-            });
-          }
+          await recreateRelatedEdges(currentNodeId);
         },
         redo: async () => {
           await deleteTabNodeRequest(tabId, currentNodeId);

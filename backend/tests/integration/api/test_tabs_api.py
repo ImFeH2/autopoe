@@ -339,7 +339,8 @@ def test_update_tab_definition_updates_metadata_and_positions(client: TestClient
             node["config"]["name"] = "Final Reviewer"
         if node["id"] == code_node["id"]:
             node["config"]["name"] = "Formatter"
-            node["config"]["language"] = "python"
+            node["config"]["runtime"] = "python"
+            node["config"]["source"] = "outputs = {'out': inputs['in']}"
     definition["view"] = {
         "positions": {
             agent_node["id"]: {"x": 60, "y": 80},
@@ -378,12 +379,39 @@ def test_update_tab_definition_updates_metadata_and_positions(client: TestClient
     )
     assert reviewer_detail["name"] == "Final Reviewer"
     assert reviewer_detail["position"] == {"x": 60.0, "y": 80.0}
-    assert formatter_detail["config"]["language"] == "python"
+    assert formatter_detail["config"]["runtime"] == "python"
     assert formatter_detail["position"] == {"x": 260.0, "y": 80.0}
 
     runtime_node = client.get(f"/api/nodes/{agent_node['id']}")
     assert runtime_node.status_code == 200
     assert runtime_node.json()["name"] == "Final Reviewer"
+
+
+def test_update_tab_definition_rejects_invalid_node_config(client: TestClient):
+    tab = client.post(
+        "/api/workflows",
+        json={"title": "Config Guard"},
+    ).json()
+    trigger = _create_graph_node(
+        client,
+        tab_id=tab["id"],
+        node_type="trigger",
+        name="Trigger",
+    )
+    definition = deepcopy(
+        client.get(f"/api/workflows/{tab['id']}").json()["workflow"]["definition"]
+    )
+    for node in definition["nodes"]:
+        if node["id"] == trigger["id"]:
+            node["config"]["kind"] = "webhook"
+
+    response = client.put(
+        f"/api/workflows/{tab['id']}/definition",
+        json={"definition": definition},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "trigger kind must be manual or cron"
 
 
 def test_update_tab_definition_rejects_agent_set_changes(client: TestClient):
@@ -436,19 +464,15 @@ def test_update_tab_definition_rejects_agent_set_changes(client: TestClient):
     assert untouched.status_code == 200
 
 
-def test_activate_empty_workflow_fails_with_validation_errors(client: TestClient):
+def test_activate_empty_workflow_succeeds_without_graph_validation(client: TestClient):
     tab = client.post("/api/workflows", json={"title": "Empty"}).json()
 
     response = client.post(f"/api/workflows/{tab['id']}/activate")
 
-    assert response.status_code == 400
-    errors = response.json()["detail"]["errors"]
-    assert any(
-        error["message"] == "Add at least one node before activating this workflow"
-        for error in errors
-    )
+    assert response.status_code == 200
+    assert response.json()["activation_state"] == "active"
     detail = client.get(f"/api/workflows/{tab['id']}").json()
-    assert detail["workflow"]["activation_state"] == "inactive"
+    assert detail["workflow"]["activation_state"] == "active"
 
 
 def test_activate_agent_only_workflow_succeeds_without_trigger(client: TestClient):
@@ -483,10 +507,10 @@ def test_activate_valid_manual_trigger_graph_succeeds(client: TestClient):
     assert detail["nodes"][0]["id"] == trigger["id"]
 
 
-def test_active_workflow_locks_semantic_edits_but_allows_view_updates(
+def test_active_workflow_allows_graph_and_json_edits(
     client: TestClient,
 ):
-    tab = client.post("/api/workflows", json={"title": "Locked"}).json()
+    tab = client.post("/api/workflows", json={"title": "Editable"}).json()
     trigger = _create_graph_node(
         client,
         tab_id=tab["id"],
@@ -500,8 +524,7 @@ def test_active_workflow_locks_semantic_edits_but_allows_view_updates(
         f"/api/workflows/{tab['id']}/nodes",
         json={"node_type": "trigger", "config": {"kind": "manual"}},
     )
-    assert create_response.status_code == 400
-    assert "active" in create_response.json()["detail"]
+    assert create_response.status_code == 200
 
     definition = deepcopy(
         client.get(f"/api/workflows/{tab['id']}").json()["workflow"]["definition"]
@@ -511,8 +534,11 @@ def test_active_workflow_locks_semantic_edits_but_allows_view_updates(
         f"/api/workflows/{tab['id']}/definition",
         json={"definition": definition},
     )
-    assert semantic_response.status_code == 400
-    assert "active" in semantic_response.json()["detail"]
+    assert semantic_response.status_code == 200
+    assert semantic_response.json()["activation_state"] == "active"
+    assert semantic_response.json()["definition"]["nodes"][0]["config"]["message"] == (
+        "Changed"
+    )
 
     view_definition = deepcopy(
         client.get(f"/api/workflows/{tab['id']}").json()["workflow"]["definition"]
@@ -578,7 +604,7 @@ def test_deactivate_interrupts_running_workflow_nodes(
     assert live_worker.state == AgentState.IDLE
 
 
-def test_llm_node_and_typed_port_validation(client: TestClient):
+def test_activate_does_not_run_whole_graph_port_validation(client: TestClient):
     from flowent.models import GraphEdge
     from flowent.workspace_store import workspace_store
 
@@ -631,12 +657,13 @@ def test_llm_node_and_typed_port_validation(client: TestClient):
 
     response = client.post(f"/api/workflows/{tab['id']}/activate")
 
-    assert response.status_code == 400
-    messages = [error["message"] for error in response.json()["detail"]["errors"]]
-    assert any("port type mismatch" in message for message in messages)
+    assert response.status_code == 200
+    assert response.json()["activation_state"] == "active"
+    detail = client.get(f"/api/workflows/{tab['id']}").json()
+    assert detail["workflow"]["activation_state"] == "active"
 
 
-def test_structured_output_false_blocks_json_schema_llm(client: TestClient):
+def test_save_definition_validates_llm_model_capabilities(client: TestClient):
     provider = client.post(
         "/api/providers",
         json={
@@ -646,43 +673,78 @@ def test_structured_output_false_blocks_json_schema_llm(client: TestClient):
             "models": [{"model": "gpt-5", "structured_output": False}],
         },
     ).json()
-    tab = client.post("/api/workflows", json={"title": "Structured"}).json()
-    trigger = _create_graph_node(
-        client,
-        tab_id=tab["id"],
-        node_type="trigger",
-        name="JSON trigger",
-        config={"kind": "manual", "output_type": "json", "message": {"task": "Run"}},
-    )
-    llm = _create_graph_node(
-        client,
-        tab_id=tab["id"],
-        node_type="llm",
-        name="JSON writer",
-        config={
-            "model": {"provider_id": provider["id"], "model": "gpt-5"},
-            "system_prompt": "Return JSON.",
-            "temperature": 0,
-            "max_output_tokens": 100,
-            "stop_sequences": [],
-            "response_format": {
-                "kind": "json_schema",
-                "schema": {"type": "object"},
+    tab = client.post("/api/workflows", json={"title": "Structured Save"}).json()
+    response = client.post(
+        f"/api/workflows/{tab['id']}/nodes",
+        json={
+            "node_type": "llm",
+            "name": "JSON writer",
+            "config": {
+                "model": {"provider_id": provider["id"], "model": "gpt-5"},
+                "system_prompt": "Return JSON.",
+                "temperature": 0,
+                "max_output_tokens": 100,
+                "stop_sequences": [],
+                "response_format": {
+                    "kind": "json_schema",
+                    "schema": {"type": "object"},
+                },
+                "input_type": "json",
+                "output_type": "json",
             },
-            "input_type": "json",
-            "output_type": "json",
         },
     )
-    assert (
-        client.post(
-            f"/api/workflows/{tab['id']}/edges",
-            json={"from_node_id": trigger["id"], "to_node_id": llm["id"]},
-        ).status_code
-        == 200
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "llm model does not support structured_output"
+
+
+def test_activate_does_not_validate_existing_llm_model_capabilities(
+    client: TestClient,
+):
+    provider = client.post(
+        "/api/providers",
+        json={
+            "name": "Primary",
+            "type": "openai_compatible",
+            "base_url": "https://api.example.com",
+            "models": [{"model": "gpt-5", "structured_output": False}],
+        },
+    ).json()
+    tab = client.post("/api/workflows", json={"title": "Structured Activate"}).json()
+    llm_response = client.post(
+        f"/api/workflows/{tab['id']}/nodes",
+        json={
+            "node_type": "llm",
+            "name": "JSON writer",
+            "config": {
+                "model": {"provider_id": provider["id"], "model": "gpt-5"},
+                "system_prompt": "Return JSON.",
+                "temperature": 0,
+                "max_output_tokens": 100,
+                "stop_sequences": [],
+                "response_format": {"kind": "text"},
+                "input_type": "json",
+                "output_type": "string",
+            },
+        },
     )
+    assert llm_response.status_code == 200
+    llm = llm_response.json()
+    from flowent.workspace_store import workspace_store
+
+    stored_tab = workspace_store.get_tab(tab["id"])
+    assert stored_tab is not None
+    stored_node = stored_tab.definition.get_node(llm["id"])
+    assert stored_node is not None
+    stored_node.config["response_format"] = {
+        "kind": "json_schema",
+        "schema": {"type": "object"},
+    }
+    stored_node.config["output_type"] = "json"
+    workspace_store.upsert_tab(stored_tab)
 
     response = client.post(f"/api/workflows/{tab['id']}/activate")
 
-    assert response.status_code == 400
-    messages = [error["message"] for error in response.json()["detail"]["errors"]]
-    assert "llm model does not support structured_output" in messages
+    assert response.status_code == 200
+    assert response.json()["activation_state"] == "active"

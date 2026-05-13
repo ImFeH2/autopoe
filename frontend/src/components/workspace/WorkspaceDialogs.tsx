@@ -128,6 +128,7 @@ export function CreateTabDialog({
 
 interface CreateNodeDialogProps {
   activeTabTitle: string | null;
+  canCreateModelNode: boolean;
   nodeName: string;
   nodeType: WorkflowNodeType;
   roles: Role[];
@@ -154,6 +155,7 @@ const workflowNodeTypeLabels: Record<WorkflowNodeType, string> = {
 
 export function CreateNodeDialog({
   activeTabTitle,
+  canCreateModelNode,
   nodeName,
   nodeType,
   roles,
@@ -233,6 +235,11 @@ export function CreateNodeDialog({
             selectedRoleName={selectedRoleName}
             onRoleNameChange={onRoleNameChange}
           />
+        </div>
+      ) : null}
+      {nodeType === "llm" && !canCreateModelNode ? (
+        <div className="rounded-lg border border-border bg-accent/35 px-3.5 py-2.5 text-xs text-muted-foreground">
+          Choose a model in Settings before adding a Model node.
         </div>
       ) : null}
       <WorkspaceDialogField label="Display Name" hint="Optional">

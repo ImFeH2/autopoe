@@ -218,6 +218,7 @@ function buildRole(
 
 interface WorkspacePageScenario {
   activeTabId?: string | null;
+  canCreateModelNode?: boolean;
   connected?: boolean;
   leaderNode?: Node | null;
   regularTabAgents?: Node[];
@@ -302,6 +303,7 @@ function useMockWorkspacePageState() {
     activeDialog,
     activeTab,
     activeTabId: activeTabIdState,
+    canCreateModelNode: workspacePageScenario.canCreateModelNode ?? true,
     connected: workspacePageScenario.connected ?? true,
     connectSourceId,
     connectSourcePortKey,
@@ -439,7 +441,7 @@ function useMockWorkspacePageState() {
     },
     workflowNodeOptions: [],
     workspaceRef,
-    workflowLocked: activeTab?.activation_state === "active",
+    workflowReceivingWork: activeTab?.activation_state === "active",
   };
 }
 
@@ -607,6 +609,28 @@ describe("WorkspacePage", () => {
         name: "Release Reviewer",
       }),
     );
+  });
+
+  it("requires a selected model before adding a model node", async () => {
+    workspacePageScenario = { canCreateModelNode: false };
+
+    render(<WorkspacePage />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Add Node" })[0]);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("combobox", { name: "Node Type" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Model" }));
+
+    expect(
+      within(dialog).getByText(
+        "Choose a model in Settings before adding a Model node.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Add Node" }),
+    ).toBeDisabled();
   });
 
   it("opens leader details from the workspace panel and keeps interrupt only in the detail header", async () => {
@@ -821,7 +845,7 @@ describe("WorkspacePage", () => {
     render(<WorkspacePage />);
 
     fireEvent(
-      screen.getAllByRole("button", { name: "Example Tab" })[0],
+      screen.getAllByRole("button", { name: /Example Tab/ })[0],
       new MouseEvent("auxclick", {
         bubbles: true,
         button: 1,

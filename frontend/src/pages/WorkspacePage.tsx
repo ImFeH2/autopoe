@@ -12,6 +12,7 @@ export function WorkspacePage() {
     activeDialog,
     activeTab,
     activeTabId,
+    canCreateModelNode,
     connected,
     connectSourceId,
     connectSourcePortKey,
@@ -78,7 +79,7 @@ export function WorkspacePage() {
     togglePanel,
     workflowNodeOptions,
     workspaceRef,
-    workflowLocked,
+    workflowReceivingWork,
   } = useWorkspacePageState();
 
   return (
@@ -123,7 +124,7 @@ export function WorkspacePage() {
         sourcePortOptions={sourcePortOptions}
         targetPortOptions={targetPortOptions}
         workspaceRef={workspaceRef}
-        workflowLocked={workflowLocked}
+        workflowReceivingWork={workflowReceivingWork}
       />
 
       <CreateTabDialog
@@ -152,6 +153,7 @@ export function WorkspacePage() {
         }}
         pending={pendingAction === "create-node"}
         activeTabTitle={activeTab?.title ?? null}
+        canCreateModelNode={canCreateModelNode}
         nodeType={createNodeType}
         onNodeTypeChange={setCreateNodeType}
         selectedRoleName={createNodeRoleName}
@@ -164,7 +166,7 @@ export function WorkspacePage() {
         submitDisabled={
           !activeTabId ||
           pendingAction === "create-node" ||
-          workflowLocked ||
+          (createNodeType === "llm" && !canCreateModelNode) ||
           (createNodeType === "agent" && !selectedCreateNodeRole)
         }
       />

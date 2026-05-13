@@ -477,18 +477,6 @@ export function useAgentGraphController({
     [buildDefinitionAgentNode, runtimeAgentMap],
   );
 
-  const workflowRuntimeNodes = useMemo(
-    () =>
-      workflowNodes.flatMap((node) => {
-        const runtimeNode = runtimeAgentMap.get(node.id);
-        if (runtimeNode) {
-          return [runtimeNode];
-        }
-        const definitionNode = buildDefinitionAgentNode(node.id);
-        return definitionNode ? [definitionNode] : [];
-      }),
-    [buildDefinitionAgentNode, runtimeAgentMap, workflowNodes],
-  );
   const getWorkflowNodeLabel = useCallback(
     (nodeId: string) => {
       const node = workflowNodeMap.get(nodeId);
@@ -817,7 +805,7 @@ export function useAgentGraphController({
         return;
       }
       if (readOnly) {
-        toast.error("Deactivate workflow before editing");
+        toast.error("Workflow editing is not available");
         return;
       }
       if (sourceNodeId === targetNodeId) {
@@ -1004,7 +992,7 @@ export function useAgentGraphController({
         return;
       }
       if (readOnly) {
-        toast.error("Deactivate workflow before editing");
+        toast.error("Workflow editing is not available");
         return;
       }
       completedConnection.current = true;
@@ -1195,7 +1183,7 @@ export function useAgentGraphController({
             void onDeleteAgent({
               tabId: activeTabId,
               node: contextNode,
-              tabAgents: workflowRuntimeNodes,
+              edges: workflowEdges,
             }).catch((error) => {
               toast.error(
                 error instanceof Error
@@ -1273,7 +1261,7 @@ export function useAgentGraphController({
     closeConnectionChoice,
     getContextAgentNode,
     selectAgent,
-    workflowRuntimeNodes,
+    workflowEdges,
   ]);
 
   const submitQuickCreate = useCallback(() => {
