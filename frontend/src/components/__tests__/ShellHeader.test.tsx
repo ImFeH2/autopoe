@@ -54,37 +54,37 @@ describe("ShellHeader", () => {
     Reflect.deleteProperty(globalThis, "ResizeObserver");
   });
 
-  it("shows the shared command entry on desktop pages", () => {
+  it("does not show a command entry on desktop pages", () => {
     render(<ShellHeader compact={false} onOpenNavigation={onOpenNavigation} />);
 
     expect(
-      screen.getByRole("button", { name: "Open search" }),
-    ).toHaveTextContent("Do anything");
+      screen.queryByRole("button", { name: "Open search" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Open navigation" }),
     ).not.toBeInTheDocument();
   });
 
-  it("keeps navigation and command entry available in compact layout", () => {
+  it("keeps navigation available without showing a command entry in compact layout", () => {
     render(<ShellHeader compact onOpenNavigation={onOpenNavigation} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
     expect(onOpenNavigation).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByRole("button", { name: "Open search" }),
-    ).toHaveTextContent("Do anything");
+      screen.queryByRole("button", { name: "Open search" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("opens the command palette and navigates to pages and workflows", async () => {
+  it("opens the command palette from keyboard and navigates to pages and workflows", async () => {
     render(<ShellHeader compact={false} onOpenNavigation={onOpenNavigation} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open search" }));
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Settings"));
     expect(navigateToPage).toHaveBeenCalledWith("settings");
 
-    fireEvent.click(screen.getByRole("button", { name: "Open search" }));
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     fireEvent.click(await screen.findByText("Release Plan"));
     expect(navigateToWorkspaceTab).toHaveBeenCalledWith("workflow-1");
     expect(navigateToPage).not.toHaveBeenCalledWith("workspace");

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PanelLeftOpen, Search } from "lucide-react";
+import { PanelLeftOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -21,19 +21,8 @@ interface ShellHeaderProps {
   onOpenNavigation: () => void;
 }
 
-function getCommandShortcutLabel() {
-  if (
-    typeof navigator !== "undefined" &&
-    /Mac|iPhone|iPad/.test(navigator.platform)
-  ) {
-    return "⌘K";
-  }
-  return "Ctrl K";
-}
-
 export function ShellHeader({ compact, onOpenNavigation }: ShellHeaderProps) {
   const [open, setOpen] = useState(false);
-  const shortcutLabel = useMemo(() => getCommandShortcutLabel(), []);
   const { currentPage, navigateToPage, navigateToWorkspaceTab } = useAgentUI();
   const { tabs } = useAgentTabsRuntime();
   const workflowItems = useMemo(() => Array.from(tabs.values()), [tabs]);
@@ -62,7 +51,7 @@ export function ShellHeader({ compact, onOpenNavigation }: ShellHeaderProps) {
 
   return (
     <div className="shrink-0 border-b border-border/70 py-3">
-      <div className="flex items-center gap-3">
+      <div className="flex min-h-9 items-center gap-3">
         {compact ? (
           <Button
             type="button"
@@ -75,19 +64,6 @@ export function ShellHeader({ compact, onOpenNavigation }: ShellHeaderProps) {
             <PanelLeftOpen className="size-4" />
           </Button>
         ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          aria-label="Open search"
-          onClick={() => setOpen(true)}
-          className="h-9 min-w-0 flex-1 justify-start gap-2 rounded-lg border border-border/70 bg-card/20 px-3 text-[13px] font-normal text-muted-foreground hover:bg-accent/35 hover:text-foreground sm:max-w-md"
-        >
-          <Search className="size-4" />
-          <span className="min-w-0 flex-1 text-left">Do anything</span>
-          <kbd className="rounded-md border border-border/70 bg-background/45 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {shortcutLabel}
-          </kbd>
-        </Button>
       </div>
       <CommandDialog
         open={open}
