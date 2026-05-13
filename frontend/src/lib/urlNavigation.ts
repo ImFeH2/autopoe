@@ -47,7 +47,7 @@ const defaultRouteState: AppRouteState = {
   providerMode: "list",
   roleName: null,
   roleMode: null,
-  settingsSection: "model",
+  settingsSection: "access",
   workspaceTabId: null,
 };
 

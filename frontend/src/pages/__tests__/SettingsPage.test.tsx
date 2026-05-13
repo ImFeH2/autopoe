@@ -186,7 +186,7 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requireReauth.mockReset();
-    window.history.replaceState(null, "", "/settings/model");
+    window.history.replaceState(null, "", "/settings");
   });
 
   afterEach(() => {
@@ -199,11 +199,30 @@ describe("SettingsPage", () => {
 
     renderSettingsPage();
 
-    expect(await screen.findByLabelText("Request Timeout")).toHaveValue(
-      "10000",
-    );
+    expect(await screen.findByLabelText("New Access Code")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { level: 1, name: "Settings" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("tablist", { name: "Settings categories" }),
+    ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Path" }));
+    expect(
+      screen.getByRole("tab", { name: "Access Configuration" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent?.trim().replace(/\s+/g, " ")),
+    ).toEqual([
+      "Access Configuration",
+      "Path Configuration",
+      "Assistant Configuration",
+      "Leader Configuration",
+      "Model Configuration",
+    ]);
+
+    await user.click(screen.getByRole("tab", { name: "Path Configuration" }));
     expect(await screen.findByLabelText("App Data Directory")).toHaveValue(
       "/home/test/.flowent",
     );
@@ -211,7 +230,10 @@ describe("SettingsPage", () => {
       "/workspace/project",
     );
 
-    await user.click(screen.getByRole("tab", { name: "Model" }));
+    await user.click(screen.getByRole("tab", { name: "Model Configuration" }));
+    expect(await screen.findByLabelText("Request Timeout")).toHaveValue(
+      "10000",
+    );
     expect(
       await screen.findByText("Context window: 128,000"),
     ).toBeInTheDocument();
@@ -221,12 +243,14 @@ describe("SettingsPage", () => {
       ),
     ).toBeInTheDocument();
 
-    await user.click(await screen.findByRole("tab", { name: "Assistant" }));
+    await user.click(
+      await screen.findByRole("tab", { name: "Assistant Configuration" }),
+    );
     expect(
       await screen.findByTestId("assistant-role-guidance"),
     ).toHaveTextContent("Human-facing assistant role");
 
-    await user.click(screen.getByRole("tab", { name: "Leader" }));
+    await user.click(screen.getByRole("tab", { name: "Leader Configuration" }));
     expect(
       (await screen.findAllByText("Default leader role")).length,
     ).toBeGreaterThan(0);
@@ -268,7 +292,9 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     renderSettingsPage();
 
-    const assistantTab = await screen.findByRole("tab", { name: "Assistant" });
+    const assistantTab = await screen.findByRole("tab", {
+      name: "Assistant Configuration",
+    });
     await user.click(assistantTab);
 
     const guidance = await screen.findByTestId("assistant-role-guidance");
@@ -292,7 +318,9 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     renderSettingsPage();
 
-    await user.click(await screen.findByRole("tab", { name: "Assistant" }));
+    await user.click(
+      await screen.findByRole("tab", { name: "Assistant Configuration" }),
+    );
     const networkAccessSwitch = await screen.findByRole("switch", {
       name: "Network Access",
     });
@@ -324,8 +352,12 @@ describe("SettingsPage", () => {
       reauthRequired: false,
     });
 
+    const user = userEvent.setup();
     renderSettingsPage();
 
+    await user.click(
+      await screen.findByRole("tab", { name: "Model Configuration" }),
+    );
     const timeoutInput = await screen.findByLabelText("Request Timeout");
 
     fireEvent.change(timeoutInput, { target: { value: "15000" } });
@@ -343,8 +375,12 @@ describe("SettingsPage", () => {
   it("shows field validation without saving an invalid compact token limit", async () => {
     fetchSettingsBootstrap.mockResolvedValue(buildBootstrapData());
 
+    const user = userEvent.setup();
     renderSettingsPage();
 
+    await user.click(
+      await screen.findByRole("tab", { name: "Model Configuration" }),
+    );
     const autoCompactTokenLimitInput = await screen.findByLabelText(
       "Automatic Compact Token Limit",
     );
@@ -373,7 +409,9 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     renderSettingsPage();
 
-    await user.click(await screen.findByRole("tab", { name: "Access" }));
+    await user.click(
+      await screen.findByRole("tab", { name: "Access Configuration" }),
+    );
     await user.type(screen.getByLabelText("New Access Code"), "NEW-CODE");
     await user.type(screen.getByLabelText("Confirm Access Code"), "NEW-CODE");
     await user.click(
@@ -403,7 +441,9 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     renderSettingsPage();
 
-    await user.click(await screen.findByRole("tab", { name: "Path" }));
+    await user.click(
+      await screen.findByRole("tab", { name: "Path Configuration" }),
+    );
     const workingDirectoryInput =
       await screen.findByLabelText("Working Directory");
 

@@ -26,9 +26,12 @@ vi.mock("@/context/AgentContext", async () => {
     ...actual,
     AgentProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
     useAgentConnectionRuntime: () => ({ connected: true }),
+    useAgentTabsRuntime: () => ({ tabs: new Map() }),
     useAgentUI: () => ({
       currentPage: "assistant",
       navigateToPage: vi.fn(),
+      navigateToWorkspaceTab: vi.fn(),
+      setActiveTabId: vi.fn(),
     }),
   };
 });

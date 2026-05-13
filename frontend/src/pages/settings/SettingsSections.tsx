@@ -11,7 +11,6 @@ import {
 } from "@/components/form/FormControls";
 import {
   FormSection,
-  PageTitleBar,
   SettingsRow,
   SettingsStack,
   SettingsGroup,
@@ -90,10 +89,6 @@ function SaveStateLine({
   );
 }
 
-export function SettingsHeader() {
-  return <PageTitleBar title="Settings" className="mb-8" />;
-}
-
 interface AccessConfigurationSectionProps {
   accessDraft: AccessDraft;
   accessDraftError: string | null;
@@ -115,7 +110,7 @@ export function AccessConfigurationSection({
   const canUpdateAccessCode = isChangingAccessCode && !accessDraftError;
 
   return (
-    <FormSection title="Access Configuration" className="mt-8 first:mt-0">
+    <FormSection title="Access Configuration">
       <SettingsStack label="New Access Code">
         <div className="space-y-2 w-full max-w-lg">
           <SecretInput
@@ -210,7 +205,7 @@ export function PathConfigurationSection({
   };
 
   return (
-    <FormSection title="Path Configuration" className="mt-10">
+    <FormSection title="Path Configuration">
       <SettingsStack label="App Data Directory">
         <div className="space-y-2 max-w-lg">
           <FormInput
@@ -425,7 +420,7 @@ export function LeaderConfigurationSection({
   settings,
 }: LeaderConfigurationSectionProps) {
   return (
-    <FormSection title="Leader Configuration" className="mt-10">
+    <FormSection title="Leader Configuration">
       <SettingsRow label="Leader Role">
         <div className="w-full">
           <Select
@@ -521,7 +516,7 @@ export function ModelConfigurationSection({
   };
 
   return (
-    <FormSection title="Model Configuration" className="mt-10">
+    <FormSection title="Model Configuration">
       <SettingsRow label="Active Provider">
         <div className="space-y-2">
           <Select

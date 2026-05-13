@@ -109,6 +109,7 @@ interface AgentUIContextValue {
   currentPage: PageId;
   setCurrentPage: (page: PageId) => void;
   navigateToPage: (page: PageId) => void;
+  navigateToWorkspaceTab: (id: string | null) => void;
 }
 
 const AgentNodesContext = createContext<AgentNodesContextValue | null>(null);
@@ -530,6 +531,12 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     pushBrowserPath(getRoutePathForPage(page));
   }, []);
 
+  const navigateToWorkspaceTab = useCallback((id: string | null) => {
+    setCurrentPage("workspace");
+    setSelectedTabId(id);
+    pushBrowserPath(getRoutePathForWorkspace(id));
+  }, []);
+
   useEffect(() => {
     const handlePopState = () => {
       const nextRoute = parseAppRouteFromLocation(window.location);
@@ -625,6 +632,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       currentPage,
       setCurrentPage,
       navigateToPage,
+      navigateToWorkspaceTab,
     }),
     [
       selectedAgentId,
@@ -634,6 +642,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       setActiveTabId,
       currentPage,
       navigateToPage,
+      navigateToWorkspaceTab,
     ],
   );
 

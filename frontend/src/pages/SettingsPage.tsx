@@ -1,6 +1,15 @@
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { PageScaffold } from "@/components/layout/PageScaffold";
 import { PageLoadingState } from "@/components/layout/PageLoadingState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Bot,
+  FolderCog,
+  KeyRound,
+  Network,
+  SlidersHorizontal,
+  type LucideIcon,
+} from "lucide-react";
 import {
   AccessConfigurationSection,
   AssistantConfigurationSection,
@@ -8,7 +17,6 @@ import {
   ModelConfigurationSection,
   PathConfigurationSection,
   SettingsFooter,
-  SettingsHeader,
 } from "@/pages/settings/SettingsSections";
 import { useSettingsPageState } from "@/pages/settings/useSettingsPageState";
 import {
@@ -19,15 +27,39 @@ import {
 import { useAppRoute } from "@/hooks/useAppRoute";
 
 const SETTINGS_SECTIONS: SettingsSectionId[] = [
-  "model",
-  "assistant",
-  "leader",
   "access",
   "path",
+  "assistant",
+  "leader",
+  "model",
 ];
+
+const SETTINGS_SECTION_NAV = {
+  access: {
+    icon: KeyRound,
+    label: "Access Configuration",
+  },
+  assistant: {
+    icon: Bot,
+    label: "Assistant Configuration",
+  },
+  leader: {
+    icon: Network,
+    label: "Leader Configuration",
+  },
+  model: {
+    icon: SlidersHorizontal,
+    label: "Model Configuration",
+  },
+  path: {
+    icon: FolderCog,
+    label: "Path Configuration",
+  },
+} satisfies Record<SettingsSectionId, { icon: LucideIcon; label: string }>;
 
 export function SettingsPage() {
   const route = useAppRoute();
+  const useHorizontalCategories = useMediaQuery("(max-width: 1023px)");
   const {
     accessDraft,
     accessDraftError,
@@ -63,10 +95,8 @@ export function SettingsPage() {
 
   return (
     <PageScaffold>
-      <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-none pb-20">
-        <div className="mx-auto max-w-[680px] pb-10 pt-6">
-          <SettingsHeader />
-
+      <div className="h-full min-h-0 overflow-y-auto pr-2 pb-20 scrollbar-none">
+        <div className="mx-auto w-full max-w-[960px] pb-10 pt-6">
           <Tabs
             value={route.settingsSection}
             onValueChange={(value) => {
@@ -74,21 +104,35 @@ export function SettingsPage() {
                 getRoutePathForSettings(value as SettingsSectionId),
               );
             }}
-            className="w-full"
+            orientation={useHorizontalCategories ? "horizontal" : "vertical"}
+            className="w-full flex-col gap-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start"
           >
-            <TabsList className="mb-8 w-full justify-start h-auto flex-wrap bg-transparent p-0 gap-6 border-b border-border/40 rounded-none">
+            <TabsList
+              aria-label="Settings categories"
+              className="mb-6 flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none border-b border-border/40 bg-transparent p-0 pb-2 lg:sticky lg:top-6 lg:mb-0 lg:w-full lg:flex-col lg:overflow-visible lg:border-b-0 lg:border-r lg:border-border/40 lg:pb-0 lg:pr-4"
+              variant="line"
+            >
               {SETTINGS_SECTIONS.map((t) => (
                 <TabsTrigger
                   key={t}
                   value={t}
-                  className="data-[state=active]:bg-transparent data-[state=active]:shadow-none bg-transparent border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground rounded-none px-1 pb-2.5 pt-2 hover:text-foreground transition-colors"
+                  className="h-10 w-auto shrink-0 justify-start gap-2 rounded-md border border-transparent bg-transparent px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent/20 hover:text-foreground data-[state=active]:border-border/70 data-[state=active]:bg-accent/25 data-[state=active]:text-foreground data-[state=active]:shadow-none lg:w-full lg:justify-start"
                 >
-                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                  {(() => {
+                    const section = SETTINGS_SECTION_NAV[t];
+                    const Icon = section.icon;
+                    return (
+                      <>
+                        <Icon className="size-4" aria-hidden="true" />
+                        <span>{section.label}</span>
+                      </>
+                    );
+                  })()}
                 </TabsTrigger>
               ))}
             </TabsList>
 
-            <TabsContent value="model" className="mt-0">
+            <TabsContent value="model" className="mt-0 min-w-0">
               <ModelConfigurationSection
                 activeProvider={activeProvider}
                 activeProviderModels={activeProviderModels}
@@ -105,7 +149,7 @@ export function SettingsPage() {
               />
             </TabsContent>
 
-            <TabsContent value="assistant" className="mt-0">
+            <TabsContent value="assistant" className="mt-0 min-w-0">
               <AssistantConfigurationSection
                 assistantRole={assistantRole}
                 onSettingsChange={commitSettingsChange}
@@ -117,7 +161,7 @@ export function SettingsPage() {
               />
             </TabsContent>
 
-            <TabsContent value="leader" className="mt-0">
+            <TabsContent value="leader" className="mt-0 min-w-0">
               <LeaderConfigurationSection
                 leaderRole={leaderRole}
                 onSettingsChange={commitSettingsChange}
@@ -127,7 +171,7 @@ export function SettingsPage() {
               />
             </TabsContent>
 
-            <TabsContent value="access" className="mt-0">
+            <TabsContent value="access" className="mt-0 min-w-0">
               <AccessConfigurationSection
                 accessDraft={accessDraft}
                 accessDraftError={accessDraftError}
@@ -139,7 +183,7 @@ export function SettingsPage() {
               />
             </TabsContent>
 
-            <TabsContent value="path" className="mt-0">
+            <TabsContent value="path" className="mt-0 min-w-0">
               <PathConfigurationSection
                 onSettingsChange={commitSettingsChange}
                 saveSettingsChange={saveSettingsChange}

@@ -77,7 +77,7 @@ describe("urlNavigation", () => {
       parseAppRouteFromLocation(locationFor("/settings/not-real")),
     ).toMatchObject({
       page: "settings",
-      settingsSection: "model",
+      settingsSection: "access",
     });
     expect(
       parseAppRouteFromLocation(locationFor("/workspace/workflow%201")),
