@@ -1,4 +1,4 @@
-import { Save } from "lucide-react";
+import type { FocusEvent, KeyboardEvent, ReactNode } from "react";
 import { ModelParamsFields } from "@/components/ModelParamsFields";
 import {
   FormInput,
@@ -30,11 +30,16 @@ import { cn } from "@/lib/utils";
 import {
   nullableBoolFromTriState,
   triStateFromNullableBool,
+  validateAutoSaveSettings,
+  type SettingsAutoSaveKey,
+  type SettingsSaveState,
   type TriStateCapability,
   type UserSettings,
 } from "@/pages/settings/lib";
 import type {
   AccessDraft,
+  CommitSettingsChange,
+  SaveSettingsChange,
   UpdateAccessDraft,
   UpdateSettings,
 } from "@/pages/settings/useSettingsPageState";
@@ -46,55 +51,68 @@ const retryPolicyOptions: Array<{ value: RetryPolicy; label: string }> = [
   { value: "unlimited", label: "Unlimited" },
 ];
 
-interface SettingsHeaderProps {
-  accessDraftError: string | null;
-  onSave: () => void;
-  saving: boolean;
-  settings: UserSettings;
+type SaveStateLookup = (saveKey: SettingsAutoSaveKey) => SettingsSaveState;
+
+const enterKeySaves = (
+  event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.currentTarget.blur();
+  }
+};
+
+function SaveStateLine({
+  children,
+  state,
+}: {
+  children?: ReactNode;
+  state: SettingsSaveState;
+}) {
+  if (state.status === "idle" && !children) {
+    return null;
+  }
+
+  return (
+    <div className={cn("space-y-1", formHelpTextClass)}>
+      {children}
+      {state.status === "saving" ? (
+        <p className="text-muted-foreground">Saving...</p>
+      ) : null}
+      {state.status === "saved" ? (
+        <p className="text-graph-status-complete">{state.message ?? "Saved"}</p>
+      ) : null}
+      {state.status === "error" ? (
+        <p className="font-medium text-destructive">
+          {state.message ?? "Could not save this change."}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
-export function SettingsHeader({
-  accessDraftError,
-  onSave,
-  saving,
-  settings,
-}: SettingsHeaderProps) {
-  return (
-    <PageTitleBar
-      title="Settings"
-      actions={
-        <Button
-          type="button"
-          size="sm"
-          onClick={onSave}
-          disabled={
-            saving || Boolean(accessDraftError) || !settings.working_dir.trim()
-          }
-          className="text-[13px]"
-        >
-          <Save className="size-4" />
-          {saving ? "Saving..." : "Save Changes"}
-        </Button>
-      }
-      className="mb-8"
-    />
-  );
+export function SettingsHeader() {
+  return <PageTitleBar title="Settings" className="mb-8" />;
 }
 
 interface AccessConfigurationSectionProps {
   accessDraft: AccessDraft;
   accessDraftError: string | null;
+  onAccessCodeUpdate: () => void;
   onAccessDraftChange: UpdateAccessDraft;
+  saveState: SettingsSaveState;
 }
 
 export function AccessConfigurationSection({
   accessDraft,
   accessDraftError,
+  onAccessCodeUpdate,
   onAccessDraftChange,
+  saveState,
 }: AccessConfigurationSectionProps) {
   const isChangingAccessCode = Boolean(
     accessDraft.newCode.trim() || accessDraft.confirmCode.trim(),
   );
+  const canUpdateAccessCode = isChangingAccessCode && !accessDraftError;
 
   return (
     <FormSection title="Access Configuration" className="mt-8 first:mt-0">
@@ -102,6 +120,7 @@ export function AccessConfigurationSection({
         <div className="space-y-2 w-full max-w-lg">
           <SecretInput
             id="new-access-code"
+            aria-label="New Access Code"
             value={accessDraft.newCode}
             onChange={(event) =>
               onAccessDraftChange((current) => ({
@@ -116,7 +135,7 @@ export function AccessConfigurationSection({
           />
           {isChangingAccessCode ? (
             <p className={formHelpTextClass}>
-              Saving signs you out; use the new code to return.
+              Updating signs you out; use the new code to return.
             </p>
           ) : null}
         </div>
@@ -126,6 +145,7 @@ export function AccessConfigurationSection({
         <div className="space-y-2 w-full max-w-lg">
           <SecretInput
             id="confirm-access-code"
+            aria-label="Confirm Access Code"
             value={accessDraft.confirmCode}
             onChange={(event) =>
               onAccessDraftChange((current) => ({
@@ -150,19 +170,45 @@ export function AccessConfigurationSection({
           ) : null}
         </div>
       </SettingsStack>
+      <SettingsStack label="Access Code Update">
+        <div className="space-y-2 w-full max-w-lg">
+          <Button
+            type="button"
+            size="sm"
+            onClick={onAccessCodeUpdate}
+            disabled={!canUpdateAccessCode || saveState.status === "saving"}
+            className="text-[13px]"
+          >
+            {saveState.status === "saving"
+              ? "Updating..."
+              : "Update access code"}
+          </Button>
+          <SaveStateLine state={saveState} />
+        </div>
+      </SettingsStack>
     </FormSection>
   );
 }
 
 interface PathConfigurationSectionProps {
-  onSettingsChange: UpdateSettings;
+  onSettingsChange: CommitSettingsChange;
+  saveSettingsChange: SaveSettingsChange;
+  saveState: SettingsSaveState;
   settings: UserSettings;
+  updateSettings: UpdateSettings;
 }
 
 export function PathConfigurationSection({
   onSettingsChange,
+  saveSettingsChange,
+  saveState,
   settings,
+  updateSettings,
 }: PathConfigurationSectionProps) {
+  const saveWorkingDirectory = (nextSettings: UserSettings) => {
+    void saveSettingsChange("working_dir", nextSettings);
+  };
+
   return (
     <FormSection title="Path Configuration" className="mt-10">
       <SettingsStack label="App Data Directory">
@@ -185,24 +231,36 @@ export function PathConfigurationSection({
             aria-label="Working Directory"
             value={settings.working_dir}
             onChange={(event) =>
-              onSettingsChange((current) => ({
+              updateSettings((current) => ({
                 ...current,
                 working_dir: event.target.value,
               }))
             }
+            onBlur={(event: FocusEvent<HTMLInputElement>) => {
+              const nextSettings = {
+                ...settings,
+                working_dir: event.target.value,
+              };
+              if (event.target.value === settings.working_dir) {
+                saveWorkingDirectory(nextSettings);
+                return;
+              }
+              void onSettingsChange("working_dir", () => nextSettings);
+            }}
+            onKeyDown={enterKeySaves}
             placeholder="/workspace/project"
             mono
           />
           <p className={formHelpTextClass}>
             Changing this does not expand saved allowed folders.
           </p>
-          <div className={cn("space-y-2", formHelpTextClass)}>
+          <SaveStateLine state={saveState}>
             {!settings.working_dir.trim() ? (
               <p className="text-destructive">
                 Working Directory must not be empty.
               </p>
             ) : null}
-          </div>
+          </SaveStateLine>
         </div>
       </SettingsStack>
     </FormSection>
@@ -211,17 +269,28 @@ export function PathConfigurationSection({
 
 interface AssistantConfigurationSectionProps {
   assistantRole: Role | null;
-  onSettingsChange: UpdateSettings;
+  onSettingsChange: CommitSettingsChange;
   roles: Role[];
+  saveSettingsChange: SaveSettingsChange;
+  saveStateFor: SaveStateLookup;
   settings: UserSettings;
+  updateSettings: UpdateSettings;
 }
 
 export function AssistantConfigurationSection({
   assistantRole,
   onSettingsChange,
   roles,
+  saveSettingsChange,
+  saveStateFor,
   settings,
+  updateSettings,
 }: AssistantConfigurationSectionProps) {
+  const writeDirsState = saveStateFor("assistant.write_dirs");
+  const saveWriteDirs = (nextSettings: UserSettings) => {
+    void saveSettingsChange("assistant.write_dirs", nextSettings);
+  };
+
   return (
     <FormSection title="Assistant Configuration">
       <SettingsRow label="Assistant Role">
@@ -229,7 +298,7 @@ export function AssistantConfigurationSection({
           <Select
             value={settings.assistant.role_name}
             onValueChange={(value) =>
-              onSettingsChange((current) => ({
+              void onSettingsChange("assistant.role_name", (current) => ({
                 ...current,
                 assistant: {
                   ...current.assistant,
@@ -262,6 +331,7 @@ export function AssistantConfigurationSection({
               <p>{assistantRole.description}</p>
             </div>
           ) : null}
+          <SaveStateLine state={saveStateFor("assistant.role_name")} />
         </div>
       </SettingsRow>
 
@@ -271,7 +341,7 @@ export function AssistantConfigurationSection({
             checked={settings.assistant.allow_network}
             label="Network Access"
             onCheckedChange={(nextValue) =>
-              onSettingsChange((current) => ({
+              void onSettingsChange("assistant.allow_network", (current) => ({
                 ...current,
                 assistant: {
                   ...current.assistant,
@@ -286,6 +356,7 @@ export function AssistantConfigurationSection({
               Assistant cannot connect to the web.
             </p>
           ) : null}
+          <SaveStateLine state={saveStateFor("assistant.allow_network")} />
         </div>
       </SettingsRow>
 
@@ -295,7 +366,7 @@ export function AssistantConfigurationSection({
             aria-label="Write Dirs"
             value={settings.assistant.write_dirs.join("\n")}
             onChange={(event) =>
-              onSettingsChange((current) => ({
+              updateSettings((current) => ({
                 ...current,
                 assistant: {
                   ...current.assistant,
@@ -303,6 +374,25 @@ export function AssistantConfigurationSection({
                 },
               }))
             }
+            onBlur={(event: FocusEvent<HTMLTextAreaElement>) => {
+              const nextWriteDirs = event.target.value.split("\n");
+              const nextSettings = {
+                ...settings,
+                assistant: {
+                  ...settings.assistant,
+                  write_dirs: nextWriteDirs,
+                },
+              };
+              if (
+                nextWriteDirs.join("\n") ===
+                settings.assistant.write_dirs.join("\n")
+              ) {
+                saveWriteDirs(nextSettings);
+                return;
+              }
+              void onSettingsChange("assistant.write_dirs", () => nextSettings);
+            }}
+            onKeyDown={enterKeySaves}
             rows={4}
             spellCheck={false}
             placeholder="/workspace/output"
@@ -312,6 +402,7 @@ export function AssistantConfigurationSection({
           <p className={formHelpTextClass}>
             One absolute folder path per line.
           </p>
+          <SaveStateLine state={writeDirsState} />
         </div>
       </SettingsStack>
     </FormSection>
@@ -320,8 +411,9 @@ export function AssistantConfigurationSection({
 
 interface LeaderConfigurationSectionProps {
   leaderRole: Role | null;
-  onSettingsChange: UpdateSettings;
+  onSettingsChange: CommitSettingsChange;
   roles: Role[];
+  saveStateFor: SaveStateLookup;
   settings: UserSettings;
 }
 
@@ -329,6 +421,7 @@ export function LeaderConfigurationSection({
   leaderRole,
   onSettingsChange,
   roles,
+  saveStateFor,
   settings,
 }: LeaderConfigurationSectionProps) {
   return (
@@ -338,7 +431,7 @@ export function LeaderConfigurationSection({
           <Select
             value={settings.leader.role_name}
             onValueChange={(value) =>
-              onSettingsChange((current) => ({
+              void onSettingsChange("leader.role_name", (current) => ({
                 ...current,
                 leader: {
                   role_name: value,
@@ -367,6 +460,7 @@ export function LeaderConfigurationSection({
               {leaderRole.description}
             </p>
           ) : null}
+          <SaveStateLine state={saveStateFor("leader.role_name")} />
         </div>
       </SettingsRow>
     </FormSection>
@@ -384,9 +478,12 @@ interface ModelConfigurationSectionProps {
     structured_output: boolean;
   };
   knownSafeInputTokens: number | null;
-  onSettingsChange: UpdateSettings;
+  onSettingsChange: CommitSettingsChange;
   providers: Provider[];
+  saveSettingsChange: SaveSettingsChange;
+  saveStateFor: SaveStateLookup;
   settings: UserSettings;
+  updateSettings: UpdateSettings;
 }
 
 export function ModelConfigurationSection({
@@ -398,40 +495,66 @@ export function ModelConfigurationSection({
   knownSafeInputTokens,
   onSettingsChange,
   providers,
+  saveSettingsChange,
+  saveStateFor,
   settings,
+  updateSettings,
 }: ModelConfigurationSectionProps) {
+  const saveChangedSettings = (
+    saveKey: SettingsAutoSaveKey,
+    nextSettings: UserSettings,
+  ) => {
+    const validationError = validateAutoSaveSettings(
+      saveKey,
+      nextSettings,
+      knownSafeInputTokens,
+    );
+    if (validationError) {
+      void saveSettingsChange(saveKey, nextSettings);
+      return;
+    }
+    if (nextSettings === settings) {
+      void saveSettingsChange(saveKey, nextSettings);
+      return;
+    }
+    void onSettingsChange(saveKey, () => nextSettings);
+  };
+
   return (
     <FormSection title="Model Configuration" className="mt-10">
       <SettingsRow label="Active Provider">
-        <Select
-          value={settings.model.active_provider_id}
-          onValueChange={(value) => {
-            onSettingsChange((current) => ({
-              ...current,
-              model: {
-                ...current.model,
-                active_provider_id: value,
-                active_model: "",
-              },
-            }));
-          }}
-        >
-          <SelectTrigger className={formSelectTriggerClass}>
-            <SelectValue placeholder="Select a provider" />
-          </SelectTrigger>
-          <SelectContent>
-            {providers.map((provider) => (
-              <SelectItem key={provider.id} value={provider.id}>
-                {provider.name} ({providerTypeLabel(provider.type)})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {activeProvider ? (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Using {activeProvider.name} ({activeProvider.base_url})
-          </p>
-        ) : null}
+        <div className="space-y-2">
+          <Select
+            value={settings.model.active_provider_id}
+            onValueChange={(value) => {
+              void onSettingsChange("model.active_provider", (current) => ({
+                ...current,
+                model: {
+                  ...current.model,
+                  active_provider_id: value,
+                  active_model: "",
+                },
+              }));
+            }}
+          >
+            <SelectTrigger className={formSelectTriggerClass}>
+              <SelectValue placeholder="Select a provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.name} ({providerTypeLabel(provider.type)})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {activeProvider ? (
+            <p className="text-xs text-muted-foreground">
+              Using {activeProvider.name} ({activeProvider.base_url})
+            </p>
+          ) : null}
+          <SaveStateLine state={saveStateFor("model.active_provider")} />
+        </div>
       </SettingsRow>
 
       <SettingsRow label="Model">
@@ -449,7 +572,7 @@ export function ModelConfigurationSection({
                       : undefined
                   }
                   onValueChange={(value) =>
-                    onSettingsChange((current) => ({
+                    void onSettingsChange("model.active_model", (current) => ({
                       ...current,
                       model: {
                         ...current.model,
@@ -478,7 +601,7 @@ export function ModelConfigurationSection({
           <FormInput
             value={settings.model.active_model}
             onChange={(event) =>
-              onSettingsChange((current) => ({
+              updateSettings((current) => ({
                 ...current,
                 model: {
                   ...current.model,
@@ -486,6 +609,17 @@ export function ModelConfigurationSection({
                 },
               }))
             }
+            onBlur={(event: FocusEvent<HTMLInputElement>) => {
+              const nextSettings = {
+                ...settings,
+                model: {
+                  ...settings.model,
+                  active_model: event.target.value,
+                },
+              };
+              saveChangedSettings("model.active_model", nextSettings);
+            }}
+            onKeyDown={enterKeySaves}
             placeholder={
               settings.model.active_provider_id
                 ? "Enter model ID manually"
@@ -511,6 +645,7 @@ export function ModelConfigurationSection({
             </p>
           </div>
         ) : null}
+        <SaveStateLine state={saveStateFor("model.active_model")} />
       </SettingsRow>
 
       <SettingsStack label="Model Metadata Overrides">
@@ -539,7 +674,7 @@ export function ModelConfigurationSection({
                     if (nextValue && Number.parseInt(nextValue, 10) <= 0) {
                       return;
                     }
-                    onSettingsChange((current) => ({
+                    updateSettings((current) => ({
                       ...current,
                       model: {
                         ...current.model,
@@ -549,6 +684,23 @@ export function ModelConfigurationSection({
                       },
                     }));
                   }}
+                  onBlur={(event: FocusEvent<HTMLInputElement>) => {
+                    const nextValue = event.target.value.trim();
+                    const nextSettings = {
+                      ...settings,
+                      model: {
+                        ...settings.model,
+                        context_window_tokens: nextValue
+                          ? Number.parseInt(nextValue, 10)
+                          : null,
+                      },
+                    };
+                    saveChangedSettings(
+                      "model.context_window_tokens",
+                      nextSettings,
+                    );
+                  }}
+                  onKeyDown={enterKeySaves}
                   placeholder="Auto"
                   mono
                 />
@@ -563,7 +715,7 @@ export function ModelConfigurationSection({
               <Select
                 value={triStateFromNullableBool(settings.model.input_image)}
                 onValueChange={(value: TriStateCapability) =>
-                  onSettingsChange((current) => ({
+                  void onSettingsChange("model.input_image", (current) => ({
                     ...current,
                     model: {
                       ...current.model,
@@ -591,7 +743,7 @@ export function ModelConfigurationSection({
               <Select
                 value={triStateFromNullableBool(settings.model.output_image)}
                 onValueChange={(value: TriStateCapability) =>
-                  onSettingsChange((current) => ({
+                  void onSettingsChange("model.output_image", (current) => ({
                     ...current,
                     model: {
                       ...current.model,
@@ -621,13 +773,16 @@ export function ModelConfigurationSection({
                   settings.model.structured_output ?? null,
                 )}
                 onValueChange={(value: TriStateCapability) =>
-                  onSettingsChange((current) => ({
-                    ...current,
-                    model: {
-                      ...current.model,
-                      structured_output: nullableBoolFromTriState(value),
-                    },
-                  }))
+                  void onSettingsChange(
+                    "model.structured_output",
+                    (current) => ({
+                      ...current,
+                      model: {
+                        ...current.model,
+                        structured_output: nullableBoolFromTriState(value),
+                      },
+                    }),
+                  )
                 }
               >
                 <SelectTrigger
@@ -644,6 +799,14 @@ export function ModelConfigurationSection({
               </Select>
             </div>
           </div>
+          <div className="grid gap-2 md:grid-cols-4">
+            <SaveStateLine
+              state={saveStateFor("model.context_window_tokens")}
+            />
+            <SaveStateLine state={saveStateFor("model.input_image")} />
+            <SaveStateLine state={saveStateFor("model.output_image")} />
+            <SaveStateLine state={saveStateFor("model.structured_output")} />
+          </div>
         </div>
       </SettingsStack>
 
@@ -653,7 +816,7 @@ export function ModelConfigurationSection({
             className="w-full"
             value={cloneModelParams(settings.model.params)}
             onChange={(params) =>
-              onSettingsChange((current) => ({
+              updateSettings((current) => ({
                 ...current,
                 model: {
                   ...current.model,
@@ -661,10 +824,22 @@ export function ModelConfigurationSection({
                 },
               }))
             }
+            onCommit={(params) => {
+              saveChangedSettings("model.params", {
+                ...settings,
+                model: {
+                  ...settings.model,
+                  params,
+                },
+              });
+            }}
             emptyLabel="Not set"
             numberPlaceholder="Not set"
             reasoningDisableLabel={null}
           />
+          <div className="mt-3">
+            <SaveStateLine state={saveStateFor("model.params")} />
+          </div>
         </div>
       </SettingsStack>
 
@@ -685,7 +860,7 @@ export function ModelConfigurationSection({
                 if (!Number.isSafeInteger(parsed) || parsed <= 0) {
                   return;
                 }
-                onSettingsChange((current) => ({
+                updateSettings((current) => ({
                   ...current,
                   model: {
                     ...current.model,
@@ -693,12 +868,25 @@ export function ModelConfigurationSection({
                   },
                 }));
               }}
+              onBlur={(event: FocusEvent<HTMLInputElement>) => {
+                const parsed = Number.parseInt(event.target.value.trim(), 10);
+                const nextSettings = {
+                  ...settings,
+                  model: {
+                    ...settings.model,
+                    timeout_ms: parsed,
+                  },
+                };
+                saveChangedSettings("model.timeout_ms", nextSettings);
+              }}
+              onKeyDown={enterKeySaves}
               mono
             />
             <span className="text-[13px] font-medium text-muted-foreground">
               ms
             </span>
           </div>
+          <SaveStateLine state={saveStateFor("model.timeout_ms")} />
         </div>
       </SettingsRow>
 
@@ -710,7 +898,7 @@ export function ModelConfigurationSection({
               <Select
                 value={settings.model.retry_policy}
                 onValueChange={(value: RetryPolicy) =>
-                  onSettingsChange((current) => ({
+                  void onSettingsChange("model.retry_policy", (current) => ({
                     ...current,
                     model: {
                       ...current.model,
@@ -752,7 +940,7 @@ export function ModelConfigurationSection({
                     if (!Number.isSafeInteger(parsed) || parsed <= 0) {
                       return;
                     }
-                    onSettingsChange((current) => ({
+                    updateSettings((current) => ({
                       ...current,
                       model: {
                         ...current.model,
@@ -760,6 +948,21 @@ export function ModelConfigurationSection({
                       },
                     }));
                   }}
+                  onBlur={(event: FocusEvent<HTMLInputElement>) => {
+                    const parsed = Number.parseInt(
+                      event.target.value.trim(),
+                      10,
+                    );
+                    const nextSettings = {
+                      ...settings,
+                      model: {
+                        ...settings.model,
+                        max_retries: parsed,
+                      },
+                    };
+                    saveChangedSettings("model.max_retries", nextSettings);
+                  }}
+                  onKeyDown={enterKeySaves}
                   mono
                 />
               </div>
@@ -788,7 +991,7 @@ export function ModelConfigurationSection({
                     if (!Number.isFinite(parsed) || parsed <= 0) {
                       return;
                     }
-                    onSettingsChange((current) => ({
+                    updateSettings((current) => ({
                       ...current,
                       model: {
                         ...current.model,
@@ -796,6 +999,18 @@ export function ModelConfigurationSection({
                       },
                     }));
                   }}
+                  onBlur={(event: FocusEvent<HTMLInputElement>) => {
+                    const parsed = Number.parseFloat(event.target.value.trim());
+                    const nextSettings = {
+                      ...settings,
+                      model: {
+                        ...settings.model,
+                        retry_initial_delay_seconds: parsed,
+                      },
+                    };
+                    saveChangedSettings("model.retry_backoff", nextSettings);
+                  }}
+                  onKeyDown={enterKeySaves}
                   mono
                 />
                 <span className="text-[13px] font-medium text-muted-foreground">
@@ -823,7 +1038,7 @@ export function ModelConfigurationSection({
                     if (!Number.isFinite(parsed) || parsed <= 0) {
                       return;
                     }
-                    onSettingsChange((current) => ({
+                    updateSettings((current) => ({
                       ...current,
                       model: {
                         ...current.model,
@@ -831,6 +1046,18 @@ export function ModelConfigurationSection({
                       },
                     }));
                   }}
+                  onBlur={(event: FocusEvent<HTMLInputElement>) => {
+                    const parsed = Number.parseFloat(event.target.value.trim());
+                    const nextSettings = {
+                      ...settings,
+                      model: {
+                        ...settings.model,
+                        retry_max_delay_seconds: parsed,
+                      },
+                    };
+                    saveChangedSettings("model.retry_backoff", nextSettings);
+                  }}
+                  onKeyDown={enterKeySaves}
                   mono
                 />
                 <span className="text-[13px] font-medium text-muted-foreground">
@@ -861,7 +1088,7 @@ export function ModelConfigurationSection({
                   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
                     return;
                   }
-                  onSettingsChange((current) => ({
+                  updateSettings((current) => ({
                     ...current,
                     model: {
                       ...current.model,
@@ -869,9 +1096,26 @@ export function ModelConfigurationSection({
                     },
                   }));
                 }}
+                onBlur={(event: FocusEvent<HTMLInputElement>) => {
+                  const parsed = Number.parseInt(event.target.value.trim(), 10);
+                  const nextSettings = {
+                    ...settings,
+                    model: {
+                      ...settings.model,
+                      retry_backoff_cap_retries: parsed,
+                    },
+                  };
+                  saveChangedSettings("model.retry_backoff", nextSettings);
+                }}
+                onKeyDown={enterKeySaves}
                 mono
               />
             </div>
+          </div>
+          <div className="grid gap-2 md:grid-cols-3">
+            <SaveStateLine state={saveStateFor("model.retry_policy")} />
+            <SaveStateLine state={saveStateFor("model.max_retries")} />
+            <SaveStateLine state={saveStateFor("model.retry_backoff")} />
           </div>
         </SettingsGroup>
       </SettingsStack>
@@ -904,7 +1148,7 @@ export function ModelConfigurationSection({
                   if (nextValue && Number.parseInt(nextValue, 10) <= 0) {
                     return;
                   }
-                  onSettingsChange((current) => ({
+                  updateSettings((current) => ({
                     ...current,
                     model: {
                       ...current.model,
@@ -914,6 +1158,23 @@ export function ModelConfigurationSection({
                     },
                   }));
                 }}
+                onBlur={(event: FocusEvent<HTMLInputElement>) => {
+                  const nextValue = event.target.value.trim();
+                  const nextSettings = {
+                    ...settings,
+                    model: {
+                      ...settings.model,
+                      auto_compact_token_limit: nextValue
+                        ? Number.parseInt(nextValue, 10)
+                        : null,
+                    },
+                  };
+                  saveChangedSettings(
+                    "model.auto_compact_token_limit",
+                    nextSettings,
+                  );
+                }}
+                onKeyDown={enterKeySaves}
                 placeholder="Disabled"
                 mono
               />
@@ -928,9 +1189,13 @@ export function ModelConfigurationSection({
               Known safe input window: {knownSafeInputTokens.toLocaleString()}{" "}
               tokens.
               {settings.model.auto_compact_token_limit !== null &&
-              settings.model.auto_compact_token_limit >= knownSafeInputTokens
-                ? " Save is blocked until the token limit is lower than this window."
-                : null}
+              settings.model.auto_compact_token_limit >=
+                knownSafeInputTokens ? (
+                <span className="text-destructive">
+                  {" "}
+                  Lower the token limit before it can be saved.
+                </span>
+              ) : null}
             </p>
           ) : settings.model.auto_compact_token_limit !== null ? (
             <p className="text-[11px] leading-relaxed text-graph-status-idle">
@@ -938,6 +1203,9 @@ export function ModelConfigurationSection({
               be saved but cannot be fully validated yet.
             </p>
           ) : null}
+          <SaveStateLine
+            state={saveStateFor("model.auto_compact_token_limit")}
+          />
         </div>
       </SettingsStack>
     </FormSection>

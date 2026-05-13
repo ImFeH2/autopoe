@@ -38,14 +38,16 @@ export function SettingsPage() {
     assistantRole,
     effectiveContextWindowTokens,
     effectiveModelCapabilities,
-    handleSave,
+    handleAccessCodeUpdate,
     knownSafeInputTokens,
     leaderRole,
     loading,
     providers,
     roles,
-    saving,
+    saveSettingsChange,
+    saveStateFor,
     settings,
+    commitSettingsChange,
     updateAccessDraft,
     updateSettings,
   } = useSettingsPageState();
@@ -63,14 +65,7 @@ export function SettingsPage() {
     <PageScaffold>
       <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-none pb-20">
         <div className="mx-auto max-w-[680px] pb-10 pt-6">
-          <SettingsHeader
-            accessDraftError={accessDraftError}
-            onSave={() => {
-              void handleSave();
-            }}
-            saving={saving}
-            settings={settings}
-          />
+          <SettingsHeader />
 
           <Tabs
             value={route.settingsSection}
@@ -101,26 +96,33 @@ export function SettingsPage() {
                 effectiveContextWindowTokens={effectiveContextWindowTokens}
                 effectiveModelCapabilities={effectiveModelCapabilities}
                 knownSafeInputTokens={knownSafeInputTokens}
-                onSettingsChange={updateSettings}
+                onSettingsChange={commitSettingsChange}
                 providers={providers}
+                saveSettingsChange={saveSettingsChange}
+                saveStateFor={saveStateFor}
                 settings={settings}
+                updateSettings={updateSettings}
               />
             </TabsContent>
 
             <TabsContent value="assistant" className="mt-0">
               <AssistantConfigurationSection
                 assistantRole={assistantRole}
-                onSettingsChange={updateSettings}
+                onSettingsChange={commitSettingsChange}
                 roles={roles}
+                saveSettingsChange={saveSettingsChange}
+                saveStateFor={saveStateFor}
                 settings={settings}
+                updateSettings={updateSettings}
               />
             </TabsContent>
 
             <TabsContent value="leader" className="mt-0">
               <LeaderConfigurationSection
                 leaderRole={leaderRole}
-                onSettingsChange={updateSettings}
+                onSettingsChange={commitSettingsChange}
                 roles={roles}
+                saveStateFor={saveStateFor}
                 settings={settings}
               />
             </TabsContent>
@@ -129,14 +131,21 @@ export function SettingsPage() {
               <AccessConfigurationSection
                 accessDraft={accessDraft}
                 accessDraftError={accessDraftError}
+                onAccessCodeUpdate={() => {
+                  void handleAccessCodeUpdate();
+                }}
                 onAccessDraftChange={updateAccessDraft}
+                saveState={saveStateFor("access")}
               />
             </TabsContent>
 
             <TabsContent value="path" className="mt-0">
               <PathConfigurationSection
-                onSettingsChange={updateSettings}
+                onSettingsChange={commitSettingsChange}
+                saveSettingsChange={saveSettingsChange}
+                saveState={saveStateFor("working_dir")}
                 settings={settings}
+                updateSettings={updateSettings}
               />
             </TabsContent>
           </Tabs>

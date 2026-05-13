@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildSettingsSavePayload,
+  buildAccessCodeUpdatePayload,
+  buildSettingsAutoSavePayload,
   findProviderById,
   findRoleByName,
   getEffectiveContextWindowTokens,
@@ -11,6 +12,7 @@ import {
   normalizeWriteDirs,
   triStateFromNullableBool,
   validateAutoCompactTokenLimit,
+  validateAutoSaveSettings,
   type UserSettings,
 } from "@/pages/settings/lib";
 import type { Provider, Role } from "@/types";
@@ -188,54 +190,21 @@ describe("settings lib", () => {
     expect(validateAutoCompactTokenLimit(120000, 126976)).toBeNull();
   });
 
-  it("builds the save payload with normalized write dirs", () => {
-    const payload = buildSettingsSavePayload(
-      buildSettings({
-        assistant: {
-          role_name: "Steward",
-          allow_network: false,
-          write_dirs: [" ./tmp ", "./tmp/", ""],
-        },
-        model: {
-          active_provider_id: "provider-1",
-          active_model: "gpt-5.2",
-          input_image: true,
-          output_image: false,
-          context_window_tokens: 64000,
-          capabilities: { input_image: true, output_image: false },
-          resolved_context_window_tokens: 64000,
-          timeout_ms: 15000,
-          retry_policy: "limited",
-          max_retries: 5,
-          retry_initial_delay_seconds: 0.75,
-          retry_max_delay_seconds: 8,
-          retry_backoff_cap_retries: 5,
-          auto_compact_token_limit: 48000,
-          params: {
-            reasoning_effort: null,
-            verbosity: null,
-            max_output_tokens: null,
-            temperature: null,
-            top_p: null,
-          },
-        },
-      }),
-    );
-
-    expect(payload).toEqual({
-      working_dir: "/workspace/project",
+  it("builds focused auto-save payloads for changed settings", () => {
+    const settings = buildSettings({
       assistant: {
         role_name: "Steward",
         allow_network: false,
-        write_dirs: ["./tmp"],
+        write_dirs: [" ./tmp ", "./tmp/", ""],
       },
-      leader: { role_name: "Conductor" },
       model: {
-        active_provider_id: "provider-1",
-        active_model: "gpt-5.2",
+        active_provider_id: "provider-2",
+        active_model: "",
         input_image: true,
         output_image: false,
         context_window_tokens: 64000,
+        capabilities: { input_image: true, output_image: false },
+        resolved_context_window_tokens: 64000,
         timeout_ms: 15000,
         retry_policy: "limited",
         max_retries: 5,
@@ -252,5 +221,71 @@ describe("settings lib", () => {
         },
       },
     });
+
+    expect(buildSettingsAutoSavePayload("working_dir", settings)).toEqual({
+      working_dir: "/workspace/project",
+    });
+    expect(
+      buildSettingsAutoSavePayload("assistant.write_dirs", settings),
+    ).toEqual({
+      assistant: {
+        write_dirs: ["./tmp"],
+      },
+    });
+    expect(
+      buildSettingsAutoSavePayload("model.active_provider", settings),
+    ).toEqual({
+      model: {
+        active_provider_id: "provider-2",
+        active_model: "",
+      },
+    });
+    expect(
+      buildSettingsAutoSavePayload("model.retry_backoff", settings),
+    ).toEqual({
+      model: {
+        retry_initial_delay_seconds: 0.75,
+        retry_max_delay_seconds: 8,
+        retry_backoff_cap_retries: 5,
+      },
+    });
+  });
+
+  it("builds the access code update payload separately", () => {
+    expect(
+      buildAccessCodeUpdatePayload({
+        newCode: "NEW-CODE",
+        confirmCode: "NEW-CODE",
+      }),
+    ).toEqual({
+      access: {
+        new_code: "NEW-CODE",
+        confirm_code: "NEW-CODE",
+      },
+    });
+  });
+
+  it("validates auto-save fields before calling the server", () => {
+    expect(
+      validateAutoSaveSettings(
+        "working_dir",
+        buildSettings({ working_dir: "   " }),
+        null,
+      ),
+    ).toBe("Working Directory must not be empty.");
+
+    expect(
+      validateAutoSaveSettings(
+        "model.retry_backoff",
+        buildSettings({
+          model: {
+            ...buildSettings().model,
+            retry_initial_delay_seconds: 8,
+            retry_max_delay_seconds: 2,
+          },
+        }),
+        null,
+      ),
+    ).toBe("Max Delay must be greater than or equal to Initial Delay.");
   });
 });

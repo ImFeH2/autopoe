@@ -16,6 +16,7 @@ interface ModelParamsFieldsProps {
   helperText?: string;
   numberPlaceholder?: string;
   onChange: (next: ModelParams) => void;
+  onCommit?: (next: ModelParams) => void;
   reasoningDisableLabel?: string | null;
   value: ModelParams;
 }
@@ -40,9 +41,31 @@ export function ModelParamsFields({
   helperText,
   numberPlaceholder = emptyLabel,
   onChange,
+  onCommit,
   reasoningDisableLabel = "None",
   value,
 }: ModelParamsFieldsProps) {
+  const updateValue = (next: ModelParams, commit = false) => {
+    onChange(next);
+    if (commit) {
+      onCommit?.(next);
+    }
+  };
+  const blurOnEnter = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+    }
+  };
+  const commitNumberInput = (
+    field: "max_output_tokens" | "temperature" | "top_p",
+    rawValue: string,
+  ) => {
+    onCommit?.({
+      ...value,
+      [field]: parseNumberInput(rawValue),
+    });
+  };
+
   return (
     <div className={cn("space-y-4", className)}>
       <div className="grid gap-4 md:grid-cols-2">
@@ -51,13 +74,16 @@ export function ModelParamsFields({
           <Select
             value={value.reasoning_effort ?? EMPTY_OPTION_VALUE}
             onValueChange={(nextValue) =>
-              onChange({
-                ...value,
-                reasoning_effort:
-                  nextValue !== EMPTY_OPTION_VALUE
-                    ? (nextValue as ModelParams["reasoning_effort"])
-                    : null,
-              })
+              updateValue(
+                {
+                  ...value,
+                  reasoning_effort:
+                    nextValue !== EMPTY_OPTION_VALUE
+                      ? (nextValue as ModelParams["reasoning_effort"])
+                      : null,
+                },
+                true,
+              )
             }
             disabled={disabled}
           >
@@ -82,13 +108,16 @@ export function ModelParamsFields({
           <Select
             value={value.verbosity ?? EMPTY_OPTION_VALUE}
             onValueChange={(nextValue) =>
-              onChange({
-                ...value,
-                verbosity:
-                  nextValue !== EMPTY_OPTION_VALUE
-                    ? (nextValue as ModelParams["verbosity"])
-                    : null,
-              })
+              updateValue(
+                {
+                  ...value,
+                  verbosity:
+                    nextValue !== EMPTY_OPTION_VALUE
+                      ? (nextValue as ModelParams["verbosity"])
+                      : null,
+                },
+                true,
+              )
             }
             disabled={disabled}
           >
@@ -112,11 +141,15 @@ export function ModelParamsFields({
             step={1}
             value={value.max_output_tokens ?? ""}
             onChange={(event) =>
-              onChange({
+              updateValue({
                 ...value,
                 max_output_tokens: parseNumberInput(event.target.value),
               })
             }
+            onBlur={(event) =>
+              commitNumberInput("max_output_tokens", event.target.value)
+            }
+            onKeyDown={blurOnEnter}
             disabled={disabled}
             placeholder={numberPlaceholder}
             className={cn(
@@ -137,11 +170,15 @@ export function ModelParamsFields({
             step={0.1}
             value={value.temperature ?? ""}
             onChange={(event) =>
-              onChange({
+              updateValue({
                 ...value,
                 temperature: parseNumberInput(event.target.value),
               })
             }
+            onBlur={(event) =>
+              commitNumberInput("temperature", event.target.value)
+            }
+            onKeyDown={blurOnEnter}
             disabled={disabled}
             placeholder={numberPlaceholder}
             className={cn(
@@ -162,11 +199,13 @@ export function ModelParamsFields({
             step={0.01}
             value={value.top_p ?? ""}
             onChange={(event) =>
-              onChange({
+              updateValue({
                 ...value,
                 top_p: parseNumberInput(event.target.value),
               })
             }
+            onBlur={(event) => commitNumberInput("top_p", event.target.value)}
+            onKeyDown={blurOnEnter}
             disabled={disabled}
             placeholder={numberPlaceholder}
             className={cn(

@@ -1,7 +1,8 @@
 import { useAccess } from "@/context/useAccess";
 import { fetchSettingsBootstrap, saveSettings } from "@/lib/api";
 import {
-  buildSettingsSavePayload,
+  buildAccessCodeUpdatePayload,
+  buildSettingsAutoSavePayload,
   findProviderById,
   findRoleByName,
   getActiveProviderModels,
@@ -9,11 +10,13 @@ import {
   getEffectiveModelCapabilities,
   getKnownSafeInputTokens,
   getSelectedCatalogModel,
+  validateAutoSaveSettings,
+  type SettingsAutoSaveKey,
+  type SettingsSaveState,
   type UserSettings,
-  validateAutoCompactTokenLimit,
 } from "@/pages/settings/lib";
 import { toast } from "sonner";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
 export interface AccessDraft {
@@ -27,6 +30,20 @@ export type UpdateAccessDraft = (
 export type UpdateSettings = (
   updater: (settings: UserSettings) => UserSettings,
 ) => void;
+export type CommitSettingsChange = (
+  saveKey: SettingsAutoSaveKey,
+  updater: (settings: UserSettings) => UserSettings,
+) => Promise<void>;
+export type SaveSettingsChange = (
+  saveKey: SettingsAutoSaveKey,
+  nextSettings: UserSettings,
+) => Promise<void>;
+
+const DEFAULT_SAVE_STATE: SettingsSaveState = { status: "idle" };
+
+function getSaveErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Failed to save changes";
+}
 
 export function useSettingsPageState() {
   const { requireReauth } = useAccess();
@@ -37,7 +54,10 @@ export function useSettingsPageState() {
   } = useSWR("settingsBootstrap", () => fetchSettingsBootstrap<UserSettings>());
 
   const [localSettings, setLocalSettings] = useState<UserSettings | null>(null);
-  const [saving, setSaving] = useState(false);
+  const savedSettingsRef = useRef<UserSettings | null>(null);
+  const [saveStates, setSaveStates] = useState<
+    Partial<Record<SettingsAutoSaveKey | "access", SettingsSaveState>>
+  >({});
   const [accessDraft, setAccessDraft] = useState<AccessDraft>({
     newCode: "",
     confirmCode: "",
@@ -56,6 +76,7 @@ export function useSettingsPageState() {
   useEffect(() => {
     if (bootstrapData?.settings && !localSettings) {
       setLocalSettings(bootstrapData.settings);
+      savedSettingsRef.current = bootstrapData.settings;
     }
   }, [bootstrapData?.settings, localSettings]);
 
@@ -151,41 +172,84 @@ export function useSettingsPageState() {
     return null;
   }, [accessDraft.confirmCode, accessDraft.newCode]);
 
-  const handleSave = useCallback(async () => {
-    if (!settings) {
-      return;
-    }
+  const setSaveState = useCallback(
+    (saveKey: SettingsAutoSaveKey | "access", state: SettingsSaveState) => {
+      setSaveStates((current) => ({
+        ...current,
+        [saveKey]: state,
+      }));
+    },
+    [],
+  );
+
+  const saveSettingsChange = useCallback<SaveSettingsChange>(
+    async (saveKey, nextSettings) => {
+      const validationError = validateAutoSaveSettings(
+        saveKey,
+        nextSettings,
+        knownSafeInputTokens,
+      );
+      if (validationError) {
+        setSaveState(saveKey, { status: "error", message: validationError });
+        return;
+      }
+
+      setSaveState(saveKey, { status: "saving" });
+      try {
+        const payload = buildSettingsAutoSavePayload(saveKey, nextSettings);
+        const saveResult = await saveSettings<UserSettings>(payload);
+        const savedSettings = saveResult.settings;
+
+        savedSettingsRef.current = savedSettings;
+        setLocalSettings(savedSettings);
+        void mutateSettings(
+          (current) =>
+            current ? { ...current, settings: savedSettings } : current,
+          false,
+        );
+        setSaveState(saveKey, { status: "saved", message: "Saved" });
+      } catch (error) {
+        const message = getSaveErrorMessage(error);
+        setLocalSettings(savedSettingsRef.current);
+        setSaveState(saveKey, { status: "error", message });
+        toast.error(message);
+      }
+    },
+    [knownSafeInputTokens, mutateSettings, setSaveState],
+  );
+
+  const commitSettingsChange = useCallback<CommitSettingsChange>(
+    async (saveKey, updater) => {
+      if (!settings) {
+        return;
+      }
+      const nextSettings = updater(settings);
+      setLocalSettings(nextSettings);
+      await saveSettingsChange(saveKey, nextSettings);
+    },
+    [saveSettingsChange, settings],
+  );
+
+  const handleAccessCodeUpdate = useCallback(async () => {
     if (accessDraftError) {
+      setSaveState("access", {
+        status: "error",
+        message: accessDraftError,
+      });
       toast.error(accessDraftError);
       return;
     }
-    if (!settings.working_dir.trim()) {
-      toast.error("Working Directory must not be empty");
-      return;
-    }
-    if (
-      settings.model.retry_max_delay_seconds <
-      settings.model.retry_initial_delay_seconds
-    ) {
-      toast.error("Max Delay must be greater than or equal to Initial Delay");
+    if (!accessDraft.newCode.trim() || !accessDraft.confirmCode.trim()) {
       return;
     }
 
-    const autoCompactTokenLimitError = validateAutoCompactTokenLimit(
-      settings.model.auto_compact_token_limit,
-      knownSafeInputTokens,
-    );
-    if (autoCompactTokenLimitError) {
-      toast.error(autoCompactTokenLimitError);
-      return;
-    }
-
-    setSaving(true);
+    setSaveState("access", { status: "saving" });
     try {
-      const payload = buildSettingsSavePayload(settings, accessDraft);
+      const payload = buildAccessCodeUpdatePayload(accessDraft);
       const saveResult = await saveSettings<UserSettings>(payload);
       const savedSettings = saveResult.settings;
 
+      savedSettingsRef.current = savedSettings;
       setLocalSettings(savedSettings);
       setAccessDraft({ newCode: "", confirmCode: "" });
       void mutateSettings(
@@ -195,26 +259,24 @@ export function useSettingsPageState() {
       );
 
       if (saveResult.reauthRequired) {
+        setSaveState("access", { status: "saved", message: "Updated" });
         toast.success("Access code updated. Sign in again with the new code.");
         requireReauth();
         return;
       }
 
-      toast.success("Settings saved");
+      setSaveState("access", { status: "saved", message: "Updated" });
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to save settings",
-      );
-    } finally {
-      setSaving(false);
+      const message = getSaveErrorMessage(error);
+      setSaveState("access", { status: "error", message });
+      toast.error(message);
     }
   }, [
     accessDraft,
     accessDraftError,
-    knownSafeInputTokens,
     mutateSettings,
     requireReauth,
-    settings,
+    setSaveState,
   ]);
 
   return {
@@ -227,14 +289,17 @@ export function useSettingsPageState() {
     assistantRole,
     effectiveContextWindowTokens,
     effectiveModelCapabilities,
-    handleSave,
+    handleAccessCodeUpdate,
     knownSafeInputTokens,
     leaderRole,
     loading,
     providers,
     roles,
-    saving,
+    saveSettingsChange,
+    saveStateFor: (saveKey: SettingsAutoSaveKey | "access") =>
+      saveStates[saveKey] ?? DEFAULT_SAVE_STATE,
     settings,
+    commitSettingsChange,
     updateAccessDraft,
     updateSettings,
   };

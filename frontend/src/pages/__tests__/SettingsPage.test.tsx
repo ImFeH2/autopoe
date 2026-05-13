@@ -221,7 +221,7 @@ describe("SettingsPage", () => {
       ),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Assistant" }));
+    await user.click(await screen.findByRole("tab", { name: "Assistant" }));
     expect(
       await screen.findByTestId("assistant-role-guidance"),
     ).toHaveTextContent("Human-facing assistant role");
@@ -230,6 +230,9 @@ describe("SettingsPage", () => {
     expect(
       (await screen.findAllByText("Default leader role")).length,
     ).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: "Save Changes" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps assistant identity guidance visible for a non-Steward selected role", async () => {
@@ -273,7 +276,7 @@ describe("SettingsPage", () => {
     expect(guidance).toHaveTextContent("Visual-first system behavior");
   });
 
-  it("saves normalized settings payload after focused edits", async () => {
+  it("auto-saves a switch change immediately", async () => {
     fetchSettingsBootstrap.mockResolvedValue(buildBootstrapData());
     saveSettings.mockResolvedValue({
       settings: buildSettings({
@@ -282,29 +285,6 @@ describe("SettingsPage", () => {
           allow_network: false,
           write_dirs: ["/workspace/project"],
         },
-        model: {
-          active_provider_id: "provider-1",
-          active_model: "gpt-5.2",
-          input_image: null,
-          output_image: null,
-          capabilities: { input_image: true, output_image: false },
-          context_window_tokens: 64000,
-          resolved_context_window_tokens: 64000,
-          timeout_ms: 15000,
-          retry_policy: "limited",
-          max_retries: 5,
-          retry_initial_delay_seconds: 0.5,
-          retry_max_delay_seconds: 8,
-          retry_backoff_cap_retries: 5,
-          auto_compact_token_limit: null,
-          params: {
-            reasoning_effort: null,
-            verbosity: null,
-            max_output_tokens: null,
-            temperature: null,
-            top_p: null,
-          },
-        },
       }),
       reauthRequired: false,
     });
@@ -312,58 +292,55 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     renderSettingsPage();
 
-    const timeoutInput = await screen.findByLabelText("Request Timeout");
-    const contextWindowInput = screen.getByLabelText("Context Window");
-
-    fireEvent.change(timeoutInput, { target: { value: "15000" } });
-    fireEvent.change(contextWindowInput, { target: { value: "64000" } });
-
-    await user.click(screen.getByRole("tab", { name: "Assistant" }));
+    await user.click(await screen.findByRole("tab", { name: "Assistant" }));
     const networkAccessSwitch = await screen.findByRole("switch", {
       name: "Network Access",
     });
 
     fireEvent.click(networkAccessSwitch);
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
     await waitFor(() =>
       expect(saveSettings).toHaveBeenCalledWith({
-        working_dir: "/workspace/project",
         assistant: {
-          role_name: "Steward",
           allow_network: false,
-          write_dirs: ["/workspace/project"],
-        },
-        leader: { role_name: "Conductor" },
-        model: {
-          active_provider_id: "provider-1",
-          active_model: "gpt-5.2",
-          input_image: null,
-          output_image: null,
-          context_window_tokens: 64000,
-          timeout_ms: 15000,
-          retry_policy: "limited",
-          max_retries: 5,
-          retry_initial_delay_seconds: 0.5,
-          retry_max_delay_seconds: 8,
-          retry_backoff_cap_retries: 5,
-          auto_compact_token_limit: null,
-          params: {
-            reasoning_effort: null,
-            verbosity: null,
-            max_output_tokens: null,
-            temperature: null,
-            top_p: null,
-          },
         },
       }),
     );
 
-    expect(toastSuccess).toHaveBeenCalledWith("Settings saved");
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(toastSuccess).not.toHaveBeenCalled();
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it("blocks saving a compact token limit that reaches the known safe window", async () => {
+  it("auto-saves a text field on blur", async () => {
+    fetchSettingsBootstrap.mockResolvedValue(buildBootstrapData());
+    saveSettings.mockResolvedValue({
+      settings: buildSettings({
+        model: {
+          ...buildSettings().model,
+          timeout_ms: 15000,
+        },
+      }),
+      reauthRequired: false,
+    });
+
+    renderSettingsPage();
+
+    const timeoutInput = await screen.findByLabelText("Request Timeout");
+
+    fireEvent.change(timeoutInput, { target: { value: "15000" } });
+    fireEvent.blur(timeoutInput);
+
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        model: {
+          timeout_ms: 15000,
+        },
+      }),
+    );
+  });
+
+  it("shows field validation without saving an invalid compact token limit", async () => {
     fetchSettingsBootstrap.mockResolvedValue(buildBootstrapData());
 
     renderSettingsPage();
@@ -375,11 +352,69 @@ describe("SettingsPage", () => {
     fireEvent.change(autoCompactTokenLimitInput, {
       target: { value: "126976" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.blur(autoCompactTokenLimitInput);
 
     expect(saveSettings).not.toHaveBeenCalled();
-    expect(toastError).toHaveBeenCalledWith(
-      "Automatic Compact token limit must stay below the known safe input window",
+    expect(
+      await screen.findByText(
+        "Automatic Compact token limit must stay below the known safe input window",
+      ),
+    ).toBeInTheDocument();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("updates the access code only from the access action", async () => {
+    fetchSettingsBootstrap.mockResolvedValue(buildBootstrapData());
+    saveSettings.mockResolvedValue({
+      settings: buildSettings(),
+      reauthRequired: true,
+    });
+
+    const user = userEvent.setup();
+    renderSettingsPage();
+
+    await user.click(await screen.findByRole("tab", { name: "Access" }));
+    await user.type(screen.getByLabelText("New Access Code"), "NEW-CODE");
+    await user.type(screen.getByLabelText("Confirm Access Code"), "NEW-CODE");
+    await user.click(
+      screen.getByRole("button", { name: "Update access code" }),
     );
+
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        access: {
+          new_code: "NEW-CODE",
+          confirm_code: "NEW-CODE",
+        },
+      }),
+    );
+    expect(requireReauth).toHaveBeenCalled();
+    expect(toastSuccess).toHaveBeenCalledWith(
+      "Access code updated. Sign in again with the new code.",
+    );
+  });
+
+  it("rolls back an auto-save failure to the last saved value", async () => {
+    fetchSettingsBootstrap.mockResolvedValue(buildBootstrapData());
+    saveSettings.mockRejectedValue(
+      new Error("Failed to save settings: denied"),
+    );
+
+    const user = userEvent.setup();
+    renderSettingsPage();
+
+    await user.click(await screen.findByRole("tab", { name: "Path" }));
+    const workingDirectoryInput =
+      await screen.findByLabelText("Working Directory");
+
+    fireEvent.change(workingDirectoryInput, {
+      target: { value: "/workspace/next" },
+    });
+    fireEvent.blur(workingDirectoryInput);
+
+    await waitFor(() =>
+      expect(workingDirectoryInput).toHaveValue("/workspace/project"),
+    );
+    expect(toastError).toHaveBeenCalledWith("Failed to save settings: denied");
   });
 });
