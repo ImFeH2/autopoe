@@ -152,7 +152,12 @@ function AppContent() {
         {isWorkspace ? (
           renderPage()
         ) : (
-          <div className="mx-auto flex h-full w-full max-w-[1320px] min-h-0 flex-col px-4 sm:px-6 lg:px-8">
+          <div
+            className={cn(
+              "mx-auto flex h-full w-full max-w-[1320px] min-h-0 flex-col px-4 sm:px-6 lg:px-8",
+              isCompactLayout && "pl-16 sm:pl-[4.5rem]",
+            )}
+          >
             <ShellHeader
               compact={isCompactLayout}
               onOpenNavigation={() => setSidebarDrawerOpen(true)}

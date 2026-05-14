@@ -68,14 +68,17 @@ describe("ShellHeader", () => {
     expect(container.querySelector(".border-b")).toBeNull();
   });
 
-  it("keeps navigation available without showing a command entry in compact layout", () => {
-    render(<ShellHeader compact onOpenNavigation={onOpenNavigation} />);
+  it("keeps navigation available without reserving a compact header row", () => {
+    const { container } = render(
+      <ShellHeader compact onOpenNavigation={onOpenNavigation} />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
     expect(onOpenNavigation).toHaveBeenCalledTimes(1);
     expect(
       screen.queryByRole("button", { name: "Open search" }),
     ).not.toBeInTheDocument();
+    expect(container.querySelector(".border-b")).toBeNull();
   });
 
   it("opens the command palette from keyboard and navigates to pages and workflows", async () => {
