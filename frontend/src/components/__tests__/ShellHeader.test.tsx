@@ -54,8 +54,10 @@ describe("ShellHeader", () => {
     Reflect.deleteProperty(globalThis, "ResizeObserver");
   });
 
-  it("does not show a command entry on desktop pages", () => {
-    render(<ShellHeader compact={false} onOpenNavigation={onOpenNavigation} />);
+  it("does not reserve a visible header row on desktop pages", () => {
+    const { container } = render(
+      <ShellHeader compact={false} onOpenNavigation={onOpenNavigation} />,
+    );
 
     expect(
       screen.queryByRole("button", { name: "Open search" }),
@@ -63,6 +65,7 @@ describe("ShellHeader", () => {
     expect(
       screen.queryByRole("button", { name: "Open navigation" }),
     ).not.toBeInTheDocument();
+    expect(container.querySelector(".border-b")).toBeNull();
   });
 
   it("keeps navigation available without showing a command entry in compact layout", () => {
