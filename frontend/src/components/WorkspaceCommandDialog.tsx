@@ -25,6 +25,7 @@ interface WorkspaceCommandDialogProps {
   children: ReactNode;
   footer: ReactNode;
   className?: string;
+  tone?: "default" | "black";
 }
 
 export function WorkspaceCommandDialog({
@@ -34,28 +35,49 @@ export function WorkspaceCommandDialog({
   children,
   footer,
   className,
+  tone = "default",
 }: WorkspaceCommandDialogProps) {
+  const isBlack = tone === "black";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={cn("flex max-h-[calc(100svh-2rem)] flex-col p-0", className)}
+        showCloseButton={false}
+        className={cn(
+          "flex max-h-[calc(100svh-2rem)] flex-col p-0",
+          isBlack &&
+            "border border-white/10 bg-black text-white ring-white/10 shadow-2xl",
+          className,
+        )}
       >
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-6">
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-foreground/[0.04] to-transparent opacity-50" />
+          {!isBlack ? (
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-foreground/[0.04] to-transparent opacity-50" />
+          ) : null}
           <DialogClose asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               aria-label="Close dialog"
-              className="absolute right-4 top-4 z-20 size-7 rounded-md bg-accent/45 text-muted-foreground hover:bg-accent/65 hover:text-accent-foreground"
+              className={cn(
+                "absolute right-4 top-4 z-20 size-7 rounded-md",
+                isBlack
+                  ? "bg-transparent text-white/45 hover:bg-white/10 hover:text-white"
+                  : "bg-accent/45 text-muted-foreground hover:bg-accent/65 hover:text-accent-foreground",
+              )}
             >
               <X className="size-3.5" />
             </Button>
           </DialogClose>
 
           <DialogHeader className="relative z-10 shrink-0 pr-8">
-            <DialogTitle className="text-[1.1rem] font-medium text-foreground">
+            <DialogTitle
+              className={cn(
+                "text-[1.1rem] font-medium",
+                isBlack ? "text-white/90" : "text-foreground",
+              )}
+            >
               {title}
             </DialogTitle>
             <DialogDescription className="sr-only">{title}</DialogDescription>
@@ -68,7 +90,13 @@ export function WorkspaceCommandDialog({
             {children}
           </div>
 
-          <DialogFooter className="relative z-10 mt-6 shrink-0 border-t border-border pt-4">
+          <DialogFooter
+            className={cn(
+              isBlack
+                ? "relative z-10 mx-0 mb-0 mt-5 shrink-0 rounded-none border-t border-white/10 bg-transparent p-0 pt-4"
+                : "relative z-10 mt-6 shrink-0 border-t border-border pt-4",
+            )}
+          >
             {footer}
           </DialogFooter>
         </div>
@@ -81,18 +109,30 @@ export function WorkspaceDialogField({
   label,
   hint,
   hintMode = "text",
+  tone = "default",
   children,
 }: {
   label: string;
   hint?: string;
   hintMode?: "text" | "tooltip";
+  tone?: "default" | "black";
   children: ReactNode;
 }) {
+  const labelClassName =
+    tone === "black" ? "text-white/65" : "text-foreground/80";
+  const hintClassName =
+    tone === "black" ? "text-white/35" : "text-muted-foreground";
+
   if (hintMode === "tooltip") {
     return (
       <div className="block space-y-1.5">
         <div className="flex items-center justify-between gap-3">
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground/80">
+          <span
+            className={cn(
+              "inline-flex min-w-0 items-center gap-1.5 text-sm font-medium",
+              labelClassName,
+            )}
+          >
             <span className="truncate">{label}</span>
             {hint ? (
               <TooltipProvider delayDuration={150}>
@@ -103,7 +143,12 @@ export function WorkspaceDialogField({
                       variant="ghost"
                       size="icon-xs"
                       aria-label={`${label} details`}
-                      className="size-5 rounded-full text-muted-foreground hover:bg-accent/35 hover:text-foreground"
+                      className={cn(
+                        "size-5 rounded-full",
+                        tone === "black"
+                          ? "text-white/35 hover:bg-white/10 hover:text-white/80"
+                          : "text-muted-foreground hover:bg-accent/35 hover:text-foreground",
+                      )}
                     >
                       <Info className="size-3.5" />
                     </Button>
@@ -128,9 +173,11 @@ export function WorkspaceDialogField({
   return (
     <label className="block space-y-1.5">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-foreground/80">{label}</span>
+        <span className={cn("text-sm font-medium", labelClassName)}>
+          {label}
+        </span>
         {hint ? (
-          <span className="text-xs text-muted-foreground">{hint}</span>
+          <span className={cn("text-xs", hintClassName)}>{hint}</span>
         ) : null}
       </div>
       {children}

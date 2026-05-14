@@ -31,6 +31,10 @@ import { RoleSearchPicker } from "@/components/workspace/RoleSearchPicker";
 
 const workspaceDialogInputClass =
   "bg-background/40 text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50";
+const createWorkflowInputClass =
+  "border-white/10 bg-black text-white/90 shadow-none placeholder:text-white/35 focus-visible:border-white/35 focus-visible:ring-0 dark:bg-black";
+const createWorkflowButtonClass =
+  "border-white/10 bg-transparent text-white/70 hover:bg-white/10 hover:text-white";
 
 export interface WorkspaceNodeOption {
   id: string;
@@ -72,58 +76,74 @@ export function CreateTabDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Create Workflow"
+      tone="black"
       footer={
         <>
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={pending}
+            className={createWorkflowButtonClass}
           >
             Cancel
           </Button>
-          <Button onClick={onSubmit} disabled={!title.trim() || pending}>
+          <Button
+            onClick={onSubmit}
+            disabled={!title.trim() || pending}
+            className="bg-white text-black hover:bg-white/90 disabled:bg-white/40 disabled:text-black/60"
+          >
             {pending ? "Creating..." : "Create Workflow"}
           </Button>
         </>
       }
     >
-      <WorkspaceDialogField label="Name">
-        <Input
-          autoFocus
-          aria-label="Workflow title"
-          value={title}
-          onChange={(event) => onTitleChange(event.target.value)}
-          placeholder="e.g., Release checklist"
-          className={cn("h-10 rounded-md", workspaceDialogInputClass)}
-        />
-      </WorkspaceDialogField>
-      <WorkspaceDialogField
-        label="Internet access"
-        hint="Allow this workflow to connect to the web."
-        hintMode="tooltip"
-      >
-        <FormSwitch
-          checked={allowNetwork}
-          label="Internet access"
-          onCheckedChange={onAllowNetworkChange}
-        />
-      </WorkspaceDialogField>
-      <WorkspaceDialogField
-        label="Folder access"
-        hint="Folders where this workflow can save files."
-        hintMode="tooltip"
-      >
-        <Textarea
-          value={writeDirs}
-          aria-label="Folder access"
-          onChange={(event) => onWriteDirsChange(event.target.value)}
-          placeholder="/workspace/output&#10;/workspace/cache"
-          className={cn(
-            "min-h-[80px] rounded-md font-mono text-[13px]",
-            workspaceDialogInputClass,
-          )}
-        />
-      </WorkspaceDialogField>
+      <div className="overflow-hidden rounded-xl border border-white/10">
+        <div className="p-4">
+          <WorkspaceDialogField label="Name" tone="black">
+            <Input
+              autoFocus
+              aria-label="Workflow title"
+              value={title}
+              onChange={(event) => onTitleChange(event.target.value)}
+              placeholder="e.g., Release checklist"
+              className={cn("h-10 rounded-md", createWorkflowInputClass)}
+            />
+          </WorkspaceDialogField>
+        </div>
+        <div className="border-t border-white/10 p-4">
+          <WorkspaceDialogField
+            label="Internet access"
+            hint="Allow this workflow to connect to the web."
+            hintMode="tooltip"
+            tone="black"
+          >
+            <FormSwitch
+              checked={allowNetwork}
+              label="Internet access"
+              onCheckedChange={onAllowNetworkChange}
+            />
+          </WorkspaceDialogField>
+        </div>
+        <div className="border-t border-white/10 p-4">
+          <WorkspaceDialogField
+            label="Folder access"
+            hint="Folders where this workflow can save files."
+            hintMode="tooltip"
+            tone="black"
+          >
+            <Textarea
+              value={writeDirs}
+              aria-label="Folder access"
+              onChange={(event) => onWriteDirsChange(event.target.value)}
+              placeholder="/workspace/output&#10;/workspace/cache"
+              className={cn(
+                "min-h-[80px] resize-none rounded-md font-mono text-[13px]",
+                createWorkflowInputClass,
+              )}
+            />
+          </WorkspaceDialogField>
+        </div>
+      </div>
     </WorkspaceCommandDialog>
   );
 }
