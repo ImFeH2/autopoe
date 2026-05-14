@@ -30,7 +30,7 @@ import { FormSwitch } from "@/components/form/FormControls";
 import { RoleSearchPicker } from "@/components/workspace/RoleSearchPicker";
 
 const workspaceDialogInputClass =
-  "bg-background/40 text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50";
+  "bg-background/40 text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50";
 const createWorkflowInputClass =
   "border-white/10 bg-black text-white/90 shadow-none placeholder:text-white/35 focus-visible:border-white/35 focus-visible:ring-0 dark:bg-black";
 const createWorkflowButtonClass =
@@ -462,7 +462,7 @@ export function DeleteTabDialog({
       <AlertDialogContent className="max-w-[30rem]">
         <AlertDialogHeader className="gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-xl border border-border bg-accent/45 text-foreground shadow-xs">
+            <div className="flex size-11 items-center justify-center rounded-xl border border-border bg-accent/45 text-foreground">
               <Trash2 className="size-5" />
             </div>
             <div>

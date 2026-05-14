@@ -630,7 +630,7 @@ function ImageViewerOverlay({
           data-pan-exempt="true"
         >
           <div
-            className="rounded-full border border-border bg-surface-overlay/88 px-3 py-1 text-[11px] font-medium text-foreground/88 shadow-md"
+            className="rounded-full border border-border bg-surface-overlay/88 px-3 py-1 text-[11px] font-medium text-foreground/88"
             data-pan-exempt="true"
             data-testid="global-image-viewer-zoom"
           >
@@ -647,7 +647,7 @@ function ImageViewerOverlay({
           className="absolute bottom-4 left-1/2 z-20 w-full max-w-3xl -translate-x-1/2 px-2"
           data-pan-exempt="true"
         >
-          <div className="rounded-xl border border-border bg-surface-overlay/88 px-4 py-3 text-center shadow-md">
+          <div className="rounded-xl border border-border bg-surface-overlay/88 px-4 py-3 text-center">
             <div className="text-sm font-medium text-foreground">
               {imageLabel}
             </div>
@@ -681,7 +681,7 @@ function ImageViewerOverlay({
               <img
                 alt={imageLabel}
                 className={cn(
-                  "block h-full w-full select-none object-contain shadow-[0_28px_80px_-32px_var(--shell-scrim)]",
+                  "block h-full w-full select-none object-contain",
                   dragging ? "cursor-grabbing" : "cursor-grab",
                 )}
                 data-testid="global-image-viewer-image"
@@ -694,7 +694,7 @@ function ImageViewerOverlay({
         ) : (
           <img
             alt={imageLabel}
-            className="max-h-[78vh] max-w-[88vw] select-none object-contain shadow-[0_28px_80px_-32px_var(--shell-scrim)]"
+            className="max-h-[78vh] max-w-[88vw] select-none object-contain"
             data-testid="global-image-viewer-image"
             draggable={false}
             ref={imageRef}
@@ -721,7 +721,7 @@ function ViewerControlButton({
       variant="ghost"
       size="icon-lg"
       aria-label={ariaLabel}
-      className="rounded-full border border-border bg-surface-overlay/88 text-foreground/82 shadow-md hover:bg-accent/60 hover:text-foreground"
+      className="rounded-full border border-border bg-surface-overlay/88 text-foreground/82 hover:bg-accent/60 hover:text-foreground"
       data-pan-exempt="true"
       onClick={onClick}
     >

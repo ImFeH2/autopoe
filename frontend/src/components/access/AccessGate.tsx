@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { useAccess } from "@/context/useAccess";
 
 const accessInputClass =
-  "h-12 w-full rounded-xl border border-input bg-background/55 px-4 pr-12 font-mono text-[15px] tracking-[0.04em] text-foreground transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground/70 focus:bg-background/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50";
+  "h-12 w-full rounded-xl border border-input bg-background/55 px-4 pr-12 font-mono text-[15px] text-foreground transition-[border-color,background-color] placeholder:text-muted-foreground/70 focus:bg-background/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50";
 
 function formatAccessError(error: unknown) {
   if (!(error instanceof Error)) {
@@ -57,11 +57,11 @@ export function AccessGate() {
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.32, delay: 0.04, ease: "easeOut" }}
-          className="mb-7 flex items-center gap-2 text-[12px] font-medium tracking-[0.04em] text-muted-foreground/80"
+          className="mb-7 flex items-center gap-2 text-[12px] font-medium text-muted-foreground/80"
         >
           <span
             aria-hidden="true"
-            className="size-1 rounded-full bg-foreground/70 shadow-[0_0_8px_color-mix(in_srgb,var(--foreground)_30%,transparent)]"
+            className="size-1 rounded-full bg-foreground/70"
           />
           Flowent
         </motion.div>
@@ -74,14 +74,14 @@ export function AccessGate() {
         >
           <ShellSurface
             variant="access"
-            className="rounded-2xl border border-border/80 p-7 text-popover-foreground shadow-2xl shadow-black/40 sm:p-8"
+            className="rounded-2xl border border-border/80 p-7 text-popover-foreground sm:p-8"
           >
             <form
               className="relative z-10"
               onSubmit={(event) => void handleSubmit(event)}
             >
               <div className="flex flex-col items-center text-center">
-                <h1 className="text-[22px] font-medium leading-tight tracking-tight text-foreground">
+                <h1 className="text-[22px] font-medium leading-tight text-foreground">
                   Enter Access Code
                 </h1>
               </div>

@@ -86,8 +86,8 @@ function ToolCard({
       padding="md"
       onClick={onToggle}
       className={cn(
-        "group cursor-pointer transition-colors duration-300 hover:border-ring/25 hover:bg-accent/20 hover:shadow-sm",
-        expanded && "border-border bg-accent/20 shadow-sm",
+        "group cursor-pointer transition-colors duration-300 hover:border-ring/25 hover:bg-accent/20",
+        expanded && "border-border bg-accent/20",
       )}
     >
       <IconTile

@@ -48,14 +48,11 @@ export function WorkspaceCommandDialog({
         className={cn(
           "flex max-h-[calc(100svh-2rem)] flex-col p-0",
           isBlack &&
-            "border border-white/10 bg-black text-white ring-white/10 shadow-2xl",
+            "border border-white/10 bg-black text-white ring-white/10 shadow-none",
           className,
         )}
       >
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-6">
-          {!isBlack ? (
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-foreground/[0.04] to-transparent opacity-50" />
-          ) : null}
           <DialogClose asChild>
             <Button
               type="button"

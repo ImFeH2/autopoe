@@ -122,9 +122,9 @@ export function PanelResizer({
     >
       <div
         className={cn(
-          "w-[2px] h-full transition-[background-color,box-shadow,opacity] duration-150 delay-100",
+          "w-[2px] h-full transition-[background-color,opacity] duration-150 delay-100",
           isDragging
-            ? "bg-primary/50 shadow-[0_0_18px_var(--sidebar-ring)]"
+            ? "bg-primary/50"
             : "bg-transparent group-hover/resizer:bg-primary/30",
         )}
       />
@@ -138,8 +138,8 @@ export function PanelResizer({
           onMouseDown={handleToggleMouseDown}
           onClick={handleToggleClick}
           className={cn(
-            "absolute top-1/2 z-10 flex h-14 w-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-sidebar-border bg-sidebar/92 shadow-[0_10px_28px_rgba(0,0,0,0.28)] backdrop-blur-md outline-hidden transition-[opacity,transform,background-color,border-color,box-shadow] duration-180",
-            "opacity-45 duration-[180ms] hover:scale-105 hover:border-sidebar-ring/40 hover:bg-sidebar-accent hover:opacity-100 hover:shadow-[0_12px_34px_rgba(0,0,0,0.34)] focus-visible:scale-105 focus-visible:border-sidebar-ring/55 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 active:-translate-y-1/2",
+            "absolute top-1/2 z-10 flex h-14 w-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-sidebar-border bg-sidebar/92 backdrop-blur-md outline-hidden transition-[opacity,transform,background-color,border-color] duration-180",
+            "opacity-45 duration-[180ms] hover:scale-105 hover:border-sidebar-ring/40 hover:bg-sidebar-accent hover:opacity-100 focus-visible:scale-105 focus-visible:border-sidebar-ring/55 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 active:-translate-y-1/2",
             position === "left"
               ? "left-0 -translate-x-1/2"
               : "right-0 translate-x-1/2",
@@ -148,9 +148,9 @@ export function PanelResizer({
           <span
             aria-hidden="true"
             className={cn(
-              "h-7 w-[2px] rounded-full bg-sidebar-foreground/38 transition-[background-color,box-shadow] duration-180",
+              "h-7 w-[2px] rounded-full bg-sidebar-foreground/38 transition-[background-color] duration-180",
               isDragging
-                ? "bg-sidebar-foreground/76 shadow-[0_0_14px_var(--sidebar-ring)]"
+                ? "bg-sidebar-foreground/76"
                 : "group-hover/resizer:bg-sidebar-foreground/66",
             )}
           />

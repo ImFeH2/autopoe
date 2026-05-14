@@ -69,7 +69,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         initial={{ opacity: 0, scale: 0.96, y: -4 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.12, ease: "easeOut" }}
-        className="fixed z-[200] min-w-[160px] rounded-md border border-border bg-popover py-1 shadow-md"
+        className="fixed z-[200] min-w-[160px] rounded-md border border-border bg-popover py-1"
         style={{ left: pos.left, top: pos.top }}
       >
         {items.map((item, i) =>

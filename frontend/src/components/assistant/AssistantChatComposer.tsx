@@ -285,7 +285,7 @@ export function AssistantChatComposer({
         <div
           role="listbox"
           aria-label="Available commands"
-          className="pointer-events-auto mb-2 overflow-hidden rounded-xl border border-border bg-surface-overlay shadow-sm"
+          className="pointer-events-auto mb-2 overflow-hidden rounded-xl border border-border bg-surface-overlay"
         >
           {commandOptions.length > 0 ? (
             commandOptions.map((command, index) => {

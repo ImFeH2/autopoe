@@ -13,7 +13,7 @@ export function AssistantPage() {
     <div className="flex h-full flex-col min-h-0">
       {detailsOpen && assistantNode ? (
         <div className="h-full overflow-hidden p-6">
-          <div className="h-full overflow-hidden rounded-xl border border-border bg-surface-overlay/90 shadow-md">
+          <div className="h-full overflow-hidden rounded-xl border border-border bg-surface-overlay/90">
             <AgentDetailPanel
               agent={assistantNode}
               onClose={() => setDetailsOpen(false)}

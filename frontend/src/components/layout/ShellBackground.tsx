@@ -4,24 +4,9 @@ import { cn } from "@/lib/utils";
 type ShellBackgroundVariant = "app" | "access";
 type ShellSurfaceVariant = "workspace" | "page" | "access";
 
-const backgroundStyles: Record<
-  ShellBackgroundVariant,
-  {
-    base: string;
-    primarySpotlight: string;
-    secondarySpotlight: string;
-  }
-> = {
-  app: {
-    base: "var(--shell-app-bg)",
-    primarySpotlight: "var(--shell-app-spotlight-primary)",
-    secondarySpotlight: "var(--shell-app-spotlight-secondary)",
-  },
-  access: {
-    base: "var(--shell-access-bg)",
-    primarySpotlight: "var(--shell-access-spotlight-primary)",
-    secondarySpotlight: "var(--shell-access-spotlight-secondary)",
-  },
+const backgroundStyles: Record<ShellBackgroundVariant, string> = {
+  app: "var(--shell-app-bg)",
+  access: "var(--shell-access-bg)",
 };
 
 const surfaceStyles: Record<ShellSurfaceVariant, string> = {
@@ -47,8 +32,6 @@ export function ShellBackground({
   variant,
   ...props
 }: ShellBackgroundProps) {
-  const tokens = backgroundStyles[variant];
-
   return (
     <div
       {...props}
@@ -60,32 +43,10 @@ export function ShellBackground({
       style={
         {
           ...style,
-          background: tokens.base,
+          background: backgroundStyles[variant],
         } as CSSProperties
       }
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background: `${tokens.primarySpotlight}, ${tokens.secondarySpotlight}`,
-        }}
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{ background: "var(--shell-sweep)" }}
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{
-          opacity: "var(--shell-noise-opacity)",
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, var(--shell-noise-dot) 1px, transparent 0)",
-          backgroundSize: "20px 20px",
-        }}
-      />
       {children}
     </div>
   );
@@ -109,11 +70,6 @@ export function ShellSurface({
         } as CSSProperties
       }
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{ background: "var(--shell-surface-sweep)" }}
-      />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-px"

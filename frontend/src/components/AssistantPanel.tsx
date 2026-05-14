@@ -57,23 +57,15 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{ background: "var(--shell-surface-sweep)" }}
-      />
-      <div
-        aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-px"
         style={{ background: "var(--shell-hairline)" }}
       />
       <div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute inset-0 z-20 border transition-[opacity,border-color,box-shadow] duration-300",
-          assistantActivity.running
-            ? "animate-pulse shadow-lg shadow-ring/5"
-            : "opacity-0",
-          assistantActivity.running &&
-            "border-ring/25 opacity-100 shadow-ring/10",
+          "pointer-events-none absolute inset-0 z-20 border transition-[opacity,border-color] duration-300",
+          assistantActivity.running ? "animate-pulse" : "opacity-0",
+          assistantActivity.running && "border-ring/25 opacity-100",
         )}
       />
       <PanelHeader
@@ -103,7 +95,7 @@ export function AssistantPanel({ onOpenDetails }: AssistantPanelProps) {
           style={{
             paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))",
           }}
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-b from-transparent via-background/70 to-background/95 px-2.5 pt-8"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 border-t border-border/60 bg-background/95 px-2.5 pt-3"
         >
           <div className="mx-auto w-full max-w-3xl">
             <AssistantChatComposer

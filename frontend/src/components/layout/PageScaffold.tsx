@@ -62,9 +62,7 @@ export function PageTitleBar({
     <div className={cn("border-b border-border/70 pb-4", className)}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-center gap-2">
-          <h1 className="text-[28px] font-medium tracking-[-0.04em] text-foreground">
-            {title}
-          </h1>
+          <h1 className="text-[28px] font-medium text-foreground">{title}</h1>
           {hint ? (
             <TooltipProvider delayDuration={150}>
               <Tooltip>
@@ -99,9 +97,7 @@ export function PageTitleBar({
 export function SectionHeader({ title }: { title: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-[14px] font-medium tracking-tight text-foreground/90">
-        {title}
-      </h2>
+      <h2 className="text-[14px] font-medium text-foreground/90">{title}</h2>
     </div>
   );
 }
@@ -129,7 +125,7 @@ export function FormSection({
       <SectionHeader title={title} />
       <div
         className={cn(
-          "rounded-xl border border-white/[0.04] bg-card/[0.03] shadow-sm px-5 transition-colors",
+          "rounded-xl border border-white/[0.04] bg-card/[0.03] px-5 transition-colors",
           contentClassName,
         )}
       >
@@ -153,7 +149,7 @@ export function SettingsRow({
   return (
     <div className="flex flex-col gap-2 border-b border-border/40 py-5 last:border-b-0 md:flex-row md:items-start md:justify-between md:gap-8 hover:bg-muted/10 transition-colors">
       <div className="min-w-0 shrink-0 md:w-[35%] pt-1">
-        <label className="block text-[13px] font-medium text-foreground/80 tracking-tight">
+        <label className="block text-[13px] font-medium text-foreground/80">
           {label}
         </label>
         {description && (
@@ -186,7 +182,7 @@ export function SettingsStack({
   return (
     <div className="flex flex-col gap-3 border-b border-border/40 py-5 last:border-b-0 hover:bg-muted/10 transition-colors">
       <div className="min-w-0 pt-1">
-        <label className="block text-[13px] font-medium text-foreground/80 tracking-tight">
+        <label className="block text-[13px] font-medium text-foreground/80">
           {label}
         </label>
         {description && (

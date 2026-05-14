@@ -8,7 +8,7 @@ export const surfacePanelClass =
 export const surfacePanelSoftClass =
   "rounded-xl bg-card/[0.18] ring-1 ring-white/[0.04]";
 export const sectionSurfaceClass =
-  "overflow-hidden rounded-xl border border-border bg-surface-2 shadow-sm";
+  "overflow-hidden rounded-xl border border-border bg-surface-2";
 export const mutedLabelClass =
   "text-[12px] font-medium text-muted-foreground/80";
 export const smallMutedTextClass =
@@ -75,7 +75,7 @@ export function IconTile({
   return (
     <div
       className={cn(
-        "flex items-center justify-center rounded-xl border shadow-sm",
+        "flex items-center justify-center rounded-xl border",
         size === "lg" ? "size-14" : size === "sm" ? "size-9" : "size-12",
         iconTileToneClass[tone],
         className,
@@ -162,9 +162,7 @@ export function MetricCard({
           </div>
         ) : null}
       </div>
-      <div className="text-2xl font-semibold leading-none tracking-tight">
-        {value}
-      </div>
+      <div className="text-2xl font-semibold leading-none">{value}</div>
     </PanelCard>
   );
 }
@@ -202,7 +200,7 @@ export function StatusChip({
     <span
       className={cn(
         "inline-flex h-fit w-fit shrink-0 items-center rounded-full border px-2.5 py-1 text-[10px] font-medium",
-        uppercase && "uppercase tracking-[0.14em]",
+        uppercase && "uppercase",
         statusToneClass[tone],
         className,
       )}

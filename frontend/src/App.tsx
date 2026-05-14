@@ -17,7 +17,6 @@ import { MotionButton } from "@/components/motion-button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AgentProvider, useAgentUI, type PageId } from "@/context/AgentContext";
 import { AccessProvider } from "@/context/AccessContext";
-import { ThemeProvider } from "@/context/ThemeContext";
 import { useAccess } from "@/context/useAccess";
 import {
   getSidebarRenderWidth,
@@ -320,21 +319,19 @@ function AppShell() {
 
 function App() {
   return (
-    <ThemeProvider>
-      <AccessProvider>
-        <Toaster
-          theme="dark"
-          position="bottom-right"
-          toastOptions={{
-            className:
-              "rounded-md border border-border bg-surface-overlay text-foreground shadow-md",
-          }}
-        />
-        <TooltipProvider delayDuration={300}>
-          <AppShell />
-        </TooltipProvider>
-      </AccessProvider>
-    </ThemeProvider>
+    <AccessProvider>
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        toastOptions={{
+          className:
+            "rounded-md border border-border bg-surface-overlay text-foreground shadow-none",
+        }}
+      />
+      <TooltipProvider delayDuration={300}>
+        <AppShell />
+      </TooltipProvider>
+    </AccessProvider>
   );
 }
 

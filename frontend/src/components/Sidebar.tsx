@@ -64,15 +64,11 @@ export function Sidebar({
       transition={SIDEBAR_WIDTH_TRANSITION}
       style={{ width: `${width}px` }}
       className={cn(
-        "text-sidebar-foreground relative isolate z-40 flex flex-col overflow-visible border-r border-sidebar-border bg-sidebar shadow-[18px_0_44px_rgba(0,0,0,0.18)] transition-colors",
+        "text-sidebar-foreground relative isolate z-40 flex flex-col overflow-visible border-r border-sidebar-border bg-sidebar transition-colors",
         autoHide ? "h-full" : "fixed inset-y-0 left-0 h-auto",
         className,
       )}
     >
-      <div
-        className="pointer-events-none absolute inset-0 opacity-20"
-        style={{ background: "var(--shell-surface-sweep)" }}
-      />
       <div className="flex h-full flex-col overflow-hidden">
         {iconRail ? (
           <div className="flex shrink-0 justify-center px-2 py-4">
@@ -99,7 +95,7 @@ export function Sidebar({
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
                 <h1
-                  className="truncate font-medium tracking-tight text-sidebar-foreground"
+                  className="truncate font-medium text-sidebar-foreground"
                   style={{ fontSize: `${titleFontSizeRem.toFixed(3)}rem` }}
                 >
                   Flowent
@@ -109,11 +105,11 @@ export function Sidebar({
                     className={cn(
                       "size-1.5 rounded-full",
                       connected
-                        ? "bg-graph-status-running shadow-[0_0_10px_var(--graph-status-running)]"
-                        : "bg-graph-status-idle shadow-[0_0_10px_var(--graph-status-idle)]",
+                        ? "bg-graph-status-running"
+                        : "bg-graph-status-idle",
                     )}
                   />
-                  <span className="text-[9px] font-medium uppercase tracking-wider text-sidebar-foreground/80">
+                  <span className="text-[9px] font-medium uppercase text-sidebar-foreground/80">
                     {connected ? "Connected" : "Reconnecting"}
                   </span>
                 </div>
@@ -156,7 +152,7 @@ export function Sidebar({
                           className={cn(
                             "outline-hidden ring-sidebar-ring cursor-pointer transition-[width,height,padding,background-color,border-color,color] focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 data-[active=true]:text-sidebar-primary hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                             iconRail
-                              ? "mx-auto flex size-11 items-center justify-center rounded-sm border border-transparent p-1 text-sidebar-foreground/74 data-[active=true]:border-sidebar-ring/35 data-[active=true]:shadow-[inset_3px_0_0_var(--sidebar-ring)]"
+                              ? "mx-auto flex size-11 items-center justify-center rounded-sm border border-transparent p-1 text-sidebar-foreground/74 data-[active=true]:border-sidebar-ring/35 data-[active=true]:bg-sidebar-accent/60"
                               : "flex min-h-9 w-full items-center gap-2 overflow-hidden rounded-sm px-3 py-2.5 text-left text-sm",
                             !isActive && "text-sidebar-foreground/82",
                           )}

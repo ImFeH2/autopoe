@@ -195,7 +195,7 @@ export function SidebarActivityTicker({ width }: SidebarActivityTickerProps) {
           className={cn(
             "size-1.5 rounded-full transition-all duration-300",
             recentBurstCount > 0
-              ? "bg-graph-status-idle shadow-[0_0_10px_var(--graph-status-idle)]"
+              ? "bg-graph-status-idle"
               : "bg-graph-status-idle/20",
           )}
         />

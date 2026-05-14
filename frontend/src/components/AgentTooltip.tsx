@@ -52,7 +52,7 @@ export function AgentTooltip({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 2, scale: 0.98 }}
             transition={{ duration: 0.15 }}
-            className="pointer-events-none fixed z-[100] max-w-[320px] rounded-md border border-border bg-popover px-2 py-1 text-popover-foreground shadow-md"
+            className="pointer-events-none fixed z-[100] max-w-[320px] rounded-md border border-border bg-popover px-2 py-1 text-popover-foreground"
             style={style}
           >
             <div className="flex flex-wrap items-center gap-2">

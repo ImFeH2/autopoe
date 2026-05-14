@@ -108,7 +108,7 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
     connectionState === "source"
       ? "ring-2 ring-graph-selection/35 border-graph-selection/90"
       : connectionState === "valid-target"
-        ? "border-graph-selection/55 shadow-[0_0_0_1px_var(--graph-glow)]"
+        ? "border-graph-selection/55 ring-1 ring-graph-selection/20"
         : connectionState === "invalid-target"
           ? "opacity-45"
           : "";
@@ -121,9 +121,9 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
       connectionState === "invalid-target");
   const connectionEntryClass =
     connectionState === "source"
-      ? "border-graph-selection/75 bg-graph-selection/14 shadow-[0_0_0_1px_var(--graph-glow),0_0_24px_var(--graph-glow)]"
+      ? "border-graph-selection/75 bg-graph-selection/14"
       : connectionState === "valid-target"
-        ? "border-graph-selection/45 bg-graph-selection/10 shadow-[0_0_0_1px_var(--graph-glow),0_0_18px_var(--graph-glow)]"
+        ? "border-graph-selection/45 bg-graph-selection/10"
         : connectionState === "invalid-target"
           ? "border-graph-node-border bg-graph-node-bg/50"
           : "border-graph-node-border bg-graph-node-bg/72";
@@ -148,7 +148,6 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
       onMouseLeave={resetMouseEffect}
       className={cn(
         "relative isolate flex h-14 w-max min-w-[100px] max-w-[300px] items-center gap-2 overflow-visible rounded-[10px] border px-2.5 py-2.5",
-        "shadow-[0_10px_24px_var(--shell-scrim)]",
         "bg-graph-node-bg",
         "transition-[border-color] duration-300",
         leaving && "pointer-events-none",
@@ -257,7 +256,7 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
               aria-hidden="true"
               data-testid="connection-entry-left"
               className={cn(
-                "pointer-events-none absolute top-1/2 z-10 h-[72%] w-2.5 -translate-y-1/2 rounded-full border transition-[opacity,transform,box-shadow] duration-150",
+                "pointer-events-none absolute top-1/2 z-10 h-[72%] w-2.5 -translate-y-1/2 rounded-full border transition-[opacity,transform] duration-150",
                 "-left-1.5",
                 connectionEntryClass,
               )}
@@ -267,7 +266,7 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
               aria-hidden="true"
               data-testid="connection-entry-right"
               className={cn(
-                "pointer-events-none absolute top-1/2 z-10 h-[72%] w-2.5 -translate-y-1/2 rounded-full border transition-[opacity,transform,box-shadow] duration-150",
+                "pointer-events-none absolute top-1/2 z-10 h-[72%] w-2.5 -translate-y-1/2 rounded-full border transition-[opacity,transform] duration-150",
                 "-right-1.5",
                 connectionEntryClass,
               )}
@@ -307,7 +306,7 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
             )}
             <span
               className={cn(
-                "relative inline-flex size-2.5 rounded-full border border-card shadow-sm",
+                "relative inline-flex size-2.5 rounded-full border border-card",
                 isToolActive ? "bg-graph-attention" : stateColor[state],
               )}
             />
@@ -321,7 +320,7 @@ export const AgentNode = memo(function AgentNode({ data }: NodeProps) {
           animate={{ opacity: 1, y: 0 }}
           className="absolute -bottom-6 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap"
         >
-          <span className="rounded-sm border border-graph-attention/24 bg-surface-2/92 px-1.5 py-0.5 text-[9px] font-mono text-graph-attention-text shadow-lg backdrop-blur-sm">
+          <span className="rounded-sm border border-graph-attention/24 bg-surface-2/92 px-1.5 py-0.5 text-[9px] font-mono text-graph-attention-text backdrop-blur-sm">
             {toolCall}
           </span>
         </motion.div>

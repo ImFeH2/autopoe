@@ -62,8 +62,8 @@ import type {
 } from "@/pages/blueprints/lib";
 import { useBlueprintsPageState } from "@/pages/blueprints/useBlueprintsPageState";
 
-const blueprintFormInputClass = `${formInputClass} text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50`;
-const blueprintFormTextareaClass = `min-h-[108px] ${formTextareaClass} text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50`;
+const blueprintFormInputClass = `${formInputClass} text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50`;
+const blueprintFormTextareaClass = `min-h-[108px] ${formTextareaClass} text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50`;
 const blueprintChoiceListClass =
   "max-h-56 space-y-2 overflow-y-auto rounded-xl border border-border bg-background/35 p-2 scrollbar-none";
 
@@ -79,9 +79,9 @@ function BlueprintFlowNode({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        "group relative min-w-[140px] rounded-xl border border-border bg-card/85 px-4 py-3 shadow-[0_18px_36px_-26px_var(--shell-scrim)] transition-[border-color,background-color,box-shadow] duration-200",
+        "group relative min-w-[140px] rounded-xl border border-border bg-card/85 px-4 py-3 transition-[border-color,background-color] duration-200",
         selected
-          ? "shadow-lg shadow-ring/10 ring-1 ring-ring/35"
+          ? "ring-1 ring-ring/35"
           : "hover:border-ring/25 hover:bg-accent/20",
       )}
     >
@@ -158,7 +158,7 @@ function DrawerShell({
         exit={{ opacity: 0, x: align === "left" ? -20 : 20 }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
-          "absolute inset-y-0 z-30 w-[min(24rem,calc(100%-1.5rem))] overflow-hidden rounded-xl border border-border bg-popover shadow-md",
+          "absolute inset-y-0 z-30 w-[min(24rem,calc(100%-1.5rem))] overflow-hidden rounded-xl border border-border bg-popover",
           align === "left" ? "left-0" : "right-0",
         )}
       >
@@ -613,13 +613,7 @@ function BlueprintStageColumn({
       </div>
 
       {blueprint ? (
-        <div
-          className="min-h-0 flex-1"
-          style={{
-            background:
-              "radial-gradient(circle at 14% 10%, var(--shell-spotlight-primary), transparent 24%), linear-gradient(180deg, color-mix(in srgb, var(--foreground) 1.4%, transparent), transparent 28%)",
-          }}
-        >
+        <div className="min-h-0 flex-1">
           <ReactFlow
             nodes={nodes}
             edges={edges}

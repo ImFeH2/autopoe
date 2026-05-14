@@ -23,7 +23,7 @@ interface ModelParamsFieldsProps {
 
 const EMPTY_OPTION_VALUE = "__empty__";
 const modelParamFieldClass =
-  "w-full rounded-md border border-input bg-background/60 px-3 py-2 text-sm shadow-xs transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-[3px] focus:ring-ring/50";
+  "w-full rounded-md border border-input bg-background/60 px-3 py-2 text-sm transition-[border-color] placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-[3px] focus:ring-ring/50";
 
 function parseNumberInput(value: string) {
   if (!value.trim()) {
