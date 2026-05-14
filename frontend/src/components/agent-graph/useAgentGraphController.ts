@@ -30,9 +30,16 @@ import type {
   AgentGraphProps,
   AgentNodeData,
   ConnectionPortChoice,
+  QuickCreateNodeResult,
   QuickCreateState,
 } from "@/components/agent-graph/lib";
-import type { Node as RuntimeNode } from "@/types";
+import type {
+  Node as RuntimeNode,
+  WorkflowNodeDefinition,
+  WorkflowPort,
+  WorkflowPortType,
+  WorkflowNodeType,
+} from "@/types";
 import {
   EDGE_EXIT_MS,
   LAYOUT_RETRY_LIMIT,
@@ -48,6 +55,54 @@ type ConnectionPortFilters = {
   sourcePortKey?: string;
   targetPortKey?: string;
 };
+
+function buildWorkflowPort(
+  key: string,
+  direction: WorkflowPort["direction"],
+  type: WorkflowPortType = "parts",
+  options: { multiple?: boolean; required?: boolean } = {},
+): WorkflowPort {
+  return {
+    key,
+    direction,
+    type,
+    required: options.required ?? direction === "in",
+    multiple: options.multiple ?? false,
+  };
+}
+
+function getDefaultWorkflowPorts(
+  nodeType: WorkflowNodeType,
+): Pick<WorkflowNodeDefinition, "inputs" | "outputs"> {
+  if (nodeType === "trigger") {
+    return {
+      inputs: [],
+      outputs: [buildWorkflowPort("out", "out", "parts", { multiple: true })],
+    };
+  }
+
+  if (nodeType === "if") {
+    return {
+      inputs: [buildWorkflowPort("in", "in")],
+      outputs: [
+        buildWorkflowPort("then", "out", "parts", { multiple: true }),
+        buildWorkflowPort("else", "out", "parts", { multiple: true }),
+      ],
+    };
+  }
+
+  if (nodeType === "merge") {
+    return {
+      inputs: [buildWorkflowPort("in", "in", "parts", { multiple: true })],
+      outputs: [buildWorkflowPort("out", "out", "json", { multiple: true })],
+    };
+  }
+
+  return {
+    inputs: [buildWorkflowPort("in", "in")],
+    outputs: [buildWorkflowPort("out", "out", "parts", { multiple: true })],
+  };
+}
 
 function isBodySourceHandle(handleId?: string | null) {
   return !handleId || handleId === NODE_BODY_SOURCE_HANDLE;
@@ -84,6 +139,127 @@ function getElementFromPointer(event: globalThis.MouseEvent | TouchEvent) {
 
 function formatPortLabel(port: { key: string; type: string }) {
   return `${port.key} · ${port.type}`;
+}
+
+function getCreatedNodeId(result: unknown) {
+  if (typeof result === "string") {
+    return result;
+  }
+  if (
+    result &&
+    typeof result === "object" &&
+    typeof (result as { id?: unknown }).id === "string"
+  ) {
+    return (result as { id: string }).id;
+  }
+  return null;
+}
+
+function normalizeWorkflowNodeType(value: unknown): WorkflowNodeType | null {
+  if (
+    value === "agent" ||
+    value === "trigger" ||
+    value === "llm" ||
+    value === "if" ||
+    value === "merge" ||
+    value === "code"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function getWorkflowNodeFromCreatedResult(
+  result: unknown,
+  fallbackType: WorkflowNodeType,
+): WorkflowNodeDefinition | null {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+  const node = result as QuickCreateNodeResult;
+  const id = typeof node.id === "string" ? node.id : null;
+  const type =
+    normalizeWorkflowNodeType(node.type) ??
+    normalizeWorkflowNodeType(node.node_type) ??
+    fallbackType;
+  if (!id || !type) {
+    return null;
+  }
+  const fallbackPorts = getDefaultWorkflowPorts(type);
+  return {
+    id,
+    type,
+    config: {},
+    inputs: Array.isArray(node.inputs) ? node.inputs : fallbackPorts.inputs,
+    outputs: Array.isArray(node.outputs) ? node.outputs : fallbackPorts.outputs,
+  };
+}
+
+function getConnectionPortChoicesForNodes({
+  sourceNode,
+  targetNode,
+  edges,
+  filters = {},
+}: {
+  sourceNode: WorkflowNodeDefinition;
+  targetNode: WorkflowNodeDefinition;
+  edges: Array<{
+    from_node_id: string;
+    from_port_key: string;
+    to_node_id: string;
+    to_port_key: string;
+  }>;
+  filters?: ConnectionPortFilters;
+}): ConnectionPortChoice[] {
+  if (sourceNode.id === targetNode.id) {
+    return [];
+  }
+
+  const sourcePorts = filters.sourcePortKey
+    ? sourceNode.outputs.filter((port) => port.key === filters.sourcePortKey)
+    : sourceNode.outputs;
+  const targetPorts = filters.targetPortKey
+    ? targetNode.inputs.filter((port) => port.key === filters.targetPortKey)
+    : targetNode.inputs;
+  const choices: ConnectionPortChoice[] = [];
+
+  for (const sourcePort of sourcePorts) {
+    for (const targetPort of targetPorts) {
+      if (sourcePort.type !== targetPort.type) {
+        continue;
+      }
+      if (
+        !targetPort.multiple &&
+        edges.some(
+          (edge) =>
+            edge.to_node_id === targetNode.id &&
+            edge.to_port_key === targetPort.key,
+        )
+      ) {
+        continue;
+      }
+      if (
+        edges.some(
+          (edge) =>
+            edge.from_node_id === sourceNode.id &&
+            edge.from_port_key === sourcePort.key &&
+            edge.to_node_id === targetNode.id &&
+            edge.to_port_key === targetPort.key,
+        )
+      ) {
+        continue;
+      }
+      choices.push({
+        sourcePortKey: sourcePort.key,
+        sourcePortLabel: formatPortLabel(sourcePort),
+        targetPortKey: targetPort.key,
+        targetPortLabel: formatPortLabel(targetPort),
+        type: sourcePort.type,
+      });
+    }
+  }
+
+  return choices;
 }
 
 function useTransientGraphElements(
@@ -222,6 +398,7 @@ export function useAgentGraphController({
   onCreateConnection = async () => undefined,
   onDeleteConnection = async () => undefined,
   onCreateStandaloneAgent = async () => undefined,
+  onCreateStandaloneNode = async () => undefined,
   onCreateLinkedAgent = async () => undefined,
   onDeleteAgent = async () => undefined,
   onInsertAgentBetween = async () => undefined,
@@ -236,6 +413,8 @@ export function useAgentGraphController({
     useState<AgentGraphController["contextMenu"]>(null);
   const [quickCreate, setQuickCreate] =
     useState<AgentGraphController["quickCreate"]>(null);
+  const [quickCreateNodeType, setQuickCreateNodeType] =
+    useState<WorkflowNodeType>("agent");
   const [quickCreateName, setQuickCreateName] = useState("");
   const [quickCreateRoleName, setQuickCreateRoleName] = useState("");
   const [submittingQuickCreate, setSubmittingQuickCreate] = useState(false);
@@ -510,54 +689,12 @@ export function useAgentGraphController({
       if (!sourceNode || !targetNode) {
         return [];
       }
-
-      const sourcePorts = filters.sourcePortKey
-        ? sourceNode.outputs.filter(
-            (port) => port.key === filters.sourcePortKey,
-          )
-        : sourceNode.outputs;
-      const targetPorts = filters.targetPortKey
-        ? targetNode.inputs.filter((port) => port.key === filters.targetPortKey)
-        : targetNode.inputs;
-      const choices: ConnectionPortChoice[] = [];
-
-      for (const sourcePort of sourcePorts) {
-        for (const targetPort of targetPorts) {
-          if (sourcePort.type !== targetPort.type) {
-            continue;
-          }
-          if (
-            !targetPort.multiple &&
-            workflowEdges.some(
-              (edge) =>
-                edge.to_node_id === targetNodeId &&
-                edge.to_port_key === targetPort.key,
-            )
-          ) {
-            continue;
-          }
-          if (
-            workflowEdges.some(
-              (edge) =>
-                edge.from_node_id === sourceNodeId &&
-                edge.from_port_key === sourcePort.key &&
-                edge.to_node_id === targetNodeId &&
-                edge.to_port_key === targetPort.key,
-            )
-          ) {
-            continue;
-          }
-          choices.push({
-            sourcePortKey: sourcePort.key,
-            sourcePortLabel: formatPortLabel(sourcePort),
-            targetPortKey: targetPort.key,
-            targetPortLabel: formatPortLabel(targetPort),
-            type: sourcePort.type,
-          });
-        }
-      }
-
-      return choices;
+      return getConnectionPortChoicesForNodes({
+        sourceNode,
+        targetNode,
+        edges: workflowEdges,
+        filters,
+      });
     },
     [workflowEdges, workflowNodeMap],
   );
@@ -737,6 +874,7 @@ export function useAgentGraphController({
 
   const closeQuickCreate = useCallback(() => {
     setQuickCreate(null);
+    setQuickCreateNodeType("agent");
     setQuickCreateName("");
     setQuickCreateRoleName("");
     setSubmittingQuickCreate(false);
@@ -749,6 +887,7 @@ export function useAgentGraphController({
 
   const openQuickCreate = useCallback((state: QuickCreateState) => {
     setQuickCreate(state);
+    setQuickCreateNodeType("agent");
     setQuickCreateName("");
     setQuickCreateRoleName("");
     setSubmittingQuickCreate(false);
@@ -792,6 +931,60 @@ export function useAgentGraphController({
             error instanceof Error ? error.message : "Failed to connect nodes",
           );
         }),
+    [onCreateConnection],
+  );
+
+  const createQuickNode = useCallback(
+    (
+      tabId: string,
+      nodeType: WorkflowNodeType,
+      roleName: string,
+      name?: string,
+    ) => {
+      if (nodeType === "agent") {
+        return onCreateStandaloneAgent({
+          tabId,
+          roleName,
+          name,
+        });
+      }
+      return onCreateStandaloneNode({
+        tabId,
+        nodeType,
+        name,
+      });
+    },
+    [onCreateStandaloneAgent, onCreateStandaloneNode],
+  );
+
+  const createBestEffortConnection = useCallback(
+    async (
+      tabId: string,
+      sourceNodeId: string,
+      targetNodeId: string,
+      sourceNode: WorkflowNodeDefinition,
+      targetNode: WorkflowNodeDefinition,
+      edges: typeof workflowEdges,
+      filters: ConnectionPortFilters = {},
+    ) => {
+      const choices = getConnectionPortChoicesForNodes({
+        sourceNode,
+        targetNode,
+        edges,
+        filters,
+      });
+      if (choices.length === 0) {
+        toast.error("This connection is not available");
+        return;
+      }
+      await onCreateConnection(
+        tabId,
+        sourceNodeId,
+        targetNodeId,
+        choices[0].sourcePortKey,
+        choices[0].targetPortKey,
+      );
+    },
     [onCreateConnection],
   );
 
@@ -840,6 +1033,7 @@ export function useAgentGraphController({
         choices,
       });
       setQuickCreate(null);
+      setQuickCreateNodeType("agent");
       setQuickCreateName("");
       setQuickCreateRoleName("");
       setSubmittingQuickCreate(false);
@@ -1129,6 +1323,14 @@ export function useAgentGraphController({
     setContextMenu(null);
   }, []);
 
+  const fitViewFromContextMenu = useCallback(() => {
+    void fitViewport({
+      padding: VIEWPORT_FIT_PADDING,
+      maxZoom: VIEWPORT_FIT_MAX_ZOOM,
+      duration: 250,
+    });
+  }, [fitViewport]);
+
   const contextMenuItems = useMemo((): ContextMenuEntry[] => {
     if (!contextMenu) {
       return [];
@@ -1151,7 +1353,7 @@ export function useAgentGraphController({
       }
       return [
         {
-          label: "Add Agent After",
+          label: "Add Connected Node",
           onClick: () => {
             openQuickCreate({
               kind: "linked",
@@ -1162,9 +1364,10 @@ export function useAgentGraphController({
           },
         },
         {
-          label: "Connect to...",
+          label: "Connect To...",
           onClick: () => {
             setQuickCreate(null);
+            setQuickCreateNodeType("agent");
             setQuickCreateName("");
             setQuickCreateRoleName("");
             closeConnectionChoice();
@@ -1205,7 +1408,7 @@ export function useAgentGraphController({
       }
       return [
         {
-          label: "Insert Agent Between",
+          label: "Insert Node Between",
           onClick: () => {
             openQuickCreate({
               kind: "between",
@@ -1213,11 +1416,13 @@ export function useAgentGraphController({
               y: contextMenu.y,
               sourceNodeId: contextMenu.sourceId,
               targetNodeId: contextMenu.targetId,
+              sourcePortKey: contextMenu.sourcePortKey,
+              targetPortKey: contextMenu.targetPortKey,
             });
           },
         },
         {
-          label: "Delete Edge",
+          label: "Delete Connection",
           danger: true,
           onClick: () => {
             void onDeleteConnection(
@@ -1240,7 +1445,7 @@ export function useAgentGraphController({
 
     return [
       {
-        label: "Add Agent",
+        label: "Add Node",
         disabled: !activeTabId || readOnly,
         onClick: () => {
           openQuickCreate({
@@ -1250,10 +1455,24 @@ export function useAgentGraphController({
           });
         },
       },
+      {
+        label: "Fit View",
+        disabled: animatedNodes.length === 0,
+        onClick: fitViewFromContextMenu,
+      },
+      {
+        label: "Clear Selection",
+        onClick: () => {
+          setSelectedEdgeId(null);
+          selectAgent(null);
+        },
+      },
     ];
   }, [
     activeTabId,
+    animatedNodes.length,
     contextMenu,
+    fitViewFromContextMenu,
     onDeleteAgent,
     onDeleteConnection,
     openQuickCreate,
@@ -1268,7 +1487,7 @@ export function useAgentGraphController({
     if (
       !activeTabId ||
       !quickCreate ||
-      !quickCreateRoleName ||
+      (quickCreateNodeType === "agent" && !quickCreateRoleName) ||
       submittingQuickCreate
     ) {
       return;
@@ -1276,27 +1495,126 @@ export function useAgentGraphController({
     const name = quickCreateName.trim() || undefined;
     setSubmittingQuickCreate(true);
 
-    const request =
-      quickCreate.kind === "standalone"
-        ? onCreateStandaloneAgent({
-            tabId: activeTabId,
-            roleName: quickCreateRoleName,
-            name,
-          })
-        : quickCreate.kind === "linked"
-          ? onCreateLinkedAgent({
-              tabId: activeTabId,
-              anchorNodeId: quickCreate.anchorNodeId,
-              roleName: quickCreateRoleName,
-              name,
-            })
-          : onInsertAgentBetween({
-              tabId: activeTabId,
-              sourceNodeId: quickCreate.sourceNodeId,
-              targetNodeId: quickCreate.targetNodeId,
-              roleName: quickCreateRoleName,
-              name,
-            });
+    const request = (async () => {
+      if (quickCreate.kind === "standalone") {
+        await createQuickNode(
+          activeTabId,
+          quickCreateNodeType,
+          quickCreateRoleName,
+          name,
+        );
+        return;
+      }
+
+      if (quickCreate.kind === "linked" && quickCreateNodeType === "agent") {
+        await onCreateLinkedAgent({
+          tabId: activeTabId,
+          anchorNodeId: quickCreate.anchorNodeId,
+          roleName: quickCreateRoleName,
+          name,
+        });
+        return;
+      }
+
+      if (quickCreate.kind === "between" && quickCreateNodeType === "agent") {
+        await onInsertAgentBetween({
+          tabId: activeTabId,
+          sourceNodeId: quickCreate.sourceNodeId,
+          targetNodeId: quickCreate.targetNodeId,
+          roleName: quickCreateRoleName,
+          name,
+        });
+        return;
+      }
+
+      const createdResult = await createQuickNode(
+        activeTabId,
+        quickCreateNodeType,
+        quickCreateRoleName,
+        name,
+      );
+      const createdNode =
+        getWorkflowNodeFromCreatedResult(createdResult, quickCreateNodeType) ??
+        (getCreatedNodeId(createdResult)
+          ? {
+              id: getCreatedNodeId(createdResult) as string,
+              type: quickCreateNodeType,
+              config: {},
+              ...getDefaultWorkflowPorts(quickCreateNodeType),
+            }
+          : null);
+      if (!createdNode) {
+        return;
+      }
+
+      if (quickCreate.kind === "linked") {
+        const anchorNode = workflowNodeMap.get(quickCreate.anchorNodeId);
+        if (!anchorNode) {
+          return;
+        }
+        await createBestEffortConnection(
+          activeTabId,
+          quickCreate.anchorNodeId,
+          createdNode.id,
+          anchorNode,
+          createdNode,
+          workflowEdges,
+        );
+        return;
+      }
+
+      const sourceNode = workflowNodeMap.get(quickCreate.sourceNodeId);
+      const targetNode = workflowNodeMap.get(quickCreate.targetNodeId);
+      if (!sourceNode || !targetNode) {
+        return;
+      }
+
+      await onDeleteConnection(
+        activeTabId,
+        quickCreate.sourceNodeId,
+        quickCreate.targetNodeId,
+        quickCreate.sourcePortKey ?? undefined,
+        quickCreate.targetPortKey ?? undefined,
+      );
+      const edgesAfterDelete = workflowEdges.filter(
+        (edge) =>
+          !(
+            edge.from_node_id === quickCreate.sourceNodeId &&
+            edge.to_node_id === quickCreate.targetNodeId &&
+            (!quickCreate.sourcePortKey ||
+              edge.from_port_key === quickCreate.sourcePortKey) &&
+            (!quickCreate.targetPortKey ||
+              edge.to_port_key === quickCreate.targetPortKey)
+          ),
+      );
+      await createBestEffortConnection(
+        activeTabId,
+        quickCreate.sourceNodeId,
+        createdNode.id,
+        sourceNode,
+        createdNode,
+        edgesAfterDelete,
+        { sourcePortKey: quickCreate.sourcePortKey ?? undefined },
+      );
+      await createBestEffortConnection(
+        activeTabId,
+        createdNode.id,
+        quickCreate.targetNodeId,
+        createdNode,
+        targetNode,
+        [
+          ...edgesAfterDelete,
+          {
+            id: "",
+            from_node_id: quickCreate.sourceNodeId,
+            from_port_key: "",
+            to_node_id: createdNode.id,
+            to_port_key: "",
+          },
+        ],
+        { targetPortKey: quickCreate.targetPortKey ?? undefined },
+      );
+    })();
 
     void request
       .then(() => {
@@ -1313,13 +1631,18 @@ export function useAgentGraphController({
   }, [
     activeTabId,
     closeQuickCreate,
+    createBestEffortConnection,
+    createQuickNode,
     onCreateLinkedAgent,
-    onCreateStandaloneAgent,
+    onDeleteConnection,
     onInsertAgentBetween,
     quickCreate,
     quickCreateName,
+    quickCreateNodeType,
     quickCreateRoleName,
     submittingQuickCreate,
+    workflowEdges,
+    workflowNodeMap,
   ]);
 
   const submitConnectionChoice = useCallback(
@@ -1508,9 +1831,11 @@ export function useAgentGraphController({
     onPaneContextMenu,
     quickCreate,
     quickCreateName,
+    quickCreateNodeType,
     quickCreateRoleName,
     readOnly,
     setQuickCreateName,
+    setQuickCreateNodeType,
     setQuickCreateRoleName,
     submitConnectionChoice,
     submittingConnectionChoice,

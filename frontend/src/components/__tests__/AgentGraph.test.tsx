@@ -112,6 +112,7 @@ vi.mock("@xyflow/react", async () => {
     onNodeMouseEnter,
     onNodeMouseMove,
     onNodeMouseLeave,
+    onEdgeContextMenu,
     onConnect,
     onConnectStart,
     onConnectEnd,
@@ -151,6 +152,16 @@ vi.mock("@xyflow/react", async () => {
     onNodeMouseEnter?: (event: React.MouseEvent, node: { id: string }) => void;
     onNodeMouseMove?: (event: React.MouseEvent, node: { id: string }) => void;
     onNodeMouseLeave?: (event: React.MouseEvent, node: { id: string }) => void;
+    onEdgeContextMenu?: (
+      event: React.MouseEvent,
+      edge: {
+        id: string;
+        source: string;
+        target: string;
+        sourceHandle?: string;
+        targetHandle?: string;
+      },
+    ) => void;
     onConnect?: (connection: {
       source: string;
       target: string;
@@ -349,6 +360,13 @@ vi.mock("@xyflow/react", async () => {
             </div>
           );
         })}
+        {edges.map((edge, index) => (
+          <button
+            key={edge.id}
+            data-testid={`edge-context-${index}`}
+            onContextMenu={(event) => onEdgeContextMenu?.(event, edge)}
+          />
+        ))}
         {children}
       </div>
     );
@@ -499,11 +517,25 @@ function renderGraph(
       sourcePortKey?: string,
       targetPortKey?: string,
     ) => Promise<void>;
+    onDeleteConnection?: (
+      tabId: string,
+      sourceNodeId: string,
+      targetNodeId: string,
+      sourcePortKey?: string,
+      targetPortKey?: string,
+    ) => Promise<void>;
     onCreateLinkedAgent?: (input: {
       tabId: string;
       anchorNodeId: string;
       roleName: string;
       name?: string;
+    }) => Promise<unknown>;
+    onCreateStandaloneNode?: (input: {
+      tabId: string;
+      nodeType?: string;
+      roleName?: string;
+      name?: string;
+      config?: Record<string, unknown>;
     }) => Promise<unknown>;
   },
 ) {
@@ -531,7 +563,9 @@ function renderGraph(
     <AgentGraph
       ref={options?.ref}
       onCreateConnection={options?.onCreateConnection}
+      onDeleteConnection={options?.onDeleteConnection}
       onCreateLinkedAgent={options?.onCreateLinkedAgent}
+      onCreateStandaloneNode={options?.onCreateStandaloneNode}
       roles={options?.roles}
     />,
   );
@@ -636,7 +670,7 @@ describe("AgentGraph", () => {
     expect(screen.getByText("Connect nodes")).toBeInTheDocument();
   });
 
-  it("shows add agent in the pane context menu", async () => {
+  it("shows add node in the pane context menu", async () => {
     renderGraph([
       buildNode({
         id: "worker-1",
@@ -651,7 +685,7 @@ describe("AgentGraph", () => {
       clientY: 120,
     });
 
-    expect(screen.getByText("Add Agent")).toBeInTheDocument();
+    expect(screen.getByText("Add Node")).toBeInTheDocument();
   });
 
   it("blocks invalid connections and forwards valid ones with explicit port keys", async () => {
@@ -848,7 +882,7 @@ describe("AgentGraph", () => {
     fireEvent.click(screen.getByTestId("body-drop-first-on-pane"));
 
     expect(
-      await screen.findByRole("dialog", { name: "Add Agent After" }),
+      await screen.findByRole("dialog", { name: "Add Connected Node" }),
     ).toBeInTheDocument();
   });
 
@@ -978,13 +1012,13 @@ describe("AgentGraph", () => {
       clientY: 120,
     });
 
-    expect(screen.getByText("Add Agent After")).toBeInTheDocument();
-    expect(screen.getByText("Connect to...")).toBeInTheDocument();
+    expect(screen.getByText("Add Connected Node")).toBeInTheDocument();
+    expect(screen.getByText("Connect To...")).toBeInTheDocument();
     expect(screen.getByText("Delete Node")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Add Agent After"));
+    fireEvent.click(screen.getByText("Add Connected Node"));
     expect(
-      await screen.findByRole("dialog", { name: "Add Agent After" }),
+      await screen.findByRole("dialog", { name: "Add Connected Node" }),
     ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Search roles"), {
       target: { value: "review" },
@@ -993,7 +1027,7 @@ describe("AgentGraph", () => {
     fireEvent.change(screen.getByLabelText("Display Name"), {
       target: { value: "Review step" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add Agent After" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Connected Node" }));
 
     await waitFor(() => {
       expect(onCreateLinkedAgent).toHaveBeenCalledWith({
@@ -1002,6 +1036,132 @@ describe("AgentGraph", () => {
         roleName: "Reviewer",
         name: "Review step",
       });
+    });
+  });
+
+  it("creates and connects a non-agent node from the node context menu", async () => {
+    const onCreateStandaloneNode = vi.fn().mockResolvedValue({
+      id: "code-1",
+      node_type: "code",
+    });
+    const onCreateConnection = vi.fn().mockResolvedValue(undefined);
+
+    renderGraph(
+      [
+        buildNode({
+          id: "worker-1",
+          role_name: "Planner",
+        }),
+      ],
+      {
+        onCreateConnection,
+        onCreateStandaloneNode,
+        roles: [
+          {
+            name: "Reviewer",
+            description: "Checks the work before it is finished.",
+            system_prompt: "",
+            model: null,
+            model_params: null,
+            included_tools: [],
+            excluded_tools: [],
+            is_builtin: true,
+          },
+        ],
+      },
+    );
+
+    await screen.findByText("Planner");
+
+    fireEvent.contextMenu(screen.getByTestId("node-worker-1"), {
+      clientX: 160,
+      clientY: 120,
+    });
+    fireEvent.click(screen.getByText("Add Connected Node"));
+    await screen.findByRole("dialog", { name: "Add Connected Node" });
+    fireEvent.click(screen.getByRole("combobox", { name: "Node Type" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Connected Node" }));
+
+    await waitFor(() => {
+      expect(onCreateStandaloneNode).toHaveBeenCalledWith({
+        tabId: "tab-1",
+        nodeType: "code",
+        name: undefined,
+      });
+      expect(onCreateConnection).toHaveBeenCalledWith(
+        "tab-1",
+        "worker-1",
+        "code-1",
+        "out",
+        "in",
+      );
+    });
+  });
+
+  it("inserts a non-agent node between connected ports", async () => {
+    const onCreateStandaloneNode = vi.fn().mockResolvedValue({
+      id: "code-1",
+      node_type: "code",
+    });
+    const onCreateConnection = vi.fn().mockResolvedValue(undefined);
+    const onDeleteConnection = vi.fn().mockResolvedValue(undefined);
+
+    renderGraph(
+      [
+        buildNode({
+          id: "worker-1",
+          role_name: "Planner",
+          connections: ["worker-2"],
+        }),
+        buildNode({
+          id: "worker-2",
+          role_name: "Reviewer",
+        }),
+      ],
+      {
+        onCreateConnection,
+        onCreateStandaloneNode,
+        onDeleteConnection,
+      },
+    );
+
+    await screen.findByText("Planner");
+
+    fireEvent.contextMenu(screen.getByTestId("edge-context-0"), {
+      clientX: 160,
+      clientY: 120,
+    });
+    fireEvent.click(screen.getByText("Insert Node Between"));
+    await screen.findByRole("dialog", { name: "Insert Node Between" });
+    fireEvent.click(screen.getByRole("combobox", { name: "Node Type" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Code" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Insert Node Between" }),
+    );
+
+    await waitFor(() => {
+      expect(onDeleteConnection).toHaveBeenCalledWith(
+        "tab-1",
+        "worker-1",
+        "worker-2",
+        "out",
+        "in",
+      );
+      expect(onCreateConnection).toHaveBeenCalledWith(
+        "tab-1",
+        "worker-1",
+        "code-1",
+        "out",
+        "in",
+      );
+      expect(onCreateConnection).toHaveBeenCalledWith(
+        "tab-1",
+        "code-1",
+        "worker-2",
+        "out",
+        "in",
+      );
     });
   });
 
@@ -1023,8 +1183,8 @@ describe("AgentGraph", () => {
       clientY: 120,
     });
 
-    expect(screen.getByText("Add Agent After")).toBeInTheDocument();
-    expect(screen.getByText("Connect to...")).toBeInTheDocument();
+    expect(screen.getByText("Add Connected Node")).toBeInTheDocument();
+    expect(screen.getByText("Connect To...")).toBeInTheDocument();
     expect(screen.getByText("Delete Node")).toBeInTheDocument();
   });
 

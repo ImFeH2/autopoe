@@ -25,11 +25,13 @@ type CreateNodeInput = {
   config?: Record<string, unknown>;
 };
 
-type CreateLinkedAgentInput = {
+type CreateLinkedNodeInput = {
   tabId: string;
   anchorNodeId: string;
-  roleName: string;
+  nodeType?: WorkflowNodeType;
+  roleName?: string;
   name?: string;
+  config?: Record<string, unknown>;
 };
 
 type DeleteNodeInput = {
@@ -38,12 +40,16 @@ type DeleteNodeInput = {
   edges?: TabEdge[];
 };
 
-type InsertAgentBetweenInput = {
+type InsertNodeBetweenInput = {
   tabId: string;
   sourceNodeId: string;
   targetNodeId: string;
-  roleName: string;
+  sourcePortKey?: string;
+  targetPortKey?: string;
+  nodeType?: WorkflowNodeType;
+  roleName?: string;
   name?: string;
+  config?: Record<string, unknown>;
 };
 
 function cloneStacks(stacks?: TabGraphStacks): TabGraphStacks {
@@ -118,13 +124,22 @@ export function useTabGraphHistory() {
   );
 
   const createLinkedAgent = useCallback(
-    async ({ tabId, anchorNodeId, roleName, name }: CreateLinkedAgentInput) => {
+    async ({
+      tabId,
+      anchorNodeId,
+      nodeType = "agent",
+      roleName,
+      name,
+      config,
+    }: CreateLinkedNodeInput) => {
       const normalizedName = normalizeOptionalName(name);
+      const nodeConfig = config ? { ...config } : undefined;
       let currentNodeId = (
         await createTabNodeRequest(tabId, {
-          node_type: "agent",
+          node_type: nodeType,
           role_name: roleName,
           name: normalizedName,
+          config: nodeConfig,
         })
       ).id;
 
@@ -145,9 +160,10 @@ export function useTabGraphHistory() {
         redo: async () => {
           currentNodeId = (
             await createTabNodeRequest(tabId, {
-              node_type: "agent",
+              node_type: nodeType,
               role_name: roleName,
               name: normalizedName,
+              config: nodeConfig,
             })
           ).id;
           await createTabEdgeRequest(tabId, {
@@ -307,22 +323,30 @@ export function useTabGraphHistory() {
       tabId,
       sourceNodeId,
       targetNodeId,
+      sourcePortKey,
+      targetPortKey,
+      nodeType = "agent",
       roleName,
       name,
-    }: InsertAgentBetweenInput) => {
+      config,
+    }: InsertNodeBetweenInput) => {
       const normalizedName = normalizeOptionalName(name);
+      const nodeConfig = config ? { ...config } : undefined;
       let currentNodeId: string | null = null;
 
       await deleteTabEdgeRequest(tabId, {
         fromNodeId: sourceNodeId,
+        fromPortKey: sourcePortKey,
         toNodeId: targetNodeId,
+        toPortKey: targetPortKey,
       });
       try {
         currentNodeId = (
           await createTabNodeRequest(tabId, {
-            node_type: "agent",
+            node_type: nodeType,
             role_name: roleName,
             name: normalizedName,
+            config: nodeConfig,
           })
         ).id;
         await createTabEdgeRequest(tabId, {
@@ -341,7 +365,9 @@ export function useTabGraphHistory() {
         }
         await createTabEdgeRequest(tabId, {
           fromNodeId: sourceNodeId,
+          fromPortKey: sourcePortKey,
           toNodeId: targetNodeId,
+          toPortKey: targetPortKey,
         }).catch(() => undefined);
         throw error;
       }
@@ -354,19 +380,24 @@ export function useTabGraphHistory() {
           await deleteTabNodeRequest(tabId, currentNodeId);
           await createTabEdgeRequest(tabId, {
             fromNodeId: sourceNodeId,
+            fromPortKey: sourcePortKey,
             toNodeId: targetNodeId,
+            toPortKey: targetPortKey,
           });
         },
         redo: async () => {
           await deleteTabEdgeRequest(tabId, {
             fromNodeId: sourceNodeId,
+            fromPortKey: sourcePortKey,
             toNodeId: targetNodeId,
+            toPortKey: targetPortKey,
           });
           currentNodeId = (
             await createTabNodeRequest(tabId, {
-              node_type: "agent",
+              node_type: nodeType,
               role_name: roleName,
               name: normalizedName,
+              config: nodeConfig,
             })
           ).id;
           await createTabEdgeRequest(tabId, {

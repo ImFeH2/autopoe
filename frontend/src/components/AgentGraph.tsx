@@ -31,8 +31,15 @@ import {
 import { RoleSearchPicker } from "@/components/workspace/RoleSearchPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatZoomPercentage } from "@/lib/utils";
-import type { Role } from "@/types";
+import type { Role, WorkflowNodeType } from "@/types";
 
 export type { AgentGraphHandle } from "@/components/agent-graph/lib";
 
@@ -79,9 +86,11 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
       onPaneContextMenu,
       quickCreate,
       quickCreateName,
+      quickCreateNodeType,
       quickCreateRoleName,
       readOnly,
       setQuickCreateName,
+      setQuickCreateNodeType,
       setQuickCreateRoleName,
       submitConnectionChoice,
       submittingConnectionChoice,
@@ -108,7 +117,7 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
         <div className="relative flex-1 overflow-hidden">
           {emptyState ? (
             <div className="flex h-full items-center justify-center px-5 py-8">
-              <div className="w-full max-w-[22rem] rounded-xl border border-border bg-surface-overlay/60 px-5 py-5 text-center shadow-md backdrop-blur-sm">
+              <div className="w-full max-w-[22rem] rounded-xl border border-border bg-surface-overlay/60 px-5 py-5 text-center backdrop-blur-sm">
                 <div className="mx-auto flex size-10 items-center justify-center rounded-lg border border-border bg-accent/35 text-muted-foreground">
                   <Network className="size-4.5" />
                 </div>
@@ -250,8 +259,10 @@ export const AgentGraph = forwardRef<AgentGraphHandle, AgentGraphProps>(
             loadingRoles={loadingRoles}
             onClose={closeQuickCreate}
             onDisplayNameChange={setQuickCreateName}
+            onNodeTypeChange={setQuickCreateNodeType}
             onSelectRole={setQuickCreateRoleName}
             onSubmit={submitQuickCreate}
+            nodeType={quickCreateNodeType}
             selectedRoleName={quickCreateRoleName}
             submitting={submittingQuickCreate}
             title={getQuickCreateTitle(quickCreate)}
@@ -344,27 +355,34 @@ function ConnectionChoiceDialog({
 
 function GraphQuickCreateDialog({
   title,
+  nodeType,
   selectedRoleName,
   displayName,
   roles,
   loadingRoles,
   submitting,
+  onNodeTypeChange,
   onSelectRole,
   onDisplayNameChange,
   onSubmit,
   onClose,
 }: {
   title: string;
+  nodeType: WorkflowNodeType;
   selectedRoleName: string;
   displayName: string;
   roles: Role[];
   loadingRoles: boolean;
   submitting: boolean;
+  onNodeTypeChange: (value: WorkflowNodeType) => void;
   onSelectRole: (value: string) => void;
   onDisplayNameChange: (value: string) => void;
   onSubmit: () => void;
   onClose: () => void;
 }) {
+  const submitDisabled =
+    submitting || (nodeType === "agent" && !selectedRoleName);
+
   return (
     <WorkspaceCommandDialog
       open
@@ -385,38 +403,57 @@ function GraphQuickCreateDialog({
           >
             Cancel
           </Button>
-          <Button
-            type="button"
-            disabled={!selectedRoleName || submitting}
-            onClick={onSubmit}
-          >
+          <Button type="button" disabled={submitDisabled} onClick={onSubmit}>
             {submitting ? "Saving..." : title}
           </Button>
         </>
       }
     >
       <WorkspaceDialogMeta>
-        Choose a role and set how this agent appears in the workflow.
+        Choose the node type and set how it appears in the workflow.
       </WorkspaceDialogMeta>
-      <div className="space-y-1.5">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-sm font-medium text-foreground/80">Role</span>
-          <span className="text-xs text-muted-foreground">Required</span>
+      <WorkspaceDialogField label="Node Type" hint="Required">
+        <Select
+          value={nodeType}
+          onValueChange={(value) => onNodeTypeChange(value as WorkflowNodeType)}
+        >
+          <SelectTrigger
+            aria-label="Node Type"
+            className="h-10 rounded-md bg-background/40 text-foreground data-[placeholder]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50"
+          >
+            <SelectValue placeholder="Choose node type" />
+          </SelectTrigger>
+          <SelectContent className="rounded-md border-border bg-popover text-popover-foreground">
+            <SelectItem value="agent">Agent</SelectItem>
+            <SelectItem value="trigger">Trigger</SelectItem>
+            <SelectItem value="llm">Model</SelectItem>
+            <SelectItem value="if">If</SelectItem>
+            <SelectItem value="merge">Merge</SelectItem>
+            <SelectItem value="code">Code</SelectItem>
+          </SelectContent>
+        </Select>
+      </WorkspaceDialogField>
+      {nodeType === "agent" ? (
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm font-medium text-foreground/80">Role</span>
+            <span className="text-xs text-muted-foreground">Required</span>
+          </div>
+          <RoleSearchPicker
+            roles={roles}
+            loadingRoles={loadingRoles}
+            selectedRoleName={selectedRoleName}
+            onRoleNameChange={onSelectRole}
+          />
         </div>
-        <RoleSearchPicker
-          roles={roles}
-          loadingRoles={loadingRoles}
-          selectedRoleName={selectedRoleName}
-          onRoleNameChange={onSelectRole}
-        />
-      </div>
+      ) : null}
       <WorkspaceDialogField label="Display Name" hint="Optional">
         <Input
           aria-label="Display Name"
           value={displayName}
           onChange={(event) => onDisplayNameChange(event.target.value)}
           placeholder="Optional display name"
-          className="h-10 rounded-md bg-background/40 text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50"
+          className="h-10 rounded-md bg-background/40 text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50"
         />
       </WorkspaceDialogField>
     </WorkspaceCommandDialog>

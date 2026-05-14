@@ -14,6 +14,7 @@ import type {
   TabEdge,
   WorkflowPort,
   WorkflowPortType,
+  WorkflowNodeType,
 } from "@/types";
 
 export const NODE_EXIT_MS = 320;
@@ -24,9 +25,9 @@ export const VIEWPORT_MIN_ZOOM = 0.05;
 export const VIEWPORT_MAX_ZOOM = 6;
 export const LAYOUT_RETRY_LIMIT = 1;
 export const graphChromePillClass =
-  "rounded-md border border-border bg-popover px-3 py-1 text-[11px] font-medium text-popover-foreground shadow-sm";
+  "rounded-md border border-border bg-popover px-3 py-1 text-[11px] font-medium text-popover-foreground";
 export const quickCreateInputClass =
-  "h-8 w-full rounded-md border border-input bg-background/55 px-3 text-[13px] text-foreground shadow-xs placeholder:text-muted-foreground transition-[border-color,box-shadow] focus:border-ring focus:outline-none focus:ring-[3px] focus:ring-ring/50";
+  "h-8 w-full rounded-md border border-input bg-background/55 px-3 text-[13px] text-foreground placeholder:text-muted-foreground transition-[border-color] focus:border-ring focus:outline-none focus:ring-[3px] focus:ring-ring/50";
 export const quickCreateListClass =
   "max-h-56 space-y-2 overflow-y-auto rounded-md border border-border bg-background/40 p-2 scrollbar-none";
 export const quickCreateButtonClass =
@@ -84,7 +85,17 @@ export type QuickCreateState =
       y: number;
       sourceNodeId: string;
       targetNodeId: string;
+      sourcePortKey?: string | null;
+      targetPortKey?: string | null;
     };
+
+export interface QuickCreateNodeResult {
+  id: string;
+  type?: WorkflowNodeType;
+  node_type?: NodeType;
+  inputs?: WorkflowPort[];
+  outputs?: WorkflowPort[];
+}
 
 export interface ConnectionPortChoice {
   sourcePortKey: string;
@@ -150,6 +161,13 @@ export interface AgentGraphProps {
     roleName: string;
     name?: string;
   }) => Promise<unknown>;
+  onCreateStandaloneNode?: (input: {
+    tabId: string;
+    nodeType?: WorkflowNodeType;
+    roleName?: string;
+    name?: string;
+    config?: Record<string, unknown>;
+  }) => Promise<unknown>;
   onCreateLinkedAgent?: (input: {
     tabId: string;
     anchorNodeId: string;
@@ -188,9 +206,11 @@ export interface AgentGraphController {
   loadingRoles: boolean;
   quickCreate: QuickCreateState | null;
   quickCreateName: string;
+  quickCreateNodeType: WorkflowNodeType;
   quickCreateRoleName: string;
   readOnly: boolean;
   setQuickCreateName: (value: string) => void;
+  setQuickCreateNodeType: (value: WorkflowNodeType) => void;
   setQuickCreateRoleName: (value: string) => void;
   submittingConnectionChoice: boolean;
   submittingQuickCreate: boolean;
@@ -286,12 +306,12 @@ export function getHorizontalHandleIds(
 
 export function getQuickCreateTitle(state: QuickCreateState) {
   if (state.kind === "standalone") {
-    return "Add Agent";
+    return "Add Node";
   }
   if (state.kind === "between") {
-    return "Insert Agent Between";
+    return "Insert Node Between";
   }
-  return "Add Agent After";
+  return "Add Connected Node";
 }
 
 export function getPointerPosition(event: globalThis.MouseEvent | TouchEvent) {

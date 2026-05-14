@@ -184,12 +184,8 @@ export function WorkspaceShell({
   return (
     <div
       ref={workspaceRef}
-      className="relative isolate flex h-full overflow-hidden rounded-xl border border-border bg-surface-overlay shadow-md [contain:paint]"
+      className="relative isolate flex h-full overflow-hidden rounded-xl border border-border bg-surface-overlay [contain:paint]"
     >
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{ background: "var(--shell-surface-sweep)" }}
-      />
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-px"
         style={{ background: "var(--shell-hairline)" }}
@@ -257,15 +253,6 @@ export function WorkspaceShell({
           </div>
         </div>
 
-        <div
-          className="pointer-events-none absolute inset-0 z-0"
-          style={{
-            background:
-              "radial-gradient(circle at 14% 10%, var(--shell-spotlight-primary), transparent 24%), linear-gradient(180deg, color-mix(in srgb, var(--foreground) 1%, transparent), transparent 22%)",
-          }}
-        />
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l from-background/28 to-transparent" />
-
         <div className="relative flex-1">
           {editorMode === "graph" ? (
             <AgentGraph
@@ -275,6 +262,7 @@ export function WorkspaceShell({
               onCreateConnection={graphHistory.createConnection}
               onCreateLinkedAgent={graphHistory.createLinkedAgent}
               onCreateStandaloneAgent={graphHistory.createStandaloneAgent}
+              onCreateStandaloneNode={graphHistory.createStandaloneNode}
               onDeleteAgent={graphHistory.deleteAgent}
               onDeleteConnection={graphHistory.deleteConnection}
               onInsertAgentBetween={graphHistory.insertAgentBetween}
@@ -308,7 +296,7 @@ export function WorkspaceShell({
                   onDefinitionDraftChange(event.target.value)
                 }
                 readOnly={!activeTabId}
-                className="h-full min-h-0 w-full resize-none rounded-xl border border-border bg-background/40 p-4 font-mono text-[12px] leading-6 text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+                className="h-full min-h-0 w-full resize-none rounded-xl border border-border bg-background/40 p-4 font-mono text-[12px] leading-6 text-foreground outline-none transition-[border-color] focus:border-ring focus:ring-[3px] focus:ring-ring/50"
                 spellCheck={false}
               />
             </div>
@@ -343,7 +331,7 @@ export function WorkspaceShell({
           <div className="pointer-events-none absolute inset-x-3 bottom-4 z-40 flex justify-center">
             <div
               data-testid="workspace-toolbar"
-              className="pointer-events-auto inline-flex max-w-full items-center overflow-x-auto rounded-xl border border-border bg-surface-overlay/92 p-0.5 shadow-sm scrollbar-none"
+              className="pointer-events-auto inline-flex max-w-full items-center overflow-x-auto rounded-xl border border-border bg-surface-overlay/92 p-0.5 scrollbar-none"
             >
               <ToolbarButton
                 disabled={!activeTabId || !graphHistory.canUndo(activeTabId)}
@@ -426,21 +414,17 @@ export function WorkspaceShell({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 18 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute inset-y-2.5 right-2.5 z-20 shrink-0 overflow-hidden rounded-xl border border-border bg-surface-overlay shadow-md"
+                className="absolute inset-y-2.5 right-2.5 z-20 shrink-0 overflow-hidden rounded-xl border border-border bg-surface-overlay"
                 style={{ width: `${resolvedPanelWidth}px` }}
               >
                 <div
                   aria-hidden="true"
                   className={cn(
-                    "pointer-events-none absolute inset-0 z-20 border transition-[opacity,border-color,box-shadow] duration-300",
+                    "pointer-events-none absolute inset-0 z-20 border transition-[opacity,border-color] duration-300",
                     !selectedAgent && leaderPanelRunning
-                      ? "animate-pulse border-ring/25 opacity-100 shadow-lg shadow-ring/10"
+                      ? "animate-pulse border-ring/25 opacity-100"
                       : "border-transparent opacity-0",
                   )}
-                />
-                <div
-                  className="pointer-events-none absolute inset-0"
-                  style={{ background: "var(--shell-surface-sweep)" }}
                 />
                 <div
                   className="pointer-events-none absolute inset-x-0 top-0 h-px"
@@ -491,20 +475,16 @@ export function WorkspaceShell({
               animate={{ width: resolvedPanelWidth, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="relative z-20 shrink-0 border-l border-border bg-surface-overlay shadow-md"
+              className="relative z-20 shrink-0 border-l border-border bg-surface-overlay"
             >
               <div
                 aria-hidden="true"
                 className={cn(
-                  "pointer-events-none absolute inset-0 z-20 border transition-[opacity,border-color,box-shadow] duration-300",
+                  "pointer-events-none absolute inset-0 z-20 border transition-[opacity,border-color] duration-300",
                   !selectedAgent && leaderPanelRunning
-                    ? "animate-pulse border-ring/25 opacity-100 shadow-lg shadow-ring/10"
+                    ? "animate-pulse border-ring/25 opacity-100"
                     : "border-transparent opacity-0",
                 )}
-              />
-              <div
-                className="pointer-events-none absolute inset-0"
-                style={{ background: "var(--shell-surface-sweep)" }}
               />
               <div
                 className="pointer-events-none absolute inset-x-0 top-0 h-px"

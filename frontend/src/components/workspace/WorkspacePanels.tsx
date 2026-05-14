@@ -602,7 +602,7 @@ export function LeaderChatPanel({
             disabled={clearing}
             onClick={() => void clearChat()}
           >
-            {clearing ? "Clearing..." : "Clear"}
+            {clearing ? "Clearing..." : "Clear Chat"}
           </Button>
           <Button
             type="button"
@@ -610,7 +610,7 @@ export function LeaderChatPanel({
             variant="outline"
             onClick={onOpenDetails}
           >
-            Detail
+            Leader Details
           </Button>
         </div>
       </div>
@@ -636,7 +636,7 @@ export function LeaderChatPanel({
           style={{
             paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))",
           }}
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-b from-transparent via-background/70 to-background/95 px-2.5 pt-8"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 border-t border-border/60 bg-background/95 px-2.5 pt-3"
         >
           <AssistantChatComposer
             busy={leaderActivity.running}
@@ -739,7 +739,7 @@ export function PanelToggleButton({
       title={title}
       aria-label={title}
       className={cn(
-        "pointer-events-auto relative isolate flex size-9 items-center justify-center rounded-md border border-border bg-surface-overlay/80 text-muted-foreground shadow-sm transition-[background-color,color] duration-150 hover:bg-accent/60 hover:text-foreground [contain:paint]",
+        "pointer-events-auto relative isolate flex size-9 items-center justify-center rounded-md border border-border bg-surface-overlay/80 text-muted-foreground transition-[background-color,color] duration-150 hover:bg-accent/60 hover:text-foreground [contain:paint]",
         className,
       )}
     >
