@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Info, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,6 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
@@ -74,15 +80,54 @@ export function WorkspaceCommandDialog({
 export function WorkspaceDialogField({
   label,
   hint,
+  hintMode = "text",
   children,
 }: {
   label: string;
   hint?: string;
+  hintMode?: "text" | "tooltip";
   children: ReactNode;
 }) {
+  if (hintMode === "tooltip") {
+    return (
+      <div className="block space-y-1.5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground/80">
+            <span className="truncate">{label}</span>
+            {hint ? (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`${label} details`}
+                      className="size-5 rounded-full text-muted-foreground hover:bg-accent/35 hover:text-foreground"
+                    >
+                      <Info className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    sideOffset={8}
+                    className="max-w-[min(18rem,calc(100vw-2rem))] whitespace-normal px-3 py-2 text-center leading-relaxed"
+                  >
+                    {hint}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
+          </span>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
   return (
     <label className="block space-y-1.5">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-foreground/80">{label}</span>
         {hint ? (
           <span className="text-xs text-muted-foreground">{hint}</span>

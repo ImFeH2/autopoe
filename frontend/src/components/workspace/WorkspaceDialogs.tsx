@@ -87,33 +87,35 @@ export function CreateTabDialog({
         </>
       }
     >
-      <WorkspaceDialogField label="Title" hint="Shown in the workflow strip">
+      <WorkspaceDialogField label="Name">
         <Input
           autoFocus
           aria-label="Workflow title"
           value={title}
           onChange={(event) => onTitleChange(event.target.value)}
-          placeholder="Release checklist"
+          placeholder="e.g., Release checklist"
           className={cn("h-10 rounded-md", workspaceDialogInputClass)}
         />
       </WorkspaceDialogField>
       <WorkspaceDialogField
-        label="Network Access"
-        hint="Allow this workflow to reach external services"
+        label="Internet access"
+        hint="Allow this workflow to connect to the web."
+        hintMode="tooltip"
       >
         <FormSwitch
           checked={allowNetwork}
-          label="Network Access"
+          label="Internet access"
           onCheckedChange={onAllowNetworkChange}
         />
       </WorkspaceDialogField>
       <WorkspaceDialogField
-        label="Writable Folders"
-        hint="One absolute folder path per line"
+        label="Folder access"
+        hint="Folders where this workflow can save files."
+        hintMode="tooltip"
       >
         <Textarea
           value={writeDirs}
-          aria-label="Writable folders"
+          aria-label="Folder access"
           onChange={(event) => onWriteDirsChange(event.target.value)}
           placeholder="/workspace/output&#10;/workspace/cache"
           className={cn(
