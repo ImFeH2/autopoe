@@ -77,6 +77,7 @@ export function CreateTabDialog({
       onOpenChange={onOpenChange}
       title="Create Workflow"
       tone="black"
+      bodyClassName="-mx-6 space-y-0 overflow-hidden border-t border-white/10 px-6 py-0"
       footer={
         <>
           <Button
@@ -97,53 +98,47 @@ export function CreateTabDialog({
         </>
       }
     >
-      <div className="overflow-hidden rounded-xl border border-white/10">
-        <div className="p-4">
-          <WorkspaceDialogField label="Name" tone="black">
-            <Input
-              autoFocus
-              aria-label="Workflow title"
-              value={title}
-              onChange={(event) => onTitleChange(event.target.value)}
-              placeholder="e.g., Release checklist"
-              className={cn("h-10 rounded-md", createWorkflowInputClass)}
-            />
-          </WorkspaceDialogField>
-        </div>
-        <div className="border-t border-white/10 p-4">
-          <WorkspaceDialogField
-            label="Internet access"
-            hint="Allow this workflow to connect to the web."
-            hintMode="tooltip"
-            tone="black"
-          >
-            <FormSwitch
-              checked={allowNetwork}
-              label="Internet access"
-              onCheckedChange={onAllowNetworkChange}
-            />
-          </WorkspaceDialogField>
-        </div>
-        <div className="border-t border-white/10 p-4">
-          <WorkspaceDialogField
-            label="Folder access"
-            hint="Folders where this workflow can save files."
-            hintMode="tooltip"
-            tone="black"
-          >
-            <Textarea
-              value={writeDirs}
-              aria-label="Folder access"
-              onChange={(event) => onWriteDirsChange(event.target.value)}
-              placeholder="/workspace/output&#10;/workspace/cache"
-              className={cn(
-                "min-h-[80px] resize-none rounded-md font-mono text-[13px]",
-                createWorkflowInputClass,
-              )}
-            />
-          </WorkspaceDialogField>
-        </div>
-      </div>
+      <WorkspaceDialogField label="Name" tone="black" className="py-4">
+        <Input
+          autoFocus
+          aria-label="Workflow title"
+          value={title}
+          onChange={(event) => onTitleChange(event.target.value)}
+          placeholder="e.g., Release checklist"
+          className={cn("h-10 rounded-md", createWorkflowInputClass)}
+        />
+      </WorkspaceDialogField>
+      <WorkspaceDialogField
+        label="Internet access"
+        hint="Allow this workflow to connect to the web."
+        hintMode="tooltip"
+        tone="black"
+        className="border-t border-white/10 py-4"
+      >
+        <FormSwitch
+          checked={allowNetwork}
+          label="Internet access"
+          onCheckedChange={onAllowNetworkChange}
+        />
+      </WorkspaceDialogField>
+      <WorkspaceDialogField
+        label="Folder access"
+        hint="Folders where this workflow can save files."
+        hintMode="tooltip"
+        tone="black"
+        className="border-t border-white/10 py-4"
+      >
+        <Textarea
+          value={writeDirs}
+          aria-label="Folder access"
+          onChange={(event) => onWriteDirsChange(event.target.value)}
+          placeholder="/workspace/output&#10;/workspace/cache"
+          className={cn(
+            "min-h-[80px] resize-none rounded-md font-mono text-[13px]",
+            createWorkflowInputClass,
+          )}
+        />
+      </WorkspaceDialogField>
     </WorkspaceCommandDialog>
   );
 }

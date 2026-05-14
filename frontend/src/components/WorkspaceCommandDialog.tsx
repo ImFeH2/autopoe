@@ -24,6 +24,7 @@ interface WorkspaceCommandDialogProps {
   title: string;
   children: ReactNode;
   footer: ReactNode;
+  bodyClassName?: string;
   className?: string;
   tone?: "default" | "black";
 }
@@ -34,6 +35,7 @@ export function WorkspaceCommandDialog({
   title,
   children,
   footer,
+  bodyClassName,
   className,
   tone = "default",
 }: WorkspaceCommandDialogProps) {
@@ -84,7 +86,10 @@ export function WorkspaceCommandDialog({
           </DialogHeader>
 
           <div
-            className="relative z-10 mt-6 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1 scrollbar-none"
+            className={cn(
+              "relative z-10 mt-6 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1 scrollbar-none",
+              bodyClassName,
+            )}
             data-testid="workspace-command-dialog-body"
           >
             {children}
@@ -93,7 +98,7 @@ export function WorkspaceCommandDialog({
           <DialogFooter
             className={cn(
               isBlack
-                ? "relative z-10 mx-0 mb-0 mt-5 shrink-0 rounded-none border-t border-white/10 bg-transparent p-0 pt-4"
+                ? "relative z-10 -mx-6 mb-0 mt-5 shrink-0 rounded-none border-t border-white/10 bg-transparent px-6 pb-0 pt-4"
                 : "relative z-10 mt-6 shrink-0 border-t border-border pt-4",
             )}
           >
@@ -110,12 +115,14 @@ export function WorkspaceDialogField({
   hint,
   hintMode = "text",
   tone = "default",
+  className,
   children,
 }: {
   label: string;
   hint?: string;
   hintMode?: "text" | "tooltip";
   tone?: "default" | "black";
+  className?: string;
   children: ReactNode;
 }) {
   const labelClassName =
@@ -125,7 +132,7 @@ export function WorkspaceDialogField({
 
   if (hintMode === "tooltip") {
     return (
-      <div className="block space-y-1.5">
+      <div className={cn("block space-y-1.5", className)}>
         <div className="flex items-center justify-between gap-3">
           <span
             className={cn(
@@ -171,7 +178,7 @@ export function WorkspaceDialogField({
   }
 
   return (
-    <label className="block space-y-1.5">
+    <label className={cn("block space-y-1.5", className)}>
       <div className="flex items-center justify-between gap-3">
         <span className={cn("text-sm font-medium", labelClassName)}>
           {label}
