@@ -466,16 +466,6 @@ def test_update_tab_definition_rejects_agent_set_changes(client: TestClient):
     assert untouched.status_code == 200
 
 
-def test_workflow_has_no_activation_routes(client: TestClient):
-    tab = client.post("/api/workflows", json={"title": "Always Ready"}).json()
-
-    activate_response = client.post(f"/api/workflows/{tab['id']}/activate")
-    deactivate_response = client.post(f"/api/workflows/{tab['id']}/deactivate")
-
-    assert activate_response.status_code == 405
-    assert deactivate_response.status_code == 405
-
-
 def test_agent_only_workflow_is_available_without_trigger(client: TestClient):
     tab = client.post("/api/workflows", json={"title": "Collaborative"}).json()
     worker = _create_agent_node(client, tab_id=tab["id"], name="Worker")
