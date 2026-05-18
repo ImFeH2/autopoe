@@ -1,10 +1,12 @@
+import json
 import os
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
@@ -13,8 +15,8 @@ from flowent.llm import (
     CompletionCallable,
     ProviderConnection,
     ProviderFormat,
-    complete_chat,
     list_provider_models,
+    stream_chat,
 )
 from flowent.storage import (
     StateStore,
@@ -51,8 +53,8 @@ class WorkspaceRespondRequest(BaseModel):
     messages: list[StoredMessage]
 
 
-class WorkspaceRespondResponse(BaseModel):
-    message: StoredMessage
+def stream_event(event: str, data: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 def frontend_static_directory() -> Path:
@@ -122,7 +124,7 @@ def create_app(
     @app.post("/api/workspace/respond")
     async def respond_to_workspace(
         request: WorkspaceRespondRequest,
-    ) -> WorkspaceRespondResponse:
+    ) -> StreamingResponse:
         state = store.read_state()
         provider = next(
             (
@@ -140,24 +142,42 @@ def create_app(
         if not provider.api_key:
             raise HTTPException(status_code=400, detail="Add a key before sending.")
 
-        answer = await complete_chat(
-            ProviderConnection(
-                base_url=provider.base_url or None,
-                model=state.settings.selected_model,
-                name=provider.name,
-                provider=provider.type,
-                secret_reference=provider.api_key,
-            ),
-            workspace_chat_messages(request.messages),
-            completion=chat_completion,
+        connection = ProviderConnection(
+            base_url=provider.base_url or None,
+            model=state.settings.selected_model,
+            name=provider.name,
+            provider=provider.type,
+            secret_reference=provider.api_key,
         )
+        chat_messages = workspace_chat_messages(request.messages)
 
-        return WorkspaceRespondResponse(
-            message=StoredMessage(
+        async def response_stream() -> AsyncIterator[str]:
+            message = StoredMessage(
                 author="assistant",
-                content=answer.content,
+                content="",
                 id=str(uuid4()),
             )
+            yield stream_event("start", {"id": message.id})
+            try:
+                async for content in stream_chat(
+                    connection,
+                    chat_messages,
+                    completion=chat_completion,
+                ):
+                    message.content += content
+                    yield stream_event("delta", {"content": content})
+            except Exception as error:
+                yield stream_event(
+                    "error",
+                    {"message": str(error) or "Message could not be sent."},
+                )
+                return
+
+            yield stream_event("done", {"message": message.model_dump()})
+
+        return StreamingResponse(
+            response_stream(),
+            media_type="text/event-stream",
         )
 
     if serve_frontend and static_dir.is_dir():

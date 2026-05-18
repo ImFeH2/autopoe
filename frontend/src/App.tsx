@@ -32,8 +32,36 @@ type ApiState = {
   };
 };
 
-type ApiWorkspaceResponse = {
-  message: ApiMessage;
+type WorkspaceStreamEvent =
+  | {
+      data: {
+        id: string;
+      };
+      event: "start";
+    }
+  | {
+      data: {
+        content: string;
+      };
+      event: "delta";
+    }
+  | {
+      data: {
+        message: ApiMessage;
+      };
+      event: "done";
+    }
+  | {
+      data: {
+        message: string;
+      };
+      event: "error";
+    };
+
+type WorkspaceStreamHandlers = {
+  onDelta: (content: string) => void;
+  onDone: (message: ApiMessage) => void;
+  onStart: (id: string) => void;
 };
 
 const providerFromApi = (provider: ApiProvider): Provider => ({
@@ -71,8 +99,6 @@ function App() {
   const [fetchError, setFetchError] = useState("");
   const [isResponding, setIsResponding] = useState(false);
   const [responseError, setResponseError] = useState("");
-  const [animatedAssistantMessageId, setAnimatedAssistantMessageId] =
-    useState("");
 
   const activeProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId),
@@ -241,7 +267,78 @@ function App() {
     return "Message could not be sent.";
   };
 
-  const requestWorkspaceResponse = async (nextMessages: Message[]) => {
+  const parseWorkspaceStreamEvent = (
+    rawEvent: string,
+  ): WorkspaceStreamEvent => {
+    const lines = rawEvent.split("\n");
+    const event = lines
+      .find((line) => line.startsWith("event: "))
+      ?.slice("event: ".length);
+    const data = lines
+      .find((line) => line.startsWith("data: "))
+      ?.slice("data: ".length);
+
+    if (!event || !data) {
+      throw new Error("Message could not be sent.");
+    }
+
+    return {
+      data: JSON.parse(data) as WorkspaceStreamEvent["data"],
+      event,
+    } as WorkspaceStreamEvent;
+  };
+
+  const readWorkspaceStream = async (
+    response: Response,
+    handlers: WorkspaceStreamHandlers,
+  ) => {
+    if (!response.body) {
+      throw new Error("Message could not be sent.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+
+      for (const rawEvent of events) {
+        if (!rawEvent.trim()) {
+          continue;
+        }
+
+        const streamEvent = parseWorkspaceStreamEvent(rawEvent);
+        if (streamEvent.event === "start") {
+          handlers.onStart(streamEvent.data.id);
+        }
+        if (streamEvent.event === "delta") {
+          handlers.onDelta(streamEvent.data.content);
+        }
+        if (streamEvent.event === "done") {
+          handlers.onDone(streamEvent.data.message);
+          return;
+        }
+        if (streamEvent.event === "error") {
+          throw new Error(streamEvent.data.message);
+        }
+      }
+
+      if (done) {
+        break;
+      }
+    }
+
+    throw new Error("Message could not be sent.");
+  };
+
+  const requestWorkspaceResponse = async (
+    nextMessages: Message[],
+    handlers: WorkspaceStreamHandlers,
+  ) => {
     const response = await fetch("/api/workspace/respond", {
       body: JSON.stringify({ messages: nextMessages.map(messageToApi) }),
       headers: { "Content-Type": "application/json" },
@@ -252,11 +349,11 @@ function App() {
       throw new Error(await responseErrorFromApi(response));
     }
 
-    return (await response.json()) as ApiWorkspaceResponse;
+    await readWorkspaceStream(response, handlers);
   };
 
   const sendMessage = async () => {
-    if (draft.length === 0 || isResponding || animatedAssistantMessageId) {
+    if (draft.length === 0 || isResponding) {
       return;
     }
 
@@ -275,12 +372,38 @@ function App() {
 
     try {
       await saveMessages(nextMessages);
-      const response = await requestWorkspaceResponse(nextMessages);
-      const completedMessages = [...nextMessages, response.message];
-      setMessages(completedMessages);
-      setIsResponding(false);
-      setAnimatedAssistantMessageId(response.message.id);
-      await saveMessages(completedMessages);
+      let assistantMessage: Message | null = null;
+      let assistantContent = "";
+      let assistantId = "";
+      await requestWorkspaceResponse(nextMessages, {
+        onDelta: (content) => {
+          assistantContent += content;
+          assistantMessage = {
+            author: "assistant",
+            content: assistantContent,
+            id: assistantId,
+          };
+          setMessages([...nextMessages, assistantMessage]);
+        },
+        onDone: (message) => {
+          assistantMessage = message;
+          assistantContent = message.content;
+          assistantId = message.id;
+          setMessages([...nextMessages, message]);
+        },
+        onStart: (id) => {
+          assistantId = id;
+          assistantMessage = {
+            author: "assistant",
+            content: "",
+            id,
+          };
+          setMessages([...nextMessages, assistantMessage]);
+        },
+      });
+      if (assistantMessage) {
+        await saveMessages([...nextMessages, assistantMessage]);
+      }
     } catch (error) {
       setResponseError(
         error instanceof Error ? error.message : "Message could not be sent.",
@@ -298,14 +421,10 @@ function App() {
     >
       <TabsContent value="workspace" className={viewPanelClassName}>
         <WorkspaceView
-          animatedAssistantMessageId={animatedAssistantMessageId}
           draft={draft}
           errorMessage={responseError}
           isResponding={isResponding}
           messages={messages}
-          onAssistantAnimationComplete={() => {
-            setAnimatedAssistantMessageId("");
-          }}
           onDraftChange={setDraft}
           onSendMessage={() => {
             void sendMessage();

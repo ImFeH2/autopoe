@@ -4,6 +4,131 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 
+const assistantStreamResponse = (
+  content: string,
+  id = "message-assistant",
+  chunks: string[] = [content],
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      for (const chunk of chunks) {
+        controller.enqueue(
+          encoder.encode(
+            `event: delta\ndata: ${JSON.stringify({ content: chunk })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+};
+
+const controlledAssistantStreamResponse = (
+  chunks: string[],
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const release = deferred();
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content: chunks[0] })}\n\n`,
+        ),
+      );
+      await release.promise;
+      for (const chunk of chunks.slice(1)) {
+        controller.enqueue(
+          encoder.encode(
+            `event: delta\ndata: ${JSON.stringify({ content: chunk })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  return {
+    finish: release.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
+};
+
+const assistantErrorStreamResponse = (
+  message: string,
+  firstChunk = "Partial response",
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content: firstChunk })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: error\ndata: ${JSON.stringify({ message })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
 const mockInitialState = (
   state: Record<string, unknown>,
   modelResults: string[] = ["gpt-5.1"],
@@ -39,19 +164,7 @@ const mockInitialState = (
     }
 
     if (input === "/api/workspace/respond" && init?.method === "POST") {
-      return new Response(
-        JSON.stringify({
-          message: {
-            author: "assistant",
-            content: assistantContent,
-            id: "message-assistant",
-          },
-        }),
-        {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        },
-      );
+      return assistantStreamResponse(assistantContent);
     }
 
     return new Response(JSON.stringify({ models: modelResults }), {
@@ -186,6 +299,118 @@ describe("App", () => {
       }),
     );
     await expectDocumentText("The plan is ready.");
+  });
+
+  it("shows the first assistant stream chunk before the request finishes", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledAssistantStreamResponse(
+      ["First step", " is ready."],
+      "First step is ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("First step");
+    expect(document.body).not.toHaveTextContent("First step is ready.");
+
+    assistantStream.finish();
+    await expectDocumentText("First step is ready.");
+  });
+
+  it("persists the full streamed assistant reply when streaming completes", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "First step is ready.",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("First step is ready.");
+
+    const saveCalls = vi
+      .mocked(window.fetch)
+      .mock.calls.filter(
+        ([input, init]) =>
+          input === "/api/workspace/messages" && init?.method === "PUT",
+      );
+    expect(saveCalls.at(-1)?.[1]).toEqual(
+      expect.objectContaining({
+        body: expect.stringContaining('"content":"First step is ready."'),
+      }),
+    );
+  });
+
+  it("stops streaming and shows an error when a streamed reply fails", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantErrorStreamResponse("Connection lost.");
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("Partial response");
+    expect(await screen.findByText("Connection lost.")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Thinking" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders assistant reply lists as Markdown", async () => {

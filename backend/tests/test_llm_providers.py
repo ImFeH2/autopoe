@@ -6,6 +6,7 @@ from flowent.llm import (
     ProviderFormat,
     build_litellm_request,
     complete_chat,
+    stream_chat,
 )
 
 
@@ -76,3 +77,37 @@ async def test_complete_chat_uses_injected_litellm_completion() -> None:
 
     assert captured_request["model"] == "openai/gpt-5.1"
     assert answer == ChatMessage(role="assistant", content="Here is the checklist.")
+
+
+@pytest.mark.anyio
+async def test_stream_chat_uses_litellm_streaming() -> None:
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Here is "}}]}
+            yield {"choices": [{"delta": {"content": "the checklist."}}]}
+
+        return chunks()
+
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="connection-responses",
+    )
+
+    chunks = [
+        chunk
+        async for chunk in stream_chat(
+            connection,
+            [ChatMessage(role="user", content="Create a checklist.")],
+            completion=fake_completion,
+        )
+    ]
+
+    assert captured_request["stream"] is True
+    assert captured_request["model"] == "openai/gpt-5.1"
+    assert chunks == ["Here is ", "the checklist."]

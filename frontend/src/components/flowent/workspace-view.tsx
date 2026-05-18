@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ArrowUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -7,26 +7,18 @@ import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import type { Message } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
-const ASSISTANT_REVEAL_STEP_MS = 16;
-const ASSISTANT_REVEAL_MIN_CHARS = 3;
-const ASSISTANT_REVEAL_TARGET_FRAMES = 140;
-
 export function WorkspaceView({
-  animatedAssistantMessageId,
   draft,
   errorMessage,
   isResponding,
   messages,
-  onAssistantAnimationComplete,
   onDraftChange,
   onSendMessage,
 }: {
-  animatedAssistantMessageId: string;
   draft: string;
   errorMessage: string;
   isResponding: boolean;
   messages: Message[];
-  onAssistantAnimationComplete: () => void;
   onDraftChange: (value: string) => void;
   onSendMessage: () => void;
 }) {
@@ -36,16 +28,11 @@ export function WorkspaceView({
       aria-label="Workspace"
     >
       <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
-        <MessageList
-          animatedAssistantMessageId={animatedAssistantMessageId}
-          isResponding={isResponding}
-          messages={messages}
-          onAssistantAnimationComplete={onAssistantAnimationComplete}
-        />
+        <MessageList isResponding={isResponding} messages={messages} />
         <ChatComposer
           draft={draft}
           errorMessage={errorMessage}
-          isSending={isResponding || Boolean(animatedAssistantMessageId)}
+          isSending={isResponding}
           onDraftChange={onDraftChange}
           onSendMessage={onSendMessage}
         />
@@ -55,21 +42,17 @@ export function WorkspaceView({
 }
 
 function MessageList({
-  animatedAssistantMessageId,
   isResponding,
   messages,
-  onAssistantAnimationComplete,
 }: {
-  animatedAssistantMessageId: string;
   isResponding: boolean;
   messages: Message[];
-  onAssistantAnimationComplete: () => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const shouldFollowRef = useRef(true);
   const scrollMarkerRef = useRef<HTMLDivElement>(null);
   const displayMessages = useMemo(() => {
-    if (!isResponding) {
+    if (!isResponding || messages.at(-1)?.author === "assistant") {
       return messages;
     }
     return [
@@ -81,6 +64,10 @@ function MessageList({
       },
     ];
   }, [isResponding, messages]);
+  const streamingMessageId =
+    isResponding && messages.at(-1)?.author === "assistant"
+      ? messages.at(-1)?.id
+      : "";
 
   useEffect(() => {
     if (!shouldFollowRef.current) {
@@ -90,7 +77,7 @@ function MessageList({
       block: "end",
       behavior: "smooth",
     });
-  }, [displayMessages, animatedAssistantMessageId]);
+  }, [displayMessages]);
 
   const updateFollowState = () => {
     const list = listRef.current;
@@ -118,20 +105,20 @@ function MessageList({
       ) : null}
       {displayMessages.map((message) => (
         <MessageRow
-          isAnimating={message.id === animatedAssistantMessageId}
-          isPending={message.id === "assistant-pending"}
+          isStreaming={
+            isResponding &&
+            message.id === streamingMessageId &&
+            message.author === "assistant" &&
+            message.content.length > 0
+          }
+          isPending={
+            message.id === "assistant-pending" ||
+            (isResponding &&
+              message.author === "assistant" &&
+              message.content.length === 0)
+          }
           key={message.id}
           message={message}
-          onAnimationComplete={onAssistantAnimationComplete}
-          onRevealFrame={() => {
-            if (!shouldFollowRef.current) {
-              return;
-            }
-            scrollMarkerRef.current?.scrollIntoView({
-              block: "end",
-              behavior: "smooth",
-            });
-          }}
         />
       ))}
       <div aria-hidden="true" ref={scrollMarkerRef} />
@@ -140,17 +127,13 @@ function MessageList({
 }
 
 function MessageRow({
-  isAnimating,
   isPending,
+  isStreaming,
   message,
-  onAnimationComplete,
-  onRevealFrame,
 }: {
-  isAnimating: boolean;
   isPending: boolean;
+  isStreaming: boolean;
   message: Message;
-  onAnimationComplete: () => void;
-  onRevealFrame: () => void;
 }) {
   return (
     <article
@@ -171,10 +154,8 @@ function MessageRow({
           <AssistantWaitingIndicator />
         ) : (
           <AssistantMessageContent
-            isAnimating={isAnimating}
+            isStreaming={isStreaming}
             message={message}
-            onAnimationComplete={onAnimationComplete}
-            onRevealFrame={onRevealFrame}
           />
         )}
       </div>
@@ -183,35 +164,20 @@ function MessageRow({
 }
 
 function AssistantMessageContent({
-  isAnimating,
+  isStreaming,
   message,
-  onAnimationComplete,
-  onRevealFrame,
 }: {
-  isAnimating: boolean;
+  isStreaming: boolean;
   message: Message;
-  onAnimationComplete: () => void;
-  onRevealFrame: () => void;
 }) {
-  const visibleContent = useRevealedText({
-    content: message.content,
-    isActive: isAnimating && message.author === "assistant",
-    onComplete: onAnimationComplete,
-    onRevealFrame,
-  });
-  const isRevealing =
-    isAnimating &&
-    message.author === "assistant" &&
-    visibleContent.length < message.content.length;
-
   return (
     <div className="flowent-markdown-message min-w-0 break-words">
       {message.author === "assistant" ? (
-        <MarkdownMessage content={visibleContent} />
+        <MarkdownMessage content={message.content} />
       ) : (
-        <p className="m-0 whitespace-pre-wrap break-words">{visibleContent}</p>
+        <p className="m-0 whitespace-pre-wrap break-words">{message.content}</p>
       )}
-      {isRevealing ? (
+      {isStreaming ? (
         <span aria-hidden="true" className="flowent-response-cursor" />
       ) : null}
     </div>
@@ -230,59 +196,6 @@ function AssistantWaitingIndicator() {
       <span className="flowent-thinking-dot" />
     </div>
   );
-}
-
-function useRevealedText({
-  content,
-  isActive,
-  onComplete,
-  onRevealFrame,
-}: {
-  content: string;
-  isActive: boolean;
-  onComplete: () => void;
-  onRevealFrame: () => void;
-}) {
-  const [visibleLength, setVisibleLength] = useState(content.length);
-
-  useEffect(() => {
-    if (!isActive) {
-      setVisibleLength(content.length);
-      return;
-    }
-
-    setVisibleLength(0);
-  }, [content, isActive]);
-
-  useEffect(() => {
-    if (!isActive) {
-      return;
-    }
-    if (visibleLength >= content.length) {
-      onComplete();
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setVisibleLength((currentLength) =>
-        Math.min(
-          content.length,
-          currentLength +
-            Math.max(
-              ASSISTANT_REVEAL_MIN_CHARS,
-              Math.ceil(content.length / ASSISTANT_REVEAL_TARGET_FRAMES),
-            ),
-        ),
-      );
-      onRevealFrame();
-    }, ASSISTANT_REVEAL_STEP_MS);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [content.length, isActive, onComplete, onRevealFrame, visibleLength]);
-
-  return content.slice(0, visibleLength);
 }
 
 function ChatComposer({

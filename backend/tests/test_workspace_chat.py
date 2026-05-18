@@ -3,24 +3,34 @@ from fastapi.testclient import TestClient
 from flowent.main import create_app
 
 
-def test_workspace_response_uses_selected_provider_model_and_history(
+def stream_events(content: str) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for raw_event in content.strip().split("\n\n"):
+        event_type = ""
+        data = ""
+        for line in raw_event.splitlines():
+            if line.startswith("event: "):
+                event_type = line.removeprefix("event: ")
+            if line.startswith("data: "):
+                data = line.removeprefix("data: ")
+        events.append({"event": event_type, "data": data})
+    return events
+
+
+def test_workspace_response_streams_selected_provider_model_and_history(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     captured_request: dict[str, object] = {}
 
-    async def fake_completion(**request: object) -> dict[str, object]:
+    async def fake_completion(**request: object) -> object:
         captured_request.update(request)
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "content": "Here is the launch checklist.",
-                        "role": "assistant",
-                    },
-                }
-            ]
-        }
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Here is "}}]}
+            yield {"choices": [{"delta": {"content": "the launch checklist."}}]}
+
+        return chunks()
 
     client = TestClient(
         create_app(serve_frontend=False, chat_completion=fake_completion)
@@ -58,8 +68,16 @@ def test_workspace_response_uses_selected_provider_model_and_history(
     )
 
     assert response.status_code == 200
-    assert response.json()["message"]["author"] == "assistant"
-    assert response.json()["message"]["content"] == "Here is the launch checklist."
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = stream_events(response.text)
+    assert events[0]["event"] == "start"
+    assert events[1] == {"event": "delta", "data": '{"content": "Here is "}'}
+    assert events[2] == {
+        "event": "delta",
+        "data": '{"content": "the launch checklist."}',
+    }
+    assert '"author": "assistant"' in str(events[3]["data"])
+    assert '"content": "Here is the launch checklist."' in str(events[3]["data"])
     assert captured_request == {
         "api_base": "https://api.example.test/v1",
         "api_key": "sk-local",
@@ -67,6 +85,7 @@ def test_workspace_response_uses_selected_provider_model_and_history(
             {"role": "user", "content": "Draft a launch checklist."},
         ],
         "model": "anthropic/claude-sonnet-4-5",
+        "stream": True,
     }
 
 

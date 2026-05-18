@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from enum import StrEnum
 from typing import Any, Literal, Protocol
 
@@ -96,12 +96,16 @@ def list_provider_models(
 def build_litellm_request(
     connection: ProviderConnection,
     messages: Sequence[ChatMessage],
+    *,
+    stream: bool = False,
 ) -> dict[str, Any]:
     request: dict[str, Any] = {
         "api_key": connection.secret_reference,
         "messages": [message.model_dump() for message in messages],
         "model": provider_model_name(connection),
     }
+    if stream:
+        request["stream"] = True
     if connection.base_url:
         request["api_base"] = connection.base_url
     return request
@@ -121,3 +125,34 @@ async def complete_chat(
     response = await completion(**build_litellm_request(connection, messages))
     choice = response["choices"][0]["message"]
     return ChatMessage(role=choice.get("role", "assistant"), content=choice["content"])
+
+
+def chunk_delta_content(chunk: Any) -> str:
+    try:
+        content = chunk.choices[0].delta.content
+    except (AttributeError, IndexError, TypeError):
+        try:
+            content = chunk["choices"][0]["delta"].get("content")
+        except (KeyError, IndexError, TypeError, AttributeError):
+            return ""
+    return content if isinstance(content, str) else ""
+
+
+async def stream_chat(
+    connection: ProviderConnection,
+    messages: Sequence[ChatMessage],
+    *,
+    completion: CompletionCallable | None = None,
+) -> AsyncIterator[str]:
+    if completion is None:
+        from litellm import acompletion
+
+        completion = acompletion
+
+    response = await completion(
+        **build_litellm_request(connection, messages, stream=True)
+    )
+    async for chunk in response:
+        content = chunk_delta_content(chunk)
+        if content:
+            yield content
