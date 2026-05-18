@@ -3,6 +3,7 @@ import { ArrowUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import type { Message } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
@@ -204,12 +205,16 @@ function AssistantMessageContent({
     visibleContent.length < message.content.length;
 
   return (
-    <p className="m-0 whitespace-pre-wrap break-words">
-      {visibleContent}
+    <div className="flowent-markdown-message min-w-0 break-words">
+      {message.author === "assistant" ? (
+        <MarkdownMessage content={visibleContent} />
+      ) : (
+        <p className="m-0 whitespace-pre-wrap break-words">{visibleContent}</p>
+      )}
       {isRevealing ? (
         <span aria-hidden="true" className="flowent-response-cursor" />
       ) : null}
-    </p>
+    </div>
   );
 }
 

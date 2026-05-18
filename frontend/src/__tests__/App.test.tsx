@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -79,6 +79,12 @@ const selectedProviderState = () => ({
   },
 });
 
+const expectDocumentText = async (text: string) => {
+  await waitFor(() => {
+    expect(document.body).toHaveTextContent(text);
+  });
+};
+
 describe("App", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -138,9 +144,7 @@ describe("App", () => {
 
     expect(composer).toHaveValue("");
     expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
-    expect(
-      await screen.findByText("Here is the checklist."),
-    ).toBeInTheDocument();
+    await expectDocumentText("Here is the checklist.");
   });
 
   it("sends the composer content when Enter is pressed", async () => {
@@ -156,9 +160,7 @@ describe("App", () => {
 
     expect(composer).toHaveValue("");
     expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
-    expect(
-      await screen.findByText("Here is the checklist."),
-    ).toBeInTheDocument();
+    await expectDocumentText("Here is the checklist.");
   });
 
   it("requests a workspace reply and appends the assistant message", async () => {
@@ -183,7 +185,90 @@ describe("App", () => {
         method: "POST",
       }),
     );
-    expect(await screen.findByText("The plan is ready.")).toBeInTheDocument();
+    await expectDocumentText("The plan is ready.");
+  });
+
+  it("renders assistant reply lists as Markdown", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "- First step\n- Second step",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const firstStep = await screen.findByText("First step");
+    const list = firstStep.closest("ul");
+
+    expect(list).not.toBeNull();
+    expect(list).toHaveTextContent("Second step");
+  });
+
+  it("renders assistant reply code blocks as Markdown", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "```ts\nconst ready = true;\n```",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const code = await screen.findByText("const ready = true;");
+
+    expect(code.tagName).toBe("CODE");
+    expect(code.closest("pre")).not.toBeNull();
+  });
+
+  it("renders assistant reply HTML as text", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "<script>window.flowentUnsafe = true;</script>",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(
+      await screen.findByText("<script>window.flowentUnsafe = true;</script>"),
+    ).toBeInTheDocument();
+    expect(document.querySelector("script")).toBeNull();
+    expect("flowentUnsafe" in window).toBe(false);
+  });
+
+  it("renders incomplete assistant Markdown without failing", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "```ts\nconst ready = true;",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("const ready = true;");
   });
 
   it("keeps the message and shows a sending error when no model is selected", async () => {
