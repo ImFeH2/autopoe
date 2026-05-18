@@ -1,14 +1,553 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 
+const mockInitialState = (
+  state: Record<string, unknown>,
+  modelResults: string[] = ["gpt-5.1"],
+  assistantContent = "Here is the checklist.",
+) => {
+  vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+    if (input === "/api/state") {
+      return new Response(JSON.stringify(state), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (input === "/api/providers" && init?.method === "POST") {
+      return new Response(init.body, {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (input === "/api/settings" && init?.method === "PUT") {
+      return new Response(init.body, {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (input === "/api/workspace/messages" && init?.method === "PUT") {
+      return new Response(init.body, {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (input === "/api/workspace/respond" && init?.method === "POST") {
+      return new Response(
+        JSON.stringify({
+          message: {
+            author: "assistant",
+            content: assistantContent,
+            id: "message-assistant",
+          },
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    return new Response(JSON.stringify({ models: modelResults }), {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    });
+  });
+};
+
+const selectedProviderState = () => ({
+  messages: [],
+  providers: [
+    {
+      api_key: "sk-local",
+      base_url: "",
+      id: "provider-openai",
+      models: ["gpt-5.1"],
+      name: "OpenAI",
+      type: "openai",
+    },
+  ],
+  settings: {
+    selected_model: "gpt-5.1",
+    selected_provider_id: "provider-openai",
+  },
+});
+
 describe("App", () => {
-  it("renders the Flowent title", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("opens the Workspace as the default chat view", () => {
     render(<App />);
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Flowent" }),
+      screen.getByRole("navigation", { name: "Primary navigation" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Workspace" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getAllByText("No provider").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("textbox", { name: "Message Flowent" }),
+    ).toBeInTheDocument();
+    const sendButton = screen.getByRole("button", { name: "Send message" });
+    expect(sendButton).toBeDisabled();
+    expect(sendButton).not.toHaveTextContent("Send");
+    expect(
+      screen.queryByText(
+        "I can help coordinate the launch checklist, draft each step, and keep the conversation focused on the decisions that still need a person.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Start with the provider setup and a first workspace flow.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("enables the composer after content is drafted", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Message Flowent" }),
+      "   ",
+    );
+
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+  });
+
+  it("clears the composer after a message is sent", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(composer).toHaveValue("");
+    expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Here is the checklist."),
+    ).toBeInTheDocument();
+  });
+
+  it("sends the composer content when Enter is pressed", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.keyboard("{Enter}");
+
+    expect(composer).toHaveValue("");
+    expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Here is the checklist."),
+    ).toBeInTheDocument();
+  });
+
+  it("requests a workspace reply and appends the assistant message", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "The plan is ready.",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/respond",
+      expect.objectContaining({
+        body: expect.stringContaining("Draft a launch checklist"),
+        method: "POST",
+      }),
+    );
+    expect(await screen.findByText("The plan is ready.")).toBeInTheDocument();
+  });
+
+  it("keeps the message and shows a sending error when no model is selected", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            messages: [],
+            providers: [],
+            settings: {
+              selected_model: "",
+              selected_provider_id: "",
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            detail: "Choose a provider and model before sending.",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Choose a provider and model before sending."),
+    ).toBeInTheDocument();
+  });
+
+  it("sends drafted spaces to the workspace reply", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "   ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/respond",
+      expect.objectContaining({
+        body: expect.stringContaining('"content":"   "'),
+        method: "POST",
+      }),
+    );
+  });
+
+  it("keeps the composer content when Shift Enter is pressed", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Line one");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.type(composer, "Line two");
+
+    expect(composer).toHaveValue("Line one\nLine two");
+    expect(screen.queryByText("Line one")).not.toBeInTheDocument();
+  });
+
+  it("keeps the composer empty when Enter is pressed without content", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.click(composer);
+    await user.keyboard("{Enter}");
+
+    expect(composer).toHaveValue("");
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  });
+
+  it("starts provider setup from an empty provider sidebar", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Providers" }));
+
+    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(screen.getByText("No providers")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Provider name" })).toHaveValue(
+      "",
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Provider type" }),
+    ).toHaveTextContent("OpenAI");
+    expect(screen.getByRole("textbox", { name: "Base URL" })).toHaveValue("");
+    expect(screen.getByLabelText("API key")).toBeInTheDocument();
+    expect(screen.getByText("No models")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "New" }));
+
+    expect(screen.getByRole("textbox", { name: "Provider name" })).toHaveValue(
+      "",
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Provider type" }),
+    ).toHaveTextContent("OpenAI");
+
+    await user.click(screen.getByRole("combobox", { name: "Provider type" }));
+
+    expect(screen.getByRole("option", { name: "OpenAI" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "OpenAI Responses" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Anthropic" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Gemini" })).toBeInTheDocument();
+  });
+
+  it("updates provider models from fetched model results", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      {
+        messages: [],
+        providers: [],
+        settings: {
+          selected_model: "",
+          selected_provider_id: "",
+        },
+      },
+      ["claude-sonnet-4-5", "claude-haiku-4-5"],
+    );
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Providers" }));
+    await user.click(screen.getByRole("combobox", { name: "Provider type" }));
+    await user.click(screen.getByRole("option", { name: "Anthropic" }));
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/providers/models",
+      expect.objectContaining({
+        body: JSON.stringify({
+          base_url: "",
+          provider: "anthropic",
+          secret_reference: "",
+        }),
+        method: "POST",
+      }),
+    );
+    expect(await screen.findByText("claude-sonnet-4-5")).toBeInTheDocument();
+    expect(screen.getByText("claude-haiku-4-5")).toBeInTheDocument();
+  });
+
+  it("updates Settings model options from the saved provider models", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      {
+        messages: [],
+        providers: [],
+        settings: {
+          selected_model: "",
+          selected_provider_id: "",
+        },
+      },
+      ["gpt-5.1", "gpt-5.1-mini"],
+    );
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Providers" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Provider name" }),
+      "OpenAI",
+    );
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+    expect(await screen.findByText("gpt-5.1-mini")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    await user.click(screen.getByRole("combobox", { name: "Provider" }));
+    await user.click(screen.getByRole("option", { name: "OpenAI" }));
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+
+    expect(screen.getByRole("option", { name: "gpt-5.1" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "gpt-5.1-mini" }),
+    ).toBeInTheDocument();
+  });
+
+  it("switches to Settings and updates models for the selected provider", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+    expect(
+      screen.getByRole("combobox", { name: "Provider" }),
+    ).toHaveTextContent("No providers");
+    expect(screen.getByRole("combobox", { name: "Provider" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
+      "No models",
+    );
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  it("loads persisted providers when the app starts", async () => {
+    mockInitialState({
+      messages: [],
+      providers: [
+        {
+          api_key: "",
+          base_url: "",
+          id: "provider-openai",
+          models: ["gpt-5.1"],
+          name: "OpenAI",
+          type: "openai",
+        },
+      ],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+    await userEvent.click(
+      await screen.findByRole("tab", { name: "Providers" }),
+    );
+
+    expect(screen.getByRole("button", { name: "OpenAI" })).toBeInTheDocument();
+  });
+
+  it("loads persisted Settings selection when the app starts", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [
+        {
+          api_key: "",
+          base_url: "",
+          id: "provider-openai",
+          models: ["gpt-5.1", "gpt-5.1-mini"],
+          name: "OpenAI",
+          type: "openai",
+        },
+      ],
+      settings: {
+        selected_model: "gpt-5.1-mini",
+        selected_provider_id: "provider-openai",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+
+    expect(
+      screen.getByRole("combobox", { name: "Provider" }),
+    ).toHaveTextContent("OpenAI");
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
+      "gpt-5.1-mini",
+    );
+  });
+
+  it("loads persisted Workspace messages when the app starts", async () => {
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Draft a launch checklist"),
+    ).toBeInTheDocument();
+  });
+
+  it("persists the model list when a provider is saved", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Providers" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Provider name" }),
+      "OpenAI",
+    );
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+    expect(await screen.findByText("gpt-5.1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/providers",
+      expect.objectContaining({
+        body: expect.stringContaining('"models":["gpt-5.1"]'),
+        method: "POST",
+      }),
+    );
   });
 });

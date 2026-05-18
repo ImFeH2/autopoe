@@ -10,6 +10,7 @@ requires-python = ">=3.12,<3.14"
 license = "Apache-2.0"
 dependencies = [
     "fastapi[standard]>=0.136.1",
+    "litellm>=1.84.0",
     "uvicorn>=0.46.0",
 ]
 

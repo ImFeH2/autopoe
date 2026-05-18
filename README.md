@@ -64,9 +64,6 @@ uv sync --project backend
 pnpm dev
 ```
 
-Open `http://localhost:6873`. Vite serves the frontend on port `6873` and
-proxies API requests to the Python server on port `6874`.
-
 You can also run the development container:
 
 ```bash
