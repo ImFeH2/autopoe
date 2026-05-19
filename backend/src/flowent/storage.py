@@ -1,13 +1,11 @@
 import json
-import os
 import sqlite3
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from flowent.llm import ProviderFormat
-
-DEFAULT_DATA_DIR = Path.home() / ".flowent"
+from flowent.paths import data_directory
 
 
 class StoredProvider(BaseModel):
@@ -55,13 +53,6 @@ class StoredState(BaseModel):
     messages: list[StoredMessage]
     providers: list[StoredProvider]
     settings: StoredSettings
-
-
-def data_directory() -> Path:
-    configured_directory = os.environ.get("FLOWENT_DATA_DIR")
-    if configured_directory:
-        return Path(configured_directory).expanduser()
-    return DEFAULT_DATA_DIR
 
 
 class StateStore:

@@ -1,8 +1,11 @@
+import logging
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from flowent.logging import TRACE_LEVEL
 
 
 class ProviderFormat(StrEnum):
@@ -45,6 +48,9 @@ class CompletionCallable(Protocol):
 
 class ModelListCallable(Protocol):
     def __call__(self, **kwargs: Any) -> Sequence[str]: ...
+
+
+logger = logging.getLogger("flowent.llm")
 
 
 MODEL_PREFIXES: dict[ProviderFormat, str] = {
@@ -110,12 +116,13 @@ def build_litellm_request(
     stream: bool = False,
     tools: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    request_messages = [
+        message.model_dump() if isinstance(message, ChatMessage) else dict(message)
+        for message in messages
+    ]
     request: dict[str, Any] = {
         "api_key": connection.secret_reference,
-        "messages": [
-            message.model_dump() if isinstance(message, ChatMessage) else dict(message)
-            for message in messages
-        ],
+        "messages": request_messages,
         "model": provider_model_name(connection),
     }
     if tools:
@@ -124,6 +131,16 @@ def build_litellm_request(
         request["stream"] = True
     if connection.base_url:
         request["api_base"] = connection.base_url
+    logger.log(
+        TRACE_LEVEL,
+        "Built LiteLLM request provider=%s model=%s base_url=%s stream=%s tools=%s messages=%r",
+        connection.provider,
+        connection.model,
+        connection.base_url or "",
+        stream,
+        bool(tools),
+        request_messages,
+    )
     return request
 
 
@@ -139,9 +156,15 @@ async def complete_chat(
 
         completion = acompletion
 
+    logger.debug(
+        "Starting LLM completion provider=%s model=%s",
+        connection.provider,
+        connection.model,
+    )
     response = await completion(
         **build_litellm_request(connection, messages, tools=tools)
     )
+    logger.log(TRACE_LEVEL, "LLM completion response=%r", response)
     choice = response["choices"][0]["message"]
     return ChatMessage(role=choice.get("role", "assistant"), content=choice["content"])
 
@@ -205,10 +228,16 @@ async def stream_chat_chunks(
 
         completion = acompletion
 
+    logger.debug(
+        "Starting streaming LLM completion provider=%s model=%s",
+        connection.provider,
+        connection.model,
+    )
     response = await completion(
         **build_litellm_request(connection, messages, stream=True, tools=tools)
     )
     async for chunk in response:
+        logger.log(TRACE_LEVEL, "LLM stream chunk=%r", chunk)
         yield chunk
 
 

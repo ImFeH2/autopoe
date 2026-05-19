@@ -58,6 +58,15 @@ def main(argv: list[str] | None = None) -> None:
         print(f"flowent {ver}")
         sys.exit(0)
 
+    from flowent.logging import configure_logging
+
+    configure_logging()
+
+    import logging
+
+    logger = logging.getLogger("flowent.cli")
+    logger.info("Starting Flowent on %s:%s", args.host, args.port)
+
     import uvicorn
 
     uvicorn.run(

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,6 +19,7 @@ from flowent.llm import (
     ProviderFormat,
     list_provider_models,
 )
+from flowent.logging import TRACE_LEVEL
 from flowent.storage import (
     StateStore,
     StoredMessage,
@@ -26,6 +28,9 @@ from flowent.storage import (
     StoredState,
     StoredToolItem,
 )
+
+logger = logging.getLogger("flowent.main")
+
 
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
 
@@ -89,6 +94,8 @@ def create_app(
     store = StateStore()
 
     static_dir = frontend_static_directory().resolve(strict=False)
+    logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
+    logger.info("Static directory: %s", static_dir)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
@@ -126,6 +133,10 @@ def create_app(
     async def respond_to_workspace(
         request: WorkspaceRespondRequest,
     ) -> StreamingResponse:
+        logger.info(
+            "Workspace response requested content_length=%s", len(request.content)
+        )
+        logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
         state = store.read_state()
         provider = next(
             (
@@ -136,12 +147,23 @@ def create_app(
             None,
         )
         if provider is None or not state.settings.selected_model:
+            logger.warning(
+                "Workspace response blocked because provider or model is missing"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="Choose a provider and model before sending.",
             )
         if not provider.api_key:
+            logger.warning(
+                "Workspace response blocked because selected provider has no key"
+            )
             raise HTTPException(status_code=400, detail="Add a key before sending.")
+        logger.debug(
+            "Workspace response using provider=%s model=%s",
+            provider.name,
+            state.settings.selected_model,
+        )
 
         user_message = StoredMessage(
             author="user",
@@ -186,6 +208,12 @@ def create_app(
                                     **event.data,
                                 }
                             )
+                    logger.log(
+                        TRACE_LEVEL,
+                        "Workspace stream event=%s data=%r",
+                        event.event,
+                        event.data,
+                    )
                     if event.event == "done":
                         message = event.data.get("message")
                         if isinstance(message, dict):
@@ -200,6 +228,7 @@ def create_app(
                             store.save_messages(next_messages)
                     yield stream_event(event.event, event.data)
             except Exception as error:
+                logger.exception("Workspace response failed")
                 yield stream_event(
                     "error",
                     {"message": str(error) or "Message could not be sent."},

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ from flowent.llm import (
     chunk_delta_tool_calls,
     stream_chat_chunks,
 )
+from flowent.logging import TRACE_LEVEL
 from flowent.tools import (
     ToolContext,
     new_tool_item,
@@ -22,6 +24,8 @@ from flowent.tools import (
     run_tool,
     tool_specs,
 )
+
+logger = logging.getLogger("flowent.agent")
 
 
 class AgentStreamEvent(BaseModel):
@@ -89,11 +93,19 @@ async def run_agent_stream(
 ) -> AsyncIterator[AgentStreamEvent]:
     conversation: list[Mapping[str, object]] = [dict(message) for message in messages]
     assistant_id = str(uuid4())
+    logger.info(
+        "Agent response started id=%s provider=%s model=%s",
+        assistant_id,
+        connection.provider,
+        connection.model,
+    )
+    logger.log(TRACE_LEVEL, "Agent initial messages=%r", conversation)
     yield AgentStreamEvent(event="start", data={"id": assistant_id})
 
     final_content = ""
 
     for _round in range(max_tool_rounds):
+        logger.debug("Agent round started id=%s round=%s", assistant_id, _round + 1)
         round_content = ""
         pending: dict[int, PendingToolCall] = {}
 
@@ -104,12 +116,35 @@ async def run_agent_stream(
             if content:
                 round_content += content
                 final_content += content
+                logger.log(
+                    TRACE_LEVEL,
+                    "Agent stream delta id=%s content=%r",
+                    assistant_id,
+                    content,
+                )
                 yield AgentStreamEvent(event="delta", data={"content": content})
             for delta in chunk_delta_tool_calls(chunk):
                 pending.setdefault(delta.index, PendingToolCall()).apply_delta(delta)
 
         tool_calls = [pending[index] for index in sorted(pending)]
+        logger.log(
+            TRACE_LEVEL,
+            "Agent round tool calls id=%s tool_calls=%r",
+            assistant_id,
+            tool_calls,
+        )
         if not tool_calls:
+            logger.info(
+                "Agent response completed id=%s content_length=%s",
+                assistant_id,
+                len(final_content),
+            )
+            logger.log(
+                TRACE_LEVEL,
+                "Agent final content id=%s content=%r",
+                assistant_id,
+                final_content,
+            )
             yield AgentStreamEvent(
                 event="done",
                 data={
@@ -131,7 +166,15 @@ async def run_agent_stream(
                 arguments = {}
                 result_content = str(error)
                 tool_item = new_tool_item(tool_call.name, arguments)
+                logger.debug("Tool call argument parse failed name=%s", tool_call.name)
+                logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
                 yield AgentStreamEvent(event="tool_start", data={"tool": tool_item})
+                logger.log(
+                    TRACE_LEVEL,
+                    "Tool error id=%s content=%r",
+                    tool_item["id"],
+                    result_content,
+                )
                 yield AgentStreamEvent(
                     event="tool_error",
                     data={
@@ -144,6 +187,10 @@ async def run_agent_stream(
                 )
             else:
                 tool_item = new_tool_item(tool_call.name, arguments)
+                logger.debug(
+                    "Tool call started name=%s id=%s", tool_call.name, tool_item["id"]
+                )
+                logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
                 yield AgentStreamEvent(event="tool_start", data={"tool": tool_item})
                 result = run_tool(
                     tool_call.name,
@@ -151,6 +198,18 @@ async def run_agent_stream(
                     ToolContext(cwd=cwd, web_searcher=web_searcher),
                 )
                 result_content = result.content
+                logger.debug(
+                    "Tool call finished name=%s id=%s ok=%s",
+                    tool_call.name,
+                    tool_item["id"],
+                    result.ok,
+                )
+                logger.log(
+                    TRACE_LEVEL,
+                    "Tool result id=%s result=%r",
+                    tool_item["id"],
+                    result.model_dump(),
+                )
                 yield AgentStreamEvent(
                     event="tool_done" if result.ok else "tool_error",
                     data={
@@ -163,6 +222,7 @@ async def run_agent_stream(
                 )
             conversation.append(tool_result_message(tool_call_id, result_content))
 
+    logger.warning("Agent response stopped at tool limit id=%s", assistant_id)
     yield AgentStreamEvent(
         event="error",
         data={"message": "Tool limit reached before the reply finished."},
