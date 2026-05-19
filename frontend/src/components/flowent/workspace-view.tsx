@@ -210,15 +210,15 @@ function AssistantMessageContent({
         <>
           <ToolProcessList tools={message.tools ?? []} />
           {message.content ? (
-            <MarkdownMessage content={message.content} />
+            <MarkdownMessage
+              content={message.content}
+              isStreaming={isStreaming}
+            />
           ) : null}
         </>
       ) : (
         <p className="m-0 whitespace-pre-wrap break-words">{message.content}</p>
       )}
-      {isStreaming ? (
-        <span aria-hidden="true" className="flowent-response-cursor" />
-      ) : null}
     </div>
   );
 }
