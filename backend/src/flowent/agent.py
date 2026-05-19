@@ -28,6 +28,21 @@ from flowent.tools import (
 logger = logging.getLogger("flowent.agent")
 
 
+FLOWENT_AGENT_SYSTEM_PROMPT = """You are Flowent, an agent that completes tasks by combining conversation context with available tools.
+
+Work through each turn until the request is resolved. If the current context is enough, answer directly. If more information or action is needed, call the appropriate tool, read the result, and continue from that new context.
+
+Use tools deliberately:
+- Read files and list directories before making file changes that depend on existing project context.
+- Search files when you need to find definitions, references, or related behavior.
+- Apply structured patches for file edits.
+- Run shell commands for diagnostics, builds, tests, and operations that require the local environment.
+- Search the web only when current external information is needed.
+- Update the plan when a task has multiple meaningful steps.
+
+After each tool result, decide whether the task is complete, whether another tool is needed, or whether you need to explain a blocker. When no more tool work is needed, provide the final response."""
+
+
 class AgentStreamEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,9 +104,11 @@ async def run_agent_stream(
     cwd: Path,
     messages: Sequence[Mapping[str, object]],
     web_searcher: Callable[[str], Sequence[dict[str, str]]] | None = None,
-    max_tool_rounds: int = 8,
 ) -> AsyncIterator[AgentStreamEvent]:
-    conversation: list[Mapping[str, object]] = [dict(message) for message in messages]
+    conversation: list[Mapping[str, object]] = [
+        {"role": "system", "content": FLOWENT_AGENT_SYSTEM_PROMPT},
+        *[dict(message) for message in messages],
+    ]
     assistant_id = str(uuid4())
     logger.info(
         "Agent response started id=%s provider=%s model=%s",
@@ -104,8 +121,10 @@ async def run_agent_stream(
 
     final_content = ""
 
-    for _round in range(max_tool_rounds):
-        logger.debug("Agent round started id=%s round=%s", assistant_id, _round + 1)
+    round_number = 0
+    while True:
+        round_number += 1
+        logger.debug("Agent round started id=%s round=%s", assistant_id, round_number)
         round_content = ""
         pending: dict[int, PendingToolCall] = {}
 
@@ -221,9 +240,3 @@ async def run_agent_stream(
                     },
                 )
             conversation.append(tool_result_message(tool_call_id, result_content))
-
-    logger.warning("Agent response stopped at tool limit id=%s", assistant_id)
-    yield AgentStreamEvent(
-        event="error",
-        data={"message": "Tool limit reached before the reply finished."},
-    )

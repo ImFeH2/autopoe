@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT
 from flowent.main import create_app
 from flowent.sandbox import SandboxRunner
 from flowent.tools import ToolContext, run_tool
@@ -79,14 +80,13 @@ def test_workspace_response_streams_tool_process_and_final_text(
     workdir.mkdir()
     (workdir / "notes.txt").write_text("Launch notes")
     monkeypatch.chdir(workdir)
-    call_count = 0
+    captured_requests: list[dict[str, object]] = []
 
     async def fake_completion(**request: object) -> object:
-        nonlocal call_count
-        call_count += 1
+        captured_requests.append(request)
 
         async def chunks() -> object:
-            if call_count == 1:
+            if len(captured_requests) == 1:
                 yield tool_call_chunk("read_file", {"path": "notes.txt"})
             else:
                 yield text_chunk("Read the notes.")
@@ -116,6 +116,22 @@ def test_workspace_response_streams_tool_process_and_final_text(
     assert events[2]["data"]["status"] == "success"
     assert events[3]["data"] == {"content": "Read the notes."}
     assert events[4]["data"]["message"]["content"] == "Read the notes."
+    assert len(captured_requests) == 2
+    assert captured_requests[0]["messages"][0] == {
+        "role": "system",
+        "content": FLOWENT_AGENT_SYSTEM_PROMPT,
+    }
+    second_messages = captured_requests[1]["messages"]
+    assert second_messages[0] == {
+        "role": "system",
+        "content": FLOWENT_AGENT_SYSTEM_PROMPT,
+    }
+    assert second_messages[-2]["tool_calls"][0]["function"]["name"] == "read_file"
+    assert second_messages[-1] == {
+        "role": "tool",
+        "tool_call_id": "call-1",
+        "content": "Launch notes",
+    }
 
 
 def test_tools_can_read_paths_outside_workdir(tmp_path) -> None:
@@ -290,17 +306,101 @@ def test_web_search_result_enters_tool_output(tmp_path) -> None:
     assert "https://example.test" in result.content
 
 
+def test_agent_continues_until_final_text_after_multiple_tool_rounds(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    (workdir / "notes.txt").write_text("Launch notes")
+    monkeypatch.chdir(workdir)
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk("list_dir", {"path": "."}, call_id="call-list")
+            elif len(captured_requests) == 2:
+                yield tool_call_chunk(
+                    "read_file", {"path": "notes.txt"}, call_id="call-read"
+                )
+            else:
+                yield text_chunk("The notes are ready.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Inspect the workspace."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert [event["event"] for event in events] == [
+        "start",
+        "tool_start",
+        "tool_done",
+        "tool_start",
+        "tool_done",
+        "delta",
+        "done",
+    ]
+    assert len(captured_requests) == 3
+    assert captured_requests[2]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-read",
+        "content": "Launch notes",
+    }
+    assert events[-1]["data"]["message"]["content"] == "The notes are ready."
+
+
+def test_agent_finishes_without_tools(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            yield text_chunk("Direct answer.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Answer directly."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert [event["event"] for event in events] == ["start", "delta", "done"]
+    assert len(captured_requests) == 1
+    assert events[-1]["data"]["message"]["content"] == "Direct answer."
+
+
 def test_tool_failure_is_reported_and_agent_continues(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
-    call_count = 0
+    captured_requests: list[dict[str, object]] = []
 
     async def fake_completion(**request: object) -> object:
-        nonlocal call_count
-        call_count += 1
+        captured_requests.append(request)
 
         async def chunks() -> object:
-            if call_count == 1:
+            if len(captured_requests) == 1:
                 yield tool_call_chunk("read_file", {"path": "missing.txt"})
             else:
                 yield text_chunk("I could not read it.")
@@ -319,6 +419,10 @@ def test_tool_failure_is_reported_and_agent_continues(tmp_path, monkeypatch) -> 
 
     events = stream_events(response.text)
     assert "tool_error" in [event["event"] for event in events]
+    assert len(captured_requests) == 2
+    assert captured_requests[1]["messages"][-1]["role"] == "tool"
+    assert captured_requests[1]["messages"][-1]["tool_call_id"] == "call-1"
+    assert "missing.txt" in captured_requests[1]["messages"][-1]["content"]
     assert events[-1]["data"]["message"]["content"] == "I could not read it."
 
 

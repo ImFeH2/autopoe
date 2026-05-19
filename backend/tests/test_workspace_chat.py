@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT
 from flowent.main import create_app
 
 
@@ -73,6 +74,7 @@ def test_workspace_response_streams_selected_provider_model_and_history(
     assert captured_request["api_base"] == "https://api.example.test/v1"
     assert captured_request["api_key"] == "sk-local"
     assert captured_request["messages"] == [
+        {"role": "system", "content": FLOWENT_AGENT_SYSTEM_PROMPT},
         {"role": "user", "content": "Draft a launch checklist."},
     ]
     assert captured_request["model"] == "anthropic/claude-sonnet-4-5"
