@@ -1014,6 +1014,132 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the Workspace Clear control in the floating control bar", async () => {
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByLabelText("Workspace controls")).toContainElement(
+      screen.getByRole("button", { name: /Clear/ }),
+    );
+  });
+
+  it("clears visible Workspace messages and returns to the empty state", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Draft a launch checklist"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Clear/ }));
+
+    expect(
+      screen.queryByText("Draft a launch checklist"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
+  });
+
+  it("persists an empty Workspace message list when Clear is clicked", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    await screen.findByText("Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: /Clear/ }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/messages",
+      expect.objectContaining({
+        body: JSON.stringify({ messages: [] }),
+        method: "PUT",
+      }),
+    );
+  });
+
+  it("clears the Workspace while a streamed reply is still running", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledAssistantStreamResponse(
+      ["First step", " is ready."],
+      "First step is ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await expectDocumentText("First step");
+
+    await user.click(screen.getByRole("button", { name: /Clear/ }));
+    assistantStream.finish();
+
+    await waitFor(() => {
+      expect(document.body).not.toHaveTextContent("Draft a launch checklist");
+      expect(document.body).not.toHaveTextContent("First step");
+      expect(document.body).not.toHaveTextContent("First step is ready.");
+    });
+    expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
+  });
+
   it("persists the model list when a provider is saved", async () => {
     const user = userEvent.setup();
     mockInitialState({

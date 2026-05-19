@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/flowent/app-shell";
 import {
@@ -124,6 +124,8 @@ function App() {
   const [fetchError, setFetchError] = useState("");
   const [isResponding, setIsResponding] = useState(false);
   const [responseError, setResponseError] = useState("");
+  const responseAbortRef = useRef<AbortController | null>(null);
+  const responseRunRef = useRef(0);
 
   const activeProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId),
@@ -372,11 +374,13 @@ function App() {
   const requestWorkspaceResponse = async (
     nextMessages: Message[],
     handlers: WorkspaceStreamHandlers,
+    signal?: AbortSignal,
   ) => {
     const response = await fetch("/api/workspace/respond", {
       body: JSON.stringify({ messages: nextMessages.map(messageToApi) }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
+      signal,
     });
 
     if (!response.ok) {
@@ -391,6 +395,10 @@ function App() {
       return;
     }
 
+    const responseRun = responseRunRef.current + 1;
+    const responseAbortController = new AbortController();
+    responseAbortRef.current = responseAbortController;
+    responseRunRef.current = responseRun;
     const nextMessages: Message[] = [
       ...messages,
       {
@@ -410,8 +418,9 @@ function App() {
       let assistantContent = "";
       let assistantId = "";
       let assistantTools: ToolItem[] = [];
+      const isCurrentResponse = () => responseRunRef.current === responseRun;
       const updateAssistantMessage = () => {
-        if (!assistantId) {
+        if (!assistantId || !isCurrentResponse()) {
           return;
         }
         assistantMessage = {
@@ -422,43 +431,86 @@ function App() {
         };
         setMessages([...nextMessages, assistantMessage]);
       };
-      await requestWorkspaceResponse(nextMessages, {
-        onDelta: (content) => {
-          assistantContent += content;
-          updateAssistantMessage();
+      await requestWorkspaceResponse(
+        nextMessages,
+        {
+          onDelta: (content) => {
+            if (!isCurrentResponse()) {
+              return;
+            }
+            assistantContent += content;
+            updateAssistantMessage();
+          },
+          onDone: (message) => {
+            if (!isCurrentResponse()) {
+              return;
+            }
+            assistantMessage = { ...message, tools: assistantTools };
+            assistantContent = message.content;
+            assistantId = message.id;
+            setMessages([...nextMessages, assistantMessage]);
+          },
+          onStart: (id) => {
+            if (!isCurrentResponse()) {
+              return;
+            }
+            assistantId = id;
+            updateAssistantMessage();
+          },
+          onToolDone: (tool) => {
+            if (!isCurrentResponse()) {
+              return;
+            }
+            assistantTools = assistantTools.map((currentTool) =>
+              currentTool.id === tool.id
+                ? { ...currentTool, ...tool }
+                : currentTool,
+            );
+            updateAssistantMessage();
+          },
+          onToolStart: (tool) => {
+            if (!isCurrentResponse()) {
+              return;
+            }
+            assistantTools = [...assistantTools, tool];
+            updateAssistantMessage();
+          },
         },
-        onDone: (message) => {
-          assistantMessage = { ...message, tools: assistantTools };
-          assistantContent = message.content;
-          assistantId = message.id;
-          setMessages([...nextMessages, assistantMessage]);
-        },
-        onStart: (id) => {
-          assistantId = id;
-          updateAssistantMessage();
-        },
-        onToolDone: (tool) => {
-          assistantTools = assistantTools.map((currentTool) =>
-            currentTool.id === tool.id
-              ? { ...currentTool, ...tool }
-              : currentTool,
-          );
-          updateAssistantMessage();
-        },
-        onToolStart: (tool) => {
-          assistantTools = [...assistantTools, tool];
-          updateAssistantMessage();
-        },
-      });
-      if (assistantMessage) {
+        responseAbortController.signal,
+      );
+      if (assistantMessage && isCurrentResponse()) {
         await saveMessages([...nextMessages, assistantMessage]);
       }
     } catch (error) {
+      if (responseRunRef.current !== responseRun) {
+        return;
+      }
       setResponseError(
         error instanceof Error ? error.message : "Message could not be sent.",
       );
     } finally {
-      setIsResponding(false);
+      if (responseRunRef.current === responseRun) {
+        responseAbortRef.current = null;
+        setIsResponding(false);
+      }
+    }
+  };
+
+  const clearMessages = async () => {
+    const previousMessages = messages;
+
+    responseAbortRef.current?.abort();
+    responseAbortRef.current = null;
+    responseRunRef.current += 1;
+    setMessages([]);
+    setResponseError("");
+    setIsResponding(false);
+
+    try {
+      await saveMessages([]);
+    } catch {
+      setMessages(previousMessages);
+      setResponseError("Conversation could not be cleared.");
     }
   };
 
@@ -474,6 +526,9 @@ function App() {
           errorMessage={responseError}
           isResponding={isResponding}
           messages={messages}
+          onClearMessages={() => {
+            void clearMessages();
+          }}
           onDraftChange={setDraft}
           onSendMessage={() => {
             void sendMessage();

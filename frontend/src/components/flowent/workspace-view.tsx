@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef } from "react";
-import { ArrowUp, Check, Circle, Search, Terminal, X } from "lucide-react";
+import {
+  ArrowUp,
+  Check,
+  Circle,
+  Search,
+  Terminal,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +20,7 @@ export function WorkspaceView({
   errorMessage,
   isResponding,
   messages,
+  onClearMessages,
   onDraftChange,
   onSendMessage,
 }: {
@@ -19,6 +28,7 @@ export function WorkspaceView({
   errorMessage: string;
   isResponding: boolean;
   messages: Message[];
+  onClearMessages: () => void;
   onDraftChange: (value: string) => void;
   onSendMessage: () => void;
 }) {
@@ -28,6 +38,7 @@ export function WorkspaceView({
       aria-label="Workspace"
     >
       <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
+        <WorkspaceControls onClearMessages={onClearMessages} />
         <MessageList isResponding={isResponding} messages={messages} />
         <ChatComposer
           draft={draft}
@@ -38,6 +49,29 @@ export function WorkspaceView({
         />
       </div>
     </section>
+  );
+}
+
+function WorkspaceControls({
+  onClearMessages,
+}: {
+  onClearMessages: () => void;
+}) {
+  return (
+    <div
+      aria-label="Workspace controls"
+      className="pointer-events-none absolute right-6 top-5 z-20 flex items-center gap-1 max-[900px]:right-4 max-[900px]:top-4"
+    >
+      <Button
+        className="pointer-events-auto h-8 rounded-lg border-white/10 bg-input/30 px-2.5 text-[13px] text-white shadow-[0_12px_28px_rgba(0,0,0,0.32)] hover:bg-input/50 hover:text-white"
+        onClick={onClearMessages}
+        type="button"
+        variant="outline"
+      >
+        <Trash2 aria-hidden="true" className="size-3.5" />
+        Clear
+      </Button>
+    </div>
   );
 }
 
