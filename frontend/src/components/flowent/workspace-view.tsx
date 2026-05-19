@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Check,
@@ -32,6 +32,8 @@ export function WorkspaceView({
   onDraftChange: (value: string) => void;
   onSendMessage: () => void;
 }) {
+  const [composerOffset, setComposerOffset] = useState(112);
+
   return (
     <section
       className="h-full min-h-0 bg-black max-[900px]:h-[calc(100vh-126px)] max-[900px]:min-h-[calc(100vh-126px)]"
@@ -39,13 +41,18 @@ export function WorkspaceView({
     >
       <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
         <WorkspaceControls onClearMessages={onClearMessages} />
-        <MessageList isResponding={isResponding} messages={messages} />
+        <MessageList
+          composerOffset={composerOffset}
+          isResponding={isResponding}
+          messages={messages}
+        />
         <ChatComposer
           draft={draft}
           errorMessage={errorMessage}
           isSending={isResponding}
           onDraftChange={onDraftChange}
           onSendMessage={onSendMessage}
+          onOffsetChange={setComposerOffset}
         />
       </div>
     </section>
@@ -76,9 +83,11 @@ function WorkspaceControls({
 }
 
 function MessageList({
+  composerOffset,
   isResponding,
   messages,
 }: {
+  composerOffset: number;
   isResponding: boolean;
   messages: Message[];
 }) {
@@ -126,9 +135,13 @@ function MessageList({
   return (
     <div
       aria-live="polite"
-      className="absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pb-40 pt-12 max-[900px]:px-4"
+      className="absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pt-12 max-[900px]:px-4"
       onScroll={updateFollowState}
       ref={listRef}
+      style={{
+        paddingBottom: composerOffset,
+        scrollPaddingBottom: composerOffset,
+      }}
     >
       {displayMessages.length === 0 ? (
         <div className="mx-auto grid min-h-full w-full max-w-[640px] place-items-center pb-24">
@@ -295,16 +308,54 @@ function ChatComposer({
   errorMessage,
   isSending,
   onDraftChange,
+  onOffsetChange,
   onSendMessage,
 }: {
   draft: string;
   errorMessage: string;
   isSending: boolean;
   onDraftChange: (value: string) => void;
+  onOffsetChange: (value: number) => void;
   onSendMessage: () => void;
 }) {
+  const composerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) {
+      return;
+    }
+
+    const updateOffset = () => {
+      const measuredBottomOffset = Number.parseFloat(
+        getComputedStyle(composer).bottom,
+      );
+      const bottomOffset = Number.isFinite(measuredBottomOffset)
+        ? measuredBottomOffset
+        : 0;
+
+      onOffsetChange(composer.offsetHeight + bottomOffset + 24);
+    };
+
+    updateOffset();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateOffset);
+
+      return () => window.removeEventListener("resize", updateOffset);
+    }
+
+    const resizeObserver = new ResizeObserver(updateOffset);
+    resizeObserver.observe(composer);
+
+    return () => resizeObserver.disconnect();
+  }, [onOffsetChange]);
+
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-6 z-10 px-6 max-[900px]:px-4">
+    <div
+      className="pointer-events-none absolute inset-x-0 bottom-6 z-10 px-6 max-[900px]:px-4"
+      ref={composerRef}
+    >
       <div className="pointer-events-auto mx-auto w-full max-w-[640px]">
         {errorMessage ? (
           <p className="mb-2 rounded-md bg-black/80 px-3 py-2 text-sm leading-5 text-red-300 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
