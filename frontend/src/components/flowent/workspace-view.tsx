@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Check,
@@ -107,6 +107,17 @@ function MessageList({
       },
     ];
   }, [isResponding, messages]);
+  const messageItems = useMemo(
+    () =>
+      displayMessages.map((message, index) => ({
+        message,
+        showTurnSeparator:
+          index > 0 &&
+          message.author === "user" &&
+          displayMessages[index - 1]?.author === "assistant",
+      })),
+    [displayMessages],
+  );
   const streamingMessageId =
     isResponding && messages.at(-1)?.author === "assistant"
       ? messages.at(-1)?.id
@@ -120,7 +131,7 @@ function MessageList({
       block: "end",
       behavior: "smooth",
     });
-  }, [displayMessages]);
+  }, [messageItems]);
 
   const updateFollowState = () => {
     const list = listRef.current;
@@ -150,26 +161,38 @@ function MessageList({
           </h1>
         </div>
       ) : null}
-      {displayMessages.map((message) => (
-        <MessageRow
-          isStreaming={
-            isResponding &&
-            message.id === streamingMessageId &&
-            message.author === "assistant" &&
-            message.content.length > 0
-          }
-          isPending={
-            message.id === "assistant-pending" ||
-            (isResponding &&
+      {messageItems.map(({ message, showTurnSeparator }) => (
+        <Fragment key={message.id}>
+          {showTurnSeparator ? <TurnSeparator /> : null}
+          <MessageRow
+            isStreaming={
+              isResponding &&
+              message.id === streamingMessageId &&
               message.author === "assistant" &&
-              message.content.length === 0)
-          }
-          key={message.id}
-          message={message}
-        />
+              message.content.length > 0
+            }
+            isPending={
+              message.id === "assistant-pending" ||
+              (isResponding &&
+                message.author === "assistant" &&
+                message.content.length === 0)
+            }
+            message={message}
+          />
+        </Fragment>
       ))}
       <div aria-hidden="true" ref={scrollMarkerRef} />
     </div>
+  );
+}
+
+function TurnSeparator() {
+  return (
+    <div
+      aria-hidden="true"
+      className="mx-auto my-4 h-px w-full max-w-[640px] bg-white/10"
+      data-testid="turn-separator"
+    />
   );
 }
 

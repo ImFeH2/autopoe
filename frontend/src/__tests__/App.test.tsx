@@ -1160,6 +1160,130 @@ describe("App", () => {
     );
   });
 
+  it("shows separators between Workspace turns", async () => {
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "First request",
+          id: "message-1",
+        },
+        {
+          author: "assistant",
+          content: "First reply",
+          id: "message-2",
+        },
+        {
+          author: "user",
+          content: "Second request",
+          id: "message-3",
+        },
+        {
+          author: "assistant",
+          content: "Second reply",
+          id: "message-4",
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Second request")).toBeInTheDocument();
+    expect(screen.getAllByTestId("turn-separator")).toHaveLength(1);
+  });
+
+  it("does not show a separator above the first Workspace turn", async () => {
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Only request",
+          id: "message-1",
+        },
+        {
+          author: "assistant",
+          content: "Only reply",
+          id: "message-2",
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Only request")).toBeInTheDocument();
+    expect(screen.queryByTestId("turn-separator")).not.toBeInTheDocument();
+  });
+
+  it("keeps the turn separator stable while a reply streams", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledAssistantStreamResponse(
+      ["Second reply", " is ready."],
+      "Second reply is ready.",
+    );
+    const state = {
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "First request",
+          id: "message-1",
+        },
+        {
+          author: "assistant",
+          content: "First reply",
+          id: "message-2",
+        },
+      ],
+    };
+    mockInitialState(state);
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(state), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Second request");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("Second reply");
+    expect(screen.getAllByTestId("turn-separator")).toHaveLength(1);
+
+    assistantStream.finish();
+
+    await expectDocumentText("Second reply is ready.");
+    expect(screen.getAllByTestId("turn-separator")).toHaveLength(1);
+  });
+
   it("loads persisted Workspace messages when the app starts", async () => {
     mockInitialState({
       messages: [
