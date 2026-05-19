@@ -78,15 +78,14 @@ def test_workspace_response_streams_selected_provider_model_and_history(
     }
     assert '"author": "assistant"' in str(events[3]["data"])
     assert '"content": "Here is the launch checklist."' in str(events[3]["data"])
-    assert captured_request == {
-        "api_base": "https://api.example.test/v1",
-        "api_key": "sk-local",
-        "messages": [
-            {"role": "user", "content": "Draft a launch checklist."},
-        ],
-        "model": "anthropic/claude-sonnet-4-5",
-        "stream": True,
-    }
+    assert captured_request["api_base"] == "https://api.example.test/v1"
+    assert captured_request["api_key"] == "sk-local"
+    assert captured_request["messages"] == [
+        {"role": "user", "content": "Draft a launch checklist."},
+    ]
+    assert captured_request["model"] == "anthropic/claude-sonnet-4-5"
+    assert captured_request["stream"] is True
+    assert isinstance(captured_request["tools"], list)
 
 
 def test_workspace_response_requires_selected_provider_and_model(

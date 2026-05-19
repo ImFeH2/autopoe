@@ -8,7 +8,12 @@ import {
 import { ProvidersView } from "@/components/flowent/providers-view";
 import { SettingsView } from "@/components/flowent/settings-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
-import type { Message, Provider, ViewId } from "@/components/flowent/types";
+import type {
+  Message,
+  Provider,
+  ToolItem,
+  ViewId,
+} from "@/components/flowent/types";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
 
@@ -53,6 +58,22 @@ type WorkspaceStreamEvent =
     }
   | {
       data: {
+        tool: ToolItem;
+      };
+      event: "tool_start";
+    }
+  | {
+      data: {
+        content?: string;
+        data?: Record<string, unknown>;
+        id: string;
+        status: ToolItem["status"];
+        title?: string;
+      };
+      event: "tool_done" | "tool_error";
+    }
+  | {
+      data: {
         message: string;
       };
       event: "error";
@@ -62,6 +83,10 @@ type WorkspaceStreamHandlers = {
   onDelta: (content: string) => void;
   onDone: (message: ApiMessage) => void;
   onStart: (id: string) => void;
+  onToolDone: (
+    tool: Pick<ToolItem, "id" | "status"> & Partial<ToolItem>,
+  ) => void;
+  onToolStart: (tool: ToolItem) => void;
 };
 
 const providerFromApi = (provider: ApiProvider): Provider => ({
@@ -322,6 +347,15 @@ function App() {
           handlers.onDone(streamEvent.data.message);
           return;
         }
+        if (streamEvent.event === "tool_start") {
+          handlers.onToolStart(streamEvent.data.tool);
+        }
+        if (
+          streamEvent.event === "tool_done" ||
+          streamEvent.event === "tool_error"
+        ) {
+          handlers.onToolDone(streamEvent.data);
+        }
         if (streamEvent.event === "error") {
           throw new Error(streamEvent.data.message);
         }
@@ -375,30 +409,45 @@ function App() {
       let assistantMessage: Message | null = null;
       let assistantContent = "";
       let assistantId = "";
+      let assistantTools: ToolItem[] = [];
+      const updateAssistantMessage = () => {
+        if (!assistantId) {
+          return;
+        }
+        assistantMessage = {
+          author: "assistant",
+          content: assistantContent,
+          id: assistantId,
+          tools: assistantTools,
+        };
+        setMessages([...nextMessages, assistantMessage]);
+      };
       await requestWorkspaceResponse(nextMessages, {
         onDelta: (content) => {
           assistantContent += content;
-          assistantMessage = {
-            author: "assistant",
-            content: assistantContent,
-            id: assistantId,
-          };
-          setMessages([...nextMessages, assistantMessage]);
+          updateAssistantMessage();
         },
         onDone: (message) => {
-          assistantMessage = message;
+          assistantMessage = { ...message, tools: assistantTools };
           assistantContent = message.content;
           assistantId = message.id;
-          setMessages([...nextMessages, message]);
+          setMessages([...nextMessages, assistantMessage]);
         },
         onStart: (id) => {
           assistantId = id;
-          assistantMessage = {
-            author: "assistant",
-            content: "",
-            id,
-          };
-          setMessages([...nextMessages, assistantMessage]);
+          updateAssistantMessage();
+        },
+        onToolDone: (tool) => {
+          assistantTools = assistantTools.map((currentTool) =>
+            currentTool.id === tool.id
+              ? { ...currentTool, ...tool }
+              : currentTool,
+          );
+          updateAssistantMessage();
+        },
+        onToolStart: (tool) => {
+          assistantTools = [...assistantTools, tool];
+          updateAssistantMessage();
         },
       });
       if (assistantMessage) {

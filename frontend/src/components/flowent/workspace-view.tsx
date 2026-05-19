@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Check, Circle, Search, Terminal, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
-import type { Message } from "@/components/flowent/types";
+import type { Message, ToolItem } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceView({
@@ -173,7 +173,12 @@ function AssistantMessageContent({
   return (
     <div className="flowent-markdown-message min-w-0 break-words">
       {message.author === "assistant" ? (
-        <MarkdownMessage content={message.content} />
+        <>
+          <ToolProcessList tools={message.tools ?? []} />
+          {message.content ? (
+            <MarkdownMessage content={message.content} />
+          ) : null}
+        </>
       ) : (
         <p className="m-0 whitespace-pre-wrap break-words">{message.content}</p>
       )}
@@ -182,6 +187,59 @@ function AssistantMessageContent({
       ) : null}
     </div>
   );
+}
+
+function ToolProcessList({ tools }: { tools: ToolItem[] }) {
+  if (tools.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-3 flex flex-col gap-1.5" aria-label="Work steps">
+      {tools.map((tool) => (
+        <ToolProcessItem key={tool.id} tool={tool} />
+      ))}
+    </div>
+  );
+}
+
+function ToolProcessItem({ tool }: { tool: ToolItem }) {
+  const statusLabel =
+    tool.status === "running"
+      ? "Running"
+      : tool.status === "success"
+        ? "Done"
+        : "Failed";
+
+  return (
+    <div className="flex max-w-full items-center gap-2 rounded-lg border border-white/10 bg-input/30 px-2.5 py-1.5 text-sm leading-5 text-white">
+      <ToolProcessIcon tool={tool} />
+      <span className="min-w-0 flex-1 truncate">{tool.title}</span>
+      <span className="shrink-0 text-xs text-white/55">{statusLabel}</span>
+    </div>
+  );
+}
+
+function ToolProcessIcon({ tool }: { tool: ToolItem }) {
+  const className = cn(
+    "size-3.5 shrink-0",
+    tool.status === "failed" ? "text-red-300" : "text-white/80",
+    tool.status === "running" ? "animate-pulse" : "",
+  );
+
+  if (tool.status === "success") {
+    return <Check aria-hidden="true" className={className} />;
+  }
+  if (tool.status === "failed") {
+    return <X aria-hidden="true" className={className} />;
+  }
+  if (tool.name === "web_search" || tool.name === "grep_files") {
+    return <Search aria-hidden="true" className={className} />;
+  }
+  if (tool.name === "shell_command") {
+    return <Terminal aria-hidden="true" className={className} />;
+  }
+  return <Circle aria-hidden="true" className={className} />;
 }
 
 function AssistantWaitingIndicator() {

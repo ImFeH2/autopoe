@@ -3,20 +3,19 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
+from flowent.agent import run_agent_stream
 from flowent.llm import (
     ChatMessage,
     CompletionCallable,
     ProviderConnection,
     ProviderFormat,
     list_provider_models,
-    stream_chat,
 )
 from flowent.storage import (
     StateStore,
@@ -152,28 +151,20 @@ def create_app(
         chat_messages = workspace_chat_messages(request.messages)
 
         async def response_stream() -> AsyncIterator[str]:
-            message = StoredMessage(
-                author="assistant",
-                content="",
-                id=str(uuid4()),
-            )
-            yield stream_event("start", {"id": message.id})
             try:
-                async for content in stream_chat(
-                    connection,
-                    chat_messages,
+                async for event in run_agent_stream(
                     completion=chat_completion,
+                    connection=connection,
+                    cwd=Path.cwd(),
+                    messages=[message.model_dump() for message in chat_messages],
                 ):
-                    message.content += content
-                    yield stream_event("delta", {"content": content})
+                    yield stream_event(event.event, event.data)
             except Exception as error:
                 yield stream_event(
                     "error",
                     {"message": str(error) or "Message could not be sent."},
                 )
                 return
-
-            yield stream_event("done", {"message": message.model_dump()})
 
         return StreamingResponse(
             response_stream(),

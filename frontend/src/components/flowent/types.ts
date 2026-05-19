@@ -20,8 +20,21 @@ export type Provider = {
   models: string[];
 };
 
+export type ToolItemStatus = "failed" | "running" | "success";
+
+export type ToolItem = {
+  arguments?: Record<string, unknown>;
+  content?: string;
+  data?: Record<string, unknown>;
+  id: string;
+  name: string;
+  status: ToolItemStatus;
+  title: string;
+};
+
 export type Message = {
   author: "assistant" | "user";
   content: string;
   id: string;
+  tools?: ToolItem[];
 };

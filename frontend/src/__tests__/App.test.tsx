@@ -129,6 +129,64 @@ const assistantErrorStreamResponse = (
   });
 };
 
+const assistantToolStreamResponse = (
+  tool: {
+    id: string;
+    name: string;
+    status?: "failed" | "running" | "success";
+    title: string;
+  },
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_start\ndata: ${JSON.stringify({
+            tool: { ...tool, status: "running" },
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_done\ndata: ${JSON.stringify({
+            content: "tool output",
+            id: tool.id,
+            status: tool.status ?? "success",
+            title: tool.title,
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
 const mockInitialState = (
   state: Record<string, unknown>,
   modelResults: string[] = ["gpt-5.1"],
@@ -411,6 +469,131 @@ describe("App", () => {
     expect(
       screen.queryByRole("status", { name: "Thinking" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows tool work steps before the final streamed reply", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+          "The notes are ready.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByLabelText("Work steps")).toHaveTextContent(
+      "Reading notes.txt",
+    );
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    await expectDocumentText("The notes are ready.");
+  });
+
+  it("keeps streaming assistant text after a failed tool step", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            id: "tool-1",
+            name: "read_file",
+            status: "failed",
+            title: "Reading missing.txt",
+          },
+          "I could not read it.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the file");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    await expectDocumentText("I could not read it.");
+  });
+
+  it("shows plan updates as work steps", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          { id: "tool-1", name: "update_plan", title: "Updating plan" },
+          "Plan updated.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Make a plan");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Updating plan")).toBeInTheDocument();
+    await expectDocumentText("Plan updated.");
   });
 
   it("renders assistant reply lists as Markdown", async () => {
