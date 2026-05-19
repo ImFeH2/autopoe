@@ -100,11 +100,7 @@ def test_workspace_response_streams_tool_process_and_final_text(
 
     response = client.post(
         "/api/workspace/respond",
-        json={
-            "messages": [
-                {"author": "user", "content": "Use the notes.", "id": "message-1"}
-            ]
-        },
+        json={"content": "Use the notes."},
     )
 
     assert response.status_code == 200
@@ -318,9 +314,7 @@ def test_tool_failure_is_reported_and_agent_continues(tmp_path, monkeypatch) -> 
 
     response = client.post(
         "/api/workspace/respond",
-        json={
-            "messages": [{"author": "user", "content": "Read it.", "id": "message-1"}]
-        },
+        json={"content": "Read it."},
     )
 
     events = stream_events(response.text)

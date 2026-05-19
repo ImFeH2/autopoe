@@ -1,8 +1,9 @@
+import json
 import os
 import sqlite3
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from flowent.llm import ProviderFormat
 
@@ -27,12 +28,25 @@ class StoredSettings(BaseModel):
     selected_provider_id: str
 
 
+class StoredToolItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    status: str
+    title: str
+    arguments: dict[str, object] | None = None
+    content: str | None = None
+    data: dict[str, object] | None = None
+
+
 class StoredMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     author: str
     content: str
     id: str
+    tools: list[StoredToolItem] = Field(default_factory=list)
 
 
 class StoredState(BaseModel):
@@ -96,10 +110,14 @@ class StateStore:
                     author=row["author"],
                     content=row["content"],
                     id=row["id"],
+                    tools=[
+                        StoredToolItem.model_validate(tool)
+                        for tool in json.loads(row["tools"] or "[]")
+                    ],
                 )
                 for row in connection.execute(
                     """
-                    SELECT id, author, content
+                    SELECT id, author, content, tools
                     FROM messages
                     ORDER BY position, id
                     """
@@ -173,11 +191,22 @@ class StateStore:
             connection.execute("DELETE FROM messages")
             connection.executemany(
                 """
-                INSERT INTO messages (id, author, content, position)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO messages (id, author, content, tools, position)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 [
-                    (message.id, message.author, message.content, position)
+                    (
+                        message.id,
+                        message.author,
+                        message.content,
+                        json.dumps(
+                            [
+                                tool.model_dump(exclude_none=True)
+                                for tool in message.tools
+                            ]
+                        ),
+                        position,
+                    )
                     for position, message in enumerate(messages)
                 ],
             )
@@ -240,3 +269,10 @@ class StateStore:
             INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
             """
         )
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(messages)")
+        }
+        if "tools" not in columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN tools TEXT NOT NULL DEFAULT '[]'"
+            )

@@ -352,7 +352,7 @@ describe("App", () => {
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workspace/respond",
       expect.objectContaining({
-        body: expect.stringContaining("Draft a launch checklist"),
+        body: JSON.stringify({ content: "Draft a launch checklist" }),
         method: "POST",
       }),
     );
@@ -592,15 +592,11 @@ describe("App", () => {
 
     await expectDocumentText("First step is ready.");
 
-    const saveCalls = vi
-      .mocked(window.fetch)
-      .mock.calls.filter(
-        ([input, init]) =>
-          input === "/api/workspace/messages" && init?.method === "PUT",
-      );
-    expect(saveCalls.at(-1)?.[1]).toEqual(
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/respond",
       expect.objectContaining({
-        body: expect.stringContaining('"content":"First step is ready."'),
+        body: JSON.stringify({ content: "Draft a launch checklist" }),
+        method: "POST",
       }),
     );
   });
@@ -929,7 +925,7 @@ describe("App", () => {
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workspace/respond",
       expect.objectContaining({
-        body: expect.stringContaining('"content":"   "'),
+        body: JSON.stringify({ content: "   " }),
         method: "POST",
       }),
     );
@@ -1185,6 +1181,37 @@ describe("App", () => {
     expect(
       await screen.findByText("Draft a launch checklist"),
     ).toBeInTheDocument();
+  });
+
+  it("loads persisted assistant tool steps when the app starts", async () => {
+    mockInitialState({
+      messages: [
+        {
+          author: "assistant",
+          content: "Plan updated.",
+          id: "message-1",
+          tools: [
+            {
+              id: "tool-1",
+              name: "update_plan",
+              status: "success",
+              title: "Updating plan",
+            },
+          ],
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Updating plan")).toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getByText("Plan updated.")).toBeInTheDocument();
   });
 
   it("shows the Workspace Clear control in the floating control bar", async () => {

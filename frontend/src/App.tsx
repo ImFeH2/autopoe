@@ -107,8 +107,6 @@ const providerToApi = (provider: Provider): ApiProvider => ({
   type: provider.type,
 });
 
-const messageToApi = (message: Message): ApiMessage => message;
-
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
@@ -276,7 +274,7 @@ function App() {
 
   const saveMessages = async (nextMessages: Message[]) => {
     await fetch("/api/workspace/messages", {
-      body: JSON.stringify({ messages: nextMessages.map(messageToApi) }),
+      body: JSON.stringify({ messages: nextMessages }),
       headers: { "Content-Type": "application/json" },
       method: "PUT",
     });
@@ -372,12 +370,12 @@ function App() {
   };
 
   const requestWorkspaceResponse = async (
-    nextMessages: Message[],
+    content: string,
     handlers: WorkspaceStreamHandlers,
     signal?: AbortSignal,
   ) => {
     const response = await fetch("/api/workspace/respond", {
-      body: JSON.stringify({ messages: nextMessages.map(messageToApi) }),
+      body: JSON.stringify({ content }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
       signal,
@@ -399,11 +397,12 @@ function App() {
     const responseAbortController = new AbortController();
     responseAbortRef.current = responseAbortController;
     responseRunRef.current = responseRun;
+    const userContent = draft;
     const nextMessages: Message[] = [
       ...messages,
       {
         author: "user",
-        content: draft,
+        content: userContent,
         id: crypto.randomUUID(),
       },
     ];
@@ -413,7 +412,6 @@ function App() {
     setDraft("");
 
     try {
-      await saveMessages(nextMessages);
       let assistantMessage: Message | null = null;
       let assistantContent = "";
       let assistantId = "";
@@ -432,7 +430,7 @@ function App() {
         setMessages([...nextMessages, assistantMessage]);
       };
       await requestWorkspaceResponse(
-        nextMessages,
+        userContent,
         {
           onDelta: (content) => {
             if (!isCurrentResponse()) {
@@ -478,9 +476,6 @@ function App() {
         },
         responseAbortController.signal,
       );
-      if (assistantMessage && isCurrentResponse()) {
-        await saveMessages([...nextMessages, assistantMessage]);
-      }
     } catch (error) {
       if (responseRunRef.current !== responseRun) {
         return;

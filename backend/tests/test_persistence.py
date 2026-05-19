@@ -68,9 +68,17 @@ def test_app_state_persists_settings_and_workspace_messages(
         json={
             "messages": [
                 {
-                    "author": "user",
+                    "author": "assistant",
                     "content": "Draft a launch checklist",
                     "id": "message-1",
+                    "tools": [
+                        {
+                            "id": "tool-1",
+                            "name": "read_file",
+                            "status": "success",
+                            "title": "Read notes.txt",
+                        }
+                    ],
                 }
             ]
         },
@@ -88,9 +96,20 @@ def test_app_state_persists_settings_and_workspace_messages(
     }
     assert state["messages"] == [
         {
-            "author": "user",
+            "author": "assistant",
             "content": "Draft a launch checklist",
             "id": "message-1",
+            "tools": [
+                {
+                    "arguments": None,
+                    "content": None,
+                    "data": None,
+                    "id": "tool-1",
+                    "name": "read_file",
+                    "status": "success",
+                    "title": "Read notes.txt",
+                }
+            ],
         }
     ]
 

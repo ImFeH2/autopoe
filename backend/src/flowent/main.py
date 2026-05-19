@@ -3,6 +3,7 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -23,6 +24,7 @@ from flowent.storage import (
     StoredProvider,
     StoredSettings,
     StoredState,
+    StoredToolItem,
 )
 
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
@@ -49,7 +51,7 @@ class WorkspaceMessagesRequest(BaseModel):
 class WorkspaceRespondRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    messages: list[StoredMessage]
+    content: str
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -141,6 +143,14 @@ def create_app(
         if not provider.api_key:
             raise HTTPException(status_code=400, detail="Add a key before sending.")
 
+        user_message = StoredMessage(
+            author="user",
+            content=request.content,
+            id=str(uuid4()),
+        )
+        next_messages = [*state.messages, user_message]
+        store.save_messages(next_messages)
+
         connection = ProviderConnection(
             base_url=provider.base_url or None,
             model=state.settings.selected_model,
@@ -148,9 +158,10 @@ def create_app(
             provider=provider.type,
             secret_reference=provider.api_key,
         )
-        chat_messages = workspace_chat_messages(request.messages)
+        chat_messages = workspace_chat_messages(next_messages)
 
         async def response_stream() -> AsyncIterator[str]:
+            assistant_tools: dict[str, StoredToolItem] = {}
             try:
                 async for event in run_agent_stream(
                     completion=chat_completion,
@@ -158,6 +169,35 @@ def create_app(
                     cwd=Path.cwd(),
                     messages=[message.model_dump() for message in chat_messages],
                 ):
+                    if event.event == "tool_start":
+                        tool = event.data.get("tool")
+                        if isinstance(tool, dict) and isinstance(tool.get("id"), str):
+                            assistant_tools[tool["id"]] = StoredToolItem.model_validate(
+                                tool
+                            )
+                    if event.event in {"tool_done", "tool_error"}:
+                        tool_id = event.data.get("id")
+                        if isinstance(tool_id, str) and tool_id in assistant_tools:
+                            assistant_tools[tool_id] = StoredToolItem.model_validate(
+                                {
+                                    **assistant_tools[tool_id].model_dump(
+                                        exclude_none=True
+                                    ),
+                                    **event.data,
+                                }
+                            )
+                    if event.event == "done":
+                        message = event.data.get("message")
+                        if isinstance(message, dict):
+                            next_messages.append(
+                                StoredMessage(
+                                    author="assistant",
+                                    content=str(message.get("content") or ""),
+                                    id=str(message.get("id") or uuid4()),
+                                    tools=list(assistant_tools.values()),
+                                )
+                            )
+                            store.save_messages(next_messages)
                     yield stream_event(event.event, event.data)
             except Exception as error:
                 yield stream_event(

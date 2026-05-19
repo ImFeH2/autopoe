@@ -56,15 +56,7 @@ def test_workspace_response_streams_selected_provider_model_and_history(
 
     response = client.post(
         "/api/workspace/respond",
-        json={
-            "messages": [
-                {
-                    "author": "user",
-                    "content": "Draft a launch checklist.",
-                    "id": "message-1",
-                }
-            ]
-        },
+        json={"content": "Draft a launch checklist."},
     )
 
     assert response.status_code == 200
@@ -96,15 +88,7 @@ def test_workspace_response_requires_selected_provider_and_model(
 
     response = client.post(
         "/api/workspace/respond",
-        json={
-            "messages": [
-                {
-                    "author": "user",
-                    "content": "Draft a launch checklist.",
-                    "id": "message-1",
-                }
-            ]
-        },
+        json={"content": "Draft a launch checklist."},
     )
 
     assert response.status_code == 400
