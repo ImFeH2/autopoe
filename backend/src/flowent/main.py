@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from flowent.agent import run_agent_stream
+from flowent.context import runtime_context_messages
 from flowent.llm import (
     ChatMessage,
     CompletionCallable,
@@ -155,10 +156,14 @@ def workspace_chat_messages(
 def compact_prompt_messages(
     messages: list[StoredMessage],
     compacted_context: str,
+    runtime_messages: list[ChatMessage] | None = None,
 ) -> list[ChatMessage]:
+    history_messages = [
+        *(runtime_messages or []),
+        *workspace_chat_messages(messages, compacted_context),
+    ]
     history = "\n\n".join(
-        f"{message.role}: {message.content}"
-        for message in workspace_chat_messages(messages, compacted_context)
+        f"{message.role}: {message.content}" for message in history_messages
     )
     return [
         ChatMessage(role="system", content=COMPACT_SYSTEM_PROMPT),
@@ -226,11 +231,16 @@ def create_app(
         state = store.read_state()
         connection = selected_connection(state)
         compacted_context = store.read_compacted_context()
+        cwd = Path.cwd()
 
         try:
             summary = await complete_chat(
                 connection,
-                compact_prompt_messages(state.messages, compacted_context),
+                compact_prompt_messages(
+                    state.messages,
+                    compacted_context,
+                    runtime_context_messages(cwd),
+                ),
                 completion=chat_completion,
             )
         except HTTPException:
@@ -265,6 +275,7 @@ def create_app(
         logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
         state = store.read_state()
         connection = selected_connection(state)
+        cwd = Path.cwd()
 
         user_message = StoredMessage(
             author="user",
@@ -277,6 +288,10 @@ def create_app(
             next_messages,
             store.read_compacted_context(),
         )
+        request_messages = [
+            message.model_dump()
+            for message in [*runtime_context_messages(cwd), *chat_messages]
+        ]
 
         async def response_stream() -> AsyncIterator[str]:
             assistant_tools: dict[str, StoredToolItem] = {}
@@ -284,8 +299,8 @@ def create_app(
                 async for event in run_agent_stream(
                     completion=chat_completion,
                     connection=connection,
-                    cwd=Path.cwd(),
-                    messages=[message.model_dump() for message in chat_messages],
+                    cwd=cwd,
+                    messages=request_messages,
                 ):
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
