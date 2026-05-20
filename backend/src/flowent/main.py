@@ -19,7 +19,7 @@ from flowent.llm import (
     ProviderFormat,
     list_provider_models,
 )
-from flowent.logging import TRACE_LEVEL
+from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.storage import (
     StateStore,
     StoredMessage,
@@ -90,6 +90,8 @@ def create_app(
     serve_frontend: bool = True,
     chat_completion: CompletionCallable | None = None,
 ) -> FastAPI:
+    ensure_logging_configured()
+
     app = FastAPI(title="Flowent")
     store = StateStore()
 

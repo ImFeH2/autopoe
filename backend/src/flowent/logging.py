@@ -11,6 +11,8 @@ from flowent.paths import data_directory
 
 TRACE_LEVEL = 5
 DEFAULT_LOG_RETENTION = 5
+_configured_log_file: Path | None = None
+_configured_log_process_id: int | None = None
 _SECRET_PATTERNS = (
     re.compile(r"(?i)\b(bearer)\s+([^\s,}]+)"),
     re.compile(
@@ -92,6 +94,8 @@ class RedactingFormatter(logging.Formatter):
 
 
 def configure_logging(*, directory: Path | None = None) -> Path:
+    global _configured_log_file, _configured_log_process_id
+
     install_trace_level()
 
     log_file = new_log_file_path(directory)
@@ -130,4 +134,19 @@ def configure_logging(*, directory: Path | None = None) -> Path:
     logger.debug("Console log level: %s", logging.getLevelName(console_log_level()))
     logger.log(TRACE_LEVEL, "File log level: TRACE")
 
+    _configured_log_file = log_file
+    _configured_log_process_id = os.getpid()
+
     return log_file
+
+
+def ensure_logging_configured(*, directory: Path | None = None) -> Path:
+    target_log_directory = log_directory(directory).resolve(strict=False)
+    if (
+        _configured_log_file is not None
+        and _configured_log_process_id == os.getpid()
+        and _configured_log_file.parent.resolve(strict=False) == target_log_directory
+    ):
+        return _configured_log_file
+
+    return configure_logging(directory=directory)

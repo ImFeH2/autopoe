@@ -1,8 +1,10 @@
 import logging
+import sys
 
 from flowent.logging import (
     TRACE_LEVEL,
     configure_logging,
+    ensure_logging_configured,
     redact_log_value,
 )
 
@@ -97,3 +99,58 @@ def test_logging_redacts_full_api_key_but_keeps_context(tmp_path, monkeypatch) -
     assert redact_log_value("authorization=Bearer sk-secret-value") == (
         "authorization=[REDACTED]"
     )
+
+
+def test_direct_main_app_import_creates_data_log_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    sys.modules.pop("flowent.main", None)
+
+    try:
+        __import__("flowent.main")
+    finally:
+        sys.modules.pop("flowent.main", None)
+
+    files = sorted((tmp_path / "logs").glob("flowent-*.log"))
+    assert len(files) == 1
+
+
+def test_create_app_creates_data_log_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+
+    from flowent.main import create_app
+
+    create_app(serve_frontend=False)
+
+    files = sorted((tmp_path / "logs").glob("flowent-*.log"))
+    assert len(files) == 1
+
+
+def test_create_app_reuses_logging_handlers(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+
+    from flowent.main import create_app
+
+    create_app(serve_frontend=False)
+    create_app(serve_frontend=False)
+
+    handlers = logging.getLogger().handlers
+    file_handlers = [
+        handler for handler in handlers if isinstance(handler, logging.FileHandler)
+    ]
+    console_handlers = [
+        handler for handler in handlers if not isinstance(handler, logging.FileHandler)
+    ]
+    files = sorted((tmp_path / "logs").glob("flowent-*.log"))
+
+    assert len(file_handlers) == 1
+    assert len(console_handlers) == 1
+    assert len(files) == 1
+
+
+def test_any_logging_path_follows_flowent_data_dir(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "custom-flowent"
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(data_dir))
+
+    log_file = ensure_logging_configured()
+
+    assert log_file.parent == data_dir / "logs"
