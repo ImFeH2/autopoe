@@ -115,20 +115,25 @@ export function MarkdownMessage({
             {...cleanMarkdownProps(props)}
           />
         ),
-        code: ({ className, children, node, ...props }) => (
-          <code
-            className={cn(
-              "rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.92em] text-white",
-              className,
-            )}
-            {...cleanMarkdownProps(props)}
-          >
-            {withCursor(
-              children,
-              shouldShowCursor(node, lastOffset) && isBlockCodeNode(node),
-            )}
-          </code>
-        ),
+        code: ({ className, children, node, ...props }) => {
+          const isBlockCode = isBlockCodeNode(node);
+
+          return (
+            <code
+              className={cn(
+                "font-mono text-[0.92em] text-white",
+                !isBlockCode && "rounded bg-white/10 px-1.5 py-0.5",
+                className,
+              )}
+              {...cleanMarkdownProps(props)}
+            >
+              {withCursor(
+                children,
+                shouldShowCursor(node, lastOffset) && isBlockCode,
+              )}
+            </code>
+          );
+        },
         h1: ({ className, children, node, ...props }) => (
           <h1
             className={cn(

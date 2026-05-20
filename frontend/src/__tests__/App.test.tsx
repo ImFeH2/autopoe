@@ -1095,6 +1095,28 @@ describe("App", () => {
     expect(code.closest("pre")).not.toBeNull();
   });
 
+  it("does not apply inline code padding inside code blocks", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "```ts\nconst ready = true;\n```",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const code = await screen.findByText("const ready = true;");
+
+    expect(code.closest("pre")).not.toBeNull();
+    expect(code).not.toHaveClass("px-1.5");
+    expect(code).not.toHaveClass("py-0.5");
+  });
+
   it("renders assistant reply HTML as text", async () => {
     const user = userEvent.setup();
     mockInitialState(
