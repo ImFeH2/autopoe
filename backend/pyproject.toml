@@ -1,6 +1,6 @@
 [project]
 name = "flowent"
-version = "0.0.8"
+version = "0.0.9"
 description = "A workflow orchestration platform for multi-agent collaboration."
 readme = "README.md"
 authors = [
