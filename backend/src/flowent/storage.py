@@ -201,7 +201,34 @@ class StateStore:
                     for position, message in enumerate(messages)
                 ],
             )
+            if not messages:
+                connection.execute("DELETE FROM workspace_context WHERE id = 1")
         return messages
+
+    def read_compacted_context(self) -> str:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT compacted_summary
+                FROM workspace_context
+                WHERE id = 1
+                """
+            ).fetchone()
+        return row["compacted_summary"] if row else ""
+
+    def save_compacted_context(self, summary: str) -> str:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_context (id, compacted_summary)
+                VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    compacted_summary = excluded.compacted_summary,
+                    updated_at = unixepoch()
+                """,
+                (summary,),
+            )
+        return summary
 
     def _provider_models(
         self, connection: sqlite3.Connection, provider_id: str
@@ -251,6 +278,12 @@ class StateStore:
                 author TEXT NOT NULL,
                 content TEXT NOT NULL,
                 position INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS workspace_context (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                compacted_summary TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
             CREATE TABLE IF NOT EXISTS schema_migrations (

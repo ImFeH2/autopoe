@@ -402,6 +402,30 @@ function App() {
     await readWorkspaceStream(response, handlers);
   };
 
+  const compactWorkspace = async () => {
+    setResponseError("");
+
+    try {
+      const response = await fetch("/api/workspace/compact", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(await responseErrorFromApi(response));
+      }
+
+      const result = (await response.json()) as { message: ApiMessage };
+      setMessages((currentMessages) => [...currentMessages, result.message]);
+    } catch (error) {
+      setResponseError(
+        error instanceof Error
+          ? error.message
+          : "Context could not be compacted.",
+      );
+    }
+  };
+
   const workspaceCommands: WorkspaceCommand[] = useMemo(
     () => [
       {
@@ -410,6 +434,12 @@ function App() {
         label: "/clear",
         name: "clear",
       },
+      {
+        description: "Compact context",
+        id: "compact",
+        label: "/compact",
+        name: "compact",
+      },
     ],
     [],
   );
@@ -417,7 +447,17 @@ function App() {
   const runWorkspaceCommand = (commandId: WorkspaceCommandId) => {
     if (commandId === "clear") {
       void clearMessages();
+      return true;
     }
+    if (commandId === "compact") {
+      if (isResponding) {
+        setResponseError("Compact is unavailable while Flowent is responding.");
+        return false;
+      }
+      void compactWorkspace();
+      return true;
+    }
+    return false;
   };
 
   const handleWorkspaceCommandError = (message: string) => {

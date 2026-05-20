@@ -488,6 +488,23 @@ const mockInitialState = (
       });
     }
 
+    if (input === "/api/workspace/compact" && init?.method === "POST") {
+      return new Response(
+        JSON.stringify({
+          message: {
+            author: "system",
+            content: "Context compacted",
+            id: "compact-message",
+            tools: [],
+          },
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
     if (input === "/api/workspace/respond" && init?.method === "POST") {
       return assistantStreamResponse(assistantContent);
     }
@@ -2104,6 +2121,7 @@ describe("App", () => {
 
     expect(screen.getByRole("listbox", { name: "Commands" })).toBeVisible();
     expect(screen.getByRole("option", { name: /\/clear/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /\/compact/ })).toBeVisible();
   });
 
   it("filters the command menu to Clear when a matching prefix is typed", async () => {
@@ -2118,6 +2136,20 @@ describe("App", () => {
 
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(screen.getByRole("option", { name: /\/clear/ })).toBeVisible();
+  });
+
+  it("filters the command menu to Compact when a matching prefix is typed", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/co");
+
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("option", { name: /\/compact/ })).toBeVisible();
   });
 
   it("completes the selected command when Tab is pressed", async () => {
@@ -2269,6 +2301,246 @@ describe("App", () => {
     expect(composer).toHaveValue("/missing");
     expect(screen.getByText("Command not found.")).toBeInTheDocument();
     expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
+  });
+
+  it("runs Compact without requesting an assistant reply", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: selectedProviderState().providers,
+      settings: selectedProviderState().settings,
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/compact",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
+  });
+
+  it("shows the compacted context marker after Compact succeeds", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Context compacted")).toBeInTheDocument();
+  });
+
+  it("keeps compacted context available for the next message", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+    await screen.findByText("Context compacted");
+
+    await user.type(composer, "Continue from there");
+    await user.keyboard("{Enter}");
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/respond",
+      expect.objectContaining({
+        body: JSON.stringify({ content: "Continue from there" }),
+        method: "POST",
+      }),
+    );
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+  });
+
+  it("keeps Compact unavailable while a streamed reply is still running", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledAssistantStreamResponse(
+      ["First step", " is ready."],
+      "First step is ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        return new Response("{}", {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await expectDocumentText("First step");
+
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    expect(composer).toHaveValue("/compact");
+    expect(
+      screen.getByText("Compact is unavailable while Flowent is responding."),
+    ).toBeInTheDocument();
+    expect(fetchWasCalledWith("/api/workspace/compact", "POST")).toBe(false);
+    assistantStream.finish();
+  });
+
+  it("keeps the conversation unchanged when Compact fails", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: selectedProviderState().providers,
+      settings: selectedProviderState().settings,
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              {
+                author: "user",
+                content: "Draft a launch checklist",
+                id: "message-1",
+              },
+            ],
+            providers: selectedProviderState().providers,
+            settings: selectedProviderState().settings,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({ detail: "Context could not be compacted." }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 500,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await screen.findByText("Draft a launch checklist");
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    expect(
+      await screen.findByText("Context could not be compacted."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
+    expect(screen.queryByText("Context compacted")).toBeNull();
+  });
+
+  it("shows the configuration prompt when Compact has no selected model", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            messages: [],
+            providers: [],
+            settings: {
+              selected_model: "",
+              selected_provider_id: "",
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            detail: "Choose a provider and model before sending.",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    expect(
+      await screen.findByText("Choose a provider and model before sending."),
+    ).toBeInTheDocument();
   });
 
   it("persists the model list when a provider is saved", async () => {

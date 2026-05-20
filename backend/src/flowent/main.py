@@ -17,6 +17,7 @@ from flowent.llm import (
     CompletionCallable,
     ProviderConnection,
     ProviderFormat,
+    complete_chat,
     list_provider_models,
 )
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
@@ -33,6 +34,8 @@ logger = logging.getLogger("flowent.main")
 
 
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
+COMPACTED_CONTEXT_MARKER = "Context compacted"
+COMPACT_SYSTEM_PROMPT = "You are compacting Flowent workspace context."
 
 
 class ProviderModelsRequest(BaseModel):
@@ -59,6 +62,12 @@ class WorkspaceRespondRequest(BaseModel):
     content: str
 
 
+class WorkspaceCompactResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: StoredMessage
+
+
 def stream_event(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -73,9 +82,67 @@ def frontend_static_directory() -> Path:
     return DEFAULT_STATIC_DIR
 
 
-def workspace_chat_messages(messages: list[StoredMessage]) -> list[ChatMessage]:
+def selected_connection(state: StoredState) -> ProviderConnection:
+    provider = next(
+        (
+            stored_provider
+            for stored_provider in state.providers
+            if stored_provider.id == state.settings.selected_provider_id
+        ),
+        None,
+    )
+    if provider is None or not state.settings.selected_model:
+        logger.warning("Workspace request blocked because provider or model is missing")
+        raise HTTPException(
+            status_code=400,
+            detail="Choose a provider and model before sending.",
+        )
+    if not provider.api_key:
+        logger.warning("Workspace request blocked because selected provider has no key")
+        raise HTTPException(status_code=400, detail="Add a key before sending.")
+
+    logger.debug(
+        "Workspace request using provider=%s model=%s",
+        provider.name,
+        state.settings.selected_model,
+    )
+    return ProviderConnection(
+        base_url=provider.base_url or None,
+        model=state.settings.selected_model,
+        name=provider.name,
+        provider=provider.type,
+        secret_reference=provider.api_key,
+    )
+
+
+def latest_compacted_context_index(messages: list[StoredMessage]) -> int | None:
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.author == "system" and message.content == COMPACTED_CONTEXT_MARKER:
+            return index
+    return None
+
+
+def workspace_chat_messages(
+    messages: list[StoredMessage],
+    compacted_context: str = "",
+) -> list[ChatMessage]:
     chat_messages: list[ChatMessage] = []
-    for message in messages:
+    marker_index = latest_compacted_context_index(messages)
+    visible_messages = messages
+
+    if compacted_context and marker_index is not None:
+        chat_messages.extend(
+            [
+                ChatMessage(role="user", content=COMPACTED_CONTEXT_MARKER),
+                ChatMessage(role="assistant", content=compacted_context),
+            ]
+        )
+        visible_messages = messages[marker_index + 1 :]
+
+    for message in visible_messages:
+        if message.author == "system" and message.content == COMPACTED_CONTEXT_MARKER:
+            continue
         if message.author not in ("user", "assistant"):
             raise HTTPException(status_code=400, detail="Message history is invalid.")
         role: Literal["user", "assistant"] = (
@@ -83,6 +150,28 @@ def workspace_chat_messages(messages: list[StoredMessage]) -> list[ChatMessage]:
         )
         chat_messages.append(ChatMessage(role=role, content=message.content))
     return chat_messages
+
+
+def compact_prompt_messages(
+    messages: list[StoredMessage],
+    compacted_context: str,
+) -> list[ChatMessage]:
+    history = "\n\n".join(
+        f"{message.role}: {message.content}"
+        for message in workspace_chat_messages(messages, compacted_context)
+    )
+    return [
+        ChatMessage(role="system", content=COMPACT_SYSTEM_PROMPT),
+        ChatMessage(
+            role="user",
+            content=(
+                "Compact the current Flowent workspace context for the next turn.\n\n"
+                "Keep the details needed to continue accurately, including decisions, "
+                "constraints, pending work, and referenced facts.\n\n"
+                f"Conversation:\n{history}"
+            ),
+        ),
+    ]
 
 
 def create_app(
@@ -131,6 +220,41 @@ def create_app(
     ) -> WorkspaceMessagesRequest:
         return WorkspaceMessagesRequest(messages=store.save_messages(request.messages))
 
+    @app.post("/api/workspace/compact")
+    async def compact_workspace() -> WorkspaceCompactResponse:
+        logger.info("Workspace compact requested")
+        state = store.read_state()
+        connection = selected_connection(state)
+        compacted_context = store.read_compacted_context()
+
+        try:
+            summary = await complete_chat(
+                connection,
+                compact_prompt_messages(state.messages, compacted_context),
+                completion=chat_completion,
+            )
+        except HTTPException:
+            raise
+        except Exception as error:
+            logger.exception("Workspace compact failed")
+            raise HTTPException(
+                status_code=500,
+                detail="Context could not be compacted.",
+            ) from error
+
+        marker = StoredMessage(
+            author="system",
+            content=COMPACTED_CONTEXT_MARKER,
+            id=str(uuid4()),
+        )
+        store.save_compacted_context(summary.content)
+        store.save_messages([*state.messages, marker])
+        logger.info(
+            "Workspace compact completed summary_length=%s", len(summary.content)
+        )
+        logger.log(TRACE_LEVEL, "Workspace compact summary=%r", summary.content)
+        return WorkspaceCompactResponse(message=marker)
+
     @app.post("/api/workspace/respond")
     async def respond_to_workspace(
         request: WorkspaceRespondRequest,
@@ -140,32 +264,7 @@ def create_app(
         )
         logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
         state = store.read_state()
-        provider = next(
-            (
-                stored_provider
-                for stored_provider in state.providers
-                if stored_provider.id == state.settings.selected_provider_id
-            ),
-            None,
-        )
-        if provider is None or not state.settings.selected_model:
-            logger.warning(
-                "Workspace response blocked because provider or model is missing"
-            )
-            raise HTTPException(
-                status_code=400,
-                detail="Choose a provider and model before sending.",
-            )
-        if not provider.api_key:
-            logger.warning(
-                "Workspace response blocked because selected provider has no key"
-            )
-            raise HTTPException(status_code=400, detail="Add a key before sending.")
-        logger.debug(
-            "Workspace response using provider=%s model=%s",
-            provider.name,
-            state.settings.selected_model,
-        )
+        connection = selected_connection(state)
 
         user_message = StoredMessage(
             author="user",
@@ -174,15 +273,10 @@ def create_app(
         )
         next_messages = [*state.messages, user_message]
         store.save_messages(next_messages)
-
-        connection = ProviderConnection(
-            base_url=provider.base_url or None,
-            model=state.settings.selected_model,
-            name=provider.name,
-            provider=provider.type,
-            secret_reference=provider.api_key,
+        chat_messages = workspace_chat_messages(
+            next_messages,
+            store.read_compacted_context(),
         )
-        chat_messages = workspace_chat_messages(next_messages)
 
         async def response_stream() -> AsyncIterator[str]:
             assistant_tools: dict[str, StoredToolItem] = {}

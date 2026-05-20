@@ -50,7 +50,7 @@ export type AssistantOutputGroup = {
 };
 
 export type Message = {
-  author: "assistant" | "user";
+  author: "assistant" | "system" | "user";
   content: string;
   groups?: AssistantOutputGroup[];
   id: string;
@@ -59,7 +59,7 @@ export type Message = {
   tools?: ToolItem[];
 };
 
-export type WorkspaceCommandId = "clear";
+export type WorkspaceCommandId = "clear" | "compact";
 
 export type WorkspaceCommand = {
   description: string;

@@ -39,7 +39,7 @@ export function WorkspaceView({
   errorMessage: string;
   isResponding: boolean;
   messages: Message[];
-  onCommand: (commandId: WorkspaceCommandId) => void;
+  onCommand: (commandId: WorkspaceCommandId) => boolean;
   onCommandError: (message: string) => void;
   onClearMessages: () => void;
   onDraftChange: (value: string) => void;
@@ -167,25 +167,40 @@ function MessageList({
         </div>
       ) : null}
       {displayMessages.map((message) => (
-        <MessageRow
-          key={message.id}
-          isStreaming={
-            isResponding &&
-            message.id === streamingMessageId &&
-            message.author === "assistant" &&
-            message.isStreamingText === true
-          }
-          isPending={
-            message.id === "assistant-pending" ||
-            (isResponding &&
-              message.author === "assistant" &&
-              message.id === streamingMessageId &&
-              message.isStreamingText !== true)
-          }
-          message={message}
-        />
+        <Fragment key={message.id}>
+          {message.author === "system" ? (
+            <SystemMessage message={message} />
+          ) : (
+            <MessageRow
+              isStreaming={
+                isResponding &&
+                message.id === streamingMessageId &&
+                message.author === "assistant" &&
+                message.isStreamingText === true
+              }
+              isPending={
+                message.id === "assistant-pending" ||
+                (isResponding &&
+                  message.author === "assistant" &&
+                  message.id === streamingMessageId &&
+                  message.isStreamingText !== true)
+              }
+              message={message}
+            />
+          )}
+        </Fragment>
       ))}
       <div aria-hidden="true" ref={scrollMarkerRef} />
+    </div>
+  );
+}
+
+function SystemMessage({ message }: { message: Message }) {
+  return (
+    <div className="mx-auto flex w-full max-w-[640px] justify-center py-3">
+      <div className="rounded-full border border-white/10 bg-input/30 px-3 py-1.5 text-sm leading-5 text-white/70">
+        {message.content}
+      </div>
     </div>
   );
 }
@@ -432,7 +447,7 @@ function ChatComposer({
   draft: string;
   errorMessage: string;
   isSending: boolean;
-  onCommand: (commandId: WorkspaceCommandId) => void;
+  onCommand: (commandId: WorkspaceCommandId) => boolean;
   onCommandError: (message: string) => void;
   onDraftChange: (value: string) => void;
   onOffsetChange: (value: number) => void;
@@ -461,8 +476,10 @@ function ChatComposer({
   const showCommandMenu =
     isCommandDraft && !isCommandMenuDismissed && matchingCommands.length > 0;
   const exactCommand = commands.find((command) => command.name === commandName);
-  const canSubmit =
-    draft.length > 0 && (!isSending || Boolean(isCommandDraft && exactCommand));
+  const canSubmitCommand =
+    Boolean(isCommandDraft && exactCommand) &&
+    (!isSending || exactCommand?.id === "clear");
+  const canSubmit = draft.length > 0 && (!isSending || canSubmitCommand);
 
   useEffect(() => {
     if (preserveCommandMenuDismissalRef.current) {
@@ -512,9 +529,13 @@ function ChatComposer({
   }, [onOffsetChange]);
 
   const runCommand = (command: WorkspaceCommand) => {
+    const commandAccepted = onCommand(command.id);
+    if (!commandAccepted) {
+      setIsCommandMenuDismissed(true);
+      return;
+    }
     onDraftChange("");
     setIsCommandMenuDismissed(false);
-    onCommand(command.id);
   };
 
   const runDraftCommand = () => {
