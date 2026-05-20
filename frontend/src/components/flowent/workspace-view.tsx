@@ -206,7 +206,7 @@ function MessageRow({
           "min-w-0 text-base leading-6 text-white",
           message.author === "user"
             ? "flowent-user-message-bubble max-w-[70%] rounded-[22px] px-4 py-2.5"
-            : "max-w-full",
+            : "w-full max-w-full",
         )}
       >
         {isWaiting ? (
