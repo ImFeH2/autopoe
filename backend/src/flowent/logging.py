@@ -93,6 +93,11 @@ class RedactingFormatter(logging.Formatter):
         return redact_log_value(rendered)
 
 
+class ConsoleNoiseFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno > logging.DEBUG or record.name.startswith("flowent")
+
+
 def configure_logging(*, directory: Path | None = None) -> Path:
     global _configured_log_file, _configured_log_process_id
 
@@ -121,6 +126,7 @@ def configure_logging(*, directory: Path | None = None) -> Path:
     console_handler.setFormatter(
         RedactingFormatter("%(levelname)s %(name)s: %(message)s")
     )
+    console_handler.addFilter(ConsoleNoiseFilter())
 
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
