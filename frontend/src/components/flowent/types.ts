@@ -44,9 +44,15 @@ export type AssistantOutputItem =
       type: "tool";
     };
 
+export type AssistantOutputGroup = {
+  id: string;
+  items: AssistantOutputItem[];
+};
+
 export type Message = {
   author: "assistant" | "user";
   content: string;
+  groups?: AssistantOutputGroup[];
   id: string;
   items?: AssistantOutputItem[];
   tools?: ToolItem[];

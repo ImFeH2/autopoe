@@ -15,6 +15,11 @@ const assistantStreamResponse = (
       controller.enqueue(
         encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
       );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
       for (const chunk of chunks) {
         controller.enqueue(
           encoder.encode(
@@ -61,6 +66,11 @@ const controlledAssistantStreamResponse = (
     async start(controller) {
       controller.enqueue(
         encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
       );
       controller.enqueue(
         encoder.encode(
@@ -112,6 +122,11 @@ const assistantErrorStreamResponse = (
       );
       controller.enqueue(
         encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
           `event: delta\ndata: ${JSON.stringify({ content: firstChunk })}\n\n`,
         ),
       );
@@ -147,6 +162,11 @@ const assistantToolStreamResponse = (
       );
       controller.enqueue(
         encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
           `event: tool_start\ndata: ${JSON.stringify({
             tool: { ...tool, status: "running" },
           })}\n\n`,
@@ -160,6 +180,11 @@ const assistantToolStreamResponse = (
             status: tool.status ?? "success",
             title: tool.title,
           })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 2 })}\n\n`,
         ),
       );
       controller.enqueue(
@@ -206,6 +231,11 @@ const controlledToolTimelineResponse = (
       );
       controller.enqueue(
         encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
           `event: tool_start\ndata: ${JSON.stringify({
             tool: { ...tool, status: "running" },
           })}\n\n`,
@@ -223,6 +253,11 @@ const controlledToolTimelineResponse = (
         ),
       );
       await finish.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 2 })}\n\n`,
+        ),
+      );
       controller.enqueue(
         encoder.encode(
           `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
@@ -251,6 +286,87 @@ const controlledToolTimelineResponse = (
       status: 200,
     }),
   };
+};
+
+const assistantToolBatchStreamResponse = (
+  groups: Array<
+    Array<{
+      id: string;
+      name: string;
+      status?: "failed" | "running" | "success";
+      title: string;
+    }>
+  >,
+  content = "",
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+
+      groups.forEach((tools, groupIndex) => {
+        controller.enqueue(
+          encoder.encode(
+            `event: output_start\ndata: ${JSON.stringify({ index: groupIndex + 1 })}\n\n`,
+          ),
+        );
+
+        tools.forEach((tool) => {
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_start\ndata: ${JSON.stringify({
+                tool: { ...tool, status: "running" },
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_done\ndata: ${JSON.stringify({
+                content: "tool output",
+                id: tool.id,
+                status: tool.status ?? "success",
+                title: tool.title,
+              })}\n\n`,
+            ),
+          );
+        });
+      });
+
+      if (content) {
+        controller.enqueue(
+          encoder.encode(
+            `event: output_start\ndata: ${JSON.stringify({ index: groups.length + 1 })}\n\n`,
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+          ),
+        );
+      }
+
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
 };
 
 const mockInitialState = (
@@ -1357,7 +1473,118 @@ describe("App", () => {
     expect(screen.getAllByTestId("assistant-output-separator")).toHaveLength(1);
   });
 
-  it("separates multiple persisted assistant output items", async () => {
+  it("keeps tools from the same assistant output group together", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolBatchStreamResponse([
+          [
+            {
+              id: "tool-1",
+              name: "list_files",
+              title: "Listed /project/flowent",
+            },
+            {
+              id: "tool-2",
+              name: "read_file",
+              title: "Read README.md",
+            },
+          ],
+        ]);
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Inspect the workspace");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(
+      await screen.findByText("Listed /project/flowent"),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Read README.md")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("assistant-output-separator"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("separates tool batches from different assistant output groups", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolBatchStreamResponse([
+          [
+            {
+              id: "tool-1",
+              name: "list_files",
+              title: "Listed /project/flowent",
+            },
+            {
+              id: "tool-2",
+              name: "read_file",
+              title: "Read README.md",
+            },
+          ],
+          [
+            {
+              id: "tool-3",
+              name: "read_file",
+              title: "Read package.json",
+            },
+          ],
+        ]);
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Inspect the workspace");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Read README.md")).toBeInTheDocument();
+    expect(await screen.findByText("Read package.json")).toBeInTheDocument();
+    expect(screen.getAllByTestId("assistant-output-separator")).toHaveLength(1);
+  });
+
+  it("separates persisted assistant tools from the final text", async () => {
     mockInitialState({
       messages: [
         {
@@ -1390,7 +1617,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("Read README.md")).toBeInTheDocument();
-    expect(screen.getAllByTestId("assistant-output-separator")).toHaveLength(2);
+    expect(screen.getAllByTestId("assistant-output-separator")).toHaveLength(1);
   });
 
   it("loads persisted assistant tools before the final text", async () => {

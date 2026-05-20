@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import type {
+  AssistantOutputGroup,
   AssistantOutputItem,
   Message,
   ToolItem,
@@ -186,9 +187,9 @@ function MessageRow({
   isStreaming: boolean;
   message: Message;
 }) {
-  const assistantItems =
-    message.author === "assistant" ? assistantOutputItems(message) : [];
-  const isWaiting = isPending && assistantItems.length === 0;
+  const assistantGroups =
+    message.author === "assistant" ? assistantOutputGroups(message) : [];
+  const isWaiting = isPending && assistantGroups.length === 0;
 
   return (
     <article
@@ -209,7 +210,7 @@ function MessageRow({
           <AssistantWaitingIndicator />
         ) : (
           <AssistantMessageContent
-            assistantItems={assistantItems}
+            assistantGroups={assistantGroups}
             isStreaming={isStreaming}
             message={message}
           />
@@ -219,9 +220,18 @@ function MessageRow({
   );
 }
 
-function assistantOutputItems(message: Message): AssistantOutputItem[] {
+function assistantOutputGroups(message: Message): AssistantOutputGroup[] {
+  if (message.groups?.length) {
+    return message.groups.filter((group) => group.items.length > 0);
+  }
+
   if (message.items?.length) {
-    return message.items;
+    return [
+      {
+        id: `${message.id}-items`,
+        items: message.items,
+      },
+    ];
   }
 
   const toolItems: AssistantOutputItem[] = (message.tools ?? []).map(
@@ -231,27 +241,37 @@ function assistantOutputItems(message: Message): AssistantOutputItem[] {
       type: "tool",
     }),
   );
+  const groups: AssistantOutputGroup[] = [];
 
-  if (message.content) {
-    return [
-      ...toolItems,
-      {
-        content: message.content,
-        id: `${message.id}-content`,
-        type: "text",
-      },
-    ];
+  if (toolItems.length) {
+    groups.push({
+      id: `${message.id}-tools`,
+      items: toolItems,
+    });
   }
 
-  return toolItems;
+  if (message.content) {
+    groups.push({
+      id: `${message.id}-content`,
+      items: [
+        {
+          content: message.content,
+          id: `${message.id}-content`,
+          type: "text",
+        },
+      ],
+    });
+  }
+
+  return groups;
 }
 
 function AssistantMessageContent({
-  assistantItems,
+  assistantGroups,
   isStreaming,
   message,
 }: {
-  assistantItems: AssistantOutputItem[];
+  assistantGroups: AssistantOutputGroup[];
   isStreaming: boolean;
   message: Message;
 }) {
@@ -259,8 +279,8 @@ function AssistantMessageContent({
     return (
       <div className="flowent-markdown-message min-w-0 break-words">
         <AssistantOutputTimeline
+          groups={assistantGroups}
           isStreaming={isStreaming}
-          items={assistantItems}
         />
       </div>
     );
@@ -274,29 +294,35 @@ function AssistantMessageContent({
 }
 
 function AssistantOutputTimeline({
+  groups,
   isStreaming,
-  items,
 }: {
+  groups: AssistantOutputGroup[];
   isStreaming: boolean;
-  items: AssistantOutputItem[];
 }) {
-  const lastTextItemId = [...items]
+  const lastTextItemId = groups
+    .flatMap((group) => group.items)
     .reverse()
     .find((item) => item.type === "text")?.id;
 
   return (
     <div className="flex min-w-0 flex-col" aria-label="Assistant response">
-      {items.map((item, index) => (
-        <Fragment key={item.id}>
+      {groups.map((group, index) => (
+        <Fragment key={group.id}>
           {index > 0 ? <AssistantOutputSeparator /> : null}
-          {item.type === "tool" ? (
-            <ToolProcessItem tool={item.tool} />
-          ) : (
-            <MarkdownMessage
-              content={item.content}
-              isStreaming={isStreaming && item.id === lastTextItemId}
-            />
-          )}
+          <div className="flex min-w-0 flex-col gap-1.5">
+            {group.items.map((item) =>
+              item.type === "tool" ? (
+                <ToolProcessItem key={item.id} tool={item.tool} />
+              ) : (
+                <MarkdownMessage
+                  key={item.id}
+                  content={item.content}
+                  isStreaming={isStreaming && item.id === lastTextItemId}
+                />
+              ),
+            )}
+          </div>
         </Fragment>
       ))}
     </div>

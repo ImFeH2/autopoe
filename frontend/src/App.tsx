@@ -9,6 +9,7 @@ import { ProvidersView } from "@/components/flowent/providers-view";
 import { SettingsView } from "@/components/flowent/settings-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
 import type {
+  AssistantOutputGroup,
   AssistantOutputItem,
   Message,
   Provider,
@@ -44,6 +45,12 @@ type WorkspaceStreamEvent =
         id: string;
       };
       event: "start";
+    }
+  | {
+      data: {
+        index: number;
+      };
+      event: "output_start";
     }
   | {
       data: {
@@ -83,6 +90,7 @@ type WorkspaceStreamEvent =
 type WorkspaceStreamHandlers = {
   onDelta: (content: string) => void;
   onDone: (message: ApiMessage) => void;
+  onOutputStart: (index: number) => void;
   onStart: (id: string) => void;
   onToolDone: (
     tool: Pick<ToolItem, "id" | "status"> & Partial<ToolItem>,
@@ -341,6 +349,9 @@ function App() {
         if (streamEvent.event === "start") {
           handlers.onStart(streamEvent.data.id);
         }
+        if (streamEvent.event === "output_start") {
+          handlers.onOutputStart(streamEvent.data.index);
+        }
         if (streamEvent.event === "delta") {
           handlers.onDelta(streamEvent.data.content);
         }
@@ -418,7 +429,7 @@ function App() {
       let assistantId = "";
       let assistantTextItemId = "";
       let assistantTextItemIndex = 0;
-      let assistantItems: AssistantOutputItem[] = [];
+      let assistantGroups: AssistantOutputGroup[] = [];
       let assistantTools: ToolItem[] = [];
       const isCurrentResponse = () => responseRunRef.current === responseRun;
       const updateAssistantMessage = () => {
@@ -429,35 +440,62 @@ function App() {
           author: "assistant",
           content: assistantContent,
           id: assistantId,
-          items: assistantItems,
+          groups: assistantGroups,
           tools: assistantTools,
         };
         setMessages([...nextMessages, assistantMessage]);
+      };
+      const createAssistantGroup = (index: number) => {
+        const groupId = `${assistantId}-group-${index}`;
+        if (assistantGroups.at(-1)?.id === groupId) {
+          return;
+        }
+        assistantTextItemId = "";
+        assistantGroups = [...assistantGroups, { id: groupId, items: [] }];
+      };
+      const ensureAssistantGroup = () => {
+        if (assistantGroups.length === 0) {
+          createAssistantGroup(1);
+        }
+      };
+      const updateCurrentAssistantGroupItems = (
+        updater: (items: AssistantOutputItem[]) => AssistantOutputItem[],
+      ) => {
+        ensureAssistantGroup();
+        const currentGroupIndex = assistantGroups.length - 1;
+        assistantGroups = assistantGroups.map((group, index) =>
+          index === currentGroupIndex
+            ? { ...group, items: updater(group.items) }
+            : group,
+        );
       };
       const appendAssistantText = (content: string) => {
         if (!assistantTextItemId) {
           assistantTextItemIndex += 1;
           assistantTextItemId = `${assistantId}-text-${assistantTextItemIndex}`;
-          assistantItems = [
-            ...assistantItems,
+          updateCurrentAssistantGroupItems((items) => [
+            ...items,
             {
               content: "",
               id: assistantTextItemId,
               type: "text",
             },
-          ];
+          ]);
         }
 
         assistantContent += content;
-        assistantItems = assistantItems.map((item) =>
-          item.type === "text" && item.id === assistantTextItemId
-            ? { ...item, content: item.content + content }
-            : item,
+        updateCurrentAssistantGroupItems((items) =>
+          items.map((item) =>
+            item.type === "text" && item.id === assistantTextItemId
+              ? { ...item, content: item.content + content }
+              : item,
+          ),
         );
         updateAssistantMessage();
       };
-      const assistantItemsText = () =>
-        assistantItems
+      const assistantGroupsText = () =>
+        assistantGroups
+          .flatMap((group) => group.items)
           .filter((item) => item.type === "text")
           .map((item) => item.content)
           .join("");
@@ -476,21 +514,21 @@ function App() {
             }
             assistantId = message.id;
             assistantContent = message.content;
-            const streamedText = assistantItemsText();
+            const streamedText = assistantGroupsText();
             if (message.content && streamedText !== message.content) {
               assistantTextItemIndex += 1;
-              assistantItems = [
-                ...assistantItems,
+              updateCurrentAssistantGroupItems((items) => [
+                ...items,
                 {
                   content: message.content.slice(streamedText.length),
                   id: `${message.id}-text-${assistantTextItemIndex}`,
                   type: "text",
                 },
-              ];
+              ]);
             }
             assistantMessage = {
               ...message,
-              items: assistantItems,
+              groups: assistantGroups,
               tools: assistantTools,
             };
             setMessages([...nextMessages, assistantMessage]);
@@ -500,6 +538,13 @@ function App() {
               return;
             }
             assistantId = id;
+            updateAssistantMessage();
+          },
+          onOutputStart: (index) => {
+            if (!isCurrentResponse()) {
+              return;
+            }
+            createAssistantGroup(index);
             updateAssistantMessage();
           },
           onToolDone: (tool) => {
@@ -512,11 +557,14 @@ function App() {
                 ? { ...currentTool, ...tool }
                 : currentTool,
             );
-            assistantItems = assistantItems.map((item) =>
-              item.type === "tool" && item.tool.id === tool.id
-                ? { ...item, tool: { ...item.tool, ...tool } }
-                : item,
-            );
+            assistantGroups = assistantGroups.map((group) => ({
+              ...group,
+              items: group.items.map((item) =>
+                item.type === "tool" && item.tool.id === tool.id
+                  ? { ...item, tool: { ...item.tool, ...tool } }
+                  : item,
+              ),
+            }));
             updateAssistantMessage();
           },
           onToolStart: (tool) => {
@@ -525,14 +573,14 @@ function App() {
             }
             assistantTextItemId = "";
             assistantTools = [...assistantTools, tool];
-            assistantItems = [
-              ...assistantItems,
+            updateCurrentAssistantGroupItems((items) => [
+              ...items,
               {
                 id: `tool-${tool.id}`,
                 tool,
                 type: "tool",
               },
-            ];
+            ]);
             updateAssistantMessage();
           },
         },

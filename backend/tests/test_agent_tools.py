@@ -107,15 +107,19 @@ def test_workspace_response_streams_tool_process_and_final_text(
     events = stream_events(response.text)
     assert [event["event"] for event in events] == [
         "start",
+        "output_start",
         "tool_start",
         "tool_done",
+        "output_start",
         "delta",
         "done",
     ]
-    assert events[1]["data"]["tool"]["status"] == "running"
-    assert events[2]["data"]["status"] == "success"
-    assert events[3]["data"] == {"content": "Read the notes."}
-    assert events[4]["data"]["message"]["content"] == "Read the notes."
+    assert events[1]["data"] == {"index": 1}
+    assert events[2]["data"]["tool"]["status"] == "running"
+    assert events[3]["data"]["status"] == "success"
+    assert events[4]["data"] == {"index": 2}
+    assert events[5]["data"] == {"content": "Read the notes."}
+    assert events[6]["data"]["message"]["content"] == "Read the notes."
     assert len(captured_requests) == 2
     assert captured_requests[0]["messages"][0] == {
         "role": "system",
@@ -345,10 +349,13 @@ def test_agent_continues_until_final_text_after_multiple_tool_rounds(
     events = stream_events(response.text)
     assert [event["event"] for event in events] == [
         "start",
+        "output_start",
         "tool_start",
         "tool_done",
+        "output_start",
         "tool_start",
         "tool_done",
+        "output_start",
         "delta",
         "done",
     ]
@@ -386,7 +393,12 @@ def test_agent_finishes_without_tools(tmp_path, monkeypatch) -> None:
 
     assert response.status_code == 200
     events = stream_events(response.text)
-    assert [event["event"] for event in events] == ["start", "delta", "done"]
+    assert [event["event"] for event in events] == [
+        "start",
+        "output_start",
+        "delta",
+        "done",
+    ]
     assert len(captured_requests) == 1
     assert events[-1]["data"]["message"]["content"] == "Direct answer."
 

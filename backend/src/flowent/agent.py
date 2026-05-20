@@ -125,6 +125,7 @@ async def run_agent_stream(
     while True:
         round_number += 1
         logger.debug("Agent round started id=%s round=%s", assistant_id, round_number)
+        yield AgentStreamEvent(event="output_start", data={"index": round_number})
         round_content = ""
         pending: dict[int, PendingToolCall] = {}
 

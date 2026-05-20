@@ -64,13 +64,14 @@ def test_workspace_response_streams_selected_provider_model_and_history(
     assert response.headers["content-type"].startswith("text/event-stream")
     events = stream_events(response.text)
     assert events[0]["event"] == "start"
-    assert events[1] == {"event": "delta", "data": '{"content": "Here is "}'}
-    assert events[2] == {
+    assert events[1] == {"event": "output_start", "data": '{"index": 1}'}
+    assert events[2] == {"event": "delta", "data": '{"content": "Here is "}'}
+    assert events[3] == {
         "event": "delta",
         "data": '{"content": "the launch checklist."}',
     }
-    assert '"author": "assistant"' in str(events[3]["data"])
-    assert '"content": "Here is the launch checklist."' in str(events[3]["data"])
+    assert '"author": "assistant"' in str(events[4]["data"])
+    assert '"content": "Here is the launch checklist."' in str(events[4]["data"])
     assert captured_request["api_base"] == "https://api.example.test/v1"
     assert captured_request["api_key"] == "sk-local"
     assert captured_request["messages"] == [
