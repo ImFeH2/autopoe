@@ -2,7 +2,9 @@ import logging
 import sys
 
 from flowent.logging import (
+    LITELLM_LOGGER_NAMES,
     TRACE_LEVEL,
+    configure_litellm_logging,
     configure_logging,
     ensure_logging_configured,
     redact_log_value,
@@ -154,3 +156,27 @@ def test_any_logging_path_follows_flowent_data_dir(tmp_path, monkeypatch) -> Non
     log_file = ensure_logging_configured()
 
     assert log_file.parent == data_dir / "logs"
+
+
+def test_litellm_debug_logs_use_flowent_handlers(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("LITELLM_LOG", raising=False)
+
+    log_file = configure_logging()
+    import litellm  # noqa: F401
+
+    configure_litellm_logging()
+    logging.getLogger("LiteLLM").debug("stream chunk detail")
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+    captured = capsys.readouterr()
+    litellm_handlers = [
+        handler
+        for logger_name in LITELLM_LOGGER_NAMES
+        for handler in logging.getLogger(logger_name).handlers
+    ]
+
+    assert litellm_handlers == []
+    assert "stream chunk detail" not in captured.err
+    assert "stream chunk detail" in log_file.read_text()

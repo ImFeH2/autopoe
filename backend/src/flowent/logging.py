@@ -11,6 +11,7 @@ from flowent.paths import data_directory
 
 TRACE_LEVEL = 5
 DEFAULT_LOG_RETENTION = 5
+LITELLM_LOGGER_NAMES = ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy")
 _configured_log_file: Path | None = None
 _configured_log_process_id: int | None = None
 _SECRET_PATTERNS = (
@@ -60,6 +61,41 @@ def console_log_level() -> int:
     return parse_log_level(os.environ.get("LOG_LEVEL"), default)
 
 
+def litellm_handler_level_name(value: str | None) -> str:
+    if not value:
+        return "INFO"
+    normalized = value.strip().upper()
+    if normalized.isdigit():
+        numeric_level = int(normalized)
+        if numeric_level <= logging.INFO:
+            return "INFO"
+        level_name = logging.getLevelName(numeric_level)
+        return level_name if isinstance(level_name, str) else "INFO"
+    level = parse_log_level(normalized, logging.INFO)
+    if level < logging.INFO:
+        return "INFO"
+    if normalized == "WARN":
+        return "WARNING"
+    if isinstance(logging.getLevelName(normalized), int):
+        return normalized
+    return "INFO"
+
+
+def configure_litellm_logging() -> None:
+    os.environ["LITELLM_LOG"] = litellm_handler_level_name(
+        os.environ.get("LITELLM_LOG")
+    )
+    handlers_to_close: set[logging.Handler] = set()
+    for logger_name in LITELLM_LOGGER_NAMES:
+        litellm_logger = logging.getLogger(logger_name)
+        for handler in list(litellm_logger.handlers):
+            litellm_logger.removeHandler(handler)
+            handlers_to_close.add(handler)
+        litellm_logger.propagate = True
+    for handler in handlers_to_close:
+        handler.close()
+
+
 def log_retention() -> int:
     raw_retention = os.environ.get("FLOWENT_LOG_RETENTION")
     if not raw_retention:
@@ -102,6 +138,7 @@ def configure_logging(*, directory: Path | None = None) -> Path:
     global _configured_log_file, _configured_log_process_id
 
     install_trace_level()
+    configure_litellm_logging()
 
     log_file = new_log_file_path(directory)
     log_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -130,6 +167,7 @@ def configure_logging(*, directory: Path | None = None) -> Path:
 
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
+    configure_litellm_logging()
 
     prune_old_logs(log_file.parent, keep=log_retention())
 

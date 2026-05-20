@@ -5,7 +5,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from flowent.logging import TRACE_LEVEL
+from flowent.logging import TRACE_LEVEL, configure_litellm_logging
 
 
 class ProviderFormat(StrEnum):
@@ -98,6 +98,7 @@ def list_provider_models(
     if model_lister is None:
         from litellm import get_valid_models
 
+        configure_litellm_logging()
         model_lister = get_valid_models
 
     models = model_lister(
@@ -154,6 +155,7 @@ async def complete_chat(
     if completion is None:
         from litellm import acompletion
 
+        configure_litellm_logging()
         completion = acompletion
 
     logger.debug(
@@ -226,6 +228,7 @@ async def stream_chat_chunks(
     if completion is None:
         from litellm import acompletion
 
+        configure_litellm_logging()
         completion = acompletion
 
     logger.debug(
