@@ -523,6 +523,11 @@ const expectDocumentText = async (text: string) => {
   });
 };
 
+const fetchWasCalledWith = (path: string, method: string) =>
+  vi.mocked(window.fetch).mock.calls.some(([input, init]) => {
+    return input === path && init?.method === method;
+  });
+
 describe("App", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -2085,6 +2090,185 @@ describe("App", () => {
       expect(document.body).not.toHaveTextContent("First step is ready.");
     });
     expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
+  });
+
+  it("shows the command menu with Clear when a slash is typed", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/");
+
+    expect(screen.getByRole("listbox", { name: "Commands" })).toBeVisible();
+    expect(screen.getByRole("option", { name: /\/clear/ })).toBeVisible();
+  });
+
+  it("filters the command menu to Clear when a matching prefix is typed", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/cl");
+
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("option", { name: /\/clear/ })).toBeVisible();
+  });
+
+  it("completes the selected command when Tab is pressed", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/cl");
+    await user.keyboard("{Tab}");
+
+    expect(composer).toHaveValue("/clear");
+  });
+
+  it("closes the command menu with Escape and keeps the draft", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/cl");
+    expect(screen.getByRole("listbox", { name: "Commands" })).toBeVisible();
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("listbox", { name: "Commands" })).toBeNull();
+    expect(composer).toHaveValue("/cl");
+  });
+
+  it("runs Clear from the command menu without requesting an assistant reply", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: selectedProviderState().providers,
+      settings: selectedProviderState().settings,
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await screen.findByText("Draft a launch checklist");
+    await user.type(composer, "/clear");
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByText("Draft a launch checklist")).toBeNull();
+    expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
+    expect(composer).toHaveValue("");
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/messages",
+      expect.objectContaining({
+        body: JSON.stringify({ messages: [] }),
+        method: "PUT",
+      }),
+    );
+    expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
+  });
+
+  it("runs Clear from the command menu while a streamed reply is still running", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledAssistantStreamResponse(
+      ["First step", " is ready."],
+      "First step is ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await expectDocumentText("First step");
+
+    await user.type(composer, "/clear");
+    await user.keyboard("{Enter}");
+    assistantStream.finish();
+
+    await waitFor(() => {
+      expect(document.body).not.toHaveTextContent("Draft a launch checklist");
+      expect(document.body).not.toHaveTextContent("First step");
+      expect(document.body).not.toHaveTextContent("First step is ready.");
+    });
+    expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
+  });
+
+  it("sends a leading-space clear command as a regular message", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, " /clear");
+    await user.keyboard("{Enter}");
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/respond",
+      expect.objectContaining({
+        body: JSON.stringify({ content: " /clear" }),
+        method: "POST",
+      }),
+    );
+    expect(screen.getByText("/clear")).toBeInTheDocument();
+  });
+
+  it("keeps an unrecognized command in the composer and does not send it", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/missing");
+    await user.keyboard("{Enter}");
+
+    expect(composer).toHaveValue("/missing");
+    expect(screen.getByText("Command not found.")).toBeInTheDocument();
+    expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
   });
 
   it("persists the model list when a provider is saved", async () => {

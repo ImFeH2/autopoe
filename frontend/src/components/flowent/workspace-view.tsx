@@ -17,22 +17,30 @@ import type {
   AssistantOutputItem,
   Message,
   ToolItem,
+  WorkspaceCommand,
+  WorkspaceCommandId,
 } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceView({
+  commands,
   draft,
   errorMessage,
   isResponding,
   messages,
+  onCommand,
+  onCommandError,
   onClearMessages,
   onDraftChange,
   onSendMessage,
 }: {
+  commands: WorkspaceCommand[];
   draft: string;
   errorMessage: string;
   isResponding: boolean;
   messages: Message[];
+  onCommand: (commandId: WorkspaceCommandId) => void;
+  onCommandError: (message: string) => void;
   onClearMessages: () => void;
   onDraftChange: (value: string) => void;
   onSendMessage: () => void;
@@ -52,9 +60,12 @@ export function WorkspaceView({
           messages={messages}
         />
         <ChatComposer
+          commands={commands}
           draft={draft}
           errorMessage={errorMessage}
           isSending={isResponding}
+          onCommand={onCommand}
+          onCommandError={onCommandError}
           onDraftChange={onDraftChange}
           onSendMessage={onSendMessage}
           onOffsetChange={setComposerOffset}
@@ -407,21 +418,67 @@ function AssistantWaitingIndicator() {
 }
 
 function ChatComposer({
+  commands,
   draft,
   errorMessage,
   isSending,
+  onCommand,
+  onCommandError,
   onDraftChange,
   onOffsetChange,
   onSendMessage,
 }: {
+  commands: WorkspaceCommand[];
   draft: string;
   errorMessage: string;
   isSending: boolean;
+  onCommand: (commandId: WorkspaceCommandId) => void;
+  onCommandError: (message: string) => void;
   onDraftChange: (value: string) => void;
   onOffsetChange: (value: number) => void;
   onSendMessage: () => void;
 }) {
   const composerRef = useRef<HTMLDivElement>(null);
+  const preserveCommandMenuDismissalRef = useRef(false);
+  const [isCommandMenuDismissed, setIsCommandMenuDismissed] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const firstLine = draft.split("\n")[0] ?? "";
+  const commandName = firstLine.startsWith("/") ? firstLine.slice(1) : "";
+  const isCommandDraft =
+    firstLine.startsWith("/") &&
+    !commandName.includes("/") &&
+    !firstLine.includes(" ");
+  const matchingCommands = useMemo(() => {
+    if (!isCommandDraft) {
+      return [];
+    }
+    const normalizedName = commandName.toLowerCase();
+
+    return commands.filter((command) =>
+      command.name.toLowerCase().startsWith(normalizedName),
+    );
+  }, [commandName, commands, isCommandDraft]);
+  const showCommandMenu =
+    isCommandDraft && !isCommandMenuDismissed && matchingCommands.length > 0;
+  const exactCommand = commands.find((command) => command.name === commandName);
+  const canSubmit =
+    draft.length > 0 && (!isSending || Boolean(isCommandDraft && exactCommand));
+
+  useEffect(() => {
+    if (preserveCommandMenuDismissalRef.current) {
+      preserveCommandMenuDismissalRef.current = false;
+      return;
+    }
+
+    setIsCommandMenuDismissed(false);
+    setSelectedCommandIndex(0);
+  }, [draft]);
+
+  useEffect(() => {
+    setSelectedCommandIndex((current) =>
+      Math.min(current, Math.max(matchingCommands.length - 1, 0)),
+    );
+  }, [matchingCommands.length]);
 
   useEffect(() => {
     const composer = composerRef.current;
@@ -454,12 +511,86 @@ function ChatComposer({
     return () => resizeObserver.disconnect();
   }, [onOffsetChange]);
 
+  const runCommand = (command: WorkspaceCommand) => {
+    onDraftChange("");
+    setIsCommandMenuDismissed(false);
+    onCommand(command.id);
+  };
+
+  const runDraftCommand = () => {
+    if (!isCommandDraft || commandName.length === 0) {
+      return false;
+    }
+
+    const command = commands.find((item) => item.name === commandName);
+    if (!command) {
+      return false;
+    }
+
+    runCommand(command);
+    return true;
+  };
+
+  const handleSubmit = () => {
+    if (showCommandMenu) {
+      const command = matchingCommands[selectedCommandIndex];
+      if (command) {
+        runCommand(command);
+        return;
+      }
+    }
+
+    if (runDraftCommand()) {
+      return;
+    }
+
+    if (isCommandDraft && commandName.length > 0) {
+      setIsCommandMenuDismissed(false);
+      onCommandError("Command not found.");
+      return;
+    }
+
+    onSendMessage();
+  };
+
   return (
     <div
       className="pointer-events-none absolute inset-x-0 bottom-6 z-10 px-6 max-[900px]:px-4"
       ref={composerRef}
     >
       <div className="pointer-events-auto mx-auto w-full max-w-[640px]">
+        {showCommandMenu ? (
+          <div
+            aria-label="Commands"
+            className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] p-1 shadow-[0_16px_44px_rgba(0,0,0,0.42)]"
+            role="listbox"
+          >
+            {matchingCommands.map((command, index) => (
+              <button
+                aria-selected={index === selectedCommandIndex}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white transition-colors hover:bg-input/50",
+                  index === selectedCommandIndex && "bg-input/40",
+                )}
+                key={command.id}
+                onClick={() => runCommand(command)}
+                onMouseEnter={() => setSelectedCommandIndex(index)}
+                role="option"
+                type="button"
+              >
+                <Terminal aria-hidden="true" className="size-4 text-white/75" />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium leading-5">
+                    {command.label}
+                  </span>
+                  <span className="block truncate text-xs leading-4 text-white/55">
+                    {command.description}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {errorMessage ? (
           <p className="mb-2 rounded-md bg-black/80 px-3 py-2 text-sm leading-5 text-red-300 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
             {errorMessage}
@@ -470,7 +601,7 @@ function ChatComposer({
           aria-label="Workspace composer"
           onSubmit={(event) => {
             event.preventDefault();
-            onSendMessage();
+            handleSubmit();
           }}
         >
           <Textarea
@@ -479,6 +610,42 @@ function ChatComposer({
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
+              if (showCommandMenu) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSelectedCommandIndex(
+                    (selectedCommandIndex + 1) % matchingCommands.length,
+                  );
+                  return;
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSelectedCommandIndex(
+                    (selectedCommandIndex - 1 + matchingCommands.length) %
+                      matchingCommands.length,
+                  );
+                  return;
+                }
+
+                if (event.key === "Tab") {
+                  const command = matchingCommands[selectedCommandIndex];
+                  if (command) {
+                    event.preventDefault();
+                    preserveCommandMenuDismissalRef.current = true;
+                    onDraftChange(command.label);
+                    setIsCommandMenuDismissed(true);
+                  }
+                  return;
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setIsCommandMenuDismissed(true);
+                  return;
+                }
+              }
+
               if (
                 event.key !== "Enter" ||
                 event.shiftKey ||
@@ -488,14 +655,14 @@ function ChatComposer({
               }
 
               event.preventDefault();
-              onSendMessage();
+              handleSubmit();
             }}
             placeholder="Message Flowent"
           />
           <Button
             aria-label="Send message"
             className="size-9 rounded-full bg-white text-black shadow-none hover:bg-[#e5e5e5] disabled:bg-transparent disabled:text-white/35 disabled:opacity-100 [&_svg]:size-5"
-            disabled={draft.length === 0 || isSending}
+            disabled={!canSubmit}
             size="icon-lg"
             type="submit"
           >

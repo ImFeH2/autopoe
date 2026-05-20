@@ -15,6 +15,8 @@ import type {
   Provider,
   ToolItem,
   ViewId,
+  WorkspaceCommand,
+  WorkspaceCommandId,
 } from "@/components/flowent/types";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
@@ -400,6 +402,28 @@ function App() {
     await readWorkspaceStream(response, handlers);
   };
 
+  const workspaceCommands: WorkspaceCommand[] = useMemo(
+    () => [
+      {
+        description: "Clear the conversation",
+        id: "clear",
+        label: "/clear",
+        name: "clear",
+      },
+    ],
+    [],
+  );
+
+  const runWorkspaceCommand = (commandId: WorkspaceCommandId) => {
+    if (commandId === "clear") {
+      void clearMessages();
+    }
+  };
+
+  const handleWorkspaceCommandError = (message: string) => {
+    setResponseError(message);
+  };
+
   const sendMessage = async () => {
     if (draft.length === 0 || isResponding) {
       return;
@@ -638,9 +662,12 @@ function App() {
           errorMessage={responseError}
           isResponding={isResponding}
           messages={messages}
+          commands={workspaceCommands}
           onClearMessages={() => {
             void clearMessages();
           }}
+          onCommand={runWorkspaceCommand}
+          onCommandError={handleWorkspaceCommandError}
           onDraftChange={setDraft}
           onSendMessage={() => {
             void sendMessage();

@@ -58,3 +58,12 @@ export type Message = {
   items?: AssistantOutputItem[];
   tools?: ToolItem[];
 };
+
+export type WorkspaceCommandId = "clear";
+
+export type WorkspaceCommand = {
+  description: string;
+  id: WorkspaceCommandId;
+  label: string;
+  name: string;
+};
