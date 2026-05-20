@@ -15,7 +15,6 @@ import {
   fieldLabelClassName,
   fieldTriggerClassName,
   formActionsClassName,
-  surfaceBorderClassName,
 } from "@/components/flowent/styles";
 import type { Provider } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
@@ -42,16 +41,8 @@ export function SettingsView({
     >
       <form
         className="m-8 grid w-[min(620px,calc(100%-64px))] gap-5 self-start bg-black max-[900px]:m-5 max-[900px]:w-auto"
-        aria-label="Runtime settings"
+        aria-label="Model routing"
       >
-        <div className={cn("border-b pb-4", surfaceBorderClassName)}>
-          <p className="m-0 text-[10px] font-semibold uppercase text-[#8f8f8f]">
-            Runtime
-          </p>
-          <h2 className="mt-2 mb-0 text-2xl font-semibold leading-none text-white">
-            Settings
-          </h2>
-        </div>
         <section className="grid gap-3">
           <h3 className="text-base font-semibold text-white">Model routing</h3>
           <div className={dashedPanelClassName}>
