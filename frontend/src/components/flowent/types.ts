@@ -32,9 +32,22 @@ export type ToolItem = {
   title: string;
 };
 
+export type AssistantOutputItem =
+  | {
+      content: string;
+      id: string;
+      type: "text";
+    }
+  | {
+      id: string;
+      tool: ToolItem;
+      type: "tool";
+    };
+
 export type Message = {
   author: "assistant" | "user";
   content: string;
   id: string;
+  items?: AssistantOutputItem[];
   tools?: ToolItem[];
 };

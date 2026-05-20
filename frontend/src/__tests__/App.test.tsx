@@ -187,6 +187,72 @@ const assistantToolStreamResponse = (
   });
 };
 
+const controlledToolTimelineResponse = (
+  tool: {
+    id: string;
+    name: string;
+    title: string;
+  },
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const completeTool = deferred();
+  const finish = deferred();
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_start\ndata: ${JSON.stringify({
+            tool: { ...tool, status: "running" },
+          })}\n\n`,
+        ),
+      );
+      await completeTool.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_done\ndata: ${JSON.stringify({
+            content: "tool output",
+            id: tool.id,
+            status: "success",
+            title: tool.title,
+          })}\n\n`,
+        ),
+      );
+      await finish.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  return {
+    completeTool: completeTool.resolve,
+    finish: finish.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
+};
+
 const mockInitialState = (
   state: Record<string, unknown>,
   modelResults: string[] = ["gpt-5.1"],
@@ -675,9 +741,7 @@ describe("App", () => {
     await user.type(composer, "Read the notes");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByLabelText("Work steps")).toHaveTextContent(
-      "Reading notes.txt",
-    );
+    expect(await screen.findByText("Reading notes.txt")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
     await expectDocumentText("The notes are ready.");
   });
@@ -1160,98 +1224,19 @@ describe("App", () => {
     );
   });
 
-  it("shows separators between Workspace turns", async () => {
-    mockInitialState({
-      messages: [
-        {
-          author: "user",
-          content: "First request",
-          id: "message-1",
-        },
-        {
-          author: "assistant",
-          content: "First reply",
-          id: "message-2",
-        },
-        {
-          author: "user",
-          content: "Second request",
-          id: "message-3",
-        },
-        {
-          author: "assistant",
-          content: "Second reply",
-          id: "message-4",
-        },
-      ],
-      providers: [],
-      settings: {
-        selected_model: "",
-        selected_provider_id: "",
-      },
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("Second request")).toBeInTheDocument();
-    expect(screen.getAllByTestId("turn-separator")).toHaveLength(1);
-  });
-
-  it("does not show a separator above the first Workspace turn", async () => {
-    mockInitialState({
-      messages: [
-        {
-          author: "user",
-          content: "Only request",
-          id: "message-1",
-        },
-        {
-          author: "assistant",
-          content: "Only reply",
-          id: "message-2",
-        },
-      ],
-      providers: [],
-      settings: {
-        selected_model: "",
-        selected_provider_id: "",
-      },
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("Only request")).toBeInTheDocument();
-    expect(screen.queryByTestId("turn-separator")).not.toBeInTheDocument();
-  });
-
-  it("keeps the turn separator stable while a reply streams", async () => {
+  it("shows a tool step as soon as the assistant starts it", async () => {
     const user = userEvent.setup();
-    const assistantStream = controlledAssistantStreamResponse(
-      ["Second reply", " is ready."],
-      "Second reply is ready.",
+    const assistantStream = controlledToolTimelineResponse(
+      { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+      "The notes are ready.",
     );
-    const state = {
-      ...selectedProviderState(),
-      messages: [
-        {
-          author: "user",
-          content: "First request",
-          id: "message-1",
-        },
-        {
-          author: "assistant",
-          content: "First reply",
-          id: "message-2",
-        },
-      ],
-    };
-    mockInitialState(state);
+    mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
       if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantStream.response;
       }
       if (input === "/api/state") {
-        return new Response(JSON.stringify(state), {
+        return new Response(JSON.stringify(selectedProviderState()), {
           headers: { "Content-Type": "application/json" },
           status: 200,
         });
@@ -1272,16 +1257,205 @@ describe("App", () => {
     const composer = await screen.findByRole("textbox", {
       name: "Message Flowent",
     });
-    await user.type(composer, "Second request");
+    await user.type(composer, "Read the notes");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await expectDocumentText("Second reply");
-    expect(screen.getAllByTestId("turn-separator")).toHaveLength(1);
+    expect(await screen.findByText("Reading notes.txt")).toBeInTheDocument();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("The notes are ready.");
+  });
 
+  it("updates the running tool step when the tool completes", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTimelineResponse(
+      { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+      "The notes are ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await screen.findByText("Reading notes.txt");
+    assistantStream.completeTool();
+
+    expect(await screen.findByText("Done")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("The notes are ready.");
+  });
+
+  it("shows streamed text after a tool step as the next assistant output item", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTimelineResponse(
+      { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+      "The notes are ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolStep = await screen.findByText("Reading notes.txt");
+    assistantStream.completeTool();
+    await screen.findByText("Done");
     assistantStream.finish();
+    const reply = await screen.findByText("The notes are ready.");
 
-    await expectDocumentText("Second reply is ready.");
-    expect(screen.getAllByTestId("turn-separator")).toHaveLength(1);
+    expect(
+      toolStep.compareDocumentPosition(reply) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getAllByTestId("assistant-output-separator")).toHaveLength(1);
+  });
+
+  it("separates multiple persisted assistant output items", async () => {
+    mockInitialState({
+      messages: [
+        {
+          author: "assistant",
+          content: "The notes are ready.",
+          id: "message-1",
+          tools: [
+            {
+              id: "tool-1",
+              name: "list_files",
+              status: "success",
+              title: "Listed /project/flowent",
+            },
+            {
+              id: "tool-2",
+              name: "read_file",
+              status: "success",
+              title: "Read README.md",
+            },
+          ],
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Read README.md")).toBeInTheDocument();
+    expect(screen.getAllByTestId("assistant-output-separator")).toHaveLength(2);
+  });
+
+  it("loads persisted assistant tools before the final text", async () => {
+    mockInitialState({
+      messages: [
+        {
+          author: "assistant",
+          content: "The notes are ready.",
+          id: "message-1",
+          tools: [
+            {
+              id: "tool-1",
+              name: "list_files",
+              status: "success",
+              title: "Listed /project/flowent",
+            },
+            {
+              id: "tool-2",
+              name: "read_file",
+              status: "success",
+              title: "Read README.md",
+            },
+          ],
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    const listed = await screen.findByText("Listed /project/flowent");
+    const read = screen.getByText("Read README.md");
+    const reply = screen.getByText("The notes are ready.");
+
+    expect(
+      listed.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      read.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("does not add assistant output separators for a reply without tools", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "The plan is ready.",
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("The plan is ready.");
+    expect(
+      screen.queryByTestId("assistant-output-separator"),
+    ).not.toBeInTheDocument();
   });
 
   it("loads persisted Workspace messages when the app starts", async () => {

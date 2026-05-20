@@ -12,7 +12,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
-import type { Message, ToolItem } from "@/components/flowent/types";
+import type {
+  AssistantOutputItem,
+  Message,
+  ToolItem,
+} from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceView({
@@ -107,17 +111,6 @@ function MessageList({
       },
     ];
   }, [isResponding, messages]);
-  const messageItems = useMemo(
-    () =>
-      displayMessages.map((message, index) => ({
-        message,
-        showTurnSeparator:
-          index > 0 &&
-          message.author === "user" &&
-          displayMessages[index - 1]?.author === "assistant",
-      })),
-    [displayMessages],
-  );
   const streamingMessageId =
     isResponding && messages.at(-1)?.author === "assistant"
       ? messages.at(-1)?.id
@@ -131,7 +124,7 @@ function MessageList({
       block: "end",
       behavior: "smooth",
     });
-  }, [messageItems]);
+  }, [displayMessages]);
 
   const updateFollowState = () => {
     const list = listRef.current;
@@ -161,38 +154,26 @@ function MessageList({
           </h1>
         </div>
       ) : null}
-      {messageItems.map(({ message, showTurnSeparator }) => (
-        <Fragment key={message.id}>
-          {showTurnSeparator ? <TurnSeparator /> : null}
-          <MessageRow
-            isStreaming={
-              isResponding &&
-              message.id === streamingMessageId &&
+      {displayMessages.map((message) => (
+        <MessageRow
+          key={message.id}
+          isStreaming={
+            isResponding &&
+            message.id === streamingMessageId &&
+            message.author === "assistant" &&
+            message.content.length > 0
+          }
+          isPending={
+            message.id === "assistant-pending" ||
+            (isResponding &&
               message.author === "assistant" &&
-              message.content.length > 0
-            }
-            isPending={
-              message.id === "assistant-pending" ||
-              (isResponding &&
-                message.author === "assistant" &&
-                message.content.length === 0)
-            }
-            message={message}
-          />
-        </Fragment>
+              message.content.length === 0)
+          }
+          message={message}
+        />
       ))}
       <div aria-hidden="true" ref={scrollMarkerRef} />
     </div>
-  );
-}
-
-function TurnSeparator() {
-  return (
-    <div
-      aria-hidden="true"
-      className="mx-auto my-4 h-px w-full max-w-[640px] bg-white/10"
-      data-testid="turn-separator"
-    />
   );
 }
 
@@ -205,6 +186,10 @@ function MessageRow({
   isStreaming: boolean;
   message: Message;
 }) {
+  const assistantItems =
+    message.author === "assistant" ? assistantOutputItems(message) : [];
+  const isWaiting = isPending && assistantItems.length === 0;
+
   return (
     <article
       className={cn(
@@ -220,10 +205,11 @@ function MessageRow({
             : "max-w-full",
         )}
       >
-        {isPending ? (
+        {isWaiting ? (
           <AssistantWaitingIndicator />
         ) : (
           <AssistantMessageContent
+            assistantItems={assistantItems}
             isStreaming={isStreaming}
             message={message}
           />
@@ -233,43 +219,97 @@ function MessageRow({
   );
 }
 
+function assistantOutputItems(message: Message): AssistantOutputItem[] {
+  if (message.items?.length) {
+    return message.items;
+  }
+
+  const toolItems: AssistantOutputItem[] = (message.tools ?? []).map(
+    (tool) => ({
+      id: `tool-${tool.id}`,
+      tool,
+      type: "tool",
+    }),
+  );
+
+  if (message.content) {
+    return [
+      ...toolItems,
+      {
+        content: message.content,
+        id: `${message.id}-content`,
+        type: "text",
+      },
+    ];
+  }
+
+  return toolItems;
+}
+
 function AssistantMessageContent({
+  assistantItems,
   isStreaming,
   message,
 }: {
+  assistantItems: AssistantOutputItem[];
   isStreaming: boolean;
   message: Message;
 }) {
+  if (message.author === "assistant") {
+    return (
+      <div className="flowent-markdown-message min-w-0 break-words">
+        <AssistantOutputTimeline
+          isStreaming={isStreaming}
+          items={assistantItems}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flowent-markdown-message min-w-0 break-words">
-      {message.author === "assistant" ? (
-        <>
-          <ToolProcessList tools={message.tools ?? []} />
-          {message.content ? (
-            <MarkdownMessage
-              content={message.content}
-              isStreaming={isStreaming}
-            />
-          ) : null}
-        </>
-      ) : (
-        <p className="m-0 whitespace-pre-wrap break-words">{message.content}</p>
-      )}
+      <p className="m-0 whitespace-pre-wrap break-words">{message.content}</p>
     </div>
   );
 }
 
-function ToolProcessList({ tools }: { tools: ToolItem[] }) {
-  if (tools.length === 0) {
-    return null;
-  }
+function AssistantOutputTimeline({
+  isStreaming,
+  items,
+}: {
+  isStreaming: boolean;
+  items: AssistantOutputItem[];
+}) {
+  const lastTextItemId = [...items]
+    .reverse()
+    .find((item) => item.type === "text")?.id;
 
   return (
-    <div className="mb-3 flex flex-col gap-1.5" aria-label="Work steps">
-      {tools.map((tool) => (
-        <ToolProcessItem key={tool.id} tool={tool} />
+    <div className="flex min-w-0 flex-col" aria-label="Assistant response">
+      {items.map((item, index) => (
+        <Fragment key={item.id}>
+          {index > 0 ? <AssistantOutputSeparator /> : null}
+          {item.type === "tool" ? (
+            <ToolProcessItem tool={item.tool} />
+          ) : (
+            <MarkdownMessage
+              content={item.content}
+              isStreaming={isStreaming && item.id === lastTextItemId}
+            />
+          )}
+        </Fragment>
       ))}
     </div>
+  );
+}
+
+function AssistantOutputSeparator() {
+  return (
+    <div
+      aria-hidden="true"
+      className="my-3 h-px w-full bg-white/10"
+      data-testid="assistant-output-separator"
+    />
   );
 }
 

@@ -9,6 +9,7 @@ import { ProvidersView } from "@/components/flowent/providers-view";
 import { SettingsView } from "@/components/flowent/settings-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
 import type {
+  AssistantOutputItem,
   Message,
   Provider,
   ToolItem,
@@ -415,6 +416,9 @@ function App() {
       let assistantMessage: Message | null = null;
       let assistantContent = "";
       let assistantId = "";
+      let assistantTextItemId = "";
+      let assistantTextItemIndex = 0;
+      let assistantItems: AssistantOutputItem[] = [];
       let assistantTools: ToolItem[] = [];
       const isCurrentResponse = () => responseRunRef.current === responseRun;
       const updateAssistantMessage = () => {
@@ -425,10 +429,38 @@ function App() {
           author: "assistant",
           content: assistantContent,
           id: assistantId,
+          items: assistantItems,
           tools: assistantTools,
         };
         setMessages([...nextMessages, assistantMessage]);
       };
+      const appendAssistantText = (content: string) => {
+        if (!assistantTextItemId) {
+          assistantTextItemIndex += 1;
+          assistantTextItemId = `${assistantId}-text-${assistantTextItemIndex}`;
+          assistantItems = [
+            ...assistantItems,
+            {
+              content: "",
+              id: assistantTextItemId,
+              type: "text",
+            },
+          ];
+        }
+
+        assistantContent += content;
+        assistantItems = assistantItems.map((item) =>
+          item.type === "text" && item.id === assistantTextItemId
+            ? { ...item, content: item.content + content }
+            : item,
+        );
+        updateAssistantMessage();
+      };
+      const assistantItemsText = () =>
+        assistantItems
+          .filter((item) => item.type === "text")
+          .map((item) => item.content)
+          .join("");
       await requestWorkspaceResponse(
         userContent,
         {
@@ -436,16 +468,31 @@ function App() {
             if (!isCurrentResponse()) {
               return;
             }
-            assistantContent += content;
-            updateAssistantMessage();
+            appendAssistantText(content);
           },
           onDone: (message) => {
             if (!isCurrentResponse()) {
               return;
             }
-            assistantMessage = { ...message, tools: assistantTools };
-            assistantContent = message.content;
             assistantId = message.id;
+            assistantContent = message.content;
+            const streamedText = assistantItemsText();
+            if (message.content && streamedText !== message.content) {
+              assistantTextItemIndex += 1;
+              assistantItems = [
+                ...assistantItems,
+                {
+                  content: message.content.slice(streamedText.length),
+                  id: `${message.id}-text-${assistantTextItemIndex}`,
+                  type: "text",
+                },
+              ];
+            }
+            assistantMessage = {
+              ...message,
+              items: assistantItems,
+              tools: assistantTools,
+            };
             setMessages([...nextMessages, assistantMessage]);
           },
           onStart: (id) => {
@@ -459,10 +506,16 @@ function App() {
             if (!isCurrentResponse()) {
               return;
             }
+            assistantTextItemId = "";
             assistantTools = assistantTools.map((currentTool) =>
               currentTool.id === tool.id
                 ? { ...currentTool, ...tool }
                 : currentTool,
+            );
+            assistantItems = assistantItems.map((item) =>
+              item.type === "tool" && item.tool.id === tool.id
+                ? { ...item, tool: { ...item.tool, ...tool } }
+                : item,
             );
             updateAssistantMessage();
           },
@@ -470,7 +523,16 @@ function App() {
             if (!isCurrentResponse()) {
               return;
             }
+            assistantTextItemId = "";
             assistantTools = [...assistantTools, tool];
+            assistantItems = [
+              ...assistantItems,
+              {
+                id: `tool-${tool.id}`,
+                tool,
+                type: "tool",
+              },
+            ];
             updateAssistantMessage();
           },
         },
