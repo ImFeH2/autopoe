@@ -16,7 +16,6 @@ import {
   dataRowClassName,
   dataRowLabelClassName,
   emptyStateClassName,
-  eyebrowClassName,
   fieldGroupClassName,
   fieldInputClassName,
   fieldLabelClassName,
@@ -68,7 +67,6 @@ export function ProvidersView({
         <ProviderDetails
           activeProvider={activeProvider}
           fetchError={fetchError}
-          isCreatingProvider={isCreatingProvider}
           isFetchingModels={isFetchingModels}
           onFetchModels={onFetchModels}
           onSaveProvider={onSaveProvider}
@@ -145,7 +143,6 @@ function ProviderSidebar({
 function ProviderDetails({
   activeProvider,
   fetchError,
-  isCreatingProvider,
   isFetchingModels,
   onFetchModels,
   onSaveProvider,
@@ -153,7 +150,6 @@ function ProviderDetails({
 }: {
   activeProvider: Provider;
   fetchError: string;
-  isCreatingProvider: boolean;
   isFetchingModels: boolean;
   onFetchModels: () => void;
   onSaveProvider: () => void;
@@ -168,17 +164,6 @@ function ProviderDetails({
         onSaveProvider();
       }}
     >
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <p className={eyebrowClassName}>
-            {isCreatingProvider ? "New" : "Provider"}
-          </p>
-          <h2 className="mt-2 mb-0 text-2xl font-semibold leading-none text-white">
-            {isCreatingProvider ? "New provider" : activeProvider.name}
-          </h2>
-        </div>
-      </div>
-
       <section className="grid gap-3">
         <h3 className="text-base font-semibold text-white">Details</h3>
         <div className={dashedPanelClassName}>
