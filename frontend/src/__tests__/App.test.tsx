@@ -288,6 +288,91 @@ const controlledToolTimelineResponse = (
   };
 };
 
+const controlledToolTextStreamResponse = (
+  tool: {
+    id: string;
+    name: string;
+    title: string;
+  },
+  firstChunk: string,
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const completeTool = deferred();
+  const startText = deferred();
+  const finish = deferred();
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_start\ndata: ${JSON.stringify({
+            tool: { ...tool, status: "running" },
+          })}\n\n`,
+        ),
+      );
+      await completeTool.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_done\ndata: ${JSON.stringify({
+            content: "tool output",
+            id: tool.id,
+            status: "success",
+            title: tool.title,
+          })}\n\n`,
+        ),
+      );
+      await startText.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 2 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content: firstChunk })}\n\n`,
+        ),
+      );
+      await finish.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content: content.slice(firstChunk.length) })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  return {
+    completeTool: completeTool.resolve,
+    finish: finish.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+    startText: startText.resolve,
+  };
+};
+
 const assistantToolBatchStreamResponse = (
   groups: Array<
     Array<{
@@ -1422,6 +1507,143 @@ describe("App", () => {
 
     expect(await screen.findByText("Done")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("The notes are ready.");
+  });
+
+  it("keeps the thinking indicator visible while a tool is running", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTimelineResponse(
+      { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+      "The notes are ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Reading notes.txt")).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: "Thinking" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("response-cursor")).not.toBeInTheDocument();
+  });
+
+  it("keeps the thinking indicator visible while waiting after a tool completes", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTimelineResponse(
+      { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+      "The notes are ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await screen.findByText("Reading notes.txt");
+    assistantStream.completeTool();
+
+    expect(await screen.findByText("Done")).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: "Thinking" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("response-cursor")).not.toBeInTheDocument();
+  });
+
+  it("replaces the thinking indicator with the streaming cursor when text starts", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTextStreamResponse(
+      { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+      "The notes",
+      "The notes are ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await screen.findByText("Reading notes.txt");
+    assistantStream.completeTool();
+    await screen.findByText("Done");
+    assistantStream.startText();
+
+    expect(await screen.findByTestId("response-cursor")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Thinking" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows streamed text after a tool step as the next assistant output item", async () => {

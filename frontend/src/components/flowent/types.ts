@@ -54,6 +54,7 @@ export type Message = {
   content: string;
   groups?: AssistantOutputGroup[];
   id: string;
+  isStreamingText?: boolean;
   items?: AssistantOutputItem[];
   tools?: ToolItem[];
 };

@@ -430,6 +430,7 @@ function App() {
       let assistantTextItemId = "";
       let assistantTextItemIndex = 0;
       let assistantGroups: AssistantOutputGroup[] = [];
+      let assistantIsStreamingText = false;
       let assistantTools: ToolItem[] = [];
       const isCurrentResponse = () => responseRunRef.current === responseRun;
       const updateAssistantMessage = () => {
@@ -442,6 +443,7 @@ function App() {
           id: assistantId,
           groups: assistantGroups,
           tools: assistantTools,
+          isStreamingText: assistantIsStreamingText,
         };
         setMessages([...nextMessages, assistantMessage]);
       };
@@ -451,6 +453,7 @@ function App() {
           return;
         }
         assistantTextItemId = "";
+        assistantIsStreamingText = false;
         assistantGroups = [...assistantGroups, { id: groupId, items: [] }];
       };
       const ensureAssistantGroup = () => {
@@ -491,6 +494,7 @@ function App() {
               : item,
           ),
         );
+        assistantIsStreamingText = true;
         updateAssistantMessage();
       };
       const assistantGroupsText = () =>
@@ -530,6 +534,7 @@ function App() {
               ...message,
               groups: assistantGroups,
               tools: assistantTools,
+              isStreamingText: false,
             };
             setMessages([...nextMessages, assistantMessage]);
           },
@@ -552,6 +557,7 @@ function App() {
               return;
             }
             assistantTextItemId = "";
+            assistantIsStreamingText = false;
             assistantTools = assistantTools.map((currentTool) =>
               currentTool.id === tool.id
                 ? { ...currentTool, ...tool }
@@ -572,6 +578,7 @@ function App() {
               return;
             }
             assistantTextItemId = "";
+            assistantIsStreamingText = false;
             assistantTools = [...assistantTools, tool];
             updateCurrentAssistantGroupItems((items) => [
               ...items,

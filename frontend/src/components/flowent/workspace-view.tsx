@@ -162,13 +162,14 @@ function MessageList({
             isResponding &&
             message.id === streamingMessageId &&
             message.author === "assistant" &&
-            message.content.length > 0
+            message.isStreamingText === true
           }
           isPending={
             message.id === "assistant-pending" ||
             (isResponding &&
               message.author === "assistant" &&
-              message.content.length === 0)
+              message.id === streamingMessageId &&
+              message.isStreamingText !== true)
           }
           message={message}
         />
@@ -190,6 +191,8 @@ function MessageRow({
   const assistantGroups =
     message.author === "assistant" ? assistantOutputGroups(message) : [];
   const isWaiting = isPending && assistantGroups.length === 0;
+  const shouldShowWaitingAfterOutput =
+    isPending && assistantGroups.length > 0 && !isStreaming;
 
   return (
     <article
@@ -213,6 +216,7 @@ function MessageRow({
             assistantGroups={assistantGroups}
             isStreaming={isStreaming}
             message={message}
+            showWaitingAfterOutput={shouldShowWaitingAfterOutput}
           />
         )}
       </div>
@@ -270,10 +274,12 @@ function AssistantMessageContent({
   assistantGroups,
   isStreaming,
   message,
+  showWaitingAfterOutput,
 }: {
   assistantGroups: AssistantOutputGroup[];
   isStreaming: boolean;
   message: Message;
+  showWaitingAfterOutput: boolean;
 }) {
   if (message.author === "assistant") {
     return (
@@ -281,6 +287,7 @@ function AssistantMessageContent({
         <AssistantOutputTimeline
           groups={assistantGroups}
           isStreaming={isStreaming}
+          showWaitingAfterOutput={showWaitingAfterOutput}
         />
       </div>
     );
@@ -296,9 +303,11 @@ function AssistantMessageContent({
 function AssistantOutputTimeline({
   groups,
   isStreaming,
+  showWaitingAfterOutput,
 }: {
   groups: AssistantOutputGroup[];
   isStreaming: boolean;
+  showWaitingAfterOutput: boolean;
 }) {
   const lastTextItemId = groups
     .flatMap((group) => group.items)
@@ -325,6 +334,11 @@ function AssistantOutputTimeline({
           </div>
         </Fragment>
       ))}
+      {showWaitingAfterOutput ? (
+        <div className="mt-3">
+          <AssistantWaitingIndicator />
+        </div>
+      ) : null}
     </div>
   );
 }
