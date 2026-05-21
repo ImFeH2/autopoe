@@ -102,7 +102,7 @@ jobs:
           sdist="backend/dist/flowent-${python_version}.tar.gz"
           test -f "$wheel"
           test -f "$sdist"
-          python -c "import sys, zipfile; names = set(zipfile.ZipFile(sys.argv[1]).namelist()); assert 'flowent/static/index.html' in names; assert 'flowent/static/favicon.svg' in names" "$wheel"
+          python -c "import sys, zipfile; names = set(zipfile.ZipFile(sys.argv[1]).namelist()); assert 'flowent/static/index.html' in names; assert 'flowent/static/flowent.png' in names" "$wheel"
 
       - name: Upload Python artifacts
         uses: actions/upload-artifact@v4
