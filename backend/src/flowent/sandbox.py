@@ -30,8 +30,25 @@ class SandboxError(RuntimeError):
     pass
 
 
+SANDBOX_INSTALL_HINT = (
+    "Install bubblewrap and try again. Debian/Ubuntu: "
+    "sudo apt-get install bubblewrap. Fedora: sudo dnf install bubblewrap. "
+    "Arch: sudo pacman -S bubblewrap."
+)
+
 SCMP_ACT_ALLOW = 0x7FFF0000
 SCMP_ACT_ERRNO = 0x00050000
+
+
+def sandbox_binary() -> str | None:
+    return shutil.which("bwrap") or shutil.which("bubblewrap")
+
+
+def ensure_sandbox_available() -> str:
+    bwrap = sandbox_binary()
+    if not bwrap:
+        raise SandboxError(f"Sandbox is not available. {SANDBOX_INSTALL_HINT}")
+    return bwrap
 
 
 def path_is_within(path: Path, roots: list[Path]) -> bool:
@@ -128,9 +145,7 @@ class SandboxRunner:
     def build_command(
         self, command: list[str], *, include_seccomp: bool = True
     ) -> SandboxCommand:
-        bwrap = shutil.which("bwrap") or shutil.which("bubblewrap")
-        if not bwrap:
-            raise SandboxError("Sandbox is not available.")
+        bwrap = ensure_sandbox_available()
 
         args = [
             bwrap,

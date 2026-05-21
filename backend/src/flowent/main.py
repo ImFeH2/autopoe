@@ -22,6 +22,7 @@ from flowent.llm import (
     list_provider_models,
 )
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
+from flowent.sandbox import ensure_sandbox_available
 from flowent.storage import (
     StateStore,
     StoredMessage,
@@ -186,6 +187,7 @@ def create_app(
     chat_completion: CompletionCallable | None = None,
 ) -> FastAPI:
     ensure_logging_configured()
+    ensure_sandbox_available()
 
     app = FastAPI(title="Flowent")
     store = StateStore()

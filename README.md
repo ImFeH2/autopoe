@@ -17,6 +17,13 @@ A workflow orchestration platform for multi-agent collaboration.
 
 ## Install
 
+Flowent requires Bubblewrap for local tool isolation. Install the system package
+first:
+
+```bash
+sudo apt-get install bubblewrap
+```
+
 Install the CLI globally:
 
 ```bash
@@ -33,6 +40,12 @@ Start the server:
 
 ```bash
 flowent
+```
+
+Check system requirements:
+
+```bash
+flowent doctor
 ```
 
 ## Docker Compose
@@ -59,6 +72,7 @@ docker compose up
 Install dependencies and start the local development server:
 
 ```bash
+sudo apt-get install bubblewrap ripgrep
 pnpm install
 uv sync --project backend
 pnpm dev

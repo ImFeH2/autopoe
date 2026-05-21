@@ -14,6 +14,7 @@ def main(argv: list[str] | None = None) -> None:
     subparsers = parser.add_subparsers(dest="command")
     apply_patch_parser = subparsers.add_parser("apply-patch", help=argparse.SUPPRESS)
     apply_patch_parser.add_argument("--cwd", required=True)
+    subparsers.add_parser("doctor", help="Check system requirements")
     parser.add_argument(
         "--host",
         "--hostname",
@@ -46,6 +47,16 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(
             run_apply_patch_cli(cwd=Path(args.cwd), patch=sys.stdin.read())
         )
+
+    if args.command == "doctor":
+        from flowent.sandbox import SANDBOX_INSTALL_HINT, sandbox_binary
+
+        bwrap = sandbox_binary()
+        if bwrap:
+            print(f"Sandbox: {bwrap}")
+            raise SystemExit(0)
+        print(f"Sandbox: missing. {SANDBOX_INSTALL_HINT}", file=sys.stderr)
+        raise SystemExit(1)
 
     if args.version:
         try:
