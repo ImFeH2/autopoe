@@ -5,6 +5,7 @@ from flowent.llm import (
     ProviderConnection,
     ProviderFormat,
     build_litellm_request,
+    chunk_delta_reasoning,
     complete_chat,
     stream_chat,
 )
@@ -43,6 +44,30 @@ def test_build_litellm_request_maps_provider_connection_to_completion_args() -> 
         ],
         "model": "anthropic/claude-sonnet-4-5",
     }
+
+
+def test_chunk_delta_reasoning_reads_litellm_reasoning_fields() -> None:
+    assert (
+        chunk_delta_reasoning(
+            {"choices": [{"delta": {"reasoning_content": "Checking files."}}]}
+        )
+        == "Checking files."
+    )
+    assert (
+        chunk_delta_reasoning(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "thinking_blocks": [{"thinking": "Read files."}],
+                            "reasoning_items": [{"summary": "Summarize."}],
+                        }
+                    }
+                ]
+            }
+        )
+        == "Read files.Summarize."
+    )
 
 
 @pytest.mark.anyio

@@ -62,6 +62,12 @@ type WorkspaceStreamEvent =
     }
   | {
       data: {
+        content: string;
+      };
+      event: "thinking_delta";
+    }
+  | {
+      data: {
         message: ApiMessage;
       };
       event: "done";
@@ -94,6 +100,7 @@ type WorkspaceStreamHandlers = {
   onDone: (message: ApiMessage) => void;
   onOutputStart: (index: number) => void;
   onStart: (id: string) => void;
+  onThinkingDelta: (content: string) => void;
   onToolDone: (
     tool: Pick<ToolItem, "id" | "status"> & Partial<ToolItem>,
   ) => void;
@@ -357,6 +364,9 @@ function App() {
         if (streamEvent.event === "delta") {
           handlers.onDelta(streamEvent.data.content);
         }
+        if (streamEvent.event === "thinking_delta") {
+          handlers.onThinkingDelta(streamEvent.data.content);
+        }
         if (streamEvent.event === "done") {
           handlers.onDone(streamEvent.data.message);
           return;
@@ -491,9 +501,13 @@ function App() {
       let assistantMessage: Message | null = null;
       let assistantContent = "";
       let assistantId = "";
+      let assistantThinking = "";
+      let assistantThinkingItemId = "";
+      let assistantThinkingItemIndex = 0;
       let assistantTextItemId = "";
       let assistantTextItemIndex = 0;
       let assistantGroups: AssistantOutputGroup[] = [];
+      let assistantIsStreamingThinking = false;
       let assistantIsStreamingText = false;
       let assistantTools: ToolItem[] = [];
       const isCurrentResponse = () => responseRunRef.current === responseRun;
@@ -506,6 +520,8 @@ function App() {
           content: assistantContent,
           id: assistantId,
           groups: assistantGroups,
+          thinking: assistantThinking,
+          isStreamingThinking: assistantIsStreamingThinking,
           tools: assistantTools,
           isStreamingText: assistantIsStreamingText,
         };
@@ -516,6 +532,7 @@ function App() {
         if (assistantGroups.at(-1)?.id === groupId) {
           return;
         }
+        finishAssistantThinking();
         assistantTextItemId = "";
         assistantIsStreamingText = false;
         assistantGroups = [...assistantGroups, { id: groupId, items: [] }];
@@ -536,7 +553,50 @@ function App() {
             : group,
         );
       };
+      const finishAssistantThinking = () => {
+        if (!assistantIsStreamingThinking) {
+          return;
+        }
+        assistantIsStreamingThinking = false;
+        assistantGroups = assistantGroups.map((group) => ({
+          ...group,
+          items: group.items.map((item) =>
+            item.type === "thinking" ? { ...item, isStreaming: false } : item,
+          ),
+        }));
+      };
+      const appendAssistantThinking = (content: string) => {
+        if (!assistantThinkingItemId) {
+          assistantThinkingItemIndex += 1;
+          assistantThinkingItemId = `${assistantId}-thinking-${assistantThinkingItemIndex}`;
+          updateCurrentAssistantGroupItems((items) => [
+            ...items,
+            {
+              content: "",
+              id: assistantThinkingItemId,
+              isStreaming: true,
+              type: "thinking",
+            },
+          ]);
+        }
+
+        assistantThinking += content;
+        assistantIsStreamingThinking = true;
+        updateCurrentAssistantGroupItems((items) =>
+          items.map((item) =>
+            item.type === "thinking" && item.id === assistantThinkingItemId
+              ? {
+                  ...item,
+                  content: item.content + content,
+                  isStreaming: true,
+                }
+              : item,
+          ),
+        );
+        updateAssistantMessage();
+      };
       const appendAssistantText = (content: string) => {
+        finishAssistantThinking();
         if (!assistantTextItemId) {
           assistantTextItemIndex += 1;
           assistantTextItemId = `${assistantId}-text-${assistantTextItemIndex}`;
@@ -561,6 +621,12 @@ function App() {
         assistantIsStreamingText = true;
         updateAssistantMessage();
       };
+      const assistantGroupsThinking = () =>
+        assistantGroups
+          .flatMap((group) => group.items)
+          .filter((item) => item.type === "thinking")
+          .map((item) => item.content)
+          .join("");
       const assistantGroupsText = () =>
         assistantGroups
           .flatMap((group) => group.items)
@@ -582,6 +648,27 @@ function App() {
             }
             assistantId = message.id;
             assistantContent = message.content;
+            const messageThinking = message.thinking ?? "";
+            assistantThinking = messageThinking || assistantThinking;
+            finishAssistantThinking();
+            const streamedThinking = assistantGroupsThinking();
+            if (messageThinking && streamedThinking !== messageThinking) {
+              const missingThinking = messageThinking.startsWith(
+                streamedThinking,
+              )
+                ? messageThinking.slice(streamedThinking.length)
+                : messageThinking;
+              assistantThinkingItemIndex += 1;
+              updateCurrentAssistantGroupItems((items) => [
+                ...items,
+                {
+                  content: missingThinking,
+                  id: `${message.id}-thinking-${assistantThinkingItemIndex}`,
+                  isStreaming: false,
+                  type: "thinking",
+                },
+              ]);
+            }
             const streamedText = assistantGroupsText();
             if (message.content && streamedText !== message.content) {
               assistantTextItemIndex += 1;
@@ -597,7 +684,9 @@ function App() {
             assistantMessage = {
               ...message,
               groups: assistantGroups,
+              thinking: assistantThinking,
               tools: assistantTools,
+              isStreamingThinking: false,
               isStreamingText: false,
             };
             setMessages([...nextMessages, assistantMessage]);
@@ -616,10 +705,17 @@ function App() {
             createAssistantGroup(index);
             updateAssistantMessage();
           },
+          onThinkingDelta: (content) => {
+            if (!isCurrentResponse()) {
+              return;
+            }
+            appendAssistantThinking(content);
+          },
           onToolDone: (tool) => {
             if (!isCurrentResponse()) {
               return;
             }
+            finishAssistantThinking();
             assistantTextItemId = "";
             assistantIsStreamingText = false;
             assistantTools = assistantTools.map((currentTool) =>
@@ -641,6 +737,7 @@ function App() {
             if (!isCurrentResponse()) {
               return;
             }
+            finishAssistantThinking();
             assistantTextItemId = "";
             assistantIsStreamingText = false;
             assistantTools = [...assistantTools, tool];

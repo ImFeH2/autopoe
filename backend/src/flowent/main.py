@@ -333,6 +333,7 @@ def create_app(
                                     author="assistant",
                                     content=str(message.get("content") or ""),
                                     id=str(message.get("id") or uuid4()),
+                                    thinking=str(message.get("thinking") or ""),
                                     tools=list(assistant_tools.values()),
                                 )
                             )

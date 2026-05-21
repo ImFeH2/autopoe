@@ -36,6 +36,12 @@ export type AssistantOutputItem =
   | {
       content: string;
       id: string;
+      isStreaming?: boolean;
+      type: "thinking";
+    }
+  | {
+      content: string;
+      id: string;
       type: "text";
     }
   | {
@@ -54,8 +60,10 @@ export type Message = {
   content: string;
   groups?: AssistantOutputGroup[];
   id: string;
+  isStreamingThinking?: boolean;
   isStreamingText?: boolean;
   items?: AssistantOutputItem[];
+  thinking?: string;
   tools?: ToolItem[];
 };
 

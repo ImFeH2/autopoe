@@ -44,6 +44,7 @@ class StoredMessage(BaseModel):
     author: str
     content: str
     id: str
+    thinking: str = Field(default="", exclude_if=lambda value: value == "")
     tools: list[StoredToolItem] = Field(default_factory=list)
 
 
@@ -101,6 +102,7 @@ class StateStore:
                     author=row["author"],
                     content=row["content"],
                     id=row["id"],
+                    thinking=row["thinking"],
                     tools=[
                         StoredToolItem.model_validate(tool)
                         for tool in json.loads(row["tools"] or "[]")
@@ -108,7 +110,7 @@ class StateStore:
                 )
                 for row in connection.execute(
                     """
-                    SELECT id, author, content, tools
+                    SELECT id, author, content, tools, thinking
                     FROM messages
                     ORDER BY position, id
                     """
@@ -182,8 +184,8 @@ class StateStore:
             connection.execute("DELETE FROM messages")
             connection.executemany(
                 """
-                INSERT INTO messages (id, author, content, tools, position)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO messages (id, author, content, tools, thinking, position)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -196,6 +198,7 @@ class StateStore:
                                 for tool in message.tools
                             ]
                         ),
+                        message.thinking,
                         position,
                     )
                     for position, message in enumerate(messages)
@@ -299,4 +302,8 @@ class StateStore:
         if "tools" not in columns:
             connection.execute(
                 "ALTER TABLE messages ADD COLUMN tools TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "thinking" not in columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN thinking TEXT NOT NULL DEFAULT ''"
             )

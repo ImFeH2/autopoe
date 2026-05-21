@@ -13,6 +13,7 @@ from flowent.llm import (
     ProviderConnection,
     ToolCallDelta,
     chunk_delta_content,
+    chunk_delta_reasoning,
     chunk_delta_tool_calls,
     stream_chat_chunks,
 )
@@ -120,6 +121,7 @@ async def run_agent_stream(
     yield AgentStreamEvent(event="start", data={"id": assistant_id})
 
     final_content = ""
+    final_thinking = ""
 
     round_number = 0
     while True:
@@ -132,6 +134,18 @@ async def run_agent_stream(
         async for chunk in stream_chat_chunks(
             connection, conversation, completion=completion, tools=tool_specs()
         ):
+            reasoning = chunk_delta_reasoning(chunk)
+            if reasoning:
+                final_thinking += reasoning
+                logger.log(
+                    TRACE_LEVEL,
+                    "Agent stream reasoning id=%s content=%r",
+                    assistant_id,
+                    reasoning,
+                )
+                yield AgentStreamEvent(
+                    event="thinking_delta", data={"content": reasoning}
+                )
             content = chunk_delta_content(chunk)
             if content:
                 round_content += content
@@ -172,6 +186,7 @@ async def run_agent_stream(
                         "author": "assistant",
                         "content": final_content,
                         "id": assistant_id,
+                        "thinking": final_thinking,
                     }
                 },
             )

@@ -71,6 +71,7 @@ def test_app_state_persists_settings_and_workspace_messages(
                     "author": "assistant",
                     "content": "Draft a launch checklist",
                     "id": "message-1",
+                    "thinking": "Read the request.",
                     "tools": [
                         {
                             "id": "tool-1",
@@ -99,6 +100,7 @@ def test_app_state_persists_settings_and_workspace_messages(
             "author": "assistant",
             "content": "Draft a launch checklist",
             "id": "message-1",
+            "thinking": "Read the request.",
             "tools": [
                 {
                     "arguments": None,

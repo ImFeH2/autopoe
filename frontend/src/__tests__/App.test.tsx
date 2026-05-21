@@ -55,6 +55,59 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+const controlledThinkingStreamResponse = (
+  thinking: string,
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const finish = deferred();
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: thinking_delta\ndata: ${JSON.stringify({ content: thinking })}\n\n`,
+        ),
+      );
+      await finish.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+              thinking,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  return {
+    finish: finish.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
+};
+
 const controlledAssistantStreamResponse = (
   chunks: string[],
   content: string,
@@ -199,6 +252,76 @@ const assistantToolStreamResponse = (
               author: "assistant",
               content,
               id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
+const assistantThinkingToolStreamResponse = (
+  thinking: string,
+  tool: {
+    id: string;
+    name: string;
+    status?: "failed" | "running" | "success";
+    title: string;
+  },
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: thinking_delta\ndata: ${JSON.stringify({ content: thinking })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_start\ndata: ${JSON.stringify({
+            tool: { ...tool, status: "running" },
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_done\ndata: ${JSON.stringify({
+            content: "tool output",
+            id: tool.id,
+            status: tool.status ?? "success",
+            title: tool.title,
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+              thinking,
             },
           })}\n\n`,
         ),
@@ -544,6 +667,31 @@ const fetchWasCalledWith = (path: string, method: string) =>
   vi.mocked(window.fetch).mock.calls.some(([input, init]) => {
     return input === path && init?.method === method;
   });
+
+const mockSelectedProviderWorkspaceResponse = (response: Response) => {
+  mockInitialState(selectedProviderState());
+  vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+    if (input === "/api/workspace/respond" && init?.method === "POST") {
+      return response;
+    }
+    if (input === "/api/state") {
+      return new Response(JSON.stringify(selectedProviderState()), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    if (input === "/api/workspace/messages" && init?.method === "PUT") {
+      return new Response(init.body, {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    return new Response("{}", {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    });
+  });
+};
 
 describe("App", () => {
   afterEach(() => {
@@ -1690,6 +1838,92 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows streamed thought process content while the assistant is thinking", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledThinkingStreamResponse(
+      "Checking the workspace.",
+      "The answer is ready.",
+    );
+    mockSelectedProviderWorkspaceResponse(assistantStream.response);
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Inspect the workspace");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Thinking...")).toBeInTheDocument();
+    expect(screen.getByText("Checking the workspace.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("The answer is ready.");
+    assistantStream.finish();
+    expect(await screen.findByText("The answer is ready.")).toBeInTheDocument();
+  });
+
+  it("collapses completed thought process content until it is opened", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledThinkingStreamResponse(
+      "Checked the current files.",
+      "The answer is ready.",
+    );
+    mockSelectedProviderWorkspaceResponse(assistantStream.response);
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Inspect the workspace");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Thinking...");
+    assistantStream.finish();
+
+    const thoughtProcess = await screen.findByRole("button", {
+      name: "Thought Process",
+    });
+    expect(screen.getByText("The answer is ready.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("Checked the current files.");
+
+    await user.click(thoughtProcess);
+
+    expect(screen.getByText("Checked the current files.")).toBeInTheDocument();
+  });
+
+  it("keeps thought process, tools, and final text in the same assistant output group", async () => {
+    const user = userEvent.setup();
+    mockSelectedProviderWorkspaceResponse(
+      assistantThinkingToolStreamResponse(
+        "Checking files.",
+        { id: "tool-1", name: "list_files", title: "Listed /project/flowent" },
+        "The workspace is Flowent.",
+      ),
+    );
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Inspect the workspace");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const thoughtProcess = await screen.findByRole("button", {
+      name: "Thought Process",
+    });
+    const toolStep = screen.getByText("Listed /project/flowent");
+    const reply = screen.getByText("The workspace is Flowent.");
+
+    expect(
+      thoughtProcess.compareDocumentPosition(toolStep) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      toolStep.compareDocumentPosition(reply) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.queryByTestId("assistant-output-separator"),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows streamed text after a tool step as the next assistant output item", async () => {
     const user = userEvent.setup();
     const assistantStream = controlledToolTimelineResponse(
@@ -1791,6 +2025,38 @@ describe("App", () => {
     expect(
       screen.queryByTestId("assistant-output-separator"),
     ).not.toBeInTheDocument();
+  });
+
+  it("loads persisted assistant thought process collapsed until it is opened", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "assistant",
+          content: "The workspace is Flowent.",
+          id: "message-1",
+          thinking: "Read the saved context.",
+          tools: [],
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    const thoughtProcess = await screen.findByRole("button", {
+      name: "Thought Process",
+    });
+    expect(screen.getByText("The workspace is Flowent.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("Read the saved context.");
+
+    await user.click(thoughtProcess);
+
+    expect(screen.getByText("Read the saved context.")).toBeInTheDocument();
   });
 
   it("separates tool batches from different assistant output groups", async () => {

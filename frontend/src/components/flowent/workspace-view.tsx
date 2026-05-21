@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Check,
+  ChevronRight,
   Circle,
   Search,
   Terminal,
@@ -271,25 +272,45 @@ function assistantOutputGroups(message: Message): AssistantOutputGroup[] {
       type: "tool",
     }),
   );
+  const thinkingItem: AssistantOutputItem | null = message.thinking
+    ? {
+        content: message.thinking,
+        id: `${message.id}-thinking`,
+        isStreaming: message.isStreamingThinking,
+        type: "thinking",
+      }
+    : null;
   const groups: AssistantOutputGroup[] = [];
+  const processItems = [...(thinkingItem ? [thinkingItem] : []), ...toolItems];
 
   if (toolItems.length) {
     groups.push({
-      id: `${message.id}-tools`,
-      items: toolItems,
+      id: `${message.id}-process`,
+      items: processItems,
     });
   }
 
   if (message.content) {
-    groups.push({
+    const contentItem: AssistantOutputItem = {
+      content: message.content,
       id: `${message.id}-content`,
-      items: [
-        {
-          content: message.content,
-          id: `${message.id}-content`,
-          type: "text",
-        },
-      ],
+      type: "text",
+    };
+    if (toolItems.length) {
+      groups.push({
+        id: `${message.id}-content`,
+        items: [contentItem],
+      });
+    } else {
+      groups.push({
+        id: `${message.id}-content`,
+        items: [...processItems, contentItem],
+      });
+    }
+  } else if (processItems.length) {
+    groups.push({
+      id: `${message.id}-process`,
+      items: processItems,
     });
   }
 
@@ -349,6 +370,12 @@ function AssistantOutputTimeline({
             {group.items.map((item) =>
               item.type === "tool" ? (
                 <ToolProcessItem key={item.id} tool={item.tool} />
+              ) : item.type === "thinking" ? (
+                <ThinkingProcessItem
+                  key={item.id}
+                  content={item.content}
+                  isStreaming={item.isStreaming === true}
+                />
               ) : (
                 <MarkdownMessage
                   key={item.id}
@@ -376,6 +403,50 @@ function AssistantOutputSeparator() {
       className="my-3 h-px w-full bg-white/10"
       data-testid="assistant-output-separator"
     />
+  );
+}
+
+function ThinkingProcessItem({
+  content,
+  isStreaming,
+}: {
+  content: string;
+  isStreaming: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const isExpanded = isStreaming || isOpen;
+
+  return (
+    <div className="max-w-full rounded-lg border border-white/10 bg-input/30 text-sm leading-5 text-white">
+      {isStreaming ? (
+        <div className="flex h-8 items-center gap-2 px-2.5 text-white/75">
+          <Circle aria-hidden="true" className="size-3 animate-pulse" />
+          Thinking...
+        </div>
+      ) : (
+        <Button
+          aria-expanded={isExpanded}
+          className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2.5 text-sm text-white/75 shadow-none hover:bg-input/50 hover:text-white"
+          onClick={() => setIsOpen((current) => !current)}
+          type="button"
+          variant="ghost"
+        >
+          <ChevronRight
+            aria-hidden="true"
+            className={cn(
+              "size-3.5 transition-transform",
+              isExpanded ? "rotate-90" : "",
+            )}
+          />
+          Thought Process
+        </Button>
+      )}
+      {isExpanded ? (
+        <div className="whitespace-pre-wrap break-words px-2.5 pb-2 text-[13px] leading-5 text-white/60">
+          {content}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -188,6 +188,42 @@ def chunk_delta_content(chunk: Any) -> str:
     return content if isinstance(content, str) else ""
 
 
+def chunk_delta_reasoning(chunk: Any) -> str:
+    try:
+        choice = chunk.choices[0]
+        delta = choice.delta
+    except (AttributeError, IndexError, TypeError):
+        try:
+            delta = chunk["choices"][0]["delta"]
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+    content = value_at(delta, "reasoning_content", "")
+    if isinstance(content, str) and content:
+        return content
+
+    return reasoning_text_from_items(
+        [
+            *list(value_at(delta, "thinking_blocks", []) or []),
+            *list(value_at(delta, "reasoning_items", []) or []),
+        ]
+    )
+
+
+def reasoning_text_from_items(items: Sequence[Any]) -> str:
+    parts: list[str] = []
+    for item in items:
+        for key in ["thinking", "text", "content", "summary"]:
+            value = value_at(item, key, "")
+            if isinstance(value, str) and value:
+                parts.append(value)
+            elif isinstance(value, Sequence) and not isinstance(
+                value, str | bytes | bytearray
+            ):
+                parts.append(reasoning_text_from_items(value))
+    return "".join(parts)
+
+
 def chunk_delta_tool_calls(chunk: Any) -> list[ToolCallDelta]:
     try:
         choice = chunk.choices[0]

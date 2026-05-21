@@ -72,6 +72,10 @@ def text_chunk(content: str) -> dict[str, object]:
     return {"choices": [{"delta": {"content": content}}]}
 
 
+def thinking_chunk(content: str) -> dict[str, object]:
+    return {"choices": [{"delta": {"reasoning_content": content}}]}
+
+
 def test_workspace_response_streams_tool_process_and_final_text(
     tmp_path, monkeypatch
 ) -> None:
@@ -429,6 +433,46 @@ def test_agent_finishes_without_tools(tmp_path, monkeypatch) -> None:
     ]
     assert len(captured_requests) == 1
     assert events[-1]["data"]["message"]["content"] == "Direct answer."
+
+
+def test_agent_streams_and_persists_thinking(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield thinking_chunk("Checking context.")
+            yield thinking_chunk(" Preparing answer.")
+            yield text_chunk("Direct answer.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Answer directly."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert [event["event"] for event in events] == [
+        "start",
+        "output_start",
+        "thinking_delta",
+        "thinking_delta",
+        "delta",
+        "done",
+    ]
+    assert events[2]["data"] == {"content": "Checking context."}
+    assert events[-1]["data"]["message"]["thinking"] == (
+        "Checking context. Preparing answer."
+    )
+    state = client.get("/api/state").json()
+    assert state["messages"][-1]["thinking"] == ("Checking context. Preparing answer.")
 
 
 def test_tool_failure_is_reported_and_agent_continues(tmp_path, monkeypatch) -> None:
