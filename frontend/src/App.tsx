@@ -489,6 +489,14 @@ function App() {
     setResponseError(message);
   };
 
+  const stopResponse = () => {
+    responseAbortRef.current?.abort();
+    responseAbortRef.current = null;
+    responseRunRef.current += 1;
+    setResponseError("");
+    setIsResponding(false);
+  };
+
   const sendMessage = async () => {
     if (draft.length === 0 || isResponding) {
       return;
@@ -773,6 +781,13 @@ function App() {
       if (responseRunRef.current !== responseRun) {
         return;
       }
+      if (
+        error instanceof DOMException &&
+        error.name === "AbortError" &&
+        responseAbortController.signal.aborted
+      ) {
+        return;
+      }
       setResponseError(
         error instanceof Error ? error.message : "Message could not be sent.",
       );
@@ -824,6 +839,7 @@ function App() {
           onSendMessage={() => {
             void sendMessage();
           }}
+          onStopResponse={stopResponse}
         />
       </TabsContent>
       <TabsContent value="providers" className={viewPanelClassName}>

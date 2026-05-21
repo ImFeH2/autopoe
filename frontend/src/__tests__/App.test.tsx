@@ -162,6 +162,53 @@ const controlledAssistantStreamResponse = (
   };
 };
 
+const abortableAssistantStreamResponse = (
+  chunk: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  let isAborted = false;
+  const aborted = deferred();
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content: chunk })}\n\n`,
+        ),
+      );
+      await aborted.promise;
+      controller.close();
+    },
+  });
+
+  return {
+    aborted: aborted.promise,
+    wasAborted: () => isAborted,
+    response: (nextSignal?: AbortSignal) => {
+      nextSignal?.addEventListener(
+        "abort",
+        () => {
+          isAborted = true;
+          aborted.resolve();
+        },
+        { once: true },
+      );
+      return new Response(stream, {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    },
+  };
+};
+
 const assistantErrorStreamResponse = (
   message: string,
   firstChunk = "Partial response",
@@ -838,6 +885,236 @@ describe("App", () => {
 
     assistantStream.finish();
     await expectDocumentText("First step is ready.");
+  });
+
+  it("shows Stop in the composer while the assistant is responding", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledAssistantStreamResponse(
+      ["First step", " is ready."],
+      "First step is ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Send message" }),
+    ).not.toBeInTheDocument();
+
+    assistantStream.finish();
+    await expectDocumentText("First step is ready.");
+  });
+
+  it("aborts the current workspace response when Stop is clicked", async () => {
+    const user = userEvent.setup();
+    const assistantStream =
+      abortableAssistantStreamResponse("Partial response");
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response(init.signal as AbortSignal | undefined);
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Partial response");
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await expect(assistantStream.aborted).resolves.toBeUndefined();
+    expect(assistantStream.wasAborted()).toBe(true);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Stop" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the partial assistant response after Stop is clicked", async () => {
+    const user = userEvent.setup();
+    const assistantStream =
+      abortableAssistantStreamResponse("Partial response");
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response(init.signal as AbortSignal | undefined);
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Partial response");
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Stop" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Partial response")).toBeInTheDocument();
+  });
+
+  it("does not show a sending error after Stop is clicked", async () => {
+    const user = userEvent.setup();
+    const assistantStream =
+      abortableAssistantStreamResponse("Partial response");
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response(init.signal as AbortSignal | undefined);
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Partial response");
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Stop" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(document.body).not.toHaveTextContent("Message could not be sent.");
+  });
+
+  it("returns to Send after Stop and sends the next drafted message", async () => {
+    const user = userEvent.setup();
+    const firstStream = abortableAssistantStreamResponse("Partial response");
+    let replyCount = 0;
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        replyCount += 1;
+        if (replyCount === 1) {
+          return firstStream.response(init.signal as AbortSignal | undefined);
+        }
+        return assistantStreamResponse("Second answer.");
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Partial response");
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Send message" }),
+      ).toBeDisabled();
+    });
+    await user.type(composer, "Continue");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("Second answer.");
+    expect(replyCount).toBe(2);
   });
 
   it("keeps the streaming cursor at the end of the current paragraph", async () => {

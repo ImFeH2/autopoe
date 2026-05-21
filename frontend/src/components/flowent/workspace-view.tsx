@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Circle,
   Search,
+  Square,
   Terminal,
   Trash2,
   X,
@@ -34,6 +35,7 @@ export function WorkspaceView({
   onClearMessages,
   onDraftChange,
   onSendMessage,
+  onStopResponse,
 }: {
   commands: WorkspaceCommand[];
   draft: string;
@@ -45,6 +47,7 @@ export function WorkspaceView({
   onClearMessages: () => void;
   onDraftChange: (value: string) => void;
   onSendMessage: () => void;
+  onStopResponse: () => void;
 }) {
   const [composerOffset, setComposerOffset] = useState(112);
 
@@ -69,6 +72,7 @@ export function WorkspaceView({
           onCommandError={onCommandError}
           onDraftChange={onDraftChange}
           onSendMessage={onSendMessage}
+          onStopResponse={onStopResponse}
           onOffsetChange={setComposerOffset}
         />
       </div>
@@ -513,6 +517,7 @@ function ChatComposer({
   onDraftChange,
   onOffsetChange,
   onSendMessage,
+  onStopResponse,
 }: {
   commands: WorkspaceCommand[];
   draft: string;
@@ -523,6 +528,7 @@ function ChatComposer({
   onDraftChange: (value: string) => void;
   onOffsetChange: (value: number) => void;
   onSendMessage: () => void;
+  onStopResponse: () => void;
 }) {
   const composerRef = useRef<HTMLDivElement>(null);
   const preserveCommandMenuDismissalRef = useRef(false);
@@ -551,6 +557,7 @@ function ChatComposer({
     Boolean(isCommandDraft && exactCommand) &&
     (!isSending || exactCommand?.id === "clear");
   const canSubmit = draft.length > 0 && (!isSending || canSubmitCommand);
+  const showStopButton = isSending && !canSubmitCommand;
 
   useEffect(() => {
     if (preserveCommandMenuDismissalRef.current) {
@@ -752,13 +759,23 @@ function ChatComposer({
             placeholder="Message Flowent"
           />
           <Button
-            aria-label="Send message"
-            className="size-9 rounded-full bg-white text-black shadow-none hover:bg-[#e5e5e5] disabled:bg-transparent disabled:text-white/35 disabled:opacity-100 [&_svg]:size-5"
-            disabled={!canSubmit}
+            aria-label={showStopButton ? "Stop" : "Send message"}
+            className={cn(
+              "size-9 rounded-full shadow-none disabled:bg-transparent disabled:text-white/35 disabled:opacity-100 [&_svg]:size-5",
+              showStopButton
+                ? "bg-white text-black hover:bg-[#e5e5e5] [&_svg]:size-3.5"
+                : "bg-white text-black hover:bg-[#e5e5e5]",
+            )}
+            disabled={!showStopButton && !canSubmit}
+            onClick={showStopButton ? onStopResponse : undefined}
             size="icon-lg"
-            type="submit"
+            type={showStopButton ? "button" : "submit"}
           >
-            <ArrowUp aria-hidden="true" />
+            {showStopButton ? (
+              <Square aria-hidden="true" fill="currentColor" />
+            ) : (
+              <ArrowUp aria-hidden="true" />
+            )}
           </Button>
         </form>
       </div>
