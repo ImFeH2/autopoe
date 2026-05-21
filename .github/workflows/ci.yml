@@ -46,8 +46,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install bubblewrap
+      - name: Install test tools
         run: sudo apt-get update && sudo apt-get install -y bubblewrap ripgrep
+
+      - name: Enable user namespaces
+        run: |
+          echo "kernel.apparmor_restrict_unprivileged_userns = 0" | sudo tee /etc/sysctl.d/99-userns.conf
+          sudo sysctl --system
 
       - name: Prepare Python README
         run: node scripts/prepare-python-readme.mjs
