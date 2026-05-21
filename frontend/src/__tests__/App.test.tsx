@@ -55,6 +55,16 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+type TestTool = {
+  arguments?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  id: string;
+  name: string;
+  output?: string;
+  status?: "failed" | "running" | "success";
+  title: string;
+};
+
 const controlledThinkingStreamResponse = (
   thinking: string,
   content: string,
@@ -245,16 +255,12 @@ const assistantErrorStreamResponse = (
 };
 
 const assistantToolStreamResponse = (
-  tool: {
-    id: string;
-    name: string;
-    status?: "failed" | "running" | "success";
-    title: string;
-  },
+  tool: TestTool,
   content: string,
   id = "message-assistant",
 ) => {
   const encoder = new TextEncoder();
+  const { data, output, status, ...startTool } = tool;
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
@@ -268,16 +274,17 @@ const assistantToolStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_start\ndata: ${JSON.stringify({
-            tool: { ...tool, status: "running" },
+            tool: { ...startTool, status: "running" },
           })}\n\n`,
         ),
       );
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: "tool output",
+            content: output ?? "tool output",
+            data,
             id: tool.id,
-            status: tool.status ?? "success",
+            status: status ?? "success",
             title: tool.title,
           })}\n\n`,
         ),
@@ -314,16 +321,12 @@ const assistantToolStreamResponse = (
 
 const assistantThinkingToolStreamResponse = (
   thinking: string,
-  tool: {
-    id: string;
-    name: string;
-    status?: "failed" | "running" | "success";
-    title: string;
-  },
+  tool: TestTool,
   content: string,
   id = "message-assistant",
 ) => {
   const encoder = new TextEncoder();
+  const { data, output, status, ...startTool } = tool;
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
@@ -342,16 +345,17 @@ const assistantThinkingToolStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_start\ndata: ${JSON.stringify({
-            tool: { ...tool, status: "running" },
+            tool: { ...startTool, status: "running" },
           })}\n\n`,
         ),
       );
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: "tool output",
+            content: output ?? "tool output",
+            data,
             id: tool.id,
-            status: tool.status ?? "success",
+            status: status ?? "success",
             title: tool.title,
           })}\n\n`,
         ),
@@ -383,17 +387,14 @@ const assistantThinkingToolStreamResponse = (
 };
 
 const controlledToolTimelineResponse = (
-  tool: {
-    id: string;
-    name: string;
-    title: string;
-  },
+  tool: TestTool,
   content: string,
   id = "message-assistant",
 ) => {
   const encoder = new TextEncoder();
   const completeTool = deferred();
   const finish = deferred();
+  const { data, output, ...startTool } = tool;
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(
@@ -407,7 +408,7 @@ const controlledToolTimelineResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_start\ndata: ${JSON.stringify({
-            tool: { ...tool, status: "running" },
+            tool: { ...startTool, status: "running" },
           })}\n\n`,
         ),
       );
@@ -415,7 +416,8 @@ const controlledToolTimelineResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: "tool output",
+            content: output ?? "tool output",
+            data,
             id: tool.id,
             status: "success",
             title: tool.title,
@@ -459,11 +461,7 @@ const controlledToolTimelineResponse = (
 };
 
 const controlledToolTextStreamResponse = (
-  tool: {
-    id: string;
-    name: string;
-    title: string;
-  },
+  tool: TestTool,
   firstChunk: string,
   content: string,
   id = "message-assistant",
@@ -472,6 +470,7 @@ const controlledToolTextStreamResponse = (
   const completeTool = deferred();
   const startText = deferred();
   const finish = deferred();
+  const { data, output, ...startTool } = tool;
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(
@@ -485,7 +484,7 @@ const controlledToolTextStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_start\ndata: ${JSON.stringify({
-            tool: { ...tool, status: "running" },
+            tool: { ...startTool, status: "running" },
           })}\n\n`,
         ),
       );
@@ -493,7 +492,8 @@ const controlledToolTextStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: "tool output",
+            content: output ?? "tool output",
+            data,
             id: tool.id,
             status: "success",
             title: tool.title,
@@ -544,14 +544,7 @@ const controlledToolTextStreamResponse = (
 };
 
 const assistantToolBatchStreamResponse = (
-  groups: Array<
-    Array<{
-      id: string;
-      name: string;
-      status?: "failed" | "running" | "success";
-      title: string;
-    }>
-  >,
+  groups: TestTool[][],
   content = "",
   id = "message-assistant",
 ) => {
@@ -570,19 +563,21 @@ const assistantToolBatchStreamResponse = (
         );
 
         tools.forEach((tool) => {
+          const { data, output, status, ...startTool } = tool;
           controller.enqueue(
             encoder.encode(
               `event: tool_start\ndata: ${JSON.stringify({
-                tool: { ...tool, status: "running" },
+                tool: { ...startTool, status: "running" },
               })}\n\n`,
             ),
           );
           controller.enqueue(
             encoder.encode(
               `event: tool_done\ndata: ${JSON.stringify({
-                content: "tool output",
+                content: output ?? "tool output",
+                data,
                 id: tool.id,
-                status: tool.status ?? "success",
+                status: status ?? "success",
                 title: tool.title,
               })}\n\n`,
             ),
@@ -1361,7 +1356,13 @@ describe("App", () => {
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
       if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantToolStreamResponse(
-          { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+          {
+            arguments: { path: "notes.txt" },
+            id: "tool-1",
+            name: "read_file",
+            output: "Note contents",
+            title: "Reading notes.txt",
+          },
           "The notes are ready.",
         );
       }
@@ -1392,7 +1393,63 @@ describe("App", () => {
 
     expect(await screen.findByText("Reading notes.txt")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("ARGS");
+    expect(document.body).not.toHaveTextContent("RESULT");
     await expectDocumentText("The notes are ready.");
+  });
+
+  it("shows successful tool details after the tool row is opened", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            arguments: { path: "notes.txt" },
+            id: "tool-1",
+            name: "read_file",
+            output: "Note contents",
+            title: "Reading notes.txt",
+          },
+          "The notes are ready.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Reading notes\.txt/,
+    });
+    expect(document.body).not.toHaveTextContent("Note contents");
+
+    await user.click(toolDetails);
+
+    expect(screen.getByText("ARGS")).toBeInTheDocument();
+    expect(screen.getByText("RESULT")).toBeInTheDocument();
+    expect(screen.getByText(/"path": "notes\.txt"/)).toBeInTheDocument();
+    expect(screen.getByText("Note contents")).toBeInTheDocument();
   });
 
   it("keeps streaming assistant text after a failed tool step", async () => {
@@ -1404,6 +1461,7 @@ describe("App", () => {
           {
             id: "tool-1",
             name: "read_file",
+            output: "File not found",
             status: "failed",
             title: "Reading missing.txt",
           },
@@ -1436,6 +1494,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("RESULT")).toBeInTheDocument();
+    expect(screen.getByText("File not found")).toBeInTheDocument();
     await expectDocumentText("I could not read it.");
   });
 
@@ -1958,7 +2018,12 @@ describe("App", () => {
   it("shows a tool step as soon as the assistant starts it", async () => {
     const user = userEvent.setup();
     const assistantStream = controlledToolTimelineResponse(
-      { id: "tool-1", name: "read_file", title: "Reading notes.txt" },
+      {
+        arguments: { path: "notes.txt" },
+        id: "tool-1",
+        name: "read_file",
+        title: "Reading notes.txt",
+      },
       "The notes are ready.",
     );
     mockInitialState(selectedProviderState());
@@ -1993,6 +2058,60 @@ describe("App", () => {
 
     expect(await screen.findByText("Reading notes.txt")).toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("The notes are ready.");
+  });
+
+  it("keeps a running tool collapsed until it is opened", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTimelineResponse(
+      {
+        arguments: { path: "notes.txt" },
+        id: "tool-1",
+        name: "read_file",
+        title: "Reading notes.txt",
+      },
+      "The notes are ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the notes");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Reading notes\.txt/,
+    });
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("ARGS");
+
+    await user.click(toolDetails);
+
+    expect(screen.getByText("ARGS")).toBeInTheDocument();
+    expect(screen.getByText(/"path": "notes\.txt"/)).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("The notes are ready.");
   });
 
@@ -2223,6 +2342,34 @@ describe("App", () => {
 
     await user.click(thoughtProcess);
 
+    expect(screen.getByText("Checked the current files.")).toBeInTheDocument();
+  });
+
+  it("uses the same expandable process row for completed thought details", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledThinkingStreamResponse(
+      "Checked the current files.",
+      "The answer is ready.",
+    );
+    mockSelectedProviderWorkspaceResponse(assistantStream.response);
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Inspect the workspace");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Thinking...");
+    assistantStream.finish();
+
+    const thoughtDetails = await screen.findByRole("button", {
+      name: "Thought Process",
+    });
+    expect(thoughtDetails).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(thoughtDetails);
+
+    expect(thoughtDetails).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Checked the current files.")).toBeInTheDocument();
   });
 

@@ -421,33 +421,37 @@ function ThinkingProcessItem({
   const isExpanded = isStreaming || isOpen;
 
   return (
-    <div className="max-w-full rounded-lg border border-white/10 bg-input/30 text-sm leading-5 text-white">
-      {isStreaming ? (
-        <div className="flex h-8 items-center gap-2 px-2.5 text-white/75">
-          <Circle aria-hidden="true" className="size-3 animate-pulse" />
-          Thinking...
-        </div>
-      ) : (
-        <Button
-          aria-expanded={isExpanded}
-          className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2.5 text-sm text-white/75 shadow-none hover:bg-input/50 hover:text-white"
-          onClick={() => setIsOpen((current) => !current)}
-          type="button"
-          variant="ghost"
-        >
-          <ChevronRight
-            aria-hidden="true"
-            className={cn(
-              "size-3.5 transition-transform",
-              isExpanded ? "rotate-90" : "",
-            )}
-          />
-          Thought Process
-        </Button>
-      )}
+    <div className="max-w-full text-sm leading-5 text-white">
+      <Button
+        aria-expanded={isExpanded}
+        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-sm text-white/75 shadow-none hover:bg-input/30 hover:text-white"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+        variant="ghost"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={cn(
+            "size-3.5 shrink-0 transition-transform",
+            isExpanded ? "rotate-90" : "",
+          )}
+        />
+        <Circle
+          aria-hidden="true"
+          className={cn(
+            "size-3.5 shrink-0 text-white/70",
+            isStreaming ? "animate-pulse" : "",
+          )}
+        />
+        <span className="min-w-0 flex-1 truncate text-left">
+          {isStreaming ? "Thinking..." : "Thought Process"}
+        </span>
+      </Button>
       {isExpanded ? (
-        <div className="whitespace-pre-wrap break-words px-2.5 pb-2 text-[13px] leading-5 text-white/60">
-          {content}
+        <div className="ml-[38px] border-l border-white/10 py-1 pl-3">
+          <div className="whitespace-pre-wrap break-words text-[13px] leading-5 text-white/60">
+            {content}
+          </div>
         </div>
       ) : null}
     </div>
@@ -455,6 +459,7 @@ function ThinkingProcessItem({
 }
 
 function ToolProcessItem({ tool }: { tool: ToolItem }) {
+  const [isOpen, setIsOpen] = useState(tool.status === "failed");
   const statusLabel =
     tool.status === "running"
       ? "Running"
@@ -462,13 +467,90 @@ function ToolProcessItem({ tool }: { tool: ToolItem }) {
         ? "Done"
         : "Failed";
 
+  useEffect(() => {
+    if (tool.status === "failed") {
+      setIsOpen(true);
+    }
+  }, [tool.status]);
+
   return (
-    <div className="flex max-w-full items-center gap-2 rounded-lg border border-white/10 bg-input/30 px-2.5 py-1.5 text-sm leading-5 text-white">
-      <ToolProcessIcon tool={tool} />
-      <span className="min-w-0 flex-1 truncate">{tool.title}</span>
-      <span className="shrink-0 text-xs text-white/55">{statusLabel}</span>
+    <div className="max-w-full text-sm leading-5 text-white">
+      <Button
+        aria-expanded={isOpen}
+        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-sm text-white shadow-none hover:bg-input/30 hover:text-white"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+        variant="ghost"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={cn(
+            "size-3.5 shrink-0 text-white/55 transition-transform",
+            isOpen ? "rotate-90" : "",
+          )}
+        />
+        <ToolProcessIcon tool={tool} />
+        <span className="min-w-0 flex-1 truncate text-left">{tool.title}</span>
+        <span className="shrink-0 text-xs text-white/55">{statusLabel}</span>
+      </Button>
+      {isOpen ? <ToolProcessDetails tool={tool} /> : null}
     </div>
   );
+}
+
+function ToolProcessDetails({ tool }: { tool: ToolItem }) {
+  const hasArguments =
+    tool.arguments !== undefined && Object.keys(tool.arguments).length > 0;
+  const hasData = tool.data !== undefined && Object.keys(tool.data).length > 0;
+  const hasResult = Boolean(tool.content);
+
+  if (!hasArguments && !hasResult && !hasData) {
+    return null;
+  }
+
+  return (
+    <div className="ml-[38px] flex min-w-0 flex-col gap-2 border-l border-white/10 py-1 pl-3">
+      {hasArguments ? (
+        <ToolProcessPayload
+          label="ARGS"
+          value={formatToolValue(tool.arguments)}
+        />
+      ) : null}
+      {hasResult ? (
+        <ToolProcessPayload label="RESULT" value={tool.content ?? ""} />
+      ) : null}
+      {hasData ? (
+        <ToolProcessPayload label="DATA" value={formatToolValue(tool.data)} />
+      ) : null}
+    </div>
+  );
+}
+
+function ToolProcessPayload({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 text-[11px] font-medium leading-4 text-white/45">
+        {label}
+      </div>
+      <pre className="max-h-64 overflow-auto rounded-md bg-input/20 px-2.5 py-2 font-mono text-xs leading-5 text-white/70">
+        <code className="whitespace-pre-wrap break-words">{value}</code>
+      </pre>
+    </div>
+  );
+}
+
+function formatToolValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return JSON.stringify(value, null, 2);
 }
 
 function ToolProcessIcon({ tool }: { tool: ToolItem }) {
