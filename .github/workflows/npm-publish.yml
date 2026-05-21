@@ -61,6 +61,9 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --project backend --frozen
 
+      - name: Install test tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Check package version
         run: |
           package_version="$(node -p "require('./package.json').version")"

@@ -252,7 +252,7 @@ def test_apply_patch_modifies_workdir_file(tmp_path) -> None:
 
 
 def test_apply_patch_rejects_outside_workdir_file(tmp_path) -> None:
-    outside = Path("/project/flowent/backend/tests/outside-patch.txt")
+    outside = Path(__file__).resolve().parent / "outside-patch.txt"
     outside.write_text("alpha\n")
     try:
         patch = f"""*** Begin Patch
