@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from flowent.llm import ProviderFormat
+from flowent.llm import ProviderFormat, ReasoningEffort
 from flowent.paths import data_directory
 
 
@@ -22,6 +22,7 @@ class StoredProvider(BaseModel):
 class StoredSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    reasoning_effort: ReasoningEffort = ReasoningEffort.DEFAULT
     selected_model: str
     selected_provider_id: str
 
@@ -92,7 +93,7 @@ class StateStore:
             ]
             settings_row = connection.execute(
                 """
-                SELECT selected_provider_id, selected_model
+                SELECT selected_provider_id, selected_model, reasoning_effort
                 FROM settings
                 WHERE id = 1
                 """
@@ -121,6 +122,9 @@ class StateStore:
             messages=messages,
             providers=providers,
             settings=StoredSettings(
+                reasoning_effort=settings_row["reasoning_effort"]
+                if settings_row
+                else ReasoningEffort.DEFAULT,
                 selected_model=settings_row["selected_model"] if settings_row else "",
                 selected_provider_id=settings_row["selected_provider_id"]
                 if settings_row
@@ -168,14 +172,24 @@ class StateStore:
         with self.connect() as connection:
             connection.execute(
                 """
-                INSERT INTO settings (id, selected_provider_id, selected_model)
-                VALUES (1, ?, ?)
+                INSERT INTO settings (
+                    id,
+                    selected_provider_id,
+                    selected_model,
+                    reasoning_effort
+                )
+                VALUES (1, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     selected_provider_id = excluded.selected_provider_id,
                     selected_model = excluded.selected_model,
+                    reasoning_effort = excluded.reasoning_effort,
                     updated_at = unixepoch()
                 """,
-                (settings.selected_provider_id, settings.selected_model),
+                (
+                    settings.selected_provider_id,
+                    settings.selected_model,
+                    settings.reasoning_effort.value,
+                ),
             )
         return settings
 
@@ -273,6 +287,7 @@ class StateStore:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 selected_provider_id TEXT NOT NULL DEFAULT '',
                 selected_model TEXT NOT NULL DEFAULT '',
+                reasoning_effort TEXT NOT NULL DEFAULT 'default',
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
@@ -306,4 +321,12 @@ class StateStore:
         if "thinking" not in columns:
             connection.execute(
                 "ALTER TABLE messages ADD COLUMN thinking TEXT NOT NULL DEFAULT ''"
+            )
+        settings_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(settings)")
+        }
+        if "reasoning_effort" not in settings_columns:
+            connection.execute(
+                "ALTER TABLE settings "
+                "ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'default'"
             )

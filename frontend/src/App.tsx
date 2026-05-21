@@ -13,6 +13,7 @@ import type {
   AssistantOutputItem,
   Message,
   Provider,
+  ReasoningEffort,
   ToolItem,
   ViewId,
   WorkspaceCommand,
@@ -36,6 +37,7 @@ type ApiState = {
   messages: ApiMessage[];
   providers: ApiProvider[];
   settings: {
+    reasoning_effort?: ReasoningEffort;
     selected_model: string;
     selected_provider_id: string;
   };
@@ -130,6 +132,8 @@ function App() {
   const [draft, setDraft] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [reasoningEffort, setReasoningEffort] =
+    useState<ReasoningEffort>("default");
   const [messages, setMessages] = useState<Message[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [providerEditorId, setProviderEditorId] = useState("new");
@@ -169,6 +173,7 @@ function App() {
         setMessages(state.messages);
         setSelectedProviderId(state.settings.selected_provider_id);
         setSelectedModel(state.settings.selected_model);
+        setReasoningEffort(state.settings.reasoning_effort ?? "default");
       } catch {
         // Keep the local empty state when persistence is unavailable.
       }
@@ -198,9 +203,14 @@ function App() {
     setFetchError("");
   };
 
-  const persistSettings = async (providerId: string, model: string) => {
+  const persistSettings = async (
+    providerId: string,
+    model: string,
+    nextReasoningEffort = reasoningEffort,
+  ) => {
     await fetch("/api/settings", {
       body: JSON.stringify({
+        reasoning_effort: nextReasoningEffort,
         selected_model: model,
         selected_provider_id: providerId,
       }),
@@ -226,6 +236,11 @@ function App() {
   const handleActiveModelChange = (value: string) => {
     setSelectedModel(value);
     void persistSettings(selectedProviderId, value);
+  };
+
+  const handleReasoningEffortChange = (value: ReasoningEffort) => {
+    setReasoningEffort(value);
+    void persistSettings(selectedProviderId, selectedModel, value);
   };
 
   const fetchProviderModels = async () => {
@@ -830,7 +845,9 @@ function App() {
           modelOptions={activeProvider?.models ?? []}
           onModelChange={handleActiveModelChange}
           onProviderChange={handleActiveProviderChange}
+          onReasoningEffortChange={handleReasoningEffortChange}
           providers={providers}
+          reasoningEffort={reasoningEffort}
           selectedModel={selectedModel}
           selectedProviderId={selectedProviderId}
         />

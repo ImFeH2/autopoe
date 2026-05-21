@@ -16,21 +16,33 @@ import {
   fieldTriggerClassName,
   formActionsClassName,
 } from "@/components/flowent/styles";
-import type { Provider } from "@/components/flowent/types";
+import type { Provider, ReasoningEffort } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
+
+const reasoningOptions: Array<{ label: string; value: ReasoningEffort }> = [
+  { label: "Default", value: "default" },
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
+  { label: "XHigh", value: "xhigh" },
+];
 
 export function SettingsView({
   modelOptions,
   onModelChange,
   onProviderChange,
+  onReasoningEffortChange,
   providers,
+  reasoningEffort,
   selectedModel,
   selectedProviderId,
 }: {
   modelOptions: string[];
   onModelChange: (value: string) => void;
   onProviderChange: (value: string) => void;
+  onReasoningEffortChange: (value: ReasoningEffort) => void;
   providers: Provider[];
+  reasoningEffort: ReasoningEffort;
   selectedModel: string;
   selectedProviderId: string;
 }) {
@@ -62,6 +74,10 @@ export function SettingsView({
                 onModelChange={onModelChange}
                 selectedModel={selectedModel}
                 selectedProviderId={selectedProviderId}
+              />
+              <RuntimeReasoningSelect
+                onReasoningEffortChange={onReasoningEffortChange}
+                reasoningEffort={reasoningEffort}
               />
             </div>
           </div>
@@ -109,6 +125,41 @@ function RuntimeProviderSelect({
           {providers.map((provider) => (
             <SelectItem key={provider.id} value={provider.id}>
               {provider.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function RuntimeReasoningSelect({
+  onReasoningEffortChange,
+  reasoningEffort,
+}: {
+  onReasoningEffortChange: (value: ReasoningEffort) => void;
+  reasoningEffort: ReasoningEffort;
+}) {
+  return (
+    <div className={dataRowClassName}>
+      <Label
+        className={cn(fieldLabelClassName, dataRowLabelClassName)}
+        htmlFor="reasoning-effort"
+      >
+        Reasoning
+      </Label>
+      <Select value={reasoningEffort} onValueChange={onReasoningEffortChange}>
+        <SelectTrigger
+          className={fieldTriggerClassName}
+          id="reasoning-effort"
+          aria-label="Reasoning"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {reasoningOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
             </SelectItem>
           ))}
         </SelectContent>

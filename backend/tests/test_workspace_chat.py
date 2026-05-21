@@ -12,6 +12,7 @@ def configure_provider(
     name: str = "OpenAI",
     provider_id: str = "provider-openai",
     provider_type: str = "openai",
+    reasoning_effort: str = "default",
 ) -> None:
     client.post(
         "/api/providers",
@@ -27,6 +28,7 @@ def configure_provider(
     client.put(
         "/api/settings",
         json={
+            "reasoning_effort": reasoning_effort,
             "selected_model": model,
             "selected_provider_id": provider_id,
         },
@@ -322,6 +324,32 @@ def test_workspace_response_includes_project_and_environment_context(
         "role": "user",
         "content": "Hello.",
     }
+
+
+def test_workspace_response_uses_selected_reasoning_effort(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client, reasoning_effort="xhigh")
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    assert captured_request["reasoning_effort"] == "xhigh"
 
 
 def test_workspace_response_prefers_agents_override(tmp_path, monkeypatch) -> None:

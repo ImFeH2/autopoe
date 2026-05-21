@@ -15,6 +15,14 @@ class ProviderFormat(StrEnum):
     GEMINI = "gemini"
 
 
+class ReasoningEffort(StrEnum):
+    DEFAULT = "default"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+
+
 class ProviderConnection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -23,6 +31,7 @@ class ProviderConnection(BaseModel):
     model: str = Field(min_length=1)
     secret_reference: str = Field(min_length=1)
     base_url: str | None = None
+    reasoning_effort: ReasoningEffort = ReasoningEffort.DEFAULT
 
 
 class ChatMessage(BaseModel):
@@ -132,14 +141,17 @@ def build_litellm_request(
         request["stream"] = True
     if connection.base_url:
         request["api_base"] = connection.base_url
+    if connection.reasoning_effort != ReasoningEffort.DEFAULT:
+        request["reasoning_effort"] = connection.reasoning_effort.value
     logger.log(
         TRACE_LEVEL,
-        "Built LiteLLM request provider=%s model=%s base_url=%s stream=%s tools=%s messages=%r",
+        "Built LiteLLM request provider=%s model=%s base_url=%s stream=%s tools=%s reasoning_effort=%s messages=%r",
         connection.provider,
         connection.model,
         connection.base_url or "",
         stream,
         bool(tools),
+        connection.reasoning_effort,
         request_messages,
     )
     return request

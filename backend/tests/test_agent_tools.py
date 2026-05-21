@@ -38,6 +38,7 @@ def configure_provider(client: TestClient) -> None:
     client.put(
         "/api/settings",
         json={
+            "reasoning_effort": "default",
             "selected_model": "gpt-5.1",
             "selected_provider_id": "provider-openai",
         },

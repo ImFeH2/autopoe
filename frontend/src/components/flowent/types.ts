@@ -1,5 +1,7 @@
 export type ViewId = "workspace" | "providers" | "settings";
 
+export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
+
 export type ProviderKind =
   | "openai"
   | "openai_responses"

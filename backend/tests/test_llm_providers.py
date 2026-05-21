@@ -4,6 +4,7 @@ from flowent.llm import (
     ChatMessage,
     ProviderConnection,
     ProviderFormat,
+    ReasoningEffort,
     build_litellm_request,
     chunk_delta_reasoning,
     complete_chat,
@@ -44,6 +45,38 @@ def test_build_litellm_request_maps_provider_connection_to_completion_args() -> 
         ],
         "model": "anthropic/claude-sonnet-4-5",
     }
+
+
+def test_build_litellm_request_omits_default_reasoning_effort() -> None:
+    connection = ProviderConnection(
+        name="Primary",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+        reasoning_effort=ReasoningEffort.DEFAULT,
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert "reasoning_effort" not in request
+
+
+def test_build_litellm_request_includes_selected_reasoning_effort() -> None:
+    connection = ProviderConnection(
+        name="Primary",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+        reasoning_effort=ReasoningEffort.XHIGH,
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["reasoning_effort"] == "xhigh"
 
 
 def test_chunk_delta_reasoning_reads_litellm_reasoning_fields() -> None:

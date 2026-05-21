@@ -112,6 +112,7 @@ def selected_connection(state: StoredState) -> ProviderConnection:
         model=state.settings.selected_model,
         name=provider.name,
         provider=provider.type,
+        reasoning_effort=state.settings.reasoning_effort,
         secret_reference=provider.api_key,
     )
 

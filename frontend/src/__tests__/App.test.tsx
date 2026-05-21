@@ -652,6 +652,7 @@ const selectedProviderState = () => ({
     },
   ],
   settings: {
+    reasoning_effort: "default",
     selected_model: "gpt-5.1",
     selected_provider_id: "provider-openai",
   },
@@ -1556,6 +1557,9 @@ describe("App", () => {
       "No models",
     );
     expect(screen.getByRole("combobox", { name: "Model" })).toBeDisabled();
+    expect(
+      screen.getByRole("combobox", { name: "Reasoning" }),
+    ).toHaveTextContent("Default");
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
@@ -1601,6 +1605,7 @@ describe("App", () => {
         },
       ],
       settings: {
+        reasoning_effort: "xhigh",
         selected_model: "gpt-5.1-mini",
         selected_provider_id: "provider-openai",
       },
@@ -1615,6 +1620,62 @@ describe("App", () => {
     expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
       "gpt-5.1-mini",
     );
+    expect(
+      screen.getByRole("combobox", { name: "Reasoning" }),
+    ).toHaveTextContent("XHigh");
+  });
+
+  it("saves the selected Settings reasoning effort", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+    await user.click(screen.getByRole("combobox", { name: "Reasoning" }));
+    await user.click(screen.getByRole("option", { name: "XHigh" }));
+
+    expect(
+      screen.getByRole("combobox", { name: "Reasoning" }),
+    ).toHaveTextContent("XHigh");
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({
+        body: JSON.stringify({
+          reasoning_effort: "xhigh",
+          selected_model: "gpt-5.1",
+          selected_provider_id: "provider-openai",
+        }),
+        method: "PUT",
+      }),
+    );
+  });
+
+  it("defaults Settings reasoning effort when persisted state has no value", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [
+        {
+          api_key: "",
+          base_url: "",
+          id: "provider-openai",
+          models: ["gpt-5.1"],
+          name: "OpenAI",
+          type: "openai",
+        },
+      ],
+      settings: {
+        selected_model: "gpt-5.1",
+        selected_provider_id: "provider-openai",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+
+    expect(
+      screen.getByRole("combobox", { name: "Reasoning" }),
+    ).toHaveTextContent("Default");
   });
 
   it("shows a tool step as soon as the assistant starts it", async () => {
