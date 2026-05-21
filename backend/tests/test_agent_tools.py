@@ -296,6 +296,34 @@ def test_apply_patch_uses_internal_subcommand(tmp_path, monkeypatch) -> None:
     assert calls[0][1:4] == ["-m", "flowent.cli", "apply-patch"]
 
 
+def test_apply_patch_reports_patch_error_when_stderr_has_warning(
+    tmp_path, monkeypatch
+) -> None:
+    def fake_run(self, command, **kwargs):
+        from flowent.sandbox import CommandResult
+
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=1,
+            stderr="RuntimeWarning: flowent.cli was already imported\n",
+            stdout='{"error": "Patch context was not found."}\n',
+        )
+
+    monkeypatch.setattr(SandboxRunner, "run", fake_run)
+    patch = """*** Begin Patch
+*** Update File: notes.txt
+@@
+-missing
++ready
+*** End Patch
+"""
+
+    result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
+
+    assert not result.ok
+    assert result.content == "Patch context was not found."
+
+
 def test_web_search_result_enters_tool_output(tmp_path) -> None:
     def fake_search(query: str):
         return [{"title": "Result", "url": "https://example.test", "snippet": query}]

@@ -261,14 +261,26 @@ def apply_patch_tool(arguments: dict[str, object], context: ToolContext) -> Tool
         input_text=patch,
     )
     if result.exit_code != 0:
-        raise SandboxError(
-            result.stderr or result.stdout or "Patch could not be applied."
-        )
+        raise SandboxError(tool_failure_content(result))
     return ToolResult(
         content=result.stdout,
         data={"files": [str(path) for path in paths]},
         title="Applied patch",
     )
+
+
+def tool_failure_content(result: object) -> str:
+    stdout = str(getattr(result, "stdout", "") or "").strip()
+    stderr = str(getattr(result, "stderr", "") or "").strip()
+    if stdout:
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+            return payload["error"]
+    parts = [part for part in [stderr, stdout] if part]
+    return "\n".join(parts) or "Tool failed."
 
 
 def shell_command(arguments: dict[str, object], context: ToolContext) -> ToolResult:
