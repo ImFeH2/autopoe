@@ -1358,6 +1358,7 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { path: "notes.txt" },
+            data: { path: "notes.txt" },
             id: "tool-1",
             name: "read_file",
             output: "Note contents",
@@ -1406,6 +1407,7 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { path: "notes.txt" },
+            data: { path: "notes.txt" },
             id: "tool-1",
             name: "read_file",
             output: "Note contents",
@@ -1447,9 +1449,10 @@ describe("App", () => {
     await user.click(toolDetails);
 
     expect(screen.getByText("ARGS")).toBeInTheDocument();
-    expect(screen.getByText("RESULT")).toBeInTheDocument();
-    expect(screen.getByText(/"path": "notes\.txt"/)).toBeInTheDocument();
-    expect(screen.getByText("Note contents")).toBeInTheDocument();
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent('"content": "Note contents"');
+    expect(resultBlock).toHaveTextContent('"data": {');
+    expect(resultBlock).toHaveTextContent('"path": "notes.txt"');
   });
 
   it("keeps streaming assistant text after a failed tool step", async () => {
@@ -1459,6 +1462,7 @@ describe("App", () => {
       if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantToolStreamResponse(
           {
+            data: { path: "missing.txt" },
             id: "tool-1",
             name: "read_file",
             output: "File not found",
@@ -1494,9 +1498,121 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Failed")).toBeInTheDocument();
-    expect(screen.getByText("RESULT")).toBeInTheDocument();
-    expect(screen.getByText("File not found")).toBeInTheDocument();
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent('"content": "File not found"');
+    expect(resultBlock).toHaveTextContent('"path": "missing.txt"');
     await expectDocumentText("I could not read it.");
+  });
+
+  it("shows shell command output and structured fields inside the tool result", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            arguments: { command: "printf done" },
+            data: {
+              command: "printf done",
+              exit_code: 0,
+              stderr: "",
+              stdout: "done",
+            },
+            id: "tool-1",
+            name: "shell_command",
+            output: "done",
+            title: "Ran printf done",
+          },
+          "Command finished.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Run the command");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Ran printf done/,
+    });
+    await user.click(toolDetails);
+
+    expect(screen.getByText("ARGS")).toBeInTheDocument();
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent('"content": "done"');
+    expect(resultBlock).toHaveTextContent('"command": "printf done"');
+    expect(resultBlock).toHaveTextContent('"exit_code": 0');
+    expect(resultBlock).toHaveTextContent('"stdout": "done"');
+    expect(resultBlock).toHaveTextContent('"stderr": ""');
+  });
+
+  it("shows content inside the tool result when no structured fields are returned", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            id: "tool-1",
+            name: "update_plan",
+            output: "Plan updated",
+            title: "Updated plan",
+          },
+          "Plan is ready.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Update the plan");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Updated plan/,
+    });
+    await user.click(toolDetails);
+
+    expect(screen.getByText("RESULT").parentElement).toHaveTextContent(
+      '"content": "Plan updated"',
+    );
   });
 
   it("shows plan updates as work steps", async () => {

@@ -448,7 +448,7 @@ function ThinkingProcessItem({
         </span>
       </Button>
       {isExpanded ? (
-        <div className="ml-[38px] border-l border-white/10 py-1 pl-3">
+        <div className="py-1">
           <div className="whitespace-pre-wrap break-words text-[13px] leading-5 text-white/60">
             {content}
           </div>
@@ -502,14 +502,15 @@ function ToolProcessDetails({ tool }: { tool: ToolItem }) {
   const hasArguments =
     tool.arguments !== undefined && Object.keys(tool.arguments).length > 0;
   const hasData = tool.data !== undefined && Object.keys(tool.data).length > 0;
-  const hasResult = Boolean(tool.content);
+  const hasContent = tool.content !== undefined;
+  const hasResult = hasContent || hasData;
 
-  if (!hasArguments && !hasResult && !hasData) {
+  if (!hasArguments && !hasResult) {
     return null;
   }
 
   return (
-    <div className="ml-[38px] flex min-w-0 flex-col gap-2 border-l border-white/10 py-1 pl-3">
+    <div className="flex min-w-0 flex-col gap-2 py-1">
       {hasArguments ? (
         <ToolProcessPayload
           label="ARGS"
@@ -517,10 +518,7 @@ function ToolProcessDetails({ tool }: { tool: ToolItem }) {
         />
       ) : null}
       {hasResult ? (
-        <ToolProcessPayload label="RESULT" value={tool.content ?? ""} />
-      ) : null}
-      {hasData ? (
-        <ToolProcessPayload label="DATA" value={formatToolValue(tool.data)} />
+        <ToolProcessPayload label="RESULT" value={formatToolResult(tool)} />
       ) : null}
     </div>
   );
@@ -551,6 +549,17 @@ function formatToolValue(value: unknown) {
   }
 
   return JSON.stringify(value, null, 2);
+}
+
+function formatToolResult(tool: ToolItem) {
+  const result: Record<string, unknown> = {};
+  if (tool.content !== undefined) {
+    result.content = tool.content;
+  }
+  if (tool.data !== undefined && Object.keys(tool.data).length > 0) {
+    result.data = tool.data;
+  }
+  return formatToolValue(result);
 }
 
 function ToolProcessIcon({ tool }: { tool: ToolItem }) {
