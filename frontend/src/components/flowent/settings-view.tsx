@@ -28,6 +28,7 @@ const reasoningOptions: Array<{ label: string; value: ReasoningEffort }> = [
 ];
 
 export function SettingsView({
+  appVersion,
   modelOptions,
   onModelChange,
   onProviderChange,
@@ -37,6 +38,7 @@ export function SettingsView({
   selectedModel,
   selectedProviderId,
 }: {
+  appVersion: string;
   modelOptions: string[];
   onModelChange: (value: string) => void;
   onProviderChange: (value: string) => void;
@@ -48,7 +50,7 @@ export function SettingsView({
 }) {
   return (
     <section
-      className="grid h-full min-h-0 overflow-auto bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)] max-[900px]:overflow-visible"
+      className="flex h-full min-h-0 flex-col overflow-auto bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)] max-[900px]:overflow-visible"
       aria-label="Settings"
     >
       <form
@@ -86,6 +88,11 @@ export function SettingsView({
           <Button type="submit">Save</Button>
         </div>
       </form>
+      {appVersion ? (
+        <p className="mx-8 mt-auto pb-6 text-center text-xs leading-5 text-white/30 max-[900px]:mx-5">
+          Flowent v{appVersion}
+        </p>
+      ) : null}
     </section>
   );
 }

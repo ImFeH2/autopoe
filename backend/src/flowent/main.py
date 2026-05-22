@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
+from flowent._version import __version__
 from flowent.agent import run_agent_stream
 from flowent.context import runtime_context_messages
 from flowent.llm import (
@@ -68,6 +69,12 @@ class WorkspaceCompactResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: StoredMessage
+
+
+class AboutResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: str
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -203,6 +210,10 @@ def create_app(
     @app.get("/api/state")
     async def app_state() -> StoredState:
         return store.read_state()
+
+    @app.get("/api/about")
+    async def about() -> AboutResponse:
+        return AboutResponse(version=__version__)
 
     @app.post("/api/providers")
     async def save_provider(provider: StoredProvider) -> StoredProvider:

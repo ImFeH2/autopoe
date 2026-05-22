@@ -43,6 +43,10 @@ type ApiState = {
   };
 };
 
+type ApiAbout = {
+  version?: string;
+};
+
 type WorkspaceStreamEvent =
   | {
       data: {
@@ -134,6 +138,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState("");
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort>("default");
+  const [appVersion, setAppVersion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [providerEditorId, setProviderEditorId] = useState("new");
@@ -158,12 +163,18 @@ function App() {
 
     const loadState = async () => {
       try {
-        const response = await fetch("/api/state");
-        if (!response.ok) {
+        const [stateResponse, aboutResponse] = await Promise.all([
+          fetch("/api/state"),
+          fetch("/api/about"),
+        ]);
+        if (!stateResponse.ok) {
           return;
         }
 
-        const state = (await response.json()) as ApiState;
+        const state = (await stateResponse.json()) as ApiState;
+        const about = aboutResponse.ok
+          ? ((await aboutResponse.json()) as ApiAbout)
+          : {};
         if (!isMounted) {
           return;
         }
@@ -174,6 +185,7 @@ function App() {
         setSelectedProviderId(state.settings.selected_provider_id);
         setSelectedModel(state.settings.selected_model);
         setReasoningEffort(state.settings.reasoning_effort ?? "default");
+        setAppVersion(typeof about.version === "string" ? about.version : "");
       } catch {
         // Keep the local empty state when persistence is unavailable.
       }
@@ -858,6 +870,7 @@ function App() {
       </TabsContent>
       <TabsContent value="settings" className={viewPanelClassName}>
         <SettingsView
+          appVersion={appVersion}
           modelOptions={activeProvider?.models ?? []}
           onModelChange={handleActiveModelChange}
           onProviderChange={handleActiveProviderChange}
