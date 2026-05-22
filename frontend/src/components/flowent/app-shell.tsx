@@ -3,10 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { KeyRound, MessageSquare, Settings } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  navigationLabelClassName,
-  stableScrollbarClassName,
-} from "@/components/flowent/styles";
+import { navigationLabelClassName } from "@/components/flowent/styles";
 import type { ViewId } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
@@ -32,10 +29,7 @@ export function AppShell({
       value={activeView}
       onValueChange={(value) => onViewChange(value as ViewId)}
       orientation="vertical"
-      className={cn(
-        "grid h-screen min-h-0 grid-cols-[260px_minmax(0,1fr)] gap-0 overflow-hidden bg-black text-white max-[900px]:grid-cols-1 max-[900px]:overflow-auto",
-        stableScrollbarClassName,
-      )}
+      className="grid h-screen min-h-0 grid-cols-[260px_minmax(0,1fr)] gap-0 overflow-hidden bg-black text-white max-[900px]:grid-cols-1 max-[900px]:overflow-auto"
     >
       <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black px-5 py-6 max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3">
         <div className="flex min-h-10 items-center gap-3 bg-black max-[560px]:min-h-10">
