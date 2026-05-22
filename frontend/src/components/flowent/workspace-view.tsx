@@ -477,7 +477,7 @@ function ToolProcessItem({ tool }: { tool: ToolItem }) {
     <div className="max-w-full text-sm leading-5 text-white">
       <Button
         aria-expanded={isOpen}
-        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-sm text-white shadow-none hover:bg-input/30 hover:text-white"
+        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-sm text-white shadow-none hover:bg-transparent hover:text-white"
         onClick={() => setIsOpen((current) => !current)}
         type="button"
         variant="ghost"
