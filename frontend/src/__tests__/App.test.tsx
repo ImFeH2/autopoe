@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -63,6 +63,24 @@ type TestTool = {
   output?: string;
   status?: "failed" | "running" | "success";
   title: string;
+};
+
+type TestTelegramSession = {
+  chat_id: string;
+  display_name: string;
+  recent_message: string;
+  status: "approved" | "pending";
+  updated_at: number;
+  user_id: string;
+  username: string;
+};
+
+type TestTelegramBot = {
+  bot_token: string;
+  enabled: boolean;
+  error: string;
+  sessions: TestTelegramSession[];
+  status: "disabled" | "error" | "running" | "starting";
 };
 
 const controlledThinkingStreamResponse = (
@@ -626,17 +644,47 @@ const mockInitialState = (
 ) => {
   vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
     if (input === "/api/state") {
-      return new Response(JSON.stringify({ channels: [], ...state }), {
+      return new Response(
+        JSON.stringify({ telegram_bot: emptyTelegramBotState(), ...state }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    if (input === "/api/telegram-bot" && init?.method === "PUT") {
+      return new Response(init.body, {
         headers: { "Content-Type": "application/json" },
         status: 200,
       });
     }
 
-    if (input === "/api/channels" && init?.method === "POST") {
-      return new Response(init.body, {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
+    if (input === "/api/telegram-bot/approve" && init?.method === "POST") {
+      const request = JSON.parse(String(init.body)) as { chat_id: string };
+      const telegramBot = (
+        "telegram_bot" in state ? state.telegram_bot : emptyTelegramBotState()
+      ) as ReturnType<typeof emptyTelegramBotState>;
+      const session = telegramBot.sessions.find(
+        (currentSession) => currentSession.chat_id === request.chat_id,
+      );
+      return new Response(
+        JSON.stringify({
+          ...(session ?? {
+            chat_id: request.chat_id,
+            display_name: "",
+            recent_message: "",
+            updated_at: 0,
+            user_id: "",
+            username: "",
+          }),
+          status: "approved",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
     }
 
     if (input === "/api/providers" && init?.method === "POST") {
@@ -689,7 +737,6 @@ const mockInitialState = (
 };
 
 const selectedProviderState = () => ({
-  channels: [],
   messages: [],
   providers: [
     {
@@ -706,6 +753,15 @@ const selectedProviderState = () => ({
     selected_model: "gpt-5.1",
     selected_provider_id: "provider-openai",
   },
+  telegram_bot: emptyTelegramBotState(),
+});
+
+const emptyTelegramBotState = (): TestTelegramBot => ({
+  bot_token: "",
+  enabled: false,
+  error: "",
+  sessions: [],
+  status: "disabled",
 });
 
 const expectDocumentText = async (text: string) => {
@@ -2086,34 +2142,27 @@ describe("App", () => {
     ).toHaveTextContent("XHigh");
   });
 
-  it("opens Channels from the sidebar", async () => {
+  it("opens Channels as a global Telegram Bot page", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(screen.getByRole("tab", { name: "Channels" }));
 
-    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument();
-    expect(screen.getByText("No channels")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Channel name" })).toHaveValue(
-      "",
-    );
     expect(
-      screen.getByRole("combobox", { name: "Channel type" }),
-    ).toHaveTextContent("Telegram Bot");
+      screen.getByRole("form", { name: "Telegram Bot" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Enabled" })).toHaveTextContent(
       "Off",
     );
     expect(screen.getByLabelText("Bot secret")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Allowed users" })).toHaveValue(
-      "",
-    );
-    expect(screen.getByRole("textbox", { name: "Allowed chats" })).toHaveValue(
-      "",
-    );
-    expect(screen.getByRole("textbox", { name: "Pairing" })).toHaveValue("");
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+    expect(screen.getByText("No requests")).toBeInTheDocument();
+    expect(screen.getByText("No conversations")).toBeInTheDocument();
   });
 
-  it("saves a Telegram Bot channel from Channels", async () => {
+  it("saves the global Telegram Bot from Channels", async () => {
     const user = userEvent.setup();
     mockInitialState({
       messages: [],
@@ -2126,111 +2175,184 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Channels" }));
-    await user.type(
-      screen.getByRole("textbox", { name: "Channel name" }),
-      "Telegram",
-    );
     await user.type(screen.getByLabelText("Bot secret"), "bot-secret");
-    fireEvent.change(screen.getByRole("textbox", { name: "Allowed users" }), {
-      target: { value: "1001, 1002" },
-    });
-    await user.type(
-      screen.getByRole("textbox", { name: "Allowed chats" }),
-      "2001",
-    );
-    await user.type(screen.getByRole("textbox", { name: "Pairing" }), "123456");
     await user.click(screen.getByRole("combobox", { name: "Enabled" }));
     await user.click(screen.getByRole("option", { name: "On" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/channels",
+      "/api/telegram-bot",
       expect.objectContaining({
-        body: expect.stringContaining('"type":"telegram_bot"'),
-        method: "POST",
+        body: expect.stringContaining('"bot_token":"bot-secret"'),
+        method: "PUT",
       }),
     );
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/channels",
+      "/api/telegram-bot",
       expect.objectContaining({
-        body: expect.stringContaining('"allowed_user_ids":["1001","1002"]'),
-        method: "POST",
-      }),
-    );
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/channels",
-      expect.objectContaining({
-        body: expect.stringContaining('"allowed_chat_ids":["2001"]'),
-        method: "POST",
+        body: expect.stringContaining('"enabled":true'),
+        method: "PUT",
       }),
     );
   });
 
-  it("loads persisted Channels when the app starts", async () => {
+  it("loads the persisted Telegram Bot when the app starts", async () => {
     const user = userEvent.setup();
     mockInitialState({
-      channels: [
-        {
-          allowed_chat_ids: ["2001"],
-          allowed_user_ids: ["1001"],
-          bot_token: "bot-secret",
-          enabled: true,
-          error: "",
-          id: "channel-telegram",
-          name: "Telegram",
-          pairing_code: "123456",
-          status: "running",
-          type: "telegram_bot",
-        },
-      ],
       messages: [],
       providers: [],
       settings: {
         selected_model: "",
         selected_provider_id: "",
       },
+      telegram_bot: {
+        bot_token: "bot-secret",
+        enabled: true,
+        error: "",
+        sessions: [
+          {
+            chat_id: "2001",
+            display_name: "Alice Example",
+            recent_message: "Pair this chat",
+            status: "pending",
+            updated_at: 1,
+            user_id: "1001",
+            username: "alice",
+          },
+          {
+            chat_id: "2002",
+            display_name: "Launch Room",
+            recent_message: "Draft the checklist",
+            status: "approved",
+            updated_at: 2,
+            user_id: "1002",
+            username: "bob",
+          },
+        ],
+        status: "running",
+      },
     });
 
     render(<App />);
     await user.click(await screen.findByRole("tab", { name: "Channels" }));
 
+    expect(screen.getByLabelText("Bot secret")).toHaveValue("bot-secret");
+    expect(screen.getByRole("combobox", { name: "Enabled" })).toHaveTextContent(
+      "On",
+    );
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Alice Example")).toBeInTheDocument();
+    expect(screen.getByText("Launch Room")).toBeInTheDocument();
+  });
+
+  it("shows a Telegram Bot connection error in Channels", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+      telegram_bot: {
+        bot_token: "bot-secret",
+        enabled: true,
+        error: "Secret is invalid",
+        sessions: [],
+        status: "error",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Channels" }));
+
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("Secret is invalid")).toBeInTheDocument();
+  });
+
+  it("shows pending Telegram conversations with request details", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+      telegram_bot: {
+        bot_token: "bot-secret",
+        enabled: true,
+        error: "",
+        sessions: [
+          {
+            chat_id: "2001",
+            display_name: "Alice Example",
+            recent_message: "Can Flowent help here?",
+            status: "pending",
+            updated_at: 1,
+            user_id: "1001",
+            username: "alice",
+          },
+        ],
+        status: "running",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Channels" }));
+
+    expect(screen.getByText("Alice Example")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Telegram/ }),
+      screen.getByText("Chat 2001 · User 1001 · @alice"),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Running").length).toBeGreaterThan(0);
+    expect(screen.getByText("Can Flowent help here?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
 
-  it("shows a Channel connection error in Channels", async () => {
+  it("approves a pending Telegram conversation from Channels", async () => {
     const user = userEvent.setup();
     mockInitialState({
-      channels: [
-        {
-          allowed_chat_ids: [],
-          allowed_user_ids: [],
-          bot_token: "bot-secret",
-          enabled: true,
-          error: "Token is invalid",
-          id: "channel-telegram",
-          name: "Telegram",
-          pairing_code: "",
-          status: "error",
-          type: "telegram_bot",
-        },
-      ],
       messages: [],
       providers: [],
       settings: {
         selected_model: "",
         selected_provider_id: "",
       },
+      telegram_bot: {
+        bot_token: "bot-secret",
+        enabled: true,
+        error: "",
+        sessions: [
+          {
+            chat_id: "2001",
+            display_name: "Alice Example",
+            recent_message: "Can Flowent help here?",
+            status: "pending",
+            updated_at: 1,
+            user_id: "1001",
+            username: "alice",
+          },
+        ],
+        status: "running",
+      },
     });
 
     render(<App />);
     await user.click(await screen.findByRole("tab", { name: "Channels" }));
-    await user.click(screen.getByRole("button", { name: /Telegram/ }));
+    await user.click(screen.getByRole("button", { name: "Approve" }));
 
-    expect(screen.getAllByText("Error").length).toBeGreaterThan(0);
-    expect(screen.getByText("Token is invalid")).toBeInTheDocument();
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/telegram-bot/approve",
+      expect.objectContaining({
+        body: JSON.stringify({ chat_id: "2001" }),
+        method: "POST",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("No requests")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Alice Example")).toBeInTheDocument();
+    expect(screen.getAllByText("Approved").length).toBeGreaterThan(1);
   });
 
   it("saves the selected Settings reasoning effort", async () => {

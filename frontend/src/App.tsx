@@ -12,10 +12,11 @@ import { viewPanelClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
-  Channel,
   Message,
   Provider,
   ReasoningEffort,
+  TelegramBot,
+  TelegramSession,
   ToolItem,
   ViewId,
   WorkspaceCommand,
@@ -33,23 +34,27 @@ type ApiProvider = {
   type: Provider["type"];
 };
 
-type ApiChannel = {
-  allowed_chat_ids: string[];
-  allowed_user_ids: string[];
+type ApiTelegramSession = {
+  chat_id: string;
+  display_name: string;
+  recent_message: string;
+  status: TelegramSession["status"];
+  updated_at?: number;
+  user_id: string;
+  username: string;
+};
+
+type ApiTelegramBot = {
   bot_token: string;
   enabled: boolean;
   error?: string;
-  id: string;
-  name: string;
-  pairing_code?: string;
-  status?: Channel["status"];
-  type: Channel["type"];
+  sessions?: ApiTelegramSession[];
+  status?: TelegramBot["status"];
 };
 
 type ApiMessage = Message;
 
 type ApiState = {
-  channels: ApiChannel[];
   messages: ApiMessage[];
   providers: ApiProvider[];
   settings: {
@@ -57,6 +62,7 @@ type ApiState = {
     selected_model: string;
     selected_provider_id: string;
   };
+  telegram_bot?: ApiTelegramBot;
 };
 
 type ApiAbout = {
@@ -147,43 +153,52 @@ const providerToApi = (provider: Provider): ApiProvider => ({
   type: provider.type,
 });
 
-const channelFromApi = (channel: ApiChannel): Channel => ({
-  allowedChatIds: channel.allowed_chat_ids,
-  allowedUserIds: channel.allowed_user_ids,
-  botToken: channel.bot_token,
-  enabled: channel.enabled,
-  error: channel.error ?? "",
-  id: channel.id,
-  name: channel.name,
-  pairingCode: channel.pairing_code ?? "",
-  status: channel.status ?? "disabled",
-  type: channel.type,
+const telegramSessionFromApi = (
+  session: ApiTelegramSession,
+): TelegramSession => ({
+  chatId: session.chat_id,
+  displayName: session.display_name,
+  recentMessage: session.recent_message,
+  status: session.status,
+  updatedAt: session.updated_at ?? 0,
+  userId: session.user_id,
+  username: session.username,
 });
 
-const channelToApi = (channel: Channel): ApiChannel => ({
-  allowed_chat_ids: channel.allowedChatIds,
-  allowed_user_ids: channel.allowedUserIds,
-  bot_token: channel.botToken,
-  enabled: channel.enabled,
-  error: channel.error,
-  id: channel.id,
-  name: channel.name,
-  pairing_code: channel.pairingCode,
-  status: channel.status,
-  type: channel.type,
+const telegramSessionToApi = (
+  session: TelegramSession,
+): ApiTelegramSession => ({
+  chat_id: session.chatId,
+  display_name: session.displayName,
+  recent_message: session.recentMessage,
+  status: session.status,
+  updated_at: session.updatedAt,
+  user_id: session.userId,
+  username: session.username,
 });
 
-const createEmptyChannel = (): Channel => ({
-  allowedChatIds: [],
-  allowedUserIds: [],
-  botToken: "",
+const createEmptyTelegramBot = (): TelegramBot => ({
+  botSecret: "",
   enabled: false,
   error: "",
-  id: crypto.randomUUID(),
-  name: "",
-  pairingCode: "",
+  sessions: [],
   status: "disabled",
-  type: "telegram_bot",
+});
+
+const telegramBotFromApi = (telegramBot?: ApiTelegramBot): TelegramBot => ({
+  botSecret: telegramBot?.bot_token ?? "",
+  enabled: telegramBot?.enabled ?? false,
+  error: telegramBot?.error ?? "",
+  sessions: (telegramBot?.sessions ?? []).map(telegramSessionFromApi),
+  status: telegramBot?.status ?? "disabled",
+});
+
+const telegramBotToApi = (telegramBot: TelegramBot): ApiTelegramBot => ({
+  bot_token: telegramBot.botSecret,
+  enabled: telegramBot.enabled,
+  error: telegramBot.error,
+  sessions: telegramBot.sessions.map(telegramSessionToApi),
+  status: telegramBot.status,
 });
 
 function App() {
@@ -195,11 +210,9 @@ function App() {
     useState<ReasoningEffort>("default");
   const [appVersion, setAppVersion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [channelEditorId, setChannelEditorId] = useState("new");
-  const [channelDraft, setChannelDraft] = useState<Channel>(() =>
-    createEmptyChannel(),
+  const [telegramBot, setTelegramBot] = useState<TelegramBot>(() =>
+    createEmptyTelegramBot(),
   );
   const [providerEditorId, setProviderEditorId] = useState("new");
   const [providerDraft, setProviderDraft] = useState<Provider>(() =>
@@ -217,7 +230,6 @@ function App() {
     [providers, selectedProviderId],
   );
   const isCreatingProvider = providerEditorId === "new";
-  const isCreatingChannel = channelEditorId === "new";
 
   useEffect(() => {
     let isMounted = true;
@@ -240,14 +252,13 @@ function App() {
           return;
         }
 
-        const loadedChannels = (state.channels ?? []).map(channelFromApi);
         const loadedProviders = state.providers.map(providerFromApi);
-        setChannels(loadedChannels);
         setProviders(loadedProviders);
         setMessages(state.messages);
         setSelectedProviderId(state.settings.selected_provider_id);
         setSelectedModel(state.settings.selected_model);
         setReasoningEffort(state.settings.reasoning_effort ?? "default");
+        setTelegramBot(telegramBotFromApi(state.telegram_bot));
         setAppVersion(typeof about.version === "string" ? about.version : "");
       } catch {
         // Keep the local empty state when persistence is unavailable.
@@ -273,18 +284,8 @@ function App() {
     setFetchError("");
   };
 
-  const loadChannelEditor = (channel: Channel) => {
-    setChannelEditorId(channel.id);
-    setChannelDraft(channel);
-  };
-
-  const openNewChannelEditor = () => {
-    setChannelEditorId("new");
-    setChannelDraft(createEmptyChannel());
-  };
-
-  const updateChannelDraft = (updates: Partial<Channel>) => {
-    setChannelDraft((current) => ({ ...current, ...updates }));
+  const updateTelegramBot = (updates: Partial<TelegramBot>) => {
+    setTelegramBot((current) => ({ ...current, ...updates }));
   };
 
   const updateProviderDraft = (updates: Partial<Provider>) => {
@@ -394,38 +395,38 @@ function App() {
     });
   };
 
-  const saveChannel = async () => {
-    const savedChannel: Channel = {
-      ...channelDraft,
-      id: isCreatingChannel ? crypto.randomUUID() : channelDraft.id,
-      name: channelDraft.name.trim() || "Telegram",
-    };
-
-    setChannels((currentChannels) => {
-      if (isCreatingChannel) {
-        return [...currentChannels, savedChannel];
-      }
-      return currentChannels.map((channel) =>
-        channel.id === savedChannel.id ? savedChannel : channel,
-      );
+  const saveTelegramBot = async () => {
+    const response = await fetch("/api/telegram-bot", {
+      body: JSON.stringify(telegramBotToApi(telegramBot)),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
     });
-    setChannelEditorId(savedChannel.id);
-    setChannelDraft(savedChannel);
 
-    const response = await fetch("/api/channels", {
-      body: JSON.stringify(channelToApi(savedChannel)),
+    if (response.ok) {
+      const result = telegramBotFromApi(
+        (await response.json()) as ApiTelegramBot,
+      );
+      setTelegramBot(result);
+    }
+  };
+
+  const approveTelegramSession = async (chatId: string) => {
+    const response = await fetch("/api/telegram-bot/approve", {
+      body: JSON.stringify({ chat_id: chatId }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
     });
 
     if (response.ok) {
-      const result = channelFromApi((await response.json()) as ApiChannel);
-      setChannels((currentChannels) =>
-        currentChannels.map((channel) =>
-          channel.id === result.id ? result : channel,
-        ),
+      const result = telegramSessionFromApi(
+        (await response.json()) as ApiTelegramSession,
       );
-      setChannelDraft(result);
+      setTelegramBot((current) => ({
+        ...current,
+        sessions: current.sessions.map((session) =>
+          session.chatId === result.chatId ? result : session,
+        ),
+      }));
     }
   };
 
@@ -982,13 +983,10 @@ function App() {
       </TabsContent>
       <TabsContent value="channels" className={viewPanelClassName}>
         <ChannelsView
-          activeChannel={channelDraft}
-          channels={channels}
-          isCreatingChannel={isCreatingChannel}
-          onChannelSelect={loadChannelEditor}
-          onNewChannel={openNewChannelEditor}
-          onSaveChannel={saveChannel}
-          onUpdateChannel={updateChannelDraft}
+          onApproveSession={approveTelegramSession}
+          onSaveTelegramBot={saveTelegramBot}
+          onUpdateTelegramBot={updateTelegramBot}
+          telegramBot={telegramBot}
         />
       </TabsContent>
       <TabsContent value="settings" className={viewPanelClassName}>

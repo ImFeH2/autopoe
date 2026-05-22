@@ -39,23 +39,18 @@ def test_app_state_persists_providers_across_app_instances(
     ]
 
 
-def test_app_state_persists_channels_across_app_instances(
+def test_app_state_persists_telegram_bot_across_app_instances(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
 
-    response = client.post(
-        "/api/channels",
+    response = client.put(
+        "/api/telegram-bot",
         json={
-            "allowed_chat_ids": ["chat-1"],
-            "allowed_user_ids": ["1001"],
             "bot_token": "telegram-secret",
             "enabled": False,
-            "id": "channel-telegram",
-            "name": "Telegram",
-            "pairing_code": "123456",
-            "type": "telegram_bot",
+            "sessions": [],
         },
     )
 
@@ -65,20 +60,13 @@ def test_app_state_persists_channels_across_app_instances(
     state_response = restarted_client.get("/api/state")
 
     assert state_response.status_code == 200
-    assert state_response.json()["channels"] == [
-        {
-            "allowed_chat_ids": ["chat-1"],
-            "allowed_user_ids": ["1001"],
-            "bot_token": "telegram-secret",
-            "enabled": False,
-            "error": "",
-            "id": "channel-telegram",
-            "name": "Telegram",
-            "pairing_code": "123456",
-            "status": "disabled",
-            "type": "telegram_bot",
-        }
-    ]
+    assert state_response.json()["telegram_bot"] == {
+        "bot_token": "telegram-secret",
+        "enabled": False,
+        "error": "",
+        "sessions": [],
+        "status": "disabled",
+    }
 
 
 def test_app_state_persists_settings_and_workspace_messages(

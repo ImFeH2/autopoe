@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from flowent._version import __version__
 from flowent.agent import run_agent_stream
-from flowent.channels import ChannelManager, TelegramTransport
+from flowent.channels import TelegramBotManager, TelegramTransport
 from flowent.context import runtime_context_messages
 from flowent.llm import (
     ChatMessage,
@@ -28,11 +28,12 @@ from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.sandbox import ensure_sandbox_available
 from flowent.storage import (
     StateStore,
-    StoredChannel,
     StoredMessage,
     StoredProvider,
     StoredSettings,
     StoredState,
+    StoredTelegramBot,
+    StoredTelegramSession,
     StoredToolItem,
 )
 
@@ -78,6 +79,12 @@ class AboutResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: str
+
+
+class TelegramSessionApproveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chat_id: str
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -201,7 +208,7 @@ def create_app(
     ensure_sandbox_available()
 
     store = StateStore()
-    channel_manager: ChannelManager | None = None
+    telegram_bot_manager: TelegramBotManager | None = None
 
     static_dir = frontend_static_directory().resolve(strict=False)
     logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
@@ -276,7 +283,7 @@ def create_app(
     async def workspace_reply_text(content: str) -> str:
         return (await run_workspace_turn(content)).content
 
-    channel_manager = ChannelManager(
+    telegram_bot_manager = TelegramBotManager(
         message_handler=workspace_reply_text,
         store=store,
         telegram_transport=telegram_transport,
@@ -284,14 +291,14 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.channel_manager = channel_manager
-        if channel_manager is not None:
-            await channel_manager.start_enabled()
+        app.state.telegram_bot_manager = telegram_bot_manager
+        if telegram_bot_manager is not None:
+            await telegram_bot_manager.start_enabled()
         try:
             yield
         finally:
-            if channel_manager is not None:
-                await channel_manager.stop_all()
+            if telegram_bot_manager is not None:
+                await telegram_bot_manager.stop_all()
 
     app = FastAPI(title="Flowent", lifespan=lifespan)
 
@@ -302,10 +309,12 @@ def create_app(
     @app.get("/api/state")
     async def app_state() -> StoredState:
         state = store.read_state()
-        if channel_manager is None:
+        if telegram_bot_manager is None:
             return state
         return state.model_copy(
-            update={"channels": channel_manager.channels_with_status(state.channels)}
+            update={
+                "telegram_bot": telegram_bot_manager.bot_with_status(state.telegram_bot)
+            }
         )
 
     @app.get("/api/about")
@@ -316,13 +325,25 @@ def create_app(
     async def save_provider(provider: StoredProvider) -> StoredProvider:
         return store.save_provider(provider)
 
-    @app.post("/api/channels")
-    async def save_channel(channel: StoredChannel) -> StoredChannel:
-        saved_channel = store.save_channel(channel)
-        if channel_manager is not None:
-            await channel_manager.sync_channel(saved_channel)
-            return channel_manager.channel_with_status(saved_channel)
-        return saved_channel
+    @app.put("/api/telegram-bot")
+    async def save_telegram_bot(telegram_bot: StoredTelegramBot) -> StoredTelegramBot:
+        saved_bot = store.save_telegram_bot(telegram_bot)
+        if telegram_bot_manager is not None:
+            await telegram_bot_manager.sync_bot(saved_bot)
+            return telegram_bot_manager.bot_with_status(saved_bot)
+        return saved_bot
+
+    @app.post("/api/telegram-bot/approve")
+    async def approve_telegram_session(
+        request: TelegramSessionApproveRequest,
+    ) -> StoredTelegramSession:
+        try:
+            return store.approve_telegram_session(request.chat_id)
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Conversation not found.",
+            ) from error
 
     @app.post("/api/providers/models")
     async def provider_models(request: ProviderModelsRequest) -> ProviderModelsResponse:

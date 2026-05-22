@@ -8,19 +8,26 @@ from flowent.llm import ProviderFormat, ReasoningEffort
 from flowent.paths import data_directory
 
 
-class StoredChannel(BaseModel):
+class StoredTelegramSession(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    allowed_chat_ids: list[str] = Field(default_factory=list)
-    allowed_user_ids: list[str] = Field(default_factory=list)
+    chat_id: str
+    display_name: str = ""
+    recent_message: str = ""
+    status: str
+    updated_at: int = 0
+    user_id: str = ""
+    username: str = ""
+
+
+class StoredTelegramBot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     bot_token: str
     enabled: bool
     error: str = ""
-    id: str
-    name: str
-    pairing_code: str = ""
+    sessions: list[StoredTelegramSession] = Field(default_factory=list)
     status: str = "disabled"
-    type: str
 
 
 class StoredProvider(BaseModel):
@@ -67,10 +74,10 @@ class StoredMessage(BaseModel):
 class StoredState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    channels: list[StoredChannel]
     messages: list[StoredMessage]
     providers: list[StoredProvider]
     settings: StoredSettings
+    telegram_bot: StoredTelegramBot
 
 
 class StateStore:
@@ -90,7 +97,7 @@ class StateStore:
 
     def read_state(self) -> StoredState:
         with self.connect() as connection:
-            channels = self._read_channels(connection)
+            telegram_bot = self._read_telegram_bot(connection)
             providers = [
                 StoredProvider(
                     api_key=row["api_key"],
@@ -136,7 +143,6 @@ class StateStore:
             ]
 
         return StoredState(
-            channels=channels,
             messages=messages,
             providers=providers,
             settings=StoredSettings(
@@ -148,49 +154,106 @@ class StateStore:
                 if settings_row
                 else "",
             ),
+            telegram_bot=telegram_bot,
         )
 
-    def read_channels(self) -> list[StoredChannel]:
+    def read_telegram_bot(self) -> StoredTelegramBot:
         with self.connect() as connection:
-            return self._read_channels(connection)
+            return self._read_telegram_bot(connection)
 
-    def save_channel(self, channel: StoredChannel) -> StoredChannel:
+    def save_telegram_bot(self, telegram_bot: StoredTelegramBot) -> StoredTelegramBot:
         with self.connect() as connection:
             connection.execute(
                 """
-                INSERT INTO channels (
+                INSERT INTO telegram_bot (
                     id,
-                    name,
-                    type,
                     enabled,
-                    bot_token,
-                    allowed_user_ids,
-                    allowed_chat_ids,
-                    pairing_code
+                    bot_token
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    type = excluded.type,
                     enabled = excluded.enabled,
                     bot_token = excluded.bot_token,
-                    allowed_user_ids = excluded.allowed_user_ids,
-                    allowed_chat_ids = excluded.allowed_chat_ids,
-                    pairing_code = excluded.pairing_code,
                     updated_at = unixepoch()
                 """,
                 (
-                    channel.id,
-                    channel.name,
-                    channel.type,
-                    int(channel.enabled),
-                    channel.bot_token,
-                    json.dumps(channel.allowed_user_ids),
-                    json.dumps(channel.allowed_chat_ids),
-                    channel.pairing_code,
+                    int(telegram_bot.enabled),
+                    telegram_bot.bot_token,
                 ),
             )
-        return channel
+            return self._read_telegram_bot(connection)
+
+    def save_telegram_session(
+        self, session: StoredTelegramSession
+    ) -> StoredTelegramSession:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO telegram_sessions (
+                    chat_id,
+                    user_id,
+                    username,
+                    display_name,
+                    recent_message,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    username = excluded.username,
+                    display_name = excluded.display_name,
+                    recent_message = excluded.recent_message,
+                    status = excluded.status,
+                    updated_at = unixepoch()
+                """,
+                (
+                    session.chat_id,
+                    session.user_id,
+                    session.username,
+                    session.display_name,
+                    session.recent_message,
+                    session.status,
+                ),
+            )
+        return session
+
+    def approve_telegram_session(self, chat_id: str) -> StoredTelegramSession:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE telegram_sessions
+                SET status = 'approved',
+                    updated_at = unixepoch()
+                WHERE chat_id = ?
+                """,
+                (chat_id,),
+            )
+            row = connection.execute(
+                """
+                SELECT
+                    chat_id,
+                    user_id,
+                    username,
+                    display_name,
+                    recent_message,
+                    status,
+                    updated_at
+                FROM telegram_sessions
+                WHERE chat_id = ?
+                """,
+                (chat_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(chat_id)
+        return StoredTelegramSession(
+            chat_id=row["chat_id"],
+            display_name=row["display_name"],
+            recent_message=row["recent_message"],
+            status=row["status"],
+            updated_at=row["updated_at"],
+            user_id=row["user_id"],
+            username=row["username"],
+        )
 
     def save_provider(self, provider: StoredProvider) -> StoredProvider:
         with self.connect() as connection:
@@ -323,48 +386,62 @@ class StateStore:
             )
         ]
 
-    def _read_channels(self, connection: sqlite3.Connection) -> list[StoredChannel]:
-        return [
-            StoredChannel(
-                allowed_chat_ids=json.loads(row["allowed_chat_ids"] or "[]"),
-                allowed_user_ids=json.loads(row["allowed_user_ids"] or "[]"),
-                bot_token=row["bot_token"],
-                enabled=bool(row["enabled"]),
-                id=row["id"],
-                name=row["name"],
-                pairing_code=row["pairing_code"],
-                type=row["type"],
+    def _read_telegram_bot(self, connection: sqlite3.Connection) -> StoredTelegramBot:
+        bot_row = connection.execute(
+            """
+            SELECT enabled, bot_token
+            FROM telegram_bot
+            WHERE id = 1
+            """
+        ).fetchone()
+        sessions = [
+            StoredTelegramSession(
+                chat_id=row["chat_id"],
+                display_name=row["display_name"],
+                recent_message=row["recent_message"],
+                status=row["status"],
+                updated_at=row["updated_at"],
+                user_id=row["user_id"],
+                username=row["username"],
             )
             for row in connection.execute(
                 """
                 SELECT
-                    id,
-                    name,
-                    type,
-                    enabled,
-                    bot_token,
-                    allowed_user_ids,
-                    allowed_chat_ids,
-                    pairing_code
-                FROM channels
-                ORDER BY created_at, id
+                    chat_id,
+                    user_id,
+                    username,
+                    display_name,
+                    recent_message,
+                    status,
+                    updated_at
+                FROM telegram_sessions
+                ORDER BY status DESC, updated_at DESC, chat_id
                 """
             )
         ]
+        return StoredTelegramBot(
+            bot_token=bot_row["bot_token"] if bot_row else "",
+            enabled=bool(bot_row["enabled"]) if bot_row else False,
+            sessions=sessions,
+        )
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
             """
-            CREATE TABLE IF NOT EXISTS channels (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS telegram_bot (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
                 enabled INTEGER NOT NULL DEFAULT 0,
                 bot_token TEXT NOT NULL,
-                allowed_user_ids TEXT NOT NULL DEFAULT '[]',
-                allowed_chat_ids TEXT NOT NULL DEFAULT '[]',
-                pairing_code TEXT NOT NULL DEFAULT '',
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS telegram_sessions (
+                chat_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                display_name TEXT NOT NULL DEFAULT '',
+                recent_message TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 

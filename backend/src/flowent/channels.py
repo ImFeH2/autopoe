@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
-from flowent.storage import StateStore, StoredChannel
+from flowent.storage import StateStore, StoredTelegramBot, StoredTelegramSession
 
 logger = logging.getLogger("flowent.channels")
 
@@ -127,7 +127,7 @@ class ChannelRuntime:
     task: asyncio.Task[None] | None = None
 
 
-class ChannelManager:
+class TelegramBotManager:
     def __init__(
         self,
         *,
@@ -138,91 +138,78 @@ class ChannelManager:
         self.message_handler = message_handler
         self.store = store
         self.telegram_transport = telegram_transport or TelegramBotTransport()
-        self.runtimes: dict[str, ChannelRuntime] = {}
+        self.runtime = ChannelRuntime()
 
-    def channel_with_status(self, channel: StoredChannel) -> StoredChannel:
-        runtime = self.runtimes.get(channel.id)
-        if not channel.enabled:
-            return channel.model_copy(
+    def bot_with_status(self, bot: StoredTelegramBot) -> StoredTelegramBot:
+        if not bot.enabled:
+            return bot.model_copy(
                 update={"status": ChannelStatus.DISABLED, "error": ""}
             )
-        if runtime is None:
-            return channel.model_copy(
+        if self.runtime.status == ChannelStatus.DISABLED:
+            return bot.model_copy(
                 update={"status": ChannelStatus.STARTING, "error": ""}
             )
-        return channel.model_copy(
-            update={"status": runtime.status, "error": runtime.error}
+        return bot.model_copy(
+            update={"status": self.runtime.status, "error": self.runtime.error}
         )
 
-    def channels_with_status(
-        self, channels: list[StoredChannel]
-    ) -> list[StoredChannel]:
-        return [self.channel_with_status(channel) for channel in channels]
-
     async def start_enabled(self) -> None:
-        for channel in self.store.read_channels():
-            await self.sync_channel(channel)
+        await self.sync_bot(self.store.read_telegram_bot())
 
     async def stop_all(self) -> None:
-        for runtime in self.runtimes.values():
-            if runtime.task is not None:
-                runtime.task.cancel()
-        for runtime in self.runtimes.values():
-            if runtime.task is not None:
-                with suppress(asyncio.CancelledError):
-                    await runtime.task
-        self.runtimes.clear()
+        if self.runtime.task is not None:
+            self.runtime.task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.runtime.task
+        self.runtime = ChannelRuntime()
 
-    async def sync_channel(self, channel: StoredChannel) -> None:
-        runtime = self.runtimes.setdefault(channel.id, ChannelRuntime())
-        if not channel.enabled:
-            if runtime.task is not None:
-                runtime.task.cancel()
-            runtime.status = ChannelStatus.DISABLED
-            runtime.error = ""
+    async def sync_bot(self, bot: StoredTelegramBot) -> None:
+        if not bot.enabled:
+            if self.runtime.task is not None:
+                self.runtime.task.cancel()
+            self.runtime.status = ChannelStatus.DISABLED
+            self.runtime.error = ""
             return
-        if runtime.task is not None and not runtime.task.done():
+        if self.runtime.task is not None and not self.runtime.task.done():
             return
-        runtime.status = ChannelStatus.STARTING
-        runtime.error = ""
-        runtime.task = asyncio.create_task(self._run_channel(channel))
+        self.runtime.status = ChannelStatus.STARTING
+        self.runtime.error = ""
+        self.runtime.task = asyncio.create_task(self._run_bot(bot))
 
-    async def poll_once(self, channel: StoredChannel) -> None:
-        runtime = self.runtimes.setdefault(channel.id, ChannelRuntime())
-        if not channel.enabled:
-            runtime.status = ChannelStatus.DISABLED
-            runtime.error = ""
+    async def poll_once(self, bot: StoredTelegramBot) -> None:
+        if not bot.enabled:
+            self.runtime.status = ChannelStatus.DISABLED
+            self.runtime.error = ""
             return
 
-        runtime.status = ChannelStatus.STARTING
-        runtime.error = ""
+        self.runtime.status = ChannelStatus.STARTING
+        self.runtime.error = ""
         try:
             updates = await self.telegram_transport.get_updates(
-                offset=runtime.offset,
+                offset=self.runtime.offset,
                 timeout=30,
-                token=channel.bot_token,
+                token=bot.bot_token,
             )
-            runtime.status = ChannelStatus.RUNNING
+            self.runtime.status = ChannelStatus.RUNNING
             for update in updates:
                 update_id = update.get("update_id")
                 if isinstance(update_id, int):
-                    runtime.offset = max(runtime.offset or 0, update_id + 1)
-                await self._handle_telegram_update(channel, update)
+                    self.runtime.offset = max(self.runtime.offset or 0, update_id + 1)
+                await self._handle_telegram_update(bot, update)
         except Exception as error:
-            runtime.status = ChannelStatus.ERROR
-            runtime.error = str(error) or "Connection failed."
-            logger.exception("Channel polling failed channel_id=%s", channel.id)
+            self.runtime.status = ChannelStatus.ERROR
+            self.runtime.error = str(error) or "Connection failed."
+            logger.exception("Telegram polling failed")
 
-    async def _run_channel(self, channel: StoredChannel) -> None:
+    async def _run_bot(self, bot: StoredTelegramBot) -> None:
         while True:
-            await self.poll_once(channel)
-            runtime = self.runtimes.setdefault(channel.id, ChannelRuntime())
-            if runtime.status == ChannelStatus.ERROR:
+            await self.poll_once(bot)
+            if self.runtime.status == ChannelStatus.ERROR:
                 await asyncio.sleep(5)
 
     async def _handle_telegram_update(
         self,
-        channel: StoredChannel,
+        bot: StoredTelegramBot,
         update: dict[str, Any],
     ) -> None:
         message = update.get("message")
@@ -234,68 +221,61 @@ class ChannelManager:
         chat = message.get("chat")
         sender = message.get("from")
         chat_id = str(chat.get("id")) if isinstance(chat, dict) else ""
-        user_id = str(sender.get("id")) if isinstance(sender, dict) else ""
         if not chat_id:
             return
 
-        if self._is_pairing_message(channel, text):
-            paired_channel = self._pair_channel(channel, chat_id, user_id)
-            self.store.save_channel(paired_channel)
-            await self._send_telegram_reply(paired_channel, chat_id, "Connected.")
-            return
-
-        if not self._is_authorized(channel, chat_id, user_id):
-            logger.info(
-                "Channel message rejected channel_id=%s chat_id=%s user_id=%s",
-                channel.id,
+        session = self._telegram_session(
+            chat=chat if isinstance(chat, dict) else {},
+            message=text,
+            sender=sender if isinstance(sender, dict) else {},
+        )
+        if not self._is_approved(session.chat_id):
+            self.store.save_telegram_session(session)
+            await self._send_telegram_reply(
+                bot,
                 chat_id,
-                user_id,
+                "Request received. Approve this conversation in Flowent.",
             )
             return
 
+        self.store.save_telegram_session(
+            session.model_copy(update={"status": "approved"})
+        )
+
         reply = await self.message_handler(text)
-        await self._send_telegram_reply(channel, chat_id, reply)
+        await self._send_telegram_reply(bot, chat_id, reply)
 
-    def _is_authorized(
-        self,
-        channel: StoredChannel,
-        chat_id: str,
-        user_id: str,
-    ) -> bool:
-        if not channel.allowed_chat_ids and not channel.allowed_user_ids:
-            return False
-        return (
-            chat_id in channel.allowed_chat_ids or user_id in channel.allowed_user_ids
+    def _is_approved(self, chat_id: str) -> bool:
+        return any(
+            session.chat_id == chat_id and session.status == "approved"
+            for session in self.store.read_telegram_bot().sessions
         )
 
-    def _is_pairing_message(self, channel: StoredChannel, text: str) -> bool:
-        return (
-            bool(channel.pairing_code)
-            and text.strip() == f"/pair {channel.pairing_code}"
-        )
-
-    def _pair_channel(
+    def _telegram_session(
         self,
-        channel: StoredChannel,
-        chat_id: str,
-        user_id: str,
-    ) -> StoredChannel:
-        allowed_chat_ids = [*channel.allowed_chat_ids]
-        allowed_user_ids = [*channel.allowed_user_ids]
-        if chat_id not in allowed_chat_ids:
-            allowed_chat_ids.append(chat_id)
-        if user_id and user_id not in allowed_user_ids:
-            allowed_user_ids.append(user_id)
-        return channel.model_copy(
-            update={
-                "allowed_chat_ids": allowed_chat_ids,
-                "allowed_user_ids": allowed_user_ids,
-            }
+        *,
+        chat: dict[str, Any],
+        message: str,
+        sender: dict[str, Any],
+    ) -> StoredTelegramSession:
+        first_name = str(sender.get("first_name") or "")
+        last_name = str(sender.get("last_name") or "")
+        title = str(chat.get("title") or "")
+        display_name = title or " ".join(
+            part for part in [first_name, last_name] if part
+        )
+        return StoredTelegramSession(
+            chat_id=str(chat.get("id") or ""),
+            display_name=display_name,
+            recent_message=message,
+            status="pending",
+            user_id=str(sender.get("id") or ""),
+            username=str(sender.get("username") or ""),
         )
 
     async def _send_telegram_reply(
         self,
-        channel: StoredChannel,
+        bot: StoredTelegramBot,
         chat_id: str,
         content: str,
     ) -> None:
@@ -303,7 +283,7 @@ class ChannelManager:
             await self.telegram_transport.send_message(
                 chat_id=chat_id,
                 text=part,
-                token=channel.bot_token,
+                token=bot.bot_token,
             )
 
 

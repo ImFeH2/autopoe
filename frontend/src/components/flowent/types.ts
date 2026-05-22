@@ -22,21 +22,26 @@ export type Provider = {
   models: string[];
 };
 
-export type ChannelStatus = "disabled" | "error" | "running" | "starting";
+export type TelegramBotStatus = "disabled" | "error" | "running" | "starting";
 
-export type ChannelKind = "telegram_bot";
+export type TelegramSessionStatus = "approved" | "pending";
 
-export type Channel = {
-  allowedChatIds: string[];
-  allowedUserIds: string[];
-  botToken: string;
+export type TelegramSession = {
+  chatId: string;
+  displayName: string;
+  recentMessage: string;
+  status: TelegramSessionStatus;
+  updatedAt: number;
+  userId: string;
+  username: string;
+};
+
+export type TelegramBot = {
+  botSecret: string;
   enabled: boolean;
   error: string;
-  id: string;
-  name: string;
-  pairingCode: string;
-  status: ChannelStatus;
-  type: ChannelKind;
+  sessions: TelegramSession[];
+  status: TelegramBotStatus;
 };
 
 export type ToolItemStatus = "failed" | "running" | "success";
