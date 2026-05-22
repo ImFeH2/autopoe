@@ -253,7 +253,58 @@ def test_apply_patch_modifies_workdir_file(tmp_path) -> None:
     result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
 
     assert result.ok
+    assert result.title == "Edited notes.txt"
     assert target.read_text() == "alpha\nready\n"
+
+
+def test_apply_patch_added_file_title(tmp_path) -> None:
+    patch = """*** Begin Patch
+*** Add File: created.txt
++hello
+*** End Patch
+"""
+
+    result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
+
+    assert result.ok
+    assert result.title == "Added created.txt"
+    assert (tmp_path / "created.txt").read_text() == "hello\n"
+
+
+def test_apply_patch_deleted_file_title(tmp_path) -> None:
+    target = tmp_path / "old.txt"
+    target.write_text("remove me\n")
+    patch = """*** Begin Patch
+*** Delete File: old.txt
+*** End Patch
+"""
+
+    result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
+
+    assert result.ok
+    assert result.title == "Deleted old.txt"
+    assert not target.exists()
+
+
+def test_apply_patch_multiple_files_title(tmp_path) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("alpha\nbeta\n")
+    patch = """*** Begin Patch
+*** Update File: notes.txt
+@@
+-beta
++ready
+*** Add File: created.txt
++hello
+*** End Patch
+"""
+
+    result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
+
+    assert result.ok
+    assert result.title == "Edited 2 files"
+    assert target.read_text() == "alpha\nready\n"
+    assert (tmp_path / "created.txt").read_text() == "hello\n"
 
 
 def test_apply_patch_rejects_outside_workdir_file(tmp_path) -> None:
@@ -271,6 +322,7 @@ def test_apply_patch_rejects_outside_workdir_file(tmp_path) -> None:
         result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
 
         assert not result.ok
+        assert result.title == "Edit failed"
         assert outside.read_text() == "alpha\n"
     finally:
         outside.unlink(missing_ok=True)
@@ -297,6 +349,7 @@ def test_apply_patch_uses_internal_subcommand(tmp_path, monkeypatch) -> None:
     result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
 
     assert result.ok
+    assert result.title == "Edited files"
     assert calls
     assert calls[0][1:4] == ["-m", "flowent.cli", "apply-patch"]
 
@@ -326,6 +379,7 @@ def test_apply_patch_reports_patch_error_when_stderr_has_warning(
     result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
 
     assert not result.ok
+    assert result.title == "Edit failed"
     assert result.content == "Patch context was not found."
 
 

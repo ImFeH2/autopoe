@@ -162,7 +162,7 @@ def tool_call_title(name: str, arguments: dict[str, object]) -> str:
     if name == "grep_files":
         return f"Searching {arguments.get('pattern', 'files')}"
     if name == "apply_patch":
-        return "Applying patch"
+        return "Editing files"
     if name == "shell_command":
         return f"Running {arguments.get('command', 'command')}"
     if name == "update_plan":
@@ -192,9 +192,10 @@ def run_tool(
             return web_search(arguments, context)
         raise ValueError("Tool is not available.")
     except Exception as error:
-        return ToolResult(
-            content=str(error), ok=False, title=tool_call_title(name, arguments)
+        title = (
+            "Edit failed" if name == "apply_patch" else tool_call_title(name, arguments)
         )
+        return ToolResult(content=str(error), ok=False, title=title)
 
 
 def integer_argument(arguments: dict[str, object], name: str, default: int) -> int:
@@ -262,11 +263,33 @@ def apply_patch_tool(arguments: dict[str, object], context: ToolContext) -> Tool
     )
     if result.exit_code != 0:
         raise SandboxError(tool_failure_content(result))
+    data = json.loads(result.stdout or "{}")
     return ToolResult(
         content=result.stdout,
-        data={"files": [str(path) for path in paths]},
-        title="Applied patch",
+        data=data if isinstance(data, dict) else {},
+        title=patch_title_from_result(data),
     )
+
+
+def patch_title_from_result(data: object) -> str:
+    if not isinstance(data, dict):
+        return "Edited files"
+    files = data.get("files")
+    if not isinstance(files, list) or not files:
+        return "Edited files"
+    if len(files) > 1:
+        return f"Edited {len(files)} files"
+    file_info = files[0]
+    if not isinstance(file_info, dict):
+        return "Edited files"
+    raw_path = file_info.get("path")
+    name = Path(str(raw_path)).name if raw_path else "file"
+    status = file_info.get("status")
+    if status == "added":
+        return f"Added {name}"
+    if status == "deleted":
+        return f"Deleted {name}"
+    return f"Edited {name}"
 
 
 def tool_failure_content(result: object) -> str:
