@@ -1,4 +1,9 @@
-export type ViewId = "workspace" | "providers" | "channels" | "settings";
+export type ViewId =
+  | "workspace"
+  | "providers"
+  | "channels"
+  | "mcp"
+  | "settings";
 
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
 
@@ -42,6 +47,31 @@ export type TelegramBot = {
   error: string;
   sessions: TelegramSession[];
   status: TelegramBotStatus;
+};
+
+export type McpServerStatus = "disabled" | "error" | "ready" | "starting";
+
+export type McpServerType = "command" | "url";
+
+export type McpTool = {
+  description: string;
+  inputSchema: Record<string, unknown>;
+  name: string;
+  outputSchema?: Record<string, unknown> | null;
+};
+
+export type McpServer = {
+  args: string[];
+  command: string;
+  commandLine: string;
+  enabled: boolean;
+  error: string;
+  id: string;
+  name: string;
+  status: McpServerStatus;
+  tools: McpTool[];
+  type: McpServerType;
+  url: string;
 };
 
 export type ToolItemStatus = "failed" | "running" | "success";

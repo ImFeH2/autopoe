@@ -30,6 +30,30 @@ class StoredTelegramBot(BaseModel):
     status: str = "disabled"
 
 
+class StoredMcpTool(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = ""
+    input_schema: dict[str, object] = Field(default_factory=dict)
+    name: str
+    output_schema: dict[str, object] | None = None
+
+
+class StoredMcpServer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    args: list[str] = Field(default_factory=list)
+    command: str = ""
+    enabled: bool = True
+    error: str = ""
+    id: str
+    name: str
+    status: str = "disabled"
+    tools: list[StoredMcpTool] = Field(default_factory=list)
+    type: str
+    url: str = ""
+
+
 class StoredProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -74,6 +98,7 @@ class StoredMessage(BaseModel):
 class StoredState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    mcp_servers: list[StoredMcpServer]
     messages: list[StoredMessage]
     providers: list[StoredProvider]
     settings: StoredSettings
@@ -97,6 +122,7 @@ class StateStore:
 
     def read_state(self) -> StoredState:
         with self.connect() as connection:
+            mcp_servers = self._read_mcp_servers(connection)
             telegram_bot = self._read_telegram_bot(connection)
             providers = [
                 StoredProvider(
@@ -143,6 +169,7 @@ class StateStore:
             ]
 
         return StoredState(
+            mcp_servers=mcp_servers,
             messages=messages,
             providers=providers,
             settings=StoredSettings(
@@ -156,6 +183,89 @@ class StateStore:
             ),
             telegram_bot=telegram_bot,
         )
+
+    def read_mcp_servers(self) -> list[StoredMcpServer]:
+        with self.connect() as connection:
+            return self._read_mcp_servers(connection)
+
+    def save_mcp_server(self, server: StoredMcpServer) -> StoredMcpServer:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO mcp_servers (
+                    id,
+                    name,
+                    type,
+                    command,
+                    args,
+                    url,
+                    enabled
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    type = excluded.type,
+                    command = excluded.command,
+                    args = excluded.args,
+                    url = excluded.url,
+                    enabled = excluded.enabled,
+                    updated_at = unixepoch()
+                """,
+                (
+                    server.id,
+                    server.name,
+                    server.type,
+                    server.command,
+                    json.dumps(server.args),
+                    server.url,
+                    int(server.enabled),
+                ),
+            )
+            existing = [
+                current_server
+                for current_server in self._read_mcp_servers(connection)
+                if current_server.id == server.id
+            ]
+        return existing[0] if existing else server
+
+    def save_mcp_tools(
+        self, server_id: str, tools: list[StoredMcpTool]
+    ) -> list[StoredMcpTool]:
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM mcp_tools WHERE server_id = ?", (server_id,)
+            )
+            connection.executemany(
+                """
+                INSERT INTO mcp_tools (
+                    server_id,
+                    name,
+                    description,
+                    input_schema,
+                    output_schema,
+                    position
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        server_id,
+                        tool.name,
+                        tool.description,
+                        json.dumps(tool.input_schema),
+                        json.dumps(tool.output_schema)
+                        if tool.output_schema is not None
+                        else None,
+                        position,
+                    )
+                    for position, tool in enumerate(tools)
+                ],
+            )
+        return tools
+
+    def delete_mcp_server(self, server_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
 
     def read_telegram_bot(self) -> StoredTelegramBot:
         with self.connect() as connection:
@@ -425,9 +535,76 @@ class StateStore:
             sessions=sessions,
         )
 
+    def _read_mcp_servers(
+        self, connection: sqlite3.Connection
+    ) -> list[StoredMcpServer]:
+        servers: list[StoredMcpServer] = []
+        for row in connection.execute(
+            """
+            SELECT id, name, type, command, args, url, enabled
+            FROM mcp_servers
+            ORDER BY created_at, id
+            """
+        ):
+            tools = [
+                StoredMcpTool(
+                    description=tool_row["description"],
+                    input_schema=json.loads(tool_row["input_schema"] or "{}"),
+                    name=tool_row["name"],
+                    output_schema=json.loads(tool_row["output_schema"])
+                    if tool_row["output_schema"]
+                    else None,
+                )
+                for tool_row in connection.execute(
+                    """
+                    SELECT name, description, input_schema, output_schema
+                    FROM mcp_tools
+                    WHERE server_id = ?
+                    ORDER BY position, name
+                    """,
+                    (row["id"],),
+                )
+            ]
+            servers.append(
+                StoredMcpServer(
+                    args=json.loads(row["args"] or "[]"),
+                    command=row["command"],
+                    enabled=bool(row["enabled"]),
+                    id=row["id"],
+                    name=row["name"],
+                    status="disabled",
+                    tools=tools,
+                    type=row["type"],
+                    url=row["url"],
+                )
+            )
+        return servers
+
     def _migrate(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
             """
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                command TEXT NOT NULL DEFAULT '',
+                args TEXT NOT NULL DEFAULT '[]',
+                url TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS mcp_tools (
+                server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                input_schema TEXT NOT NULL DEFAULT '{}',
+                output_schema TEXT,
+                position INTEGER NOT NULL,
+                PRIMARY KEY (server_id, name)
+            );
+
             CREATE TABLE IF NOT EXISTS telegram_bot (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 enabled INTEGER NOT NULL DEFAULT 0,

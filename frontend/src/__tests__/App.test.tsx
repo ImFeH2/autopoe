@@ -83,6 +83,25 @@ type TestTelegramBot = {
   status: "disabled" | "error" | "running" | "starting";
 };
 
+type TestMcpTool = {
+  description?: string;
+  input_schema?: Record<string, unknown>;
+  name: string;
+};
+
+type TestMcpServer = {
+  args: string[];
+  command: string;
+  enabled: boolean;
+  error: string;
+  id: string;
+  name: string;
+  status: "disabled" | "error" | "ready" | "starting";
+  tools: TestMcpTool[];
+  type: "command" | "url";
+  url: string;
+};
+
 const controlledThinkingStreamResponse = (
   thinking: string,
   content: string,
@@ -645,7 +664,11 @@ const mockInitialState = (
   vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
     if (input === "/api/state") {
       return new Response(
-        JSON.stringify({ telegram_bot: emptyTelegramBotState(), ...state }),
+        JSON.stringify({
+          mcp_servers: [],
+          telegram_bot: emptyTelegramBotState(),
+          ...state,
+        }),
         {
           headers: { "Content-Type": "application/json" },
           status: 200,
@@ -685,6 +708,77 @@ const mockInitialState = (
           status: 200,
         },
       );
+    }
+
+    if (input === "/api/mcp/servers" && init?.method === "PUT") {
+      const request = JSON.parse(String(init.body)) as TestMcpServer;
+      return new Response(
+        JSON.stringify({
+          ...request,
+          status: request.enabled ? "ready" : "disabled",
+          tools: request.enabled
+            ? [
+                {
+                  description: "Read a file",
+                  input_schema: { type: "object" },
+                  name: "read_file",
+                },
+              ]
+            : [],
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/mcp/servers/") &&
+      input.endsWith("/reconnect") &&
+      init?.method === "POST"
+    ) {
+      const mcpServers = (
+        "mcp_servers" in state ? state.mcp_servers : []
+      ) as TestMcpServer[];
+      const serverId = input
+        .replace("/api/mcp/servers/", "")
+        .replace("/reconnect", "");
+      const server = mcpServers.find((current) => current.id === serverId);
+      return new Response(
+        JSON.stringify({
+          ...(server ?? commandMcpServer()),
+          status: "ready",
+          tools: [
+            {
+              description: "Read a file",
+              input_schema: { type: "object" },
+              name: "read_file",
+            },
+            {
+              description: "Write a file",
+              input_schema: { type: "object" },
+              name: "write_file",
+            },
+          ],
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/mcp/servers/") &&
+      init?.method === "DELETE"
+    ) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
     }
 
     if (input === "/api/providers" && init?.method === "POST") {
@@ -737,6 +831,7 @@ const mockInitialState = (
 };
 
 const selectedProviderState = () => ({
+  mcp_servers: [],
   messages: [],
   providers: [
     {
@@ -762,6 +857,28 @@ const emptyTelegramBotState = (): TestTelegramBot => ({
   error: "",
   sessions: [],
   status: "disabled",
+});
+
+const commandMcpServer = (
+  updates: Partial<TestMcpServer> = {},
+): TestMcpServer => ({
+  args: ["-y", "@modelcontextprotocol/server-filesystem", "/project"],
+  command: "npx",
+  enabled: true,
+  error: "",
+  id: "mcp-files",
+  name: "Files",
+  status: "ready",
+  tools: [
+    {
+      description: "Read a file",
+      input_schema: { type: "object" },
+      name: "read_file",
+    },
+  ],
+  type: "command",
+  url: "",
+  ...updates,
 });
 
 const expectDocumentText = async (text: string) => {
@@ -2353,6 +2470,269 @@ describe("App", () => {
     });
     expect(screen.getByText("Alice Example")).toBeInTheDocument();
     expect(screen.getAllByText("Approved").length).toBeGreaterThan(1);
+  });
+
+  it("opens MCP with an empty server list", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "MCP" }));
+
+    expect(
+      screen.getByRole("complementary", { name: "MCP servers" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No servers")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("form", { name: "MCP server" }),
+    ).toBeInTheDocument();
+  });
+
+  it("saves a command MCP server from a pasted command", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.type(screen.getByLabelText("Name"), "Files");
+    await user.type(
+      screen.getByLabelText("Command line"),
+      "npx -y @modelcontextprotocol/server-filesystem /project",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const saveCall = vi
+      .mocked(window.fetch)
+      .mock.calls.find(
+        ([input, init]) =>
+          input === "/api/mcp/servers" && init?.method === "PUT",
+      );
+    expect(saveCall).toBeDefined();
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toMatchObject({
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/project"],
+      command: "npx",
+      enabled: true,
+      name: "Files",
+      type: "command",
+    });
+    await expectDocumentText("read_file");
+  });
+
+  it("saves a URL MCP server", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.type(screen.getByLabelText("Name"), "Docs");
+    await user.click(screen.getByRole("combobox", { name: "Type" }));
+    await user.click(screen.getByRole("option", { name: "URL" }));
+    await user.type(screen.getByLabelText("URL"), "https://example.com/mcp");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const saveCall = vi
+      .mocked(window.fetch)
+      .mock.calls.find(
+        ([input, init]) =>
+          input === "/api/mcp/servers" && init?.method === "PUT",
+      );
+    expect(saveCall).toBeDefined();
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toMatchObject({
+      args: [],
+      command: "",
+      name: "Docs",
+      type: "url",
+      url: "https://example.com/mcp",
+    });
+  });
+
+  it("loads persisted MCP servers when the app starts", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      mcp_servers: [commandMcpServer()],
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+
+    expect(screen.getByRole("button", { name: "Files" })).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+  });
+
+  it("does not show disabled MCP tools as ready", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      mcp_servers: [
+        commandMcpServer({
+          enabled: false,
+          status: "disabled",
+          tools: [],
+        }),
+      ],
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByText("No tools")).toBeInTheDocument();
+  });
+
+  it("reconnects the selected MCP server and refreshes its tools", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      mcp_servers: [commandMcpServer()],
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("button", { name: "Reconnect" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/mcp/servers/mcp-files/reconnect",
+      expect.objectContaining({ method: "POST" }),
+    );
+    await expectDocumentText("write_file");
+  });
+
+  it("removes the selected MCP server", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      mcp_servers: [commandMcpServer()],
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/mcp/servers/mcp-files",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("No servers")).toBeInTheDocument();
+    });
+  });
+
+  it("shows successful MCP tool details after the tool row is opened", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            arguments: { path: "README.md" },
+            data: {
+              result: {
+                content: [{ text: "MCP file content", type: "text" }],
+                isError: false,
+              },
+              server: "Files",
+              tool: "read_file",
+            },
+            id: "tool-1",
+            name: "mcp__mcp-files__read_file",
+            output: "MCP file content",
+            title: "Calling Files.read_file",
+          },
+          "Used MCP.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read with MCP");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    const toolDetails = await screen.findByRole("button", {
+      name: /Calling Files\.read_file/,
+    });
+    await user.click(toolDetails);
+
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent('"server": "Files"');
+    expect(resultBlock).toHaveTextContent('"tool": "read_file"');
+    expect(resultBlock).toHaveTextContent("MCP file content");
+    await expectDocumentText("Used MCP.");
+  });
+
+  it("shows failed MCP tool details when a server call fails", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            arguments: { path: "secret.txt" },
+            data: {
+              result: {
+                content: [{ text: "Permission denied", type: "text" }],
+                isError: true,
+              },
+              server: "Files",
+              tool: "read_file",
+            },
+            id: "tool-1",
+            name: "mcp__mcp-files__read_file",
+            output: "Permission denied",
+            status: "failed",
+            title: "Calling Files.read_file",
+          },
+          "Could not use MCP.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read with MCP");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent("Permission denied");
+    await expectDocumentText("Could not use MCP.");
   });
 
   it("saves the selected Settings reasoning effort", async () => {

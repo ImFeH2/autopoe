@@ -389,11 +389,15 @@ def parse_tool_arguments(arguments: str) -> dict[str, object]:
     return parsed
 
 
-def new_tool_item(name: str, arguments: dict[str, object]) -> dict[str, object]:
+def new_tool_item(
+    name: str,
+    arguments: dict[str, object],
+    title: str | None = None,
+) -> dict[str, object]:
     return {
         "id": str(uuid4()),
         "arguments": arguments,
         "name": name,
         "status": "running",
-        "title": tool_call_title(name, arguments),
+        "title": title or tool_call_title(name, arguments),
     }

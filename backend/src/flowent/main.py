@@ -25,9 +25,11 @@ from flowent.llm import (
     list_provider_models,
 )
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
+from flowent.mcp import McpManager, McpTransport
 from flowent.sandbox import ensure_sandbox_available
 from flowent.storage import (
     StateStore,
+    StoredMcpServer,
     StoredMessage,
     StoredProvider,
     StoredSettings,
@@ -202,12 +204,14 @@ def create_app(
     *,
     serve_frontend: bool = True,
     chat_completion: CompletionCallable | None = None,
+    mcp_transport: McpTransport | None = None,
     telegram_transport: TelegramTransport | None = None,
 ) -> FastAPI:
     ensure_logging_configured()
     ensure_sandbox_available()
 
     store = StateStore()
+    mcp_manager = McpManager(store=store, transport=mcp_transport)
     telegram_bot_manager: TelegramBotManager | None = None
 
     static_dir = frontend_static_directory().resolve(strict=False)
@@ -242,6 +246,9 @@ def create_app(
             completion=chat_completion,
             connection=connection,
             cwd=cwd,
+            extra_tool_runner=mcp_manager.run_tool,
+            extra_tool_specs=mcp_manager.tool_specs(),
+            extra_tool_title=mcp_manager.tool_title,
             messages=request_messages,
         ):
             if event.event == "delta":
@@ -291,7 +298,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.mcp_manager = mcp_manager
         app.state.telegram_bot_manager = telegram_bot_manager
+        await mcp_manager.start_enabled()
         if telegram_bot_manager is not None:
             await telegram_bot_manager.start_enabled()
         try:
@@ -299,6 +308,7 @@ def create_app(
         finally:
             if telegram_bot_manager is not None:
                 await telegram_bot_manager.stop_all()
+            await mcp_manager.stop_all()
 
     app = FastAPI(title="Flowent", lifespan=lifespan)
 
@@ -309,13 +319,14 @@ def create_app(
     @app.get("/api/state")
     async def app_state() -> StoredState:
         state = store.read_state()
-        if telegram_bot_manager is None:
-            return state
-        return state.model_copy(
-            update={
-                "telegram_bot": telegram_bot_manager.bot_with_status(state.telegram_bot)
-            }
-        )
+        update: dict[str, object] = {
+            "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers)
+        }
+        if telegram_bot_manager is not None:
+            update["telegram_bot"] = telegram_bot_manager.bot_with_status(
+                state.telegram_bot
+            )
+        return state.model_copy(update=update)
 
     @app.get("/api/about")
     async def about() -> AboutResponse:
@@ -324,6 +335,27 @@ def create_app(
     @app.post("/api/providers")
     async def save_provider(provider: StoredProvider) -> StoredProvider:
         return store.save_provider(provider)
+
+    @app.put("/api/mcp/servers")
+    async def save_mcp_server(server: StoredMcpServer) -> StoredMcpServer:
+        saved_server = store.save_mcp_server(server)
+        return await mcp_manager.sync_server(saved_server)
+
+    @app.delete("/api/mcp/servers/{server_id}")
+    async def delete_mcp_server(server_id: str) -> dict[str, bool]:
+        await mcp_manager.delete_server(server_id)
+        return {"ok": True}
+
+    @app.post("/api/mcp/servers/{server_id}/reconnect")
+    async def reconnect_mcp_server(server_id: str) -> StoredMcpServer:
+        try:
+            return await mcp_manager.reconnect_server(server_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Server not found.") from error
+
+    @app.post("/api/mcp/reload")
+    async def reload_mcp_servers() -> list[StoredMcpServer]:
+        return await mcp_manager.reload()
 
     @app.put("/api/telegram-bot")
     async def save_telegram_bot(telegram_bot: StoredTelegramBot) -> StoredTelegramBot:
@@ -440,6 +472,9 @@ def create_app(
                     completion=chat_completion,
                     connection=connection,
                     cwd=cwd,
+                    extra_tool_runner=mcp_manager.run_tool,
+                    extra_tool_specs=mcp_manager.tool_specs(),
+                    extra_tool_title=mcp_manager.tool_title,
                     messages=request_messages,
                 ):
                     if event.event == "tool_start":

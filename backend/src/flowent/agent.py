@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +20,7 @@ from flowent.llm import (
 from flowent.logging import TRACE_LEVEL
 from flowent.tools import (
     ToolContext,
+    ToolResult,
     new_tool_item,
     parse_tool_arguments,
     run_tool,
@@ -104,6 +105,10 @@ async def run_agent_stream(
     connection: ProviderConnection,
     cwd: Path,
     messages: Sequence[Mapping[str, object]],
+    extra_tool_runner: Callable[[str, dict[str, object]], Awaitable[ToolResult | None]]
+    | None = None,
+    extra_tool_specs: Sequence[Mapping[str, object]] | None = None,
+    extra_tool_title: Callable[[str], str | None] | None = None,
     web_searcher: Callable[[str], Sequence[dict[str, str]]] | None = None,
 ) -> AsyncIterator[AgentStreamEvent]:
     conversation: list[Mapping[str, object]] = [
@@ -132,7 +137,10 @@ async def run_agent_stream(
         pending: dict[int, PendingToolCall] = {}
 
         async for chunk in stream_chat_chunks(
-            connection, conversation, completion=completion, tools=tool_specs()
+            connection,
+            conversation,
+            completion=completion,
+            tools=[*tool_specs(), *list(extra_tool_specs or [])],
         ):
             reasoning = chunk_delta_reasoning(chunk)
             if reasoning:
@@ -221,16 +229,29 @@ async def run_agent_stream(
                     },
                 )
             else:
-                tool_item = new_tool_item(tool_call.name, arguments)
+                tool_item = new_tool_item(
+                    tool_call.name,
+                    arguments,
+                    extra_tool_title(tool_call.name) if extra_tool_title else None,
+                )
                 logger.debug(
                     "Tool call started name=%s id=%s", tool_call.name, tool_item["id"]
                 )
                 logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
                 yield AgentStreamEvent(event="tool_start", data={"tool": tool_item})
-                result = run_tool(
-                    tool_call.name,
-                    arguments,
-                    ToolContext(cwd=cwd, web_searcher=web_searcher),
+                extra_result = (
+                    await extra_tool_runner(tool_call.name, arguments)
+                    if extra_tool_runner is not None
+                    else None
+                )
+                result = (
+                    extra_result
+                    if isinstance(extra_result, ToolResult)
+                    else run_tool(
+                        tool_call.name,
+                        arguments,
+                        ToolContext(cwd=cwd, web_searcher=web_searcher),
+                    )
                 )
                 result_content = result.content
                 logger.debug(

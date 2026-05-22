@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
+import { McpView } from "@/components/flowent/mcp-view";
 import {
   createEmptyProvider,
   providerOptions,
@@ -12,6 +13,8 @@ import { viewPanelClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
+  McpServer,
+  McpTool,
   Message,
   Provider,
   ReasoningEffort,
@@ -52,9 +55,30 @@ type ApiTelegramBot = {
   status?: TelegramBot["status"];
 };
 
+type ApiMcpTool = {
+  description?: string;
+  input_schema?: Record<string, unknown>;
+  name: string;
+  output_schema?: Record<string, unknown> | null;
+};
+
+type ApiMcpServer = {
+  args: string[];
+  command: string;
+  enabled: boolean;
+  error?: string;
+  id: string;
+  name: string;
+  status?: McpServer["status"];
+  tools?: ApiMcpTool[];
+  type: McpServer["type"];
+  url: string;
+};
+
 type ApiMessage = Message;
 
 type ApiState = {
+  mcp_servers?: ApiMcpServer[];
   messages: ApiMessage[];
   providers: ApiProvider[];
   settings: {
@@ -201,6 +225,121 @@ const telegramBotToApi = (telegramBot: TelegramBot): ApiTelegramBot => ({
   status: telegramBot.status,
 });
 
+const mcpCommandLine = (server: Pick<McpServer, "args" | "command">) =>
+  [server.command, ...server.args].filter(Boolean).join(" ");
+
+const mcpToolFromApi = (tool: ApiMcpTool): McpTool => ({
+  description: tool.description ?? "",
+  inputSchema: tool.input_schema ?? {},
+  name: tool.name,
+  outputSchema: tool.output_schema ?? null,
+});
+
+const mcpServerFromApi = (server: ApiMcpServer): McpServer => ({
+  args: server.args ?? [],
+  command: server.command ?? "",
+  commandLine: mcpCommandLine({
+    args: server.args ?? [],
+    command: server.command ?? "",
+  }),
+  enabled: server.enabled,
+  error: server.error ?? "",
+  id: server.id,
+  name: server.name,
+  status: server.status ?? "disabled",
+  tools: (server.tools ?? []).map(mcpToolFromApi),
+  type: server.type,
+  url: server.url ?? "",
+});
+
+const mcpServerToApi = (server: McpServer): ApiMcpServer => ({
+  args: server.args,
+  command: server.command,
+  enabled: server.enabled,
+  error: server.error,
+  id: server.id,
+  name: server.name,
+  status: server.status,
+  tools: server.tools.map((tool) => ({
+    description: tool.description,
+    input_schema: tool.inputSchema,
+    name: tool.name,
+    output_schema: tool.outputSchema,
+  })),
+  type: server.type,
+  url: server.url,
+});
+
+const createEmptyMcpServer = (): McpServer => ({
+  args: [],
+  command: "",
+  commandLine: "",
+  enabled: true,
+  error: "",
+  id: "new",
+  name: "",
+  status: "disabled",
+  tools: [],
+  type: "command",
+  url: "",
+});
+
+const parseCommandLine = (commandLine: string) => {
+  const parts: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | "" = "";
+  let isEscaped = false;
+
+  for (const character of commandLine) {
+    if (isEscaped) {
+      current += character;
+      isEscaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      isEscaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) {
+        quote = "";
+      } else {
+        current += character;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (current) {
+        parts.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += character;
+  }
+
+  if (current) {
+    parts.push(current);
+  }
+
+  return {
+    args: parts.slice(1),
+    command: parts[0] ?? "",
+  };
+};
+
+const mcpServerId = (name: string) => {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `mcp-${slug || crypto.randomUUID()}`;
+};
+
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
@@ -211,6 +350,11 @@ function App() {
   const [appVersion, setAppVersion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [mcpEditorId, setMcpEditorId] = useState("new");
+  const [mcpDraft, setMcpDraft] = useState<McpServer>(() =>
+    createEmptyMcpServer(),
+  );
   const [telegramBot, setTelegramBot] = useState<TelegramBot>(() =>
     createEmptyTelegramBot(),
   );
@@ -230,6 +374,7 @@ function App() {
     [providers, selectedProviderId],
   );
   const isCreatingProvider = providerEditorId === "new";
+  const isCreatingMcpServer = mcpEditorId === "new";
 
   useEffect(() => {
     let isMounted = true;
@@ -255,6 +400,14 @@ function App() {
         const loadedProviders = state.providers.map(providerFromApi);
         setProviders(loadedProviders);
         setMessages(state.messages);
+        const loadedMcpServers = (state.mcp_servers ?? []).map(
+          mcpServerFromApi,
+        );
+        setMcpServers(loadedMcpServers);
+        if (loadedMcpServers[0]) {
+          setMcpEditorId(loadedMcpServers[0].id);
+          setMcpDraft(loadedMcpServers[0]);
+        }
         setSelectedProviderId(state.settings.selected_provider_id);
         setSelectedModel(state.settings.selected_model);
         setReasoningEffort(state.settings.reasoning_effort ?? "default");
@@ -286,6 +439,20 @@ function App() {
 
   const updateTelegramBot = (updates: Partial<TelegramBot>) => {
     setTelegramBot((current) => ({ ...current, ...updates }));
+  };
+
+  const loadMcpEditor = (server: McpServer) => {
+    setMcpEditorId(server.id);
+    setMcpDraft(server);
+  };
+
+  const openNewMcpEditor = () => {
+    setMcpEditorId("new");
+    setMcpDraft(createEmptyMcpServer());
+  };
+
+  const updateMcpDraft = (updates: Partial<McpServer>) => {
+    setMcpDraft((current) => ({ ...current, ...updates }));
   };
 
   const updateProviderDraft = (updates: Partial<Provider>) => {
@@ -407,6 +574,92 @@ function App() {
         (await response.json()) as ApiTelegramBot,
       );
       setTelegramBot(result);
+    }
+  };
+
+  const saveMcpServer = async () => {
+    const parsedCommand =
+      mcpDraft.type === "command"
+        ? parseCommandLine(mcpDraft.commandLine)
+        : { args: [], command: "" };
+    const nextServer: McpServer = {
+      ...mcpDraft,
+      args: parsedCommand.args,
+      command: parsedCommand.command,
+      id:
+        isCreatingMcpServer || mcpDraft.id === "new"
+          ? mcpServerId(mcpDraft.name)
+          : mcpDraft.id,
+      name: mcpDraft.name.trim() || "Server",
+      tools: isCreatingMcpServer ? [] : mcpDraft.tools,
+      url: mcpDraft.type === "url" ? mcpDraft.url : "",
+    };
+    const response = await fetch("/api/mcp/servers", {
+      body: JSON.stringify(mcpServerToApi(nextServer)),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    });
+
+    if (response.ok) {
+      const savedServer = mcpServerFromApi(
+        (await response.json()) as ApiMcpServer,
+      );
+      setMcpServers((currentServers) => {
+        if (isCreatingMcpServer) {
+          return [...currentServers, savedServer];
+        }
+        return currentServers.map((server) =>
+          server.id === savedServer.id ? savedServer : server,
+        );
+      });
+      setMcpEditorId(savedServer.id);
+      setMcpDraft(savedServer);
+    }
+  };
+
+  const reconnectMcpServer = async () => {
+    if (isCreatingMcpServer) {
+      return;
+    }
+    const response = await fetch(`/api/mcp/servers/${mcpDraft.id}/reconnect`, {
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    if (response.ok) {
+      const updatedServer = mcpServerFromApi(
+        (await response.json()) as ApiMcpServer,
+      );
+      setMcpServers((currentServers) =>
+        currentServers.map((server) =>
+          server.id === updatedServer.id ? updatedServer : server,
+        ),
+      );
+      setMcpDraft(updatedServer);
+    }
+  };
+
+  const removeMcpServer = async () => {
+    if (isCreatingMcpServer) {
+      return;
+    }
+    const response = await fetch(`/api/mcp/servers/${mcpDraft.id}`, {
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+
+    if (response.ok) {
+      const remainingServers = mcpServers.filter(
+        (server) => server.id !== mcpDraft.id,
+      );
+      setMcpServers(remainingServers);
+      const nextServer = remainingServers[0];
+      if (nextServer) {
+        setMcpEditorId(nextServer.id);
+        setMcpDraft(nextServer);
+      } else {
+        openNewMcpEditor();
+      }
     }
   };
 
@@ -987,6 +1240,21 @@ function App() {
           onSaveTelegramBot={saveTelegramBot}
           onUpdateTelegramBot={updateTelegramBot}
           telegramBot={telegramBot}
+        />
+      </TabsContent>
+      <TabsContent value="mcp" className={viewPanelClassName}>
+        <McpView
+          activeServer={mcpDraft}
+          isCreatingServer={isCreatingMcpServer}
+          onNewServer={openNewMcpEditor}
+          onReconnectServer={reconnectMcpServer}
+          onRemoveServer={removeMcpServer}
+          onSaveServer={() => {
+            void saveMcpServer();
+          }}
+          onServerSelect={loadMcpEditor}
+          onUpdateServer={updateMcpDraft}
+          servers={mcpServers}
         />
       </TabsContent>
       <TabsContent value="settings" className={viewPanelClassName}>
