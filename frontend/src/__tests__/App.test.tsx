@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -626,7 +626,14 @@ const mockInitialState = (
 ) => {
   vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
     if (input === "/api/state") {
-      return new Response(JSON.stringify(state), {
+      return new Response(JSON.stringify({ channels: [], ...state }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (input === "/api/channels" && init?.method === "POST") {
+      return new Response(init.body, {
         headers: { "Content-Type": "application/json" },
         status: 200,
       });
@@ -682,6 +689,7 @@ const mockInitialState = (
 };
 
 const selectedProviderState = () => ({
+  channels: [],
   messages: [],
   providers: [
     {
@@ -2076,6 +2084,153 @@ describe("App", () => {
     expect(
       screen.getByRole("combobox", { name: "Reasoning" }),
     ).toHaveTextContent("XHigh");
+  });
+
+  it("opens Channels from the sidebar", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Channels" }));
+
+    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(screen.getByText("No channels")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Channel name" })).toHaveValue(
+      "",
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Channel type" }),
+    ).toHaveTextContent("Telegram Bot");
+    expect(screen.getByRole("combobox", { name: "Enabled" })).toHaveTextContent(
+      "Off",
+    );
+    expect(screen.getByLabelText("Bot secret")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Allowed users" })).toHaveValue(
+      "",
+    );
+    expect(screen.getByRole("textbox", { name: "Allowed chats" })).toHaveValue(
+      "",
+    );
+    expect(screen.getByRole("textbox", { name: "Pairing" })).toHaveValue("");
+  });
+
+  it("saves a Telegram Bot channel from Channels", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Channels" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Channel name" }),
+      "Telegram",
+    );
+    await user.type(screen.getByLabelText("Bot secret"), "bot-secret");
+    fireEvent.change(screen.getByRole("textbox", { name: "Allowed users" }), {
+      target: { value: "1001, 1002" },
+    });
+    await user.type(
+      screen.getByRole("textbox", { name: "Allowed chats" }),
+      "2001",
+    );
+    await user.type(screen.getByRole("textbox", { name: "Pairing" }), "123456");
+    await user.click(screen.getByRole("combobox", { name: "Enabled" }));
+    await user.click(screen.getByRole("option", { name: "On" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/channels",
+      expect.objectContaining({
+        body: expect.stringContaining('"type":"telegram_bot"'),
+        method: "POST",
+      }),
+    );
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/channels",
+      expect.objectContaining({
+        body: expect.stringContaining('"allowed_user_ids":["1001","1002"]'),
+        method: "POST",
+      }),
+    );
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/channels",
+      expect.objectContaining({
+        body: expect.stringContaining('"allowed_chat_ids":["2001"]'),
+        method: "POST",
+      }),
+    );
+  });
+
+  it("loads persisted Channels when the app starts", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      channels: [
+        {
+          allowed_chat_ids: ["2001"],
+          allowed_user_ids: ["1001"],
+          bot_token: "bot-secret",
+          enabled: true,
+          error: "",
+          id: "channel-telegram",
+          name: "Telegram",
+          pairing_code: "123456",
+          status: "running",
+          type: "telegram_bot",
+        },
+      ],
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Channels" }));
+
+    expect(
+      screen.getByRole("button", { name: /Telegram/ }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Running").length).toBeGreaterThan(0);
+  });
+
+  it("shows a Channel connection error in Channels", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      channels: [
+        {
+          allowed_chat_ids: [],
+          allowed_user_ids: [],
+          bot_token: "bot-secret",
+          enabled: true,
+          error: "Token is invalid",
+          id: "channel-telegram",
+          name: "Telegram",
+          pairing_code: "",
+          status: "error",
+          type: "telegram_bot",
+        },
+      ],
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Channels" }));
+    await user.click(screen.getByRole("button", { name: /Telegram/ }));
+
+    expect(screen.getAllByText("Error").length).toBeGreaterThan(0);
+    expect(screen.getByText("Token is invalid")).toBeInTheDocument();
   });
 
   it("saves the selected Settings reasoning effort", async () => {

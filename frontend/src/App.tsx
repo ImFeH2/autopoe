@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/flowent/app-shell";
+import { ChannelsView } from "@/components/flowent/channels-view";
 import {
   createEmptyProvider,
   providerOptions,
@@ -11,6 +12,7 @@ import { viewPanelClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
+  Channel,
   Message,
   Provider,
   ReasoningEffort,
@@ -31,9 +33,23 @@ type ApiProvider = {
   type: Provider["type"];
 };
 
+type ApiChannel = {
+  allowed_chat_ids: string[];
+  allowed_user_ids: string[];
+  bot_token: string;
+  enabled: boolean;
+  error?: string;
+  id: string;
+  name: string;
+  pairing_code?: string;
+  status?: Channel["status"];
+  type: Channel["type"];
+};
+
 type ApiMessage = Message;
 
 type ApiState = {
+  channels: ApiChannel[];
   messages: ApiMessage[];
   providers: ApiProvider[];
   settings: {
@@ -131,6 +147,45 @@ const providerToApi = (provider: Provider): ApiProvider => ({
   type: provider.type,
 });
 
+const channelFromApi = (channel: ApiChannel): Channel => ({
+  allowedChatIds: channel.allowed_chat_ids,
+  allowedUserIds: channel.allowed_user_ids,
+  botToken: channel.bot_token,
+  enabled: channel.enabled,
+  error: channel.error ?? "",
+  id: channel.id,
+  name: channel.name,
+  pairingCode: channel.pairing_code ?? "",
+  status: channel.status ?? "disabled",
+  type: channel.type,
+});
+
+const channelToApi = (channel: Channel): ApiChannel => ({
+  allowed_chat_ids: channel.allowedChatIds,
+  allowed_user_ids: channel.allowedUserIds,
+  bot_token: channel.botToken,
+  enabled: channel.enabled,
+  error: channel.error,
+  id: channel.id,
+  name: channel.name,
+  pairing_code: channel.pairingCode,
+  status: channel.status,
+  type: channel.type,
+});
+
+const createEmptyChannel = (): Channel => ({
+  allowedChatIds: [],
+  allowedUserIds: [],
+  botToken: "",
+  enabled: false,
+  error: "",
+  id: crypto.randomUUID(),
+  name: "",
+  pairingCode: "",
+  status: "disabled",
+  type: "telegram_bot",
+});
+
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
@@ -140,7 +195,12 @@ function App() {
     useState<ReasoningEffort>("default");
   const [appVersion, setAppVersion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [channelEditorId, setChannelEditorId] = useState("new");
+  const [channelDraft, setChannelDraft] = useState<Channel>(() =>
+    createEmptyChannel(),
+  );
   const [providerEditorId, setProviderEditorId] = useState("new");
   const [providerDraft, setProviderDraft] = useState<Provider>(() =>
     createEmptyProvider(),
@@ -157,6 +217,7 @@ function App() {
     [providers, selectedProviderId],
   );
   const isCreatingProvider = providerEditorId === "new";
+  const isCreatingChannel = channelEditorId === "new";
 
   useEffect(() => {
     let isMounted = true;
@@ -179,7 +240,9 @@ function App() {
           return;
         }
 
+        const loadedChannels = (state.channels ?? []).map(channelFromApi);
         const loadedProviders = state.providers.map(providerFromApi);
+        setChannels(loadedChannels);
         setProviders(loadedProviders);
         setMessages(state.messages);
         setSelectedProviderId(state.settings.selected_provider_id);
@@ -208,6 +271,20 @@ function App() {
     setProviderEditorId("new");
     setProviderDraft(createEmptyProvider());
     setFetchError("");
+  };
+
+  const loadChannelEditor = (channel: Channel) => {
+    setChannelEditorId(channel.id);
+    setChannelDraft(channel);
+  };
+
+  const openNewChannelEditor = () => {
+    setChannelEditorId("new");
+    setChannelDraft(createEmptyChannel());
+  };
+
+  const updateChannelDraft = (updates: Partial<Channel>) => {
+    setChannelDraft((current) => ({ ...current, ...updates }));
   };
 
   const updateProviderDraft = (updates: Partial<Provider>) => {
@@ -315,6 +392,41 @@ function App() {
       headers: { "Content-Type": "application/json" },
       method: "POST",
     });
+  };
+
+  const saveChannel = async () => {
+    const savedChannel: Channel = {
+      ...channelDraft,
+      id: isCreatingChannel ? crypto.randomUUID() : channelDraft.id,
+      name: channelDraft.name.trim() || "Telegram",
+    };
+
+    setChannels((currentChannels) => {
+      if (isCreatingChannel) {
+        return [...currentChannels, savedChannel];
+      }
+      return currentChannels.map((channel) =>
+        channel.id === savedChannel.id ? savedChannel : channel,
+      );
+    });
+    setChannelEditorId(savedChannel.id);
+    setChannelDraft(savedChannel);
+
+    const response = await fetch("/api/channels", {
+      body: JSON.stringify(channelToApi(savedChannel)),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    if (response.ok) {
+      const result = channelFromApi((await response.json()) as ApiChannel);
+      setChannels((currentChannels) =>
+        currentChannels.map((channel) =>
+          channel.id === result.id ? result : channel,
+        ),
+      );
+      setChannelDraft(result);
+    }
   };
 
   const saveMessages = async (nextMessages: Message[]) => {
@@ -866,6 +978,17 @@ function App() {
           onSaveProvider={saveProvider}
           onUpdateProvider={updateProviderDraft}
           providers={providers}
+        />
+      </TabsContent>
+      <TabsContent value="channels" className={viewPanelClassName}>
+        <ChannelsView
+          activeChannel={channelDraft}
+          channels={channels}
+          isCreatingChannel={isCreatingChannel}
+          onChannelSelect={loadChannelEditor}
+          onNewChannel={openNewChannelEditor}
+          onSaveChannel={saveChannel}
+          onUpdateChannel={updateChannelDraft}
         />
       </TabsContent>
       <TabsContent value="settings" className={viewPanelClassName}>

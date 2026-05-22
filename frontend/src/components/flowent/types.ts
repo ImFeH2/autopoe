@@ -1,4 +1,4 @@
-export type ViewId = "workspace" | "providers" | "settings";
+export type ViewId = "workspace" | "providers" | "channels" | "settings";
 
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
 
@@ -20,6 +20,23 @@ export type Provider = {
   baseUrl: string;
   apiKey: string;
   models: string[];
+};
+
+export type ChannelStatus = "disabled" | "error" | "running" | "starting";
+
+export type ChannelKind = "telegram_bot";
+
+export type Channel = {
+  allowedChatIds: string[];
+  allowedUserIds: string[];
+  botToken: string;
+  enabled: boolean;
+  error: string;
+  id: string;
+  name: string;
+  pairingCode: string;
+  status: ChannelStatus;
+  type: ChannelKind;
 };
 
 export type ToolItemStatus = "failed" | "running" | "success";

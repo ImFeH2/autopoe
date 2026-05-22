@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from flowent._version import __version__
 from flowent.agent import run_agent_stream
+from flowent.channels import ChannelManager, TelegramTransport
 from flowent.context import runtime_context_messages
 from flowent.llm import (
     ChatMessage,
@@ -26,6 +28,7 @@ from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.sandbox import ensure_sandbox_available
 from flowent.storage import (
     StateStore,
+    StoredChannel,
     StoredMessage,
     StoredProvider,
     StoredSettings,
@@ -192,16 +195,105 @@ def create_app(
     *,
     serve_frontend: bool = True,
     chat_completion: CompletionCallable | None = None,
+    telegram_transport: TelegramTransport | None = None,
 ) -> FastAPI:
     ensure_logging_configured()
     ensure_sandbox_available()
 
-    app = FastAPI(title="Flowent")
     store = StateStore()
+    channel_manager: ChannelManager | None = None
 
     static_dir = frontend_static_directory().resolve(strict=False)
     logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
     logger.info("Static directory: %s", static_dir)
+
+    async def run_workspace_turn(content: str) -> StoredMessage:
+        state = store.read_state()
+        connection = selected_connection(state)
+        cwd = Path.cwd()
+        user_message = StoredMessage(
+            author="user",
+            content=content,
+            id=str(uuid4()),
+        )
+        next_messages = [*state.messages, user_message]
+        store.save_messages(next_messages)
+        chat_messages = workspace_chat_messages(
+            next_messages,
+            store.read_compacted_context(),
+        )
+        request_messages = [
+            message.model_dump()
+            for message in [*runtime_context_messages(cwd), *chat_messages]
+        ]
+        assistant_content = ""
+        assistant_thinking = ""
+        assistant_tools: dict[str, StoredToolItem] = {}
+        assistant_id = str(uuid4())
+
+        async for event in run_agent_stream(
+            completion=chat_completion,
+            connection=connection,
+            cwd=cwd,
+            messages=request_messages,
+        ):
+            if event.event == "delta":
+                assistant_content += str(event.data.get("content") or "")
+            if event.event == "thinking_delta":
+                assistant_thinking += str(event.data.get("content") or "")
+            if event.event == "tool_start":
+                tool = event.data.get("tool")
+                if isinstance(tool, dict) and isinstance(tool.get("id"), str):
+                    assistant_tools[tool["id"]] = StoredToolItem.model_validate(tool)
+            if event.event in {"tool_done", "tool_error"}:
+                tool_id = event.data.get("id")
+                if isinstance(tool_id, str) and tool_id in assistant_tools:
+                    assistant_tools[tool_id] = StoredToolItem.model_validate(
+                        {
+                            **assistant_tools[tool_id].model_dump(exclude_none=True),
+                            **event.data,
+                        }
+                    )
+            if event.event == "done":
+                message = event.data.get("message")
+                if isinstance(message, dict):
+                    assistant_id = str(message.get("id") or assistant_id)
+                    assistant_content = str(message.get("content") or assistant_content)
+                    assistant_thinking = str(
+                        message.get("thinking") or assistant_thinking
+                    )
+
+        assistant_message = StoredMessage(
+            author="assistant",
+            content=assistant_content,
+            id=assistant_id,
+            thinking=assistant_thinking,
+            tools=list(assistant_tools.values()),
+        )
+        store.save_messages([*next_messages, assistant_message])
+        return assistant_message
+
+    async def workspace_reply_text(content: str) -> str:
+        return (await run_workspace_turn(content)).content
+
+    channel_manager = ChannelManager(
+        message_handler=workspace_reply_text,
+        store=store,
+        telegram_transport=telegram_transport,
+    )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.channel_manager = channel_manager
+        if channel_manager is not None:
+            await channel_manager.start_enabled()
+        try:
+            yield
+        finally:
+            if channel_manager is not None:
+                await channel_manager.stop_all()
+
+    app = FastAPI(title="Flowent", lifespan=lifespan)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
@@ -209,7 +301,12 @@ def create_app(
 
     @app.get("/api/state")
     async def app_state() -> StoredState:
-        return store.read_state()
+        state = store.read_state()
+        if channel_manager is None:
+            return state
+        return state.model_copy(
+            update={"channels": channel_manager.channels_with_status(state.channels)}
+        )
 
     @app.get("/api/about")
     async def about() -> AboutResponse:
@@ -218,6 +315,14 @@ def create_app(
     @app.post("/api/providers")
     async def save_provider(provider: StoredProvider) -> StoredProvider:
         return store.save_provider(provider)
+
+    @app.post("/api/channels")
+    async def save_channel(channel: StoredChannel) -> StoredChannel:
+        saved_channel = store.save_channel(channel)
+        if channel_manager is not None:
+            await channel_manager.sync_channel(saved_channel)
+            return channel_manager.channel_with_status(saved_channel)
+        return saved_channel
 
     @app.post("/api/providers/models")
     async def provider_models(request: ProviderModelsRequest) -> ProviderModelsResponse:

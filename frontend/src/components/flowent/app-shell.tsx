@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { KeyRound, MessageSquare, Settings } from "lucide-react";
+import { KeyRound, MessageSquare, Radio, Settings } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { navigationLabelClassName } from "@/components/flowent/styles";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const navigationItems = [
   { id: "workspace", label: "Workspace", icon: MessageSquare },
   { id: "providers", label: "Providers", icon: KeyRound },
+  { id: "channels", label: "Channels", icon: Radio },
   { id: "settings", label: "Settings", icon: Settings },
 ] satisfies Array<{ id: ViewId; label: string; icon: LucideIcon }>;
 

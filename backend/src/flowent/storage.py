@@ -8,6 +8,21 @@ from flowent.llm import ProviderFormat, ReasoningEffort
 from flowent.paths import data_directory
 
 
+class StoredChannel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_chat_ids: list[str] = Field(default_factory=list)
+    allowed_user_ids: list[str] = Field(default_factory=list)
+    bot_token: str
+    enabled: bool
+    error: str = ""
+    id: str
+    name: str
+    pairing_code: str = ""
+    status: str = "disabled"
+    type: str
+
+
 class StoredProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -52,6 +67,7 @@ class StoredMessage(BaseModel):
 class StoredState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    channels: list[StoredChannel]
     messages: list[StoredMessage]
     providers: list[StoredProvider]
     settings: StoredSettings
@@ -74,6 +90,7 @@ class StateStore:
 
     def read_state(self) -> StoredState:
         with self.connect() as connection:
+            channels = self._read_channels(connection)
             providers = [
                 StoredProvider(
                     api_key=row["api_key"],
@@ -119,6 +136,7 @@ class StateStore:
             ]
 
         return StoredState(
+            channels=channels,
             messages=messages,
             providers=providers,
             settings=StoredSettings(
@@ -131,6 +149,48 @@ class StateStore:
                 else "",
             ),
         )
+
+    def read_channels(self) -> list[StoredChannel]:
+        with self.connect() as connection:
+            return self._read_channels(connection)
+
+    def save_channel(self, channel: StoredChannel) -> StoredChannel:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO channels (
+                    id,
+                    name,
+                    type,
+                    enabled,
+                    bot_token,
+                    allowed_user_ids,
+                    allowed_chat_ids,
+                    pairing_code
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    type = excluded.type,
+                    enabled = excluded.enabled,
+                    bot_token = excluded.bot_token,
+                    allowed_user_ids = excluded.allowed_user_ids,
+                    allowed_chat_ids = excluded.allowed_chat_ids,
+                    pairing_code = excluded.pairing_code,
+                    updated_at = unixepoch()
+                """,
+                (
+                    channel.id,
+                    channel.name,
+                    channel.type,
+                    int(channel.enabled),
+                    channel.bot_token,
+                    json.dumps(channel.allowed_user_ids),
+                    json.dumps(channel.allowed_chat_ids),
+                    channel.pairing_code,
+                ),
+            )
+        return channel
 
     def save_provider(self, provider: StoredProvider) -> StoredProvider:
         with self.connect() as connection:
@@ -263,9 +323,51 @@ class StateStore:
             )
         ]
 
+    def _read_channels(self, connection: sqlite3.Connection) -> list[StoredChannel]:
+        return [
+            StoredChannel(
+                allowed_chat_ids=json.loads(row["allowed_chat_ids"] or "[]"),
+                allowed_user_ids=json.loads(row["allowed_user_ids"] or "[]"),
+                bot_token=row["bot_token"],
+                enabled=bool(row["enabled"]),
+                id=row["id"],
+                name=row["name"],
+                pairing_code=row["pairing_code"],
+                type=row["type"],
+            )
+            for row in connection.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    type,
+                    enabled,
+                    bot_token,
+                    allowed_user_ids,
+                    allowed_chat_ids,
+                    pairing_code
+                FROM channels
+                ORDER BY created_at, id
+                """
+            )
+        ]
+
     def _migrate(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
             """
+            CREATE TABLE IF NOT EXISTS channels (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                bot_token TEXT NOT NULL,
+                allowed_user_ids TEXT NOT NULL DEFAULT '[]',
+                allowed_chat_ids TEXT NOT NULL DEFAULT '[]',
+                pairing_code TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
             CREATE TABLE IF NOT EXISTS providers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
