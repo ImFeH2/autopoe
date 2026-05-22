@@ -11,6 +11,8 @@ export const sectionTitleClassName = "text-base font-semibold text-white";
 
 export const navigationLabelClassName = "flowent-navigation-label";
 
+export const stableScrollbarClassName = "[scrollbar-gutter:stable]";
+
 export const dashedPanelClassName =
   "overflow-hidden rounded-lg border border-dashed border-white/10 bg-black";
 

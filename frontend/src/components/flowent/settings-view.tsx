@@ -15,6 +15,7 @@ import {
   fieldLabelClassName,
   fieldTriggerClassName,
   formActionsClassName,
+  stableScrollbarClassName,
 } from "@/components/flowent/styles";
 import type { Provider, ReasoningEffort } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
@@ -50,7 +51,10 @@ export function SettingsView({
 }) {
   return (
     <section
-      className="flex h-full min-h-0 flex-col overflow-auto bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)] max-[900px]:overflow-visible"
+      className={cn(
+        "flex h-full min-h-0 flex-col overflow-auto bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)] max-[900px]:overflow-visible",
+        stableScrollbarClassName,
+      )}
       aria-label="Settings"
     >
       <form

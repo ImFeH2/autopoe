@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
+import { stableScrollbarClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
@@ -156,7 +157,10 @@ function MessageList({
   return (
     <div
       aria-live="polite"
-      className="absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pt-12 max-[900px]:px-4"
+      className={cn(
+        "absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pt-12 max-[900px]:px-4",
+        stableScrollbarClassName,
+      )}
       onScroll={updateFollowState}
       ref={listRef}
       style={{

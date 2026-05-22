@@ -23,6 +23,7 @@ import {
   formActionsClassName,
   mutedTextClassName,
   navigationLabelClassName,
+  stableScrollbarClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
 import type { Provider } from "@/components/flowent/types";
@@ -92,7 +93,10 @@ function ProviderSidebar({
 }) {
   return (
     <aside
-      className="flex min-h-0 min-w-0 flex-col overflow-auto border-r border-white/10 bg-black p-4 max-[900px]:max-h-64 max-[900px]:border-r-0 max-[900px]:border-b"
+      className={cn(
+        "flex min-h-0 min-w-0 flex-col overflow-auto border-r border-white/10 bg-black p-4 max-[900px]:max-h-64 max-[900px]:border-r-0 max-[900px]:border-b",
+        stableScrollbarClassName,
+      )}
       aria-label="Provider list"
     >
       <Button
@@ -157,7 +161,10 @@ function ProviderDetails({
 }) {
   return (
     <form
-      className="grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5"
+      className={cn(
+        "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5",
+        stableScrollbarClassName,
+      )}
       aria-label="Provider details"
       onSubmit={(event) => {
         event.preventDefault();
