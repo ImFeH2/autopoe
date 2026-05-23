@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -92,6 +92,7 @@ type TestMcpTool = {
 type TestMcpServer = {
   args: string[];
   command: string;
+  config?: Record<string, unknown>;
   enabled: boolean;
   error: string;
   id: string;
@@ -100,6 +101,18 @@ type TestMcpServer = {
   tools: TestMcpTool[];
   type: "command" | "url";
   url: string;
+};
+
+type TestMcpImportSource = {
+  error?: string;
+  path: string;
+  servers?: TestMcpServer[];
+  source: "claude_code" | "codex";
+};
+
+type TestMcpImportPreview = {
+  servers: TestMcpServer[];
+  sources: TestMcpImportSource[];
 };
 
 type TestSkill = {
@@ -671,6 +684,7 @@ const mockInitialState = (
   state: Record<string, unknown>,
   modelResults: string[] = ["gpt-5.1"],
   assistantContent = "Here is the checklist.",
+  mcpImportPreview: TestMcpImportPreview = codexMcpImportPreview(),
 ) => {
   vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
     if (input === "/api/state") {
@@ -743,6 +757,24 @@ const mockInitialState = (
           status: 200,
         },
       );
+    }
+
+    if (input === "/api/mcp/import/preview" && init?.method === "GET") {
+      return new Response(JSON.stringify(mcpImportPreview), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (input === "/api/mcp/import" && init?.method === "POST") {
+      const servers = mcpImportPreview.servers.map((server) => ({
+        ...server,
+        status: server.enabled ? "ready" : "disabled",
+      }));
+      return new Response(JSON.stringify(servers), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
     }
 
     if (
@@ -908,6 +940,7 @@ const commandMcpServer = (
 ): TestMcpServer => ({
   args: ["-y", "@modelcontextprotocol/server-filesystem", "/project"],
   command: "npx",
+  config: {},
   enabled: true,
   error: "",
   id: "mcp-files",
@@ -924,6 +957,58 @@ const commandMcpServer = (
   url: "",
   ...updates,
 });
+
+const codexMcpImportPreview = (): TestMcpImportPreview => {
+  const server = commandMcpServer({
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/project"],
+    config: {
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/project"],
+      command: "npx",
+    },
+    id: "mcp-docs",
+    name: "docs",
+    status: "disabled",
+    tools: [],
+  });
+  return {
+    servers: [server],
+    sources: [
+      {
+        path: "/home/test/.codex/config.toml",
+        servers: [server],
+        source: "codex",
+      },
+    ],
+  };
+};
+
+const claudeCodeMcpImportPreview = (): TestMcpImportPreview => {
+  const server = commandMcpServer({
+    args: [],
+    command: "",
+    config: {
+      headers: { "X-Team": "${TEAM_ID:-local}" },
+      type: "http",
+      url: "https://linear.example.com/mcp",
+    },
+    id: "mcp-linear",
+    name: "Linear",
+    status: "disabled",
+    tools: [],
+    type: "url",
+    url: "https://linear.example.com/mcp",
+  });
+  return {
+    servers: [server],
+    sources: [
+      {
+        path: "/home/test/.claude.json",
+        servers: [server],
+        source: "claude_code",
+      },
+    ],
+  };
+};
 
 const projectSkill = (updates: Partial<TestSkill> = {}): TestSkill => ({
   description: "Review project changes.",
@@ -2673,6 +2758,93 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByText("No servers")).toBeInTheDocument();
     });
+  });
+
+  it("scans Codex MCP servers before import", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/mcp/import/preview",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    expect(
+      await screen.findByText("/home/test/.codex/config.toml"),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("docs")).toBeInTheDocument();
+    expect(screen.getByText(/@modelcontextprotocol/)).toBeInTheDocument();
+  });
+
+  it("imports Claude Code MCP servers and opens the imported server", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "Here is the checklist.",
+      claudeCodeMcpImportPreview(),
+    );
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
+    expect(
+      await screen.findByText("/home/test/.claude.json"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.click(
+      within(screen.getByRole("region", { name: "MCP import" })).getByRole(
+        "button",
+        { name: "Apply" },
+      ),
+    );
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/mcp/import",
+      expect.objectContaining({
+        body: JSON.stringify({
+          duplicate_action: "replace",
+        }),
+        method: "POST",
+      }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Linear" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("URL")).toHaveValue(
+      "https://linear.example.com/mcp",
+    );
+  });
+
+  it("shows an empty MCP import scan", async () => {
+    const user = userEvent.setup();
+    mockInitialState(
+      selectedProviderState(),
+      ["gpt-5.1"],
+      "Here is the checklist.",
+      {
+        servers: [],
+        sources: [],
+      },
+    );
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(await screen.findByText("No sources")).toBeInTheDocument();
+    expect(screen.getByText("No preview")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "MCP import" })).getByRole(
+        "button",
+        { name: "Apply" },
+      ),
+    ).toBeDisabled();
   });
 
   it("shows successful MCP tool details after the tool row is opened", async () => {

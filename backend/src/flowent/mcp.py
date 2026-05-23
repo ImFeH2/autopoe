@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import re
+from collections.abc import Callable
 from contextlib import AsyncExitStack
 from importlib import import_module
 from typing import Any, Protocol
@@ -11,6 +14,7 @@ from flowent.storage import StateStore, StoredMcpServer, StoredMcpTool
 from flowent.tools import ToolResult
 
 logger = logging.getLogger("flowent.mcp")
+MCP_CONNECT_TIMEOUT_SECONDS = 10
 
 
 class McpTransport(Protocol):
@@ -86,30 +90,73 @@ def mcp_result_is_error(result: dict[str, object]) -> bool:
     return bool(result.get("isError") or result.get("is_error"))
 
 
+_template_pattern = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}")
+
+
+def expand_mcp_template(value: str, *, env: dict[str, str] | None = None) -> str:
+    lookup = env or os.environ
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        default = match.group(2)
+        return lookup.get(name, default or "")
+
+    return _template_pattern.sub(replace, value)
+
+
+def expand_mcp_value(value: Any, *, env: dict[str, str] | None = None) -> Any:
+    if isinstance(value, str):
+        return expand_mcp_template(value, env=env)
+    if isinstance(value, list):
+        return [expand_mcp_value(item, env=env) for item in value]
+    if isinstance(value, dict):
+        return {key: expand_mcp_value(item, env=env) for key, item in value.items()}
+    return value
+
+
+def expand_mcp_config(config: dict[str, object]) -> dict[str, object]:
+    expanded = expand_mcp_value(config) if config else {}
+    return expanded if isinstance(expanded, dict) else {}
+
+
 class DefaultMcpTransport:
     def __init__(self) -> None:
         self._sessions: dict[str, Any] = {}
         self._stacks: dict[str, AsyncExitStack] = {}
 
     async def connect(self, server: StoredMcpServer) -> list[dict[str, object]]:
-        from mcp import ClientSession, StdioServerParameters
+        from mcp import ClientSession
         from mcp.client.stdio import stdio_client
 
         await self.disconnect(server.id)
         stack = AsyncExitStack()
+        config = expand_mcp_config(server.config)
         if server.type == "url":
             http_module = import_module("mcp.client.streamable_http")
-            if hasattr(http_module, "streamable_http_client"):
-                streamable_http_client = http_module.streamable_http_client
+            http_headers = self._streamable_http_headers(config) or None
+            if hasattr(http_module, "streamablehttp_client"):
+                read_stream, write_stream, _ = await stack.enter_async_context(
+                    http_module.streamablehttp_client(
+                        server.url or str(config.get("url") or ""),
+                        headers=http_headers,
+                    )
+                )
             else:
-                streamable_http_client = http_module.streamablehttp_client
-            read_stream, write_stream, _ = await stack.enter_async_context(
-                streamable_http_client(server.url)
-            )
+                import httpx
+
+                http_client = await stack.enter_async_context(
+                    httpx.AsyncClient(headers=http_headers)
+                )
+                read_stream, write_stream, _ = await stack.enter_async_context(
+                    http_module.streamable_http_client(
+                        server.url or str(config.get("url") or ""),
+                        http_client=http_client,
+                    )
+                )
         else:
             read_stream, write_stream = await stack.enter_async_context(
                 stdio_client(
-                    StdioServerParameters(command=server.command, args=server.args)
+                    self._stdio_parameters(server, config),
                 )
             )
         session = await stack.enter_async_context(
@@ -120,6 +167,75 @@ class DefaultMcpTransport:
         self._sessions[server.id] = session
         self._stacks[server.id] = stack
         return [self._model_dump(tool) for tool in result.tools]
+
+    def _streamable_http_headers(self, config: dict[str, object]) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        for key in ("http_headers", "headers"):
+            raw_headers = config.get(key)
+            if isinstance(raw_headers, dict):
+                headers.update(
+                    {
+                        str(header_name): str(header_value)
+                        for header_name, header_value in raw_headers.items()
+                    }
+                )
+                break
+
+        raw_env_headers = config.get("env_http_headers") or config.get("envHeaders")
+        if isinstance(raw_env_headers, dict):
+            for header_name, env_name in raw_env_headers.items():
+                if isinstance(env_name, str):
+                    env_value = os.environ.get(env_name)
+                    if env_value is not None:
+                        headers[str(header_name)] = env_value
+
+        bearer_token_env_var = config.get("bearer_token_env_var") or config.get(
+            "bearerTokenEnvVar"
+        )
+        if isinstance(bearer_token_env_var, str):
+            env_bearer_token = os.environ.get(bearer_token_env_var)
+            if env_bearer_token and "Authorization" not in headers:
+                headers["Authorization"] = f"Bearer {env_bearer_token}"
+
+        bearer_token: object = config.get("bearer_token") or config.get("bearerToken")
+        if (
+            isinstance(bearer_token, str)
+            and bearer_token
+            and "Authorization" not in headers
+        ):
+            headers["Authorization"] = f"Bearer {bearer_token}"
+        return headers
+
+    def _stdio_parameters(
+        self,
+        server: StoredMcpServer,
+        config: dict[str, object],
+    ) -> Any:
+        from mcp import StdioServerParameters
+
+        env: dict[str, str] = {}
+        raw_env = config.get("env")
+        if isinstance(raw_env, dict):
+            for key, value in raw_env.items():
+                if isinstance(key, str) and isinstance(value, str):
+                    env[key] = value
+        raw_env_vars = config.get("env_vars")
+        if isinstance(raw_env_vars, list):
+            for key in raw_env_vars:
+                if isinstance(key, str) and key not in env:
+                    value = os.environ.get(key)
+                    if value is not None:
+                        env[key] = value
+        cwd = config.get("cwd")
+        raw_args = config.get("args")
+        config_args = raw_args if isinstance(raw_args, list) else []
+        return StdioServerParameters(
+            command=server.command or str(config.get("command") or ""),
+            args=server.args
+            or [str(argument) for argument in config_args if isinstance(argument, str)],
+            cwd=cwd if isinstance(cwd, str) else None,
+            env=env or None,
+        )
 
     async def disconnect(self, server_id: str) -> None:
         stack = self._stacks.pop(server_id, None)
@@ -161,15 +277,22 @@ class McpManager:
         self._error_by_server: dict[str, str] = {}
         self._tools_by_server: dict[str, list[StoredMcpTool]] = {}
         self._server_names: dict[str, str] = {}
+        self._connect_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def start_enabled(self) -> None:
         for server in self.store.read_mcp_servers():
             if server.enabled:
-                await self.connect_server(server)
+                self.schedule_connect_server(server)
             else:
                 await self.disconnect_server(server.id)
 
     async def stop_all(self) -> None:
+        tasks = list(self._connect_tasks.values())
+        self._connect_tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         for server_id in list(self._status_by_server):
             await self.transport.disconnect(server_id)
         self._status_by_server.clear()
@@ -178,14 +301,57 @@ class McpManager:
         self._server_names.clear()
 
     async def sync_server(self, server: StoredMcpServer) -> StoredMcpServer:
+        await self.cancel_connect_server(server.id)
         if not server.enabled:
             await self.disconnect_server(server.id)
             return self.server_with_status(server)
         await self.connect_server(server)
         return self.server_with_status(server)
 
+    def schedule_connect_server(self, server: StoredMcpServer) -> None:
+        task = self._connect_tasks.pop(server.id, None)
+        if task is not None and not task.done():
+            task.cancel()
+        self._server_names[server.id] = server.name
+        self._status_by_server[server.id] = "starting"
+        self._error_by_server[server.id] = ""
+        connect_task = asyncio.create_task(self.connect_server(server))
+        self._connect_tasks[server.id] = connect_task
+        connect_task.add_done_callback(self._connect_task_callback(server.id))
+
+    def _connect_task_callback(
+        self,
+        server_id: str,
+    ) -> Callable[[asyncio.Task[None]], None]:
+        def finish(completed_task: asyncio.Task[None]) -> None:
+            self._finish_connect_task(server_id, completed_task)
+
+        return finish
+
+    def _finish_connect_task(
+        self,
+        server_id: str,
+        task: asyncio.Task[None],
+    ) -> None:
+        if self._connect_tasks.get(server_id) is task:
+            self._connect_tasks.pop(server_id, None)
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("MCP server background connect failed")
+
+    async def cancel_connect_server(self, server_id: str) -> None:
+        task = self._connect_tasks.pop(server_id, None)
+        if task is None or task.done():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
     async def reconnect_server(self, server_id: str) -> StoredMcpServer:
         server = self.find_server(server_id)
+        await self.cancel_connect_server(server_id)
         await self.transport.disconnect(server_id)
         if server.enabled:
             await self.connect_server(server)
@@ -194,6 +360,7 @@ class McpManager:
         return self.server_with_status(server)
 
     async def delete_server(self, server_id: str) -> None:
+        await self.cancel_connect_server(server_id)
         self.store.delete_mcp_server(server_id)
         try:
             await self.transport.disconnect(server_id)
@@ -220,7 +387,15 @@ class McpManager:
         self._status_by_server[server.id] = "starting"
         self._error_by_server[server.id] = ""
         try:
-            raw_tools = await self.transport.connect(server)
+            raw_tools = await asyncio.wait_for(
+                self.transport.connect(server),
+                timeout=MCP_CONNECT_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            self._status_by_server[server.id] = "error"
+            self._error_by_server[server.id] = "Connection timed out."
+            self._tools_by_server[server.id] = []
+            return
         except Exception as error:
             self._status_by_server[server.id] = "error"
             self._error_by_server[server.id] = str(error)

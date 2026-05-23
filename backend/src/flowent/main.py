@@ -26,6 +26,7 @@ from flowent.llm import (
 )
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.mcp import McpManager, McpTransport
+from flowent.mcp_import import McpImportDiscovery, discover_imported_mcp_servers
 from flowent.sandbox import ensure_sandbox_available
 from flowent.skills import (
     discover_skills,
@@ -99,6 +100,12 @@ class SkillSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
+
+
+class McpImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duplicate_action: Literal["replace", "skip"] = "skip"
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -328,6 +335,8 @@ def create_app(
             await mcp_manager.stop_all()
 
     app = FastAPI(title="Flowent", lifespan=lifespan)
+    app.state.mcp_manager = mcp_manager
+    app.state.telegram_bot_manager = telegram_bot_manager
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
@@ -358,6 +367,23 @@ def create_app(
     async def save_mcp_server(server: StoredMcpServer) -> StoredMcpServer:
         saved_server = store.save_mcp_server(server)
         return await mcp_manager.sync_server(saved_server)
+
+    @app.get("/api/mcp/import/preview")
+    async def preview_mcp_import() -> McpImportDiscovery:
+        return discover_imported_mcp_servers(Path.cwd())
+
+    @app.post("/api/mcp/import")
+    async def import_mcp_servers(request: McpImportRequest) -> list[StoredMcpServer]:
+        imported_servers = discover_imported_mcp_servers(Path.cwd()).servers
+        existing_servers = {server.id for server in store.read_mcp_servers()}
+        for server in imported_servers:
+            if request.duplicate_action == "skip" and server.id in existing_servers:
+                continue
+            if request.duplicate_action == "replace" and server.id in existing_servers:
+                await mcp_manager.delete_server(server.id)
+            store.save_mcp_server(server)
+            existing_servers.add(server.id)
+        return mcp_manager.servers_with_status(store.read_mcp_servers())
 
     @app.delete("/api/mcp/servers/{server_id}")
     async def delete_mcp_server(server_id: str) -> dict[str, bool]:

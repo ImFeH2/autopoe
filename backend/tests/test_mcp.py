@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from flowent.main import create_app
@@ -19,9 +22,12 @@ class FakeMcpTransport(McpTransport):
         self.errors: dict[str, str] = {}
         self.tools_by_server: dict[str, list[dict[str, object]]] = {}
         self.results: dict[tuple[str, str], dict[str, object]] = {}
+        self.sleep_on_connect: set[str] = set()
 
     async def connect(self, server: StoredMcpServer) -> list[dict[str, object]]:
         self.connect_calls.append(server)
+        if server.id in self.sleep_on_connect:
+            await asyncio.sleep(60)
         if server.id in self.errors:
             raise RuntimeError(self.errors[server.id])
         return self.tools_by_server.get(server.id, [])
@@ -96,6 +102,65 @@ def url_server_payload(**updates: object) -> dict[str, object]:
     )
     payload.update(updates)
     return payload
+
+
+def codex_import_content(name: str = "docs", command: str = "npx") -> str:
+    return f"""
+[mcp_servers.{name}]
+command = "{command}"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/project"]
+enabled = false
+
+[mcp_servers.{name}.env]
+DOCS_TOKEN = "${{DOCS_TOKEN}}"
+"""
+
+
+def claude_code_import_content() -> str:
+    return json.dumps(
+        {
+            "mcpServers": {
+                "Linear": {
+                    "headers": {"X-Team": "${TEAM_ID:-local}"},
+                    "type": "http",
+                    "url": "https://linear.example.com/mcp",
+                }
+            }
+        }
+    )
+
+
+def isolated_mcp_import_environment(tmp_path, monkeypatch) -> tuple[Path, Path]:
+    data_dir = tmp_path / "data"
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(workspace)
+    return home, workspace
+
+
+def write_config(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+async def wait_for_status(
+    manager,
+    server: StoredMcpServer,
+    status: str,
+    *,
+    attempts: int = 20,
+) -> StoredMcpServer:
+    current = manager.server_with_status(server)
+    for _ in range(attempts):
+        current = manager.server_with_status(server)
+        if current.status == status:
+            return current
+        await asyncio.sleep(0.01)
+    return current
 
 
 def tool_call_chunk(
@@ -183,6 +248,140 @@ def test_mcp_url_server_is_saved_and_persisted(tmp_path, monkeypatch) -> None:
     assert state["mcp_servers"][0]["url"] == "https://example.com/mcp"
 
 
+def test_mcp_server_config_is_saved_and_persisted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    transport = FakeMcpTransport()
+    client = TestClient(create_app(serve_frontend=False, mcp_transport=transport))
+
+    response = client.put(
+        "/api/mcp/servers",
+        json=command_server_payload(
+            config={
+                "cwd": "/workspace",
+                "env": {"DOCS_TOKEN": "${DOCS_TOKEN}"},
+            },
+        ),
+    )
+
+    assert response.status_code == 200
+    restarted = TestClient(create_app(serve_frontend=False))
+    state = restarted.get("/api/state").json()
+    assert state["mcp_servers"][0]["config"] == {
+        "cwd": "/workspace",
+        "env": {"DOCS_TOKEN": "${DOCS_TOKEN}"},
+    }
+
+
+def test_mcp_import_preview_reads_codex_config(tmp_path, monkeypatch) -> None:
+    home, _ = isolated_mcp_import_environment(tmp_path, monkeypatch)
+    write_config(home / ".codex" / "config.toml", codex_import_content())
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.get("/api/mcp/import/preview")
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["sources"][0]["source"] == "codex"
+    assert result["sources"][0]["path"].endswith(".codex/config.toml")
+    server = result["servers"][0]
+    assert server["id"] == "mcp-docs"
+    assert server["name"] == "docs"
+    assert server["type"] == "command"
+    assert server["command"] == "npx"
+    assert server["enabled"] is False
+    assert server["config"]["env"] == {"DOCS_TOKEN": "${DOCS_TOKEN}"}
+
+
+def test_mcp_import_preview_reads_claude_code_config(tmp_path, monkeypatch) -> None:
+    home, _ = isolated_mcp_import_environment(tmp_path, monkeypatch)
+    write_config(home / ".claude.json", claude_code_import_content())
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.get("/api/mcp/import/preview")
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["sources"][0]["source"] == "claude_code"
+    assert result["sources"][0]["path"].endswith(".claude.json")
+    server = result["servers"][0]
+    assert server["id"] == "mcp-linear"
+    assert server["name"] == "Linear"
+    assert server["type"] == "url"
+    assert server["url"] == "https://linear.example.com/mcp"
+    assert server["config"]["headers"] == {"X-Team": "${TEAM_ID:-local}"}
+
+
+def test_mcp_import_skip_keeps_existing_server(tmp_path, monkeypatch) -> None:
+    home, _ = isolated_mcp_import_environment(tmp_path, monkeypatch)
+    write_config(home / ".codex" / "config.toml", codex_import_content())
+    transport = FakeMcpTransport()
+    client = TestClient(create_app(serve_frontend=False, mcp_transport=transport))
+    client.put("/api/mcp/servers", json=command_server_payload(id="mcp-docs"))
+
+    response = client.post(
+        "/api/mcp/import",
+        json={"duplicate_action": "skip"},
+    )
+
+    assert response.status_code == 200
+    state = client.get("/api/state").json()
+    assert state["mcp_servers"][0]["name"] == "Files"
+    assert state["mcp_servers"][0]["command"] == "npx"
+
+
+def test_mcp_import_replace_updates_existing_server(tmp_path, monkeypatch) -> None:
+    home, _ = isolated_mcp_import_environment(tmp_path, monkeypatch)
+    write_config(
+        home / ".codex" / "config.toml",
+        codex_import_content(command="docs-server"),
+    )
+    transport = FakeMcpTransport()
+    client = TestClient(create_app(serve_frontend=False, mcp_transport=transport))
+    client.put("/api/mcp/servers", json=command_server_payload(id="mcp-docs"))
+
+    response = client.post(
+        "/api/mcp/import",
+        json={"duplicate_action": "replace"},
+    )
+
+    assert response.status_code == 200
+    state = client.get("/api/state").json()
+    assert state["mcp_servers"][0]["name"] == "docs"
+    assert state["mcp_servers"][0]["command"] == "docs-server"
+
+
+def test_mcp_import_preview_reports_empty_scan(tmp_path, monkeypatch) -> None:
+    isolated_mcp_import_environment(tmp_path, monkeypatch)
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.get("/api/mcp/import/preview")
+
+    assert response.status_code == 200
+    assert response.json() == {"servers": [], "sources": []}
+
+
+def test_mcp_import_preview_dedupes_discovered_servers(tmp_path, monkeypatch) -> None:
+    home, workspace = isolated_mcp_import_environment(tmp_path, monkeypatch)
+    write_config(workspace / ".codex" / "config.toml", codex_import_content())
+    write_config(
+        home / ".codex" / "config.toml",
+        codex_import_content(command="different-docs-server"),
+    )
+    write_config(home / ".claude.json", claude_code_import_content())
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.get("/api/mcp/import/preview")
+
+    assert response.status_code == 200
+    result = response.json()
+    assert [server["id"] for server in result["servers"]] == [
+        "mcp-linear",
+        "mcp-docs",
+    ]
+    assert result["servers"][1]["command"] == "npx"
+    assert len(result["sources"]) == 3
+
+
 def test_disabled_mcp_server_does_not_connect_or_expose_tools(
     tmp_path, monkeypatch
 ) -> None:
@@ -256,6 +455,58 @@ def test_mcp_server_can_be_reconnected(tmp_path, monkeypatch) -> None:
         "mcp-files",
         "mcp-files",
     ]
+
+
+@pytest.mark.anyio
+async def test_enabled_mcp_start_does_not_block_app_state(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    store = StateStore(tmp_path)
+    server = store.save_mcp_server(
+        StoredMcpServer(
+            args=[],
+            command="slow-server",
+            id="mcp-slow",
+            name="Slow",
+            type="command",
+        )
+    )
+    transport = FakeMcpTransport()
+    transport.sleep_on_connect.add("mcp-slow")
+    from flowent.mcp import McpManager
+
+    manager = McpManager(store=store, transport=transport)
+
+    await manager.start_enabled()
+    state_server = manager.server_with_status(server)
+
+    assert state_server.status == "starting"
+    assert transport.connect_calls == []
+
+
+@pytest.mark.anyio
+async def test_mcp_connection_timeout_reports_error(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    server = StoredMcpServer(
+        args=[],
+        command="slow-server",
+        id="mcp-slow",
+        name="Slow",
+        type="command",
+    )
+    transport = FakeMcpTransport()
+    transport.sleep_on_connect.add("mcp-slow")
+    from flowent import mcp as mcp_module
+
+    monkeypatch.setattr(mcp_module, "MCP_CONNECT_TIMEOUT_SECONDS", 0.01)
+    manager = mcp_module.McpManager(store=StateStore(tmp_path), transport=transport)
+
+    await manager.connect_server(server)
+    state_server = manager.server_with_status(server)
+
+    assert state_server.status == "error"
+    assert state_server.error == "Connection timed out."
 
 
 def test_mcp_server_can_be_deleted(tmp_path, monkeypatch) -> None:
@@ -433,12 +684,15 @@ def test_mcp_tool_call_failure_is_reported_in_workspace(tmp_path, monkeypatch) -
     assert events[3]["data"]["content"] == "Permission denied"
 
 
-def test_mcp_server_reload_reconnects_saved_enabled_servers(
+@pytest.mark.anyio
+async def test_mcp_server_reload_reconnects_saved_enabled_servers(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     store = StateStore(tmp_path)
-    store.save_mcp_server(StoredMcpServer.model_validate(command_server_payload()))
+    server = store.save_mcp_server(
+        StoredMcpServer.model_validate(command_server_payload())
+    )
     transport = FakeMcpTransport()
     transport.tools_by_server["mcp-files"] = [
         {"inputSchema": {"type": "object"}, "name": "read_file"}
@@ -448,5 +702,9 @@ def test_mcp_server_reload_reconnects_saved_enabled_servers(
     response = client.post("/api/mcp/reload")
 
     assert response.status_code == 200
-    assert response.json()[0]["status"] == "ready"
+    assert response.json()[0]["status"] == "starting"
+    manager = client.app.state.mcp_manager
+    connected = await wait_for_status(manager, server, "ready")
+    assert connected.status == "ready"
+    assert connected.tools[0].name == "read_file"
     assert transport.connect_calls[0].id == "mcp-files"

@@ -14,6 +14,7 @@ import { viewPanelClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
+  McpImportFile,
   McpServer,
   McpTool,
   Message,
@@ -67,6 +68,7 @@ type ApiMcpTool = {
 type ApiMcpServer = {
   args: string[];
   command: string;
+  config?: Record<string, unknown>;
   enabled: boolean;
   error?: string;
   id: string;
@@ -75,6 +77,18 @@ type ApiMcpServer = {
   tools?: ApiMcpTool[];
   type: McpServer["type"];
   url: string;
+};
+
+type ApiMcpImportFile = {
+  error?: string;
+  path: string;
+  servers?: ApiMcpServer[];
+  source: McpImportFile["source"];
+};
+
+type ApiMcpImportPreview = {
+  servers?: ApiMcpServer[];
+  sources?: ApiMcpImportFile[];
 };
 
 type ApiSkill = Skill;
@@ -247,6 +261,7 @@ const mcpServerFromApi = (server: ApiMcpServer): McpServer => ({
     args: server.args ?? [],
     command: server.command ?? "",
   }),
+  config: server.config ?? {},
   enabled: server.enabled,
   error: server.error ?? "",
   id: server.id,
@@ -257,9 +272,17 @@ const mcpServerFromApi = (server: ApiMcpServer): McpServer => ({
   url: server.url ?? "",
 });
 
+const mcpImportFileFromApi = (source: ApiMcpImportFile): McpImportFile => ({
+  error: source.error ?? "",
+  path: source.path,
+  servers: (source.servers ?? []).map(mcpServerFromApi),
+  source: source.source,
+});
+
 const mcpServerToApi = (server: McpServer): ApiMcpServer => ({
   args: server.args,
   command: server.command,
+  config: server.config,
   enabled: server.enabled,
   error: server.error,
   id: server.id,
@@ -279,6 +302,7 @@ const createEmptyMcpServer = (): McpServer => ({
   args: [],
   command: "",
   commandLine: "",
+  config: {},
   enabled: true,
   error: "",
   id: "new",
@@ -362,6 +386,15 @@ function App() {
   const [mcpDraft, setMcpDraft] = useState<McpServer>(() =>
     createEmptyMcpServer(),
   );
+  const [isMcpImportOpen, setIsMcpImportOpen] = useState(false);
+  const [mcpImportSources, setMcpImportSources] = useState<McpImportFile[]>([]);
+  const [mcpImportPreview, setMcpImportPreview] = useState<McpServer[]>([]);
+  const [mcpImportDuplicateAction, setMcpImportDuplicateAction] = useState<
+    "replace" | "skip"
+  >("skip");
+  const [isPreviewingMcpImport, setIsPreviewingMcpImport] = useState(false);
+  const [isImportingMcp, setIsImportingMcp] = useState(false);
+  const [mcpImportError, setMcpImportError] = useState("");
   const [telegramBot, setTelegramBot] = useState<TelegramBot>(() =>
     createEmptyTelegramBot(),
   );
@@ -455,13 +488,29 @@ function App() {
   };
 
   const loadMcpEditor = (server: McpServer) => {
+    setIsMcpImportOpen(false);
     setMcpEditorId(server.id);
     setMcpDraft(server);
   };
 
   const openNewMcpEditor = () => {
+    setIsMcpImportOpen(false);
     setMcpEditorId("new");
     setMcpDraft(createEmptyMcpServer());
+  };
+
+  const openMcpImport = () => {
+    setIsMcpImportOpen(true);
+    setMcpImportError("");
+    setMcpImportSources([]);
+    setMcpImportPreview([]);
+    setMcpImportDuplicateAction("skip");
+    void previewMcpImport();
+  };
+
+  const closeMcpImport = () => {
+    setIsMcpImportOpen(false);
+    setMcpImportError("");
   };
 
   const selectSkill = (skill: Skill) => {
@@ -470,6 +519,74 @@ function App() {
 
   const updateMcpDraft = (updates: Partial<McpServer>) => {
     setMcpDraft((current) => ({ ...current, ...updates }));
+  };
+
+  const previewMcpImport = async () => {
+    setIsPreviewingMcpImport(true);
+    setMcpImportError("");
+    try {
+      const response = await fetch("/api/mcp/import/preview", {
+        method: "GET",
+      });
+      if (!response.ok) {
+        throw new Error("Scan could not be completed.");
+      }
+      const result = (await response.json()) as ApiMcpImportPreview;
+      setMcpImportSources(
+        (result.sources ?? []).map((source) => mcpImportFileFromApi(source)),
+      );
+      setMcpImportPreview(
+        (result.servers ?? []).map((server) => mcpServerFromApi(server)),
+      );
+    } catch {
+      setMcpImportSources([]);
+      setMcpImportPreview([]);
+      setMcpImportError("Scan could not be completed.");
+    } finally {
+      setIsPreviewingMcpImport(false);
+    }
+  };
+
+  const importMcpServers = async () => {
+    if (mcpImportPreview.length === 0) {
+      setMcpImportError("No servers found.");
+      return;
+    }
+
+    setIsImportingMcp(true);
+    setMcpImportError("");
+    try {
+      const response = await fetch("/api/mcp/import", {
+        body: JSON.stringify({
+          duplicate_action: mcpImportDuplicateAction,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Import could not be completed.");
+      }
+      const result = (await response.json()) as ApiMcpServer[];
+      const importedServers = result.map((server) => mcpServerFromApi(server));
+      setMcpServers(importedServers);
+      const nextServer =
+        mcpImportPreview.find((preview) =>
+          importedServers.some((server) => server.id === preview.id),
+        ) ?? importedServers[0];
+      if (nextServer) {
+        setIsMcpImportOpen(false);
+        setMcpEditorId(nextServer.id);
+        setMcpDraft(nextServer);
+      }
+    } catch {
+      setMcpImportError("Import could not be completed.");
+    } finally {
+      setIsImportingMcp(false);
+    }
+  };
+
+  const confirmMcpImport = () => {
+    void importMcpServers();
   };
 
   const updateProviderDraft = (updates: Partial<Provider>) => {
@@ -1302,7 +1419,21 @@ function App() {
         <McpView
           activeServer={mcpDraft}
           isCreatingServer={isCreatingMcpServer}
+          isImportOpen={isMcpImportOpen}
+          importError={mcpImportError}
+          importPreview={mcpImportPreview}
+          importDuplicateAction={mcpImportDuplicateAction}
+          importSources={mcpImportSources}
+          isImporting={isImportingMcp}
+          isPreviewing={isPreviewingMcpImport}
           onNewServer={openNewMcpEditor}
+          onImport={openMcpImport}
+          onImportClose={closeMcpImport}
+          onImportDuplicateActionChange={setMcpImportDuplicateAction}
+          onImportPreview={() => {
+            void previewMcpImport();
+          }}
+          onImportConfirm={confirmMcpImport}
           onReconnectServer={reconnectMcpServer}
           onRemoveServer={removeMcpServer}
           onSaveServer={() => {

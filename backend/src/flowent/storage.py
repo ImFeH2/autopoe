@@ -44,6 +44,7 @@ class StoredMcpServer(BaseModel):
 
     args: list[str] = Field(default_factory=list)
     command: str = ""
+    config: dict[str, object] = Field(default_factory=dict)
     enabled: bool = True
     error: str = ""
     id: str
@@ -239,15 +240,17 @@ class StateStore:
                     type,
                     command,
                     args,
+                    config,
                     url,
                     enabled
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     type = excluded.type,
                     command = excluded.command,
                     args = excluded.args,
+                    config = excluded.config,
                     url = excluded.url,
                     enabled = excluded.enabled,
                     updated_at = unixepoch()
@@ -258,6 +261,7 @@ class StateStore:
                     server.type,
                     server.command,
                     json.dumps(server.args),
+                    json.dumps(server.config, ensure_ascii=False),
                     server.url,
                     int(server.enabled),
                 ),
@@ -582,7 +586,7 @@ class StateStore:
         servers: list[StoredMcpServer] = []
         for row in connection.execute(
             """
-            SELECT id, name, type, command, args, url, enabled
+            SELECT id, name, type, command, args, config, url, enabled
             FROM mcp_servers
             ORDER BY created_at, id
             """
@@ -610,6 +614,7 @@ class StateStore:
                 StoredMcpServer(
                     args=json.loads(row["args"] or "[]"),
                     command=row["command"],
+                    config=json.loads(row["config"] or "{}"),
                     enabled=bool(row["enabled"]),
                     id=row["id"],
                     name=row["name"],
@@ -630,6 +635,7 @@ class StateStore:
                 type TEXT NOT NULL,
                 command TEXT NOT NULL DEFAULT '',
                 args TEXT NOT NULL DEFAULT '[]',
+                config TEXT NOT NULL DEFAULT '{}',
                 url TEXT NOT NULL DEFAULT '',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -714,6 +720,16 @@ class StateStore:
             INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
             """
         )
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(mcp_servers)")
+        }
+        if "config" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE mcp_servers
+                ADD COLUMN config TEXT NOT NULL DEFAULT '{}'
+                """
+            )
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(messages)")
         }
