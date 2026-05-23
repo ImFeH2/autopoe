@@ -121,6 +121,61 @@ def test_state_lists_project_skills_from_project_directory(
     ]
 
 
+def test_state_lists_project_skills_from_agents_directory(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    skill_path = write_skill(
+        tmp_path / ".agents" / "skills",
+        "review",
+        description="Review agent changes.",
+        name="Agent Review",
+    )
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.get("/api/state")
+
+    assert response.status_code == 200
+    assert response.json()["skills"] == [
+        {
+            "description": "Review agent changes.",
+            "enabled": True,
+            "error": "",
+            "id": response.json()["skills"][0]["id"],
+            "name": "Agent Review",
+            "path": str(skill_path),
+            "scope": "project",
+            "slug": "agent-review",
+        }
+    ]
+
+
+def test_state_lists_flowent_and_agents_project_skills(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    write_skill(
+        tmp_path / ".flowent" / "skills",
+        "project",
+        description="Use project rules.",
+        name="Project Rules",
+    )
+    write_skill(
+        tmp_path / ".agents" / "skills",
+        "agent",
+        description="Use agent rules.",
+        name="Agent Rules",
+    )
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.get("/api/state")
+
+    assert response.status_code == 200
+    skills = response.json()["skills"]
+    assert skill_by_slug(skills, "project-rules")["scope"] == "project"
+    assert skill_by_slug(skills, "agent-rules")["scope"] == "project"
+
+
 def test_skill_reload_reflects_filesystem_changes(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -235,6 +290,45 @@ def test_workspace_response_injects_explicit_skill_instruction(
         "role": "user",
         "content": "$project-review Please inspect the changes.",
     }
+
+
+def test_workspace_response_injects_agents_skill_instruction(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    write_skill(
+        tmp_path / ".agents" / "skills",
+        "review",
+        body="Full only instruction: review agent workspace changes.",
+        description="Review agent changes.",
+        name="Agent Review",
+    )
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "$agent-review Please inspect the changes."},
+    )
+
+    assert response.status_code == 200
+    contents = "\n".join(
+        str(message["content"]) for message in captured_request["messages"]
+    )
+    assert "Full only instruction: review agent workspace changes." in contents
 
 
 def test_workspace_response_injects_multiple_explicit_skill_instructions(

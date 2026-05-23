@@ -8,6 +8,7 @@ from flowent.llm import ChatMessage
 from flowent.storage import StateStore, StoredSkill
 
 PROJECT_SKILLS_DIRECTORY = Path(".flowent") / "skills"
+AGENTS_SKILLS_DIRECTORY = Path(".agents") / "skills"
 SKILL_FILENAME = "SKILL.md"
 SKILL_REFERENCE_PATTERN = re.compile(r"(?<!\w)\$([a-z0-9][a-z0-9-]*)\b")
 
@@ -30,6 +31,7 @@ def skill_id(scope: str, path: Path) -> str:
 def skill_directories(cwd: Path, store: StateStore) -> list[tuple[str, Path]]:
     return [
         ("project", cwd.resolve(strict=False) / PROJECT_SKILLS_DIRECTORY),
+        ("project", cwd.resolve(strict=False) / AGENTS_SKILLS_DIRECTORY),
         ("user", store.directory / "skills"),
     ]
 
