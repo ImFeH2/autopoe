@@ -17,9 +17,9 @@ import { cn } from "@/lib/utils";
 const navigationItems = [
   { id: "workspace", label: "Workspace", icon: MessageSquare },
   { id: "providers", label: "Providers", icon: KeyRound },
-  { id: "channels", label: "Channels", icon: Radio },
   { id: "mcp", label: "MCP", icon: Plug },
   { id: "skills", label: "Skills", icon: Sparkles },
+  { id: "channels", label: "Channels", icon: Radio },
   { id: "settings", label: "Settings", icon: Settings },
 ] satisfies Array<{ id: ViewId; label: string; icon: LucideIcon }>;
 
