@@ -3,6 +3,7 @@ export type ViewId =
   | "providers"
   | "channels"
   | "mcp"
+  | "skills"
   | "settings";
 
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
@@ -72,6 +73,19 @@ export type McpServer = {
   tools: McpTool[];
   type: McpServerType;
   url: string;
+};
+
+export type SkillScope = "project" | "user";
+
+export type Skill = {
+  description: string;
+  enabled: boolean;
+  error: string;
+  id: string;
+  name: string;
+  path: string;
+  scope: SkillScope;
+  slug: string;
 };
 
 export type ToolItemStatus = "failed" | "running" | "success";

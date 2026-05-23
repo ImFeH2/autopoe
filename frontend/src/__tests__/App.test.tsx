@@ -102,6 +102,17 @@ type TestMcpServer = {
   url: string;
 };
 
+type TestSkill = {
+  description: string;
+  enabled: boolean;
+  error: string;
+  id: string;
+  name: string;
+  path: string;
+  scope: "project" | "user";
+  slug: string;
+};
+
 const controlledThinkingStreamResponse = (
   thinking: string,
   content: string,
@@ -666,6 +677,7 @@ const mockInitialState = (
       return new Response(
         JSON.stringify({
           mcp_servers: [],
+          skills: [],
           telegram_bot: emptyTelegramBotState(),
           ...state,
         }),
@@ -781,6 +793,37 @@ const mockInitialState = (
       });
     }
 
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/skills/") &&
+      init?.method === "PUT"
+    ) {
+      const request = JSON.parse(String(init.body)) as { enabled: boolean };
+      const skillId = input.replace("/api/skills/", "");
+      const skills = ("skills" in state ? state.skills : []) as TestSkill[];
+      const skill = skills.find((current) => current.id === skillId);
+      return new Response(
+        JSON.stringify({
+          ...(skill ?? projectSkill()),
+          enabled: request.enabled,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    if (input === "/api/skills/reload" && init?.method === "POST") {
+      return new Response(
+        JSON.stringify(("skills" in state ? state.skills : []) as TestSkill[]),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
     if (input === "/api/providers" && init?.method === "POST") {
       return new Response(init.body, {
         headers: { "Content-Type": "application/json" },
@@ -848,6 +891,7 @@ const selectedProviderState = () => ({
     selected_model: "gpt-5.1",
     selected_provider_id: "provider-openai",
   },
+  skills: [],
   telegram_bot: emptyTelegramBotState(),
 });
 
@@ -878,6 +922,18 @@ const commandMcpServer = (
   ],
   type: "command",
   url: "",
+  ...updates,
+});
+
+const projectSkill = (updates: Partial<TestSkill> = {}): TestSkill => ({
+  description: "Review project changes.",
+  enabled: true,
+  error: "",
+  id: "skill-project-review",
+  name: "Project Review",
+  path: "/workspace/.flowent/skills/review/SKILL.md",
+  scope: "project",
+  slug: "project-review",
   ...updates,
 });
 
@@ -4117,5 +4173,166 @@ describe("App", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("shows an empty Skills page when no skills are available", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Skills" }));
+
+    expect(screen.getAllByText("No skills").length).toBeGreaterThan(0);
+  });
+
+  it("lists available skills with their scope and description", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      skills: [projectSkill()],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Skills" }));
+
+    expect(screen.getAllByText("Project Review").length).toBeGreaterThan(0);
+    expect(screen.getByText("Review project changes.")).toBeInTheDocument();
+    expect(screen.getByText("Project")).toBeInTheDocument();
+    expect(screen.getByText("$project-review")).toBeInTheDocument();
+  });
+
+  it("shows invalid skill errors without hiding the skill", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      skills: [
+        projectSkill({
+          description: "",
+          error: "Skill needs a name and description.",
+          name: "Broken Skill",
+          slug: "broken-skill",
+        }),
+      ],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Skills" }));
+
+    expect(screen.getAllByText("Broken Skill").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Skill needs a name and description."),
+    ).toBeInTheDocument();
+  });
+
+  it("updates a skill when its enabled state changes", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      skills: [projectSkill()],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Skills" }));
+    await user.click(await screen.findByRole("button", { name: "Off" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/skills/skill-project-review",
+      expect.objectContaining({
+        body: JSON.stringify({ enabled: false }),
+        method: "PUT",
+      }),
+    );
+  });
+
+  it("reloads the Skills page from the current skill set", async () => {
+    const user = userEvent.setup();
+    const initialState = selectedProviderState();
+    let skills: TestSkill[] = [];
+    mockInitialState({ ...initialState, skills });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify({ ...initialState, skills }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/skills/reload" && init?.method === "POST") {
+        skills = [projectSkill()];
+        return new Response(JSON.stringify(skills), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Skills" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("No skills").length).toBeGreaterThan(0);
+    });
+    await user.click(screen.getByRole("button", { name: "Reload" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Project Review").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("shows skill suggestions when the composer starts a skill reference", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      skills: [projectSkill()],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "$");
+
+    expect(screen.getByRole("listbox", { name: "Skills" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /\$project-review/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("inserts the selected skill reference into the composer", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      skills: [projectSkill()],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "$");
+    await user.click(screen.getByRole("option", { name: /\$project-review/ }));
+
+    expect(composer).toHaveValue("$project-review ");
+  });
+
+  it("does not suggest disabled skills in the composer", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      skills: [projectSkill({ enabled: false })],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "$");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Skills" }),
+    ).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("$project-review");
   });
 });

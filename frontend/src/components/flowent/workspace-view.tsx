@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Circle,
   Search,
+  Sparkles,
   Square,
   Terminal,
   Trash2,
@@ -19,6 +20,7 @@ import type {
   AssistantOutputGroup,
   AssistantOutputItem,
   Message,
+  Skill,
   ToolItem,
   WorkspaceCommand,
   WorkspaceCommandId,
@@ -37,6 +39,7 @@ export function WorkspaceView({
   onDraftChange,
   onSendMessage,
   onStopResponse,
+  skills,
 }: {
   commands: WorkspaceCommand[];
   draft: string;
@@ -49,6 +52,7 @@ export function WorkspaceView({
   onDraftChange: (value: string) => void;
   onSendMessage: () => void;
   onStopResponse: () => void;
+  skills: Skill[];
 }) {
   const [composerOffset, setComposerOffset] = useState(112);
 
@@ -75,6 +79,7 @@ export function WorkspaceView({
           onSendMessage={onSendMessage}
           onStopResponse={onStopResponse}
           onOffsetChange={setComposerOffset}
+          skills={skills}
         />
       </div>
     </section>
@@ -613,6 +618,7 @@ function ChatComposer({
   onOffsetChange,
   onSendMessage,
   onStopResponse,
+  skills,
 }: {
   commands: WorkspaceCommand[];
   draft: string;
@@ -624,11 +630,15 @@ function ChatComposer({
   onOffsetChange: (value: number) => void;
   onSendMessage: () => void;
   onStopResponse: () => void;
+  skills: Skill[];
 }) {
   const composerRef = useRef<HTMLDivElement>(null);
   const preserveCommandMenuDismissalRef = useRef(false);
+  const preserveSkillMenuDismissalRef = useRef(false);
   const [isCommandMenuDismissed, setIsCommandMenuDismissed] = useState(false);
+  const [isSkillMenuDismissed, setIsSkillMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [selectedSkillIndex, setSelectedSkillIndex] = useState(0);
   const firstLine = draft.split("\n")[0] ?? "";
   const commandName = firstLine.startsWith("/") ? firstLine.slice(1) : "";
   const isCommandDraft =
@@ -647,6 +657,27 @@ function ChatComposer({
   }, [commandName, commands, isCommandDraft]);
   const showCommandMenu =
     isCommandDraft && !isCommandMenuDismissed && matchingCommands.length > 0;
+  const skillTokenMatch = draft.match(/(?:^|\s)\$([a-z0-9-]*)$/i);
+  const skillName = skillTokenMatch?.[1] ?? "";
+  const isSkillDraft = Boolean(skillTokenMatch);
+  const matchingSkills = useMemo(() => {
+    if (!isSkillDraft) {
+      return [];
+    }
+    const normalizedName = skillName.toLowerCase();
+
+    return skills.filter(
+      (skill) =>
+        skill.enabled &&
+        !skill.error &&
+        skill.slug.toLowerCase().startsWith(normalizedName),
+    );
+  }, [isSkillDraft, skillName, skills]);
+  const showSkillMenu =
+    !showCommandMenu &&
+    isSkillDraft &&
+    !isSkillMenuDismissed &&
+    matchingSkills.length > 0;
   const exactCommand = commands.find((command) => command.name === commandName);
   const canSubmitCommand =
     Boolean(isCommandDraft && exactCommand) &&
@@ -665,10 +696,26 @@ function ChatComposer({
   }, [draft]);
 
   useEffect(() => {
+    if (preserveSkillMenuDismissalRef.current) {
+      preserveSkillMenuDismissalRef.current = false;
+      return;
+    }
+
+    setIsSkillMenuDismissed(false);
+    setSelectedSkillIndex(0);
+  }, [draft]);
+
+  useEffect(() => {
     setSelectedCommandIndex((current) =>
       Math.min(current, Math.max(matchingCommands.length - 1, 0)),
     );
   }, [matchingCommands.length]);
+
+  useEffect(() => {
+    setSelectedSkillIndex((current) =>
+      Math.min(current, Math.max(matchingSkills.length - 1, 0)),
+    );
+  }, [matchingSkills.length]);
 
   useEffect(() => {
     const composer = composerRef.current;
@@ -725,7 +772,25 @@ function ChatComposer({
     return true;
   };
 
+  const insertSkill = (skill: Skill) => {
+    const nextDraft = draft.replace(/(?:^|\s)\$([a-z0-9-]*)$/i, (match) => {
+      const prefix = match.startsWith(" ") ? " " : "";
+      return `${prefix}$${skill.slug} `;
+    });
+    preserveSkillMenuDismissalRef.current = true;
+    onDraftChange(nextDraft);
+    setIsSkillMenuDismissed(true);
+  };
+
   const handleSubmit = () => {
+    if (showSkillMenu) {
+      const skill = matchingSkills[selectedSkillIndex];
+      if (skill) {
+        insertSkill(skill);
+        return;
+      }
+    }
+
     if (showCommandMenu) {
       const command = matchingCommands[selectedCommandIndex];
       if (command) {
@@ -760,17 +825,19 @@ function ChatComposer({
             role="listbox"
           >
             {matchingCommands.map((command, index) => (
-              <button
+              <Button
                 aria-selected={index === selectedCommandIndex}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-white transition-colors hover:bg-input/50",
+                  "flex h-auto w-full items-center justify-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm text-white shadow-none transition-colors hover:bg-input/50 hover:text-white",
                   index === selectedCommandIndex && "bg-input/40",
                 )}
                 key={command.id}
                 onClick={() => runCommand(command)}
                 onMouseEnter={() => setSelectedCommandIndex(index)}
+                size="sm"
                 role="option"
                 type="button"
+                variant="ghost"
               >
                 <Terminal aria-hidden="true" className="size-4 text-white/75" />
                 <span className="min-w-0 flex-1">
@@ -781,7 +848,41 @@ function ChatComposer({
                     {command.description}
                   </span>
                 </span>
-              </button>
+              </Button>
+            ))}
+          </div>
+        ) : null}
+        {showSkillMenu ? (
+          <div
+            aria-label="Skills"
+            className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] p-1 shadow-[0_16px_44px_rgba(0,0,0,0.42)]"
+            role="listbox"
+          >
+            {matchingSkills.map((skill, index) => (
+              <Button
+                aria-selected={index === selectedSkillIndex}
+                className={cn(
+                  "flex h-auto w-full items-center justify-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm text-white shadow-none transition-colors hover:bg-input/50 hover:text-white",
+                  index === selectedSkillIndex && "bg-input/40",
+                )}
+                key={skill.id}
+                onClick={() => insertSkill(skill)}
+                onMouseEnter={() => setSelectedSkillIndex(index)}
+                size="sm"
+                role="option"
+                type="button"
+                variant="ghost"
+              >
+                <Sparkles aria-hidden="true" className="size-4 text-white/75" />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium leading-5">
+                    ${skill.slug}
+                  </span>
+                  <span className="block truncate text-xs leading-4 text-white/55">
+                    {skill.description || skill.name}
+                  </span>
+                </span>
+              </Button>
             ))}
           </div>
         ) : null}
@@ -804,6 +905,40 @@ function ChatComposer({
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
+              if (showSkillMenu) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSelectedSkillIndex(
+                    (selectedSkillIndex + 1) % matchingSkills.length,
+                  );
+                  return;
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSelectedSkillIndex(
+                    (selectedSkillIndex - 1 + matchingSkills.length) %
+                      matchingSkills.length,
+                  );
+                  return;
+                }
+
+                if (event.key === "Tab") {
+                  const skill = matchingSkills[selectedSkillIndex];
+                  if (skill) {
+                    event.preventDefault();
+                    insertSkill(skill);
+                  }
+                  return;
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setIsSkillMenuDismissed(true);
+                  return;
+                }
+              }
+
               if (showCommandMenu) {
                 if (event.key === "ArrowDown") {
                   event.preventDefault();

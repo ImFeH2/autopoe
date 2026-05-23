@@ -27,12 +27,18 @@ from flowent.llm import (
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.mcp import McpManager, McpTransport
 from flowent.sandbox import ensure_sandbox_available
+from flowent.skills import (
+    discover_skills,
+    explicit_skill_messages,
+    update_skill_enabled,
+)
 from flowent.storage import (
     StateStore,
     StoredMcpServer,
     StoredMessage,
     StoredProvider,
     StoredSettings,
+    StoredSkill,
     StoredState,
     StoredTelegramBot,
     StoredTelegramSession,
@@ -87,6 +93,12 @@ class TelegramSessionApproveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     chat_id: str
+
+
+class SkillSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -233,9 +245,14 @@ def create_app(
             next_messages,
             store.read_compacted_context(),
         )
+        skill_messages = explicit_skill_messages(cwd, store, content)
         request_messages = [
             message.model_dump()
-            for message in [*runtime_context_messages(cwd), *chat_messages]
+            for message in [
+                *runtime_context_messages(cwd),
+                *skill_messages,
+                *chat_messages,
+            ]
         ]
         assistant_content = ""
         assistant_thinking = ""
@@ -320,7 +337,8 @@ def create_app(
     async def app_state() -> StoredState:
         state = store.read_state()
         update: dict[str, object] = {
-            "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers)
+            "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers),
+            "skills": discover_skills(Path.cwd(), store),
         }
         if telegram_bot_manager is not None:
             update["telegram_bot"] = telegram_bot_manager.bot_with_status(
@@ -356,6 +374,20 @@ def create_app(
     @app.post("/api/mcp/reload")
     async def reload_mcp_servers() -> list[StoredMcpServer]:
         return await mcp_manager.reload()
+
+    @app.post("/api/skills/reload")
+    async def reload_skills() -> list[StoredSkill]:
+        return discover_skills(Path.cwd(), store)
+
+    @app.put("/api/skills/{skill_id:path}")
+    async def save_skill_settings(
+        skill_id: str,
+        request: SkillSettingsRequest,
+    ) -> StoredSkill:
+        try:
+            return update_skill_enabled(Path.cwd(), store, skill_id, request.enabled)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Skill not found.") from error
 
     @app.put("/api/telegram-bot")
     async def save_telegram_bot(telegram_bot: StoredTelegramBot) -> StoredTelegramBot:
@@ -462,7 +494,11 @@ def create_app(
         )
         request_messages = [
             message.model_dump()
-            for message in [*runtime_context_messages(cwd), *chat_messages]
+            for message in [
+                *runtime_context_messages(cwd),
+                *explicit_skill_messages(cwd, store, request.content),
+                *chat_messages,
+            ]
         ]
 
         async def response_stream() -> AsyncIterator[str]:

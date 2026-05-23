@@ -9,6 +9,7 @@ import {
 } from "@/components/flowent/provider-options";
 import { ProvidersView } from "@/components/flowent/providers-view";
 import { SettingsView } from "@/components/flowent/settings-view";
+import { SkillsView } from "@/components/flowent/skills-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
@@ -18,6 +19,7 @@ import type {
   Message,
   Provider,
   ReasoningEffort,
+  Skill,
   TelegramBot,
   TelegramSession,
   ToolItem,
@@ -75,6 +77,8 @@ type ApiMcpServer = {
   url: string;
 };
 
+type ApiSkill = Skill;
+
 type ApiMessage = Message;
 
 type ApiState = {
@@ -86,6 +90,7 @@ type ApiState = {
     selected_model: string;
     selected_provider_id: string;
   };
+  skills?: ApiSkill[];
   telegram_bot?: ApiTelegramBot;
 };
 
@@ -351,6 +356,8 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [activeSkillId, setActiveSkillId] = useState("");
   const [mcpEditorId, setMcpEditorId] = useState("new");
   const [mcpDraft, setMcpDraft] = useState<McpServer>(() =>
     createEmptyMcpServer(),
@@ -375,6 +382,10 @@ function App() {
   );
   const isCreatingProvider = providerEditorId === "new";
   const isCreatingMcpServer = mcpEditorId === "new";
+  const activeSkill = useMemo(
+    () => skills.find((skill) => skill.id === activeSkillId) ?? skills[0],
+    [activeSkillId, skills],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -408,6 +419,8 @@ function App() {
           setMcpEditorId(loadedMcpServers[0].id);
           setMcpDraft(loadedMcpServers[0]);
         }
+        setSkills(state.skills ?? []);
+        setActiveSkillId((state.skills ?? [])[0]?.id ?? "");
         setSelectedProviderId(state.settings.selected_provider_id);
         setSelectedModel(state.settings.selected_model);
         setReasoningEffort(state.settings.reasoning_effort ?? "default");
@@ -449,6 +462,10 @@ function App() {
   const openNewMcpEditor = () => {
     setMcpEditorId("new");
     setMcpDraft(createEmptyMcpServer());
+  };
+
+  const selectSkill = (skill: Skill) => {
+    setActiveSkillId(skill.id);
   };
 
   const updateMcpDraft = (updates: Partial<McpServer>) => {
@@ -660,6 +677,44 @@ function App() {
       } else {
         openNewMcpEditor();
       }
+    }
+  };
+
+  const reloadSkills = async () => {
+    const response = await fetch("/api/skills/reload", {
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    if (response.ok) {
+      const reloadedSkills = (await response.json()) as Skill[];
+      setSkills(reloadedSkills);
+      setActiveSkillId((currentSkillId) => {
+        if (reloadedSkills.some((skill) => skill.id === currentSkillId)) {
+          return currentSkillId;
+        }
+        return reloadedSkills[0]?.id ?? "";
+      });
+    }
+  };
+
+  const toggleSkill = async (skill: Skill, enabled: boolean) => {
+    const response = await fetch(
+      `/api/skills/${encodeURIComponent(skill.id)}`,
+      {
+        body: JSON.stringify({ enabled }),
+        headers: { "Content-Type": "application/json" },
+        method: "PUT",
+      },
+    );
+
+    if (response.ok) {
+      const updatedSkill = (await response.json()) as Skill;
+      setSkills((currentSkills) =>
+        currentSkills.map((currentSkill) =>
+          currentSkill.id === updatedSkill.id ? updatedSkill : currentSkill,
+        ),
+      );
     }
   };
 
@@ -1208,6 +1263,7 @@ function App() {
           isResponding={isResponding}
           messages={messages}
           commands={workspaceCommands}
+          skills={skills}
           onClearMessages={() => {
             void clearMessages();
           }}
@@ -1255,6 +1311,19 @@ function App() {
           onServerSelect={loadMcpEditor}
           onUpdateServer={updateMcpDraft}
           servers={mcpServers}
+        />
+      </TabsContent>
+      <TabsContent value="skills" className={viewPanelClassName}>
+        <SkillsView
+          activeSkill={activeSkill}
+          onReloadSkills={() => {
+            void reloadSkills();
+          }}
+          onSkillSelect={selectSkill}
+          onSkillToggle={(skill, enabled) => {
+            void toggleSkill(skill, enabled);
+          }}
+          skills={skills}
         />
       </TabsContent>
       <TabsContent value="settings" className={viewPanelClassName}>

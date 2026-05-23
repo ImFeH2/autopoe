@@ -54,6 +54,19 @@ class StoredMcpServer(BaseModel):
     url: str = ""
 
 
+class StoredSkill(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str
+    enabled: bool = True
+    error: str = ""
+    id: str
+    name: str
+    path: str
+    scope: str
+    slug: str
+
+
 class StoredProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -102,6 +115,7 @@ class StoredState(BaseModel):
     messages: list[StoredMessage]
     providers: list[StoredProvider]
     settings: StoredSettings
+    skills: list[StoredSkill]
     telegram_bot: StoredTelegramBot
 
 
@@ -181,8 +195,35 @@ class StateStore:
                 if settings_row
                 else "",
             ),
+            skills=[],
             telegram_bot=telegram_bot,
         )
+
+    def read_skill_enabled(self) -> dict[str, bool]:
+        with self.connect() as connection:
+            return {
+                row["id"]: bool(row["enabled"])
+                for row in connection.execute(
+                    """
+                    SELECT id, enabled
+                    FROM skill_settings
+                    ORDER BY id
+                    """
+                )
+            }
+
+    def save_skill_enabled(self, skill_id: str, enabled: bool) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO skill_settings (id, enabled)
+                VALUES (?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at = unixepoch()
+                """,
+                (skill_id, int(enabled)),
+            )
 
     def read_mcp_servers(self) -> list[StoredMcpServer]:
         with self.connect() as connection:
@@ -657,6 +698,12 @@ class StateStore:
             CREATE TABLE IF NOT EXISTS workspace_context (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 compacted_summary TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS skill_settings (
+                id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1,
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
