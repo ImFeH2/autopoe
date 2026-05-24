@@ -168,8 +168,11 @@ function McpSidebar({
               type="button"
               variant="ghost"
             >
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                {server.name}
+              <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                  {server.name}
+                </span>
+                <McpStatusDot status={server.status} />
               </span>
             </Button>
           );
@@ -537,10 +540,16 @@ function McpFields({
           Status
         </Label>
         <div
-          className={cn("text-[13px] leading-5 text-white", mutedTextClassName)}
+          className="flex min-w-0 flex-wrap items-center gap-2"
           id="mcp-status"
         >
-          {mcpStatusLabel(activeServer.status)}
+          <McpStatusBadge status={activeServer.status} />
+          {activeServer.status === "ready" ? (
+            <span className={cn("text-xs leading-5", mutedTextClassName)}>
+              {activeServer.tools.length}{" "}
+              {activeServer.tools.length === 1 ? "tool" : "tools"}
+            </span>
+          ) : null}
         </div>
       </div>
     </>
@@ -593,4 +602,68 @@ function mcpStatusLabel(status: McpServer["status"]): string {
     return "Error";
   }
   return "Disabled";
+}
+
+function McpStatusBadge({ status }: { status: McpServer["status"] }) {
+  const tone = mcpStatusTone(status);
+
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-black",
+        "px-2 py-1 text-xs",
+        tone.className,
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          status === "starting" && "animate-pulse",
+          tone.dotClassName,
+        )}
+        aria-hidden="true"
+      />
+      <span className="leading-none">{mcpStatusLabel(status)}</span>
+    </span>
+  );
+}
+
+function McpStatusDot({ status }: { status: McpServer["status"] }) {
+  const tone = mcpStatusTone(status);
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "size-2 rounded-full",
+        status === "starting" && "animate-pulse",
+        tone.dotClassName,
+      )}
+    />
+  );
+}
+
+function mcpStatusTone(status: McpServer["status"]) {
+  if (status === "ready") {
+    return {
+      className: "border-emerald-400/20 text-emerald-200",
+      dotClassName: "bg-emerald-300",
+    };
+  }
+  if (status === "starting") {
+    return {
+      className: "border-sky-400/20 text-sky-200",
+      dotClassName: "bg-sky-300",
+    };
+  }
+  if (status === "error") {
+    return {
+      className: "border-red-400/25 text-red-200",
+      dotClassName: "bg-red-300",
+    };
+  }
+  return {
+    className: "border-white/10 text-white/55",
+    dotClassName: "bg-white/35",
+  };
 }
