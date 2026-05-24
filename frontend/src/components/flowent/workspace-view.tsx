@@ -50,7 +50,7 @@ export function WorkspaceView({
   onCommandError: (message: string) => void;
   onClearMessages: () => void;
   onDraftChange: (value: string) => void;
-  onSendMessage: () => void;
+  onSendMessage: (content: string) => void;
   onStopResponse: () => void;
   skills: Skill[];
 }) {
@@ -628,11 +628,15 @@ function ChatComposer({
   onCommandError: (message: string) => void;
   onDraftChange: (value: string) => void;
   onOffsetChange: (value: number) => void;
-  onSendMessage: () => void;
+  onSendMessage: (content: string) => void;
   onStopResponse: () => void;
   skills: Skill[];
 }) {
   const composerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const allowNextLineBreakRef = useRef(false);
+  const softKeyboardSubmitRef = useRef(() => {});
+  const handlesSoftKeyboardSubmitRef = useRef(false);
   const preserveCommandMenuDismissalRef = useRef(false);
   const preserveSkillMenuDismissalRef = useRef(false);
   const [isCommandMenuDismissed, setIsCommandMenuDismissed] = useState(false);
@@ -682,8 +686,14 @@ function ChatComposer({
   const canSubmitCommand =
     Boolean(isCommandDraft && exactCommand) &&
     (!isSending || exactCommand?.id === "clear");
-  const canSubmit = draft.length > 0 && (!isSending || canSubmitCommand);
+  const currentDraft = () => textareaRef.current?.value ?? draft;
+  const handlesSoftKeyboardSubmit = shouldHandleSoftKeyboardSubmit();
+  handlesSoftKeyboardSubmitRef.current = handlesSoftKeyboardSubmit;
+  const canSubmit =
+    currentDraft().length > 0 && (!isSending || canSubmitCommand);
   const showStopButton = isSending && !canSubmitCommand;
+  const isSendUnavailable = !showStopButton && !canSubmit;
+  const isSendDisabled = isSendUnavailable && !handlesSoftKeyboardSubmit;
 
   useEffect(() => {
     if (preserveCommandMenuDismissalRef.current) {
@@ -783,6 +793,8 @@ function ChatComposer({
   };
 
   const handleSubmit = () => {
+    const submittedDraft = currentDraft();
+
     if (showSkillMenu) {
       const skill = matchingSkills[selectedSkillIndex];
       if (skill) {
@@ -809,8 +821,41 @@ function ChatComposer({
       return;
     }
 
-    onSendMessage();
+    onSendMessage(submittedDraft);
   };
+
+  softKeyboardSubmitRef.current = () => {
+    handleSubmit();
+  };
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const handleBeforeInput = (event: InputEvent) => {
+      if (!handlesSoftKeyboardSubmitRef.current) {
+        return;
+      }
+      if (allowNextLineBreakRef.current) {
+        allowNextLineBreakRef.current = false;
+        return;
+      }
+      if (
+        event.inputType !== "insertLineBreak" &&
+        event.inputType !== "insertParagraph"
+      ) {
+        return;
+      }
+      event.preventDefault();
+      softKeyboardSubmitRef.current();
+    };
+
+    textarea.addEventListener("beforeinput", handleBeforeInput);
+
+    return () => textarea.removeEventListener("beforeinput", handleBeforeInput);
+  }, []);
 
   return (
     <div
@@ -902,9 +947,15 @@ function ChatComposer({
           <Textarea
             aria-label="Message Flowent"
             className="flowent-composer-textarea max-h-[216px] min-h-9 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-white shadow-none placeholder:text-[#9b9b9b] focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+            enterKeyHint="send"
+            ref={textareaRef}
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
+            onInput={(event) => onDraftChange(event.currentTarget.value)}
             onKeyDown={(event) => {
+              allowNextLineBreakRef.current =
+                event.key === "Enter" && event.shiftKey;
+
               if (showSkillMenu) {
                 if (event.key === "ArrowDown") {
                   event.preventDefault();
@@ -995,8 +1046,11 @@ function ChatComposer({
               showStopButton
                 ? "bg-white text-black hover:bg-[#e5e5e5] [&_svg]:size-3.5"
                 : "bg-white text-black hover:bg-[#e5e5e5]",
+              isSendUnavailable &&
+                "bg-transparent text-white/35 hover:bg-transparent",
             )}
-            disabled={!showStopButton && !canSubmit}
+            aria-disabled={isSendUnavailable}
+            disabled={isSendDisabled}
             onClick={showStopButton ? onStopResponse : undefined}
             size="icon-lg"
             type={showStopButton ? "button" : "submit"}
@@ -1010,5 +1064,16 @@ function ChatComposer({
         </form>
       </div>
     </div>
+  );
+}
+
+function shouldHandleSoftKeyboardSubmit() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
   );
 }

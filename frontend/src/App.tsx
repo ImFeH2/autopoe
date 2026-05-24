@@ -30,6 +30,7 @@ import type {
 } from "@/components/flowent/types";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
+import { createClientId } from "@/lib/utils";
 
 type ApiProvider = {
   api_key: string;
@@ -351,7 +352,7 @@ const mcpServerId = (name: string) => {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `mcp-${slug || crypto.randomUUID()}`;
+  return slug ? `mcp-${slug}` : createClientId("mcp");
 };
 
 function App() {
@@ -644,7 +645,7 @@ function App() {
   const saveProvider = async () => {
     const savedProvider: Provider = {
       ...providerDraft,
-      id: isCreatingProvider ? crypto.randomUUID() : providerDraft.id,
+      id: isCreatingProvider ? createClientId("provider") : providerDraft.id,
       name:
         providerDraft.name.trim() ||
         providerOptions.find((type) => type.id === providerDraft.type)?.label ||
@@ -1026,8 +1027,8 @@ function App() {
     setIsResponding(false);
   };
 
-  const sendMessage = async () => {
-    if (draft.length === 0 || isResponding) {
+  const sendMessage = async (submittedDraft = draft) => {
+    if (submittedDraft.length === 0 || isResponding) {
       return;
     }
 
@@ -1035,13 +1036,13 @@ function App() {
     const responseAbortController = new AbortController();
     responseAbortRef.current = responseAbortController;
     responseRunRef.current = responseRun;
-    const userContent = draft;
+    const userContent = submittedDraft;
     const nextMessages: Message[] = [
       ...messages,
       {
         author: "user",
         content: userContent,
-        id: crypto.randomUUID(),
+        id: createClientId("message"),
       },
     ];
     setResponseError("");
@@ -1366,8 +1367,8 @@ function App() {
           onCommand={runWorkspaceCommand}
           onCommandError={handleWorkspaceCommandError}
           onDraftChange={setDraft}
-          onSendMessage={() => {
-            void sendMessage();
+          onSendMessage={(content) => {
+            void sendMessage(content);
           }}
           onStopResponse={stopResponse}
         />
