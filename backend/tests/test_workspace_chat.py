@@ -1,11 +1,17 @@
+import asyncio
+import time
+
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT
 from flowent.main import create_app
+from flowent.sandbox import CommandResult, SandboxRunner
 
 
 def configure_provider(
-    client: TestClient,
+    client,
     *,
     base_url: str = "",
     model: str = "gpt-5.1",
@@ -26,6 +32,37 @@ def configure_provider(
         },
     )
     client.put(
+        "/api/settings",
+        json={
+            "reasoning_effort": reasoning_effort,
+            "selected_model": model,
+            "selected_provider_id": provider_id,
+        },
+    )
+
+
+async def configure_provider_async(
+    client: httpx.AsyncClient,
+    *,
+    base_url: str = "",
+    model: str = "gpt-5.1",
+    name: str = "OpenAI",
+    provider_id: str = "provider-openai",
+    provider_type: str = "openai",
+    reasoning_effort: str = "default",
+) -> None:
+    await client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-local",
+            "base_url": base_url,
+            "id": provider_id,
+            "models": [model],
+            "name": name,
+            "type": provider_type,
+        },
+    )
+    await client.put(
         "/api/settings",
         json={
             "reasoning_effort": reasoning_effort,
@@ -61,6 +98,88 @@ def stream_events(content: str) -> list[dict[str, object]]:
                 data = line.removeprefix("data: ")
         events.append({"event": event_type, "data": data})
     return events
+
+
+def tool_call_chunk(
+    name: str,
+    arguments: str,
+    *,
+    call_id: str = "call-1",
+) -> dict[str, object]:
+    return {
+        "choices": [
+            {
+                "delta": {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "arguments": arguments,
+                                "name": name,
+                            },
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+
+@pytest.mark.anyio
+async def test_workspace_long_shell_command_does_not_block_health(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    command_started = asyncio.Event()
+    command_can_finish = asyncio.Event()
+
+    async def fake_run_async(self, command, **kwargs):
+        command_started.set()
+        await asyncio.wait_for(command_can_finish.wait(), timeout=2)
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="slow command finished",
+        )
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk("shell_command", '{"command": "slow"}')
+            else:
+                yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response_task = asyncio.create_task(
+            client.post("/api/workspace/respond", json={"content": "Run slow."})
+        )
+        await asyncio.wait_for(command_started.wait(), timeout=2)
+        start = time.perf_counter()
+        health_response = await client.get("/api/health")
+        elapsed = time.perf_counter() - start
+        command_can_finish.set()
+        response = await response_task
+
+    assert health_response.status_code == 200
+    assert health_response.json() == {"status": "ok"}
+    assert elapsed < 0.2
+    assert response.status_code == 200
 
 
 def test_workspace_response_streams_selected_provider_model_and_history(
@@ -604,3 +723,152 @@ def test_project_instructions_are_truncated_to_size_limit(
     assert project_message is not None
     assert "1234567890ab" in project_message["content"]
     assert "cdef" not in project_message["content"]
+
+
+@pytest.mark.anyio
+async def test_workspace_persists_tool_start_during_stream(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    command_started = asyncio.Event()
+    command_can_finish = asyncio.Event()
+
+    async def fake_run_async(self, command, **kwargs):
+        command_started.set()
+        await asyncio.wait_for(command_can_finish.wait(), timeout=2)
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="Launch notes",
+        )
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            if request["messages"][-1]["role"] == "user":
+                yield tool_call_chunk("shell_command", '{"command": "slow"}')
+            else:
+                yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response_task = asyncio.create_task(
+            client.post("/api/workspace/respond", json={"content": "Read notes."})
+        )
+        await asyncio.wait_for(command_started.wait(), timeout=2)
+        state = (await client.get("/api/state")).json()
+        command_can_finish.set()
+        response = await response_task
+
+    assistant = state["messages"][-1]
+    assert response.status_code == 200
+    assert assistant["author"] == "assistant"
+    assert assistant["status"] == "running"
+    assert assistant["tools"][0]["name"] == "shell_command"
+    assert assistant["tools"][0]["status"] == "running"
+
+
+@pytest.mark.anyio
+async def test_workspace_persists_tool_result_during_stream(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "notes.txt").write_text("Launch notes")
+    second_round_started = asyncio.Event()
+    continue_stream = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            if request["messages"][-1]["role"] == "user":
+                yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
+                return
+            second_round_started.set()
+            await asyncio.wait_for(continue_stream.wait(), timeout=2)
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response_task = asyncio.create_task(
+            client.post("/api/workspace/respond", json={"content": "Read notes."})
+        )
+        await asyncio.wait_for(second_round_started.wait(), timeout=2)
+        state = (await client.get("/api/state")).json()
+        continue_stream.set()
+        response = await response_task
+
+    assistant = state["messages"][-1]
+    assert response.status_code == 200
+    assert assistant["status"] == "running"
+    assert assistant["tools"][0]["status"] == "success"
+    assert assistant["tools"][0]["content"] == "Launch notes"
+
+
+def test_workspace_persists_failed_draft_when_stream_errors(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Partial answer."}}]}
+            raise RuntimeError("provider stopped")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert events[-1]["event"] == "error"
+    state = client.get("/api/state").json()
+    assistant = state["messages"][-1]
+    assert assistant["author"] == "assistant"
+    assert assistant["content"] == "Partial answer."
+    assert assistant["status"] == "failed"
+
+
+def test_workspace_marks_draft_complete_when_stream_finishes(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    state = client.get("/api/state").json()
+    assistant = state["messages"][-1]
+    assert assistant["author"] == "assistant"
+    assert assistant["content"] == "Done."
+    assert assistant.get("status", "completed") == "completed"

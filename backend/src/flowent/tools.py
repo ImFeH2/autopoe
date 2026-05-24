@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
@@ -198,12 +199,37 @@ def run_tool(
         return ToolResult(content=str(error), ok=False, title=title)
 
 
+async def run_tool_async(
+    name: str, arguments: dict[str, object], context: ToolContext
+) -> ToolResult:
+    try:
+        if name == "shell_command":
+            return await shell_command_async(arguments, context)
+        if name == "apply_patch":
+            return await apply_patch_tool_async(arguments, context)
+        return await asyncio.to_thread(run_tool, name, arguments, context)
+    except Exception as error:
+        title = (
+            "Edit failed" if name == "apply_patch" else tool_call_title(name, arguments)
+        )
+        return ToolResult(content=str(error), ok=False, title=title)
+
+
 def integer_argument(arguments: dict[str, object], name: str, default: int) -> int:
     value = arguments.get(name, default)
     if isinstance(value, int):
         return value
     if isinstance(value, str):
         return int(value)
+    return default
+
+
+def number_argument(arguments: dict[str, object], name: str, default: float) -> float:
+    value = arguments.get(name, default)
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        return float(value)
     return default
 
 
@@ -271,6 +297,28 @@ def apply_patch_tool(arguments: dict[str, object], context: ToolContext) -> Tool
     )
 
 
+async def apply_patch_tool_async(
+    arguments: dict[str, object], context: ToolContext
+) -> ToolResult:
+    patch = str(arguments["patch"])
+    paths = affected_paths(patch, context.cwd)
+    runner = SandboxRunner(cwd=context.cwd)
+    for path in paths:
+        runner.ensure_writable_path(path)
+    result = await runner.run_async(
+        [sys.executable, "-m", "flowent.cli", "apply-patch", "--cwd", str(context.cwd)],
+        input_text=patch,
+    )
+    if result.exit_code != 0:
+        raise SandboxError(tool_failure_content(result))
+    data = json.loads(result.stdout or "{}")
+    return ToolResult(
+        content=result.stdout,
+        data=data if isinstance(data, dict) else {},
+        title=patch_title_from_result(data),
+    )
+
+
 def patch_title_from_result(data: object) -> str:
     if not isinstance(data, dict):
         return "Edited files"
@@ -308,8 +356,31 @@ def tool_failure_content(result: object) -> str:
 
 def shell_command(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     command = str(arguments["command"])
-    timeout_seconds = integer_argument(arguments, "timeout_seconds", 30)
+    timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
     result = SandboxRunner(cwd=context.cwd).run(
+        ["/bin/sh", "-c", command], timeout_seconds=timeout_seconds
+    )
+    ok = result.exit_code == 0
+    content = result.stdout or result.stderr
+    return ToolResult(
+        content=content,
+        data={
+            "command": command,
+            "exit_code": result.exit_code,
+            "stderr": result.stderr,
+            "stdout": result.stdout,
+        },
+        ok=ok,
+        title=f"Ran {command}",
+    )
+
+
+async def shell_command_async(
+    arguments: dict[str, object], context: ToolContext
+) -> ToolResult:
+    command = str(arguments["command"])
+    timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
+    result = await SandboxRunner(cwd=context.cwd).run_async(
         ["/bin/sh", "-c", command], timeout_seconds=timeout_seconds
     )
     ok = result.exit_code == 0

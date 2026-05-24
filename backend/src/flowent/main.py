@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -117,6 +118,15 @@ class McpImportPreviewRequest(BaseModel):
 
 def stream_event(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def append_or_replace_message(
+    messages: list[StoredMessage], message: StoredMessage
+) -> list[StoredMessage]:
+    return [
+        *(current for current in messages if current.id != message.id),
+        message,
+    ]
 
 
 def frontend_static_directory() -> Path:
@@ -312,6 +322,7 @@ def create_app(
             author="assistant",
             content=assistant_content,
             id=assistant_id,
+            status="completed",
             thinking=assistant_thinking,
             tools=list(assistant_tools.values()),
         )
@@ -541,6 +552,30 @@ def create_app(
 
         async def response_stream() -> AsyncIterator[str]:
             assistant_tools: dict[str, StoredToolItem] = {}
+            assistant_message = StoredMessage(
+                author="assistant",
+                content="",
+                id=str(uuid4()),
+                status="running",
+            )
+            assistant_content = ""
+            assistant_thinking = ""
+
+            def persist_assistant(status: str = "running") -> None:
+                nonlocal next_messages, assistant_message
+                assistant_message = StoredMessage(
+                    author="assistant",
+                    content=assistant_content,
+                    id=assistant_message.id,
+                    status=status,
+                    thinking=assistant_thinking,
+                    tools=list(assistant_tools.values()),
+                )
+                next_messages = append_or_replace_message(
+                    next_messages, assistant_message
+                )
+                store.upsert_message(assistant_message)
+
             try:
                 async for event in run_agent_stream(
                     completion=chat_completion,
@@ -551,12 +586,20 @@ def create_app(
                     extra_tool_title=mcp_manager.tool_title,
                     messages=request_messages,
                 ):
+                    if event.event == "start":
+                        event_id = event.data.get("id")
+                        if isinstance(event_id, str):
+                            assistant_message = assistant_message.model_copy(
+                                update={"id": event_id}
+                            )
+                            persist_assistant()
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
                         if isinstance(tool, dict) and isinstance(tool.get("id"), str):
                             assistant_tools[tool["id"]] = StoredToolItem.model_validate(
                                 tool
                             )
+                            persist_assistant()
                     if event.event in {"tool_done", "tool_error"}:
                         tool_id = event.data.get("id")
                         if isinstance(tool_id, str) and tool_id in assistant_tools:
@@ -568,6 +611,13 @@ def create_app(
                                     **event.data,
                                 }
                             )
+                            persist_assistant()
+                    if event.event == "delta":
+                        assistant_content += str(event.data.get("content") or "")
+                        persist_assistant()
+                    if event.event == "thinking_delta":
+                        assistant_thinking += str(event.data.get("content") or "")
+                        persist_assistant()
                     logger.log(
                         TRACE_LEVEL,
                         "Workspace stream event=%s data=%r",
@@ -577,19 +627,21 @@ def create_app(
                     if event.event == "done":
                         message = event.data.get("message")
                         if isinstance(message, dict):
-                            next_messages.append(
-                                StoredMessage(
-                                    author="assistant",
-                                    content=str(message.get("content") or ""),
-                                    id=str(message.get("id") or uuid4()),
-                                    thinking=str(message.get("thinking") or ""),
-                                    tools=list(assistant_tools.values()),
-                                )
+                            assistant_content = str(
+                                message.get("content") or assistant_content
                             )
-                            store.save_messages(next_messages)
+                            assistant_thinking = str(
+                                message.get("thinking") or assistant_thinking
+                            )
+                            persist_assistant("completed")
                     yield stream_event(event.event, event.data)
+            except asyncio.CancelledError:
+                logger.info("Workspace response interrupted")
+                persist_assistant("interrupted")
+                raise
             except Exception as error:
                 logger.exception("Workspace response failed")
+                persist_assistant("failed")
                 yield stream_event(
                     "error",
                     {"message": str(error) or "Message could not be sent."},

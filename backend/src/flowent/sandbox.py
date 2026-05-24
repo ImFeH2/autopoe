@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import errno
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -127,7 +130,7 @@ class SandboxRunner:
         self,
         *,
         cwd: Path | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: float = 30,
         output_limit: int = 20000,
     ) -> None:
         self.cwd = (cwd or Path.cwd()).resolve(strict=False)
@@ -193,7 +196,7 @@ class SandboxRunner:
         *,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
-        timeout_seconds: int | None = None,
+        timeout_seconds: float | None = None,
     ) -> CommandResult:
         sandbox_command = self.build_command(command)
         pass_fds: tuple[int, ...] = ()
@@ -231,4 +234,68 @@ class SandboxRunner:
             exit_code=completed.returncode,
             stderr=completed.stderr[: self.output_limit],
             stdout=completed.stdout[: self.output_limit],
+        )
+
+    async def run_async(
+        self,
+        command: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        input_text: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> CommandResult:
+        sandbox_command = self.build_command(command)
+        pass_fds: tuple[int, ...] = ()
+        if sandbox_command.seccomp_file is not None:
+            pass_fds = (sandbox_command.seccomp_file.fileno(),)
+
+        process_env = os.environ.copy()
+        if env is not None:
+            process_env.update(env)
+        process = await asyncio.create_subprocess_exec(
+            *sandbox_command.args,
+            cwd=self.cwd,
+            env=process_env,
+            pass_fds=pass_fds,
+            start_new_session=True,
+            stdin=asyncio.subprocess.PIPE if input_text is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(
+                    input_text.encode() if input_text is not None else None
+                ),
+                timeout=timeout_seconds or self.timeout_seconds,
+            )
+        except TimeoutError as error:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = await process.communicate()
+            return CommandResult(
+                command=" ".join(command),
+                exit_code=124,
+                stderr=str(error) or "Command timed out.",
+                stdout=self._text_output(stdout)[: self.output_limit],
+            )
+        except asyncio.CancelledError:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=1)
+            except TimeoutError:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                await process.wait()
+            raise
+        finally:
+            if sandbox_command.seccomp_file is not None:
+                sandbox_command.seccomp_file.close()
+
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=process.returncode or 0,
+            stderr=self._text_output(stderr)[: self.output_limit],
+            stdout=self._text_output(stdout)[: self.output_limit],
         )

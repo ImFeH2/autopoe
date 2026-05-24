@@ -1,11 +1,15 @@
+import asyncio
 import json
+import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT
+from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT, run_agent_stream
+from flowent.llm import ProviderConnection, ProviderFormat
 from flowent.main import create_app
-from flowent.sandbox import SandboxRunner
+from flowent.sandbox import SandboxCommand, SandboxRunner
 from flowent.tools import ToolContext, run_tool
 
 
@@ -220,6 +224,103 @@ def test_shell_command_has_network_by_default(tmp_path) -> None:
 
     assert result.ok
     assert "network-ready" in result.content
+
+
+@pytest.mark.anyio
+async def test_async_shell_command_does_not_block_other_tasks(
+    tmp_path, monkeypatch
+) -> None:
+    runner = SandboxRunner(cwd=tmp_path)
+    command = [
+        "/bin/sh",
+        "-c",
+        "python - <<'PY'\nimport time\ntime.sleep(0.2)\nprint('done')\nPY",
+    ]
+    monkeypatch.setattr(
+        runner,
+        "build_command",
+        lambda command: SandboxCommand(command, seccomp_available=False),
+    )
+    command_task = asyncio.create_task(runner.run_async(command, timeout_seconds=1))
+    start = time.perf_counter()
+    await asyncio.sleep(0.01)
+    elapsed = time.perf_counter() - start
+    result = await command_task
+
+    assert elapsed < 0.1
+    assert result.exit_code == 0
+    assert "done" in result.stdout
+
+
+@pytest.mark.anyio
+async def test_async_shell_command_timeout_returns_failed_result(
+    tmp_path, monkeypatch
+) -> None:
+    runner = SandboxRunner(cwd=tmp_path)
+    command = [
+        "/bin/sh",
+        "-c",
+        "python - <<'PY'\nimport time\ntime.sleep(1)\nprint('late')\nPY",
+    ]
+    monkeypatch.setattr(
+        runner,
+        "build_command",
+        lambda command: SandboxCommand(command, seccomp_available=False),
+    )
+    result = await runner.run_async(
+        command,
+        timeout_seconds=0.05,
+    )
+
+    assert result.exit_code == 124
+    assert "late" not in result.stdout
+
+
+@pytest.mark.anyio
+async def test_agent_stream_stops_after_cancelled_tool(tmp_path) -> None:
+    cancelled = False
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield tool_call_chunk("shell_command", {"command": "slow"})
+
+        return chunks()
+
+    async def fake_runner(
+        name: str, arguments: dict[str, object], context: ToolContext
+    ):
+        nonlocal cancelled
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+
+    stream = run_agent_stream(
+        completion=fake_completion,
+        connection=ProviderConnection(
+            base_url=None,
+            model="gpt-5.1",
+            name="OpenAI",
+            provider=ProviderFormat.OPENAI,
+            secret_reference="sk-local",
+        ),
+        cwd=tmp_path,
+        messages=[{"role": "user", "content": "Run it."}],
+        tool_runner=fake_runner,
+    )
+
+    await stream.__anext__()
+    await stream.__anext__()
+    await stream.__anext__()
+    next_event = asyncio.create_task(stream.__anext__())
+    await asyncio.sleep(0)
+    next_event.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await next_event
+    await stream.aclose()
+
+    assert cancelled
 
 
 def test_shell_command_denies_ptrace_when_seccomp_is_available(tmp_path) -> None:

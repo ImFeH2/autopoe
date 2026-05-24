@@ -105,6 +105,9 @@ class StoredMessage(BaseModel):
     author: str
     content: str
     id: str
+    status: str = Field(
+        default="completed", exclude_if=lambda value: value == "completed"
+    )
     thinking: str = Field(default="", exclude_if=lambda value: value == "")
     tools: list[StoredToolItem] = Field(default_factory=list)
 
@@ -168,6 +171,7 @@ class StateStore:
                     author=row["author"],
                     content=row["content"],
                     id=row["id"],
+                    status=row["status"],
                     thinking=row["thinking"],
                     tools=[
                         StoredToolItem.model_validate(tool)
@@ -176,7 +180,7 @@ class StateStore:
                 )
                 for row in connection.execute(
                     """
-                    SELECT id, author, content, tools, thinking
+                    SELECT id, author, content, tools, thinking, status
                     FROM messages
                     ORDER BY position, id
                     """
@@ -476,8 +480,8 @@ class StateStore:
             connection.execute("DELETE FROM messages")
             connection.executemany(
                 """
-                INSERT INTO messages (id, author, content, tools, thinking, position)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (id, author, content, tools, thinking, status, position)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -491,6 +495,7 @@ class StateStore:
                             ]
                         ),
                         message.thinking,
+                        message.status,
                         position,
                     )
                     for position, message in enumerate(messages)
@@ -499,6 +504,44 @@ class StateStore:
             if not messages:
                 connection.execute("DELETE FROM workspace_context WHERE id = 1")
         return messages
+
+    def upsert_message(self, message: StoredMessage) -> StoredMessage:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT position FROM messages WHERE id = ?", (message.id,)
+            ).fetchone()
+            if row:
+                position = row["position"]
+            else:
+                position_row = connection.execute(
+                    "SELECT COALESCE(MAX(position) + 1, 0) AS position FROM messages"
+                ).fetchone()
+                position = position_row["position"]
+            connection.execute(
+                """
+                INSERT INTO messages (id, author, content, tools, thinking, status, position)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    author = excluded.author,
+                    content = excluded.content,
+                    tools = excluded.tools,
+                    thinking = excluded.thinking,
+                    status = excluded.status,
+                    position = excluded.position
+                """,
+                (
+                    message.id,
+                    message.author,
+                    message.content,
+                    json.dumps(
+                        [tool.model_dump(exclude_none=True) for tool in message.tools]
+                    ),
+                    message.thinking,
+                    message.status,
+                    position,
+                ),
+            )
+        return message
 
     def read_compacted_context(self) -> str:
         with self.connect() as connection:
@@ -698,6 +741,7 @@ class StateStore:
                 id TEXT PRIMARY KEY,
                 author TEXT NOT NULL,
                 content TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'completed',
                 position INTEGER NOT NULL
             );
 
@@ -740,6 +784,10 @@ class StateStore:
         if "thinking" not in columns:
             connection.execute(
                 "ALTER TABLE messages ADD COLUMN thinking TEXT NOT NULL DEFAULT ''"
+            )
+        if "status" not in columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
             )
         settings_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(settings)")

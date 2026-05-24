@@ -23,7 +23,7 @@ from flowent.tools import (
     ToolResult,
     new_tool_item,
     parse_tool_arguments,
-    run_tool,
+    run_tool_async,
     tool_specs,
 )
 
@@ -109,6 +109,8 @@ async def run_agent_stream(
     | None = None,
     extra_tool_specs: Sequence[Mapping[str, object]] | None = None,
     extra_tool_title: Callable[[str], str | None] | None = None,
+    tool_runner: Callable[[str, dict[str, object], ToolContext], Awaitable[ToolResult]]
+    | None = None,
     web_searcher: Callable[[str], Sequence[dict[str, str]]] | None = None,
 ) -> AsyncIterator[AgentStreamEvent]:
     conversation: list[Mapping[str, object]] = [
@@ -244,15 +246,22 @@ async def run_agent_stream(
                     if extra_tool_runner is not None
                     else None
                 )
-                result = (
-                    extra_result
-                    if isinstance(extra_result, ToolResult)
-                    else run_tool(
-                        tool_call.name,
-                        arguments,
-                        ToolContext(cwd=cwd, web_searcher=web_searcher),
+                result = extra_result if isinstance(extra_result, ToolResult) else None
+                if result is None:
+                    context = ToolContext(cwd=cwd, web_searcher=web_searcher)
+                    result = await (
+                        tool_runner(
+                            tool_call.name,
+                            arguments,
+                            context,
+                        )
+                        if tool_runner is not None
+                        else run_tool_async(
+                            tool_call.name,
+                            arguments,
+                            context,
+                        )
                     )
-                )
                 result_content = result.content
                 logger.debug(
                     "Tool call finished name=%s id=%s ok=%s",
