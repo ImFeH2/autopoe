@@ -33,21 +33,26 @@ class McpImportDiscovery(BaseModel):
 def discover_imported_mcp_servers(
     cwd: Path | None = None,
     home: Path | None = None,
+    source: McpImportSource | None = None,
 ) -> McpImportDiscovery:
     workspace = (cwd or Path.cwd()).resolve(strict=False)
     user_home = (home or Path.home()).resolve(strict=False)
     sources: list[McpImportSourceResult] = []
 
-    for path, source in candidate_mcp_config_files(workspace, user_home):
+    for path, config_source in candidate_mcp_config_files(
+        workspace,
+        user_home,
+        source,
+    ):
         if not path.is_file():
             continue
         try:
-            servers = parse_mcp_config_file(path, source, workspace)
+            servers = parse_mcp_config_file(path, config_source, workspace)
             sources.append(
                 McpImportSourceResult(
                     path=str(path.resolve(strict=False)),
                     servers=servers,
-                    source=source,
+                    source=config_source,
                 )
             )
         except Exception as error:
@@ -55,7 +60,7 @@ def discover_imported_mcp_servers(
                 McpImportSourceResult(
                     error=str(error),
                     path=str(path.resolve(strict=False)),
-                    source=source,
+                    source=config_source,
                 )
             )
 
@@ -70,16 +75,26 @@ def discover_imported_mcp_servers(
 def candidate_mcp_config_files(
     cwd: Path,
     home: Path,
+    source: McpImportSource | None = None,
 ) -> list[tuple[Path, McpImportSource]]:
-    candidates: list[tuple[Path, McpImportSource]] = [
-        (cwd / ".mcp.json", "claude_code"),
-        (cwd / ".claude" / "settings.local.json", "claude_code"),
-        (cwd / ".claude" / "settings.json", "claude_code"),
-        (home / ".claude.json", "claude_code"),
-        (home / ".claude" / "settings.json", "claude_code"),
-        (cwd / ".codex" / "config.toml", "codex"),
-        (home / ".codex" / "config.toml", "codex"),
-    ]
+    candidates: list[tuple[Path, McpImportSource]] = []
+    if source in (None, "claude_code"):
+        candidates.extend(
+            [
+                (cwd / ".mcp.json", "claude_code"),
+                (cwd / ".claude" / "settings.local.json", "claude_code"),
+                (cwd / ".claude" / "settings.json", "claude_code"),
+                (home / ".claude.json", "claude_code"),
+                (home / ".claude" / "settings.json", "claude_code"),
+            ]
+        )
+    if source in (None, "codex"):
+        candidates.extend(
+            [
+                (cwd / ".codex" / "config.toml", "codex"),
+                (home / ".codex" / "config.toml", "codex"),
+            ]
+        )
     seen: set[tuple[Path, McpImportSource]] = set()
     unique_candidates: list[tuple[Path, McpImportSource]] = []
     for path, source in candidates:

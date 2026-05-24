@@ -277,7 +277,10 @@ def test_mcp_import_preview_reads_codex_config(tmp_path, monkeypatch) -> None:
     write_config(home / ".codex" / "config.toml", codex_import_content())
     client = TestClient(create_app(serve_frontend=False))
 
-    response = client.get("/api/mcp/import/preview")
+    response = client.post(
+        "/api/mcp/import/preview",
+        json={"source": "codex"},
+    )
 
     assert response.status_code == 200
     result = response.json()
@@ -297,7 +300,10 @@ def test_mcp_import_preview_reads_claude_code_config(tmp_path, monkeypatch) -> N
     write_config(home / ".claude.json", claude_code_import_content())
     client = TestClient(create_app(serve_frontend=False))
 
-    response = client.get("/api/mcp/import/preview")
+    response = client.post(
+        "/api/mcp/import/preview",
+        json={"source": "claude_code"},
+    )
 
     assert response.status_code == 200
     result = response.json()
@@ -311,7 +317,7 @@ def test_mcp_import_preview_reads_claude_code_config(tmp_path, monkeypatch) -> N
     assert server["config"]["headers"] == {"X-Team": "${TEAM_ID:-local}"}
 
 
-def test_mcp_import_skip_keeps_existing_server(tmp_path, monkeypatch) -> None:
+def test_mcp_import_keeps_existing_server(tmp_path, monkeypatch) -> None:
     home, _ = isolated_mcp_import_environment(tmp_path, monkeypatch)
     write_config(home / ".codex" / "config.toml", codex_import_content())
     transport = FakeMcpTransport()
@@ -320,7 +326,10 @@ def test_mcp_import_skip_keeps_existing_server(tmp_path, monkeypatch) -> None:
 
     response = client.post(
         "/api/mcp/import",
-        json={"duplicate_action": "skip"},
+        json={
+            "server_id": "mcp-docs",
+            "source": "codex",
+        },
     )
 
     assert response.status_code == 200
@@ -329,32 +338,35 @@ def test_mcp_import_skip_keeps_existing_server(tmp_path, monkeypatch) -> None:
     assert state["mcp_servers"][0]["command"] == "npx"
 
 
-def test_mcp_import_replace_updates_existing_server(tmp_path, monkeypatch) -> None:
+def test_mcp_import_only_saves_requested_server(tmp_path, monkeypatch) -> None:
     home, _ = isolated_mcp_import_environment(tmp_path, monkeypatch)
     write_config(
         home / ".codex" / "config.toml",
-        codex_import_content(command="docs-server"),
+        codex_import_content(name="docs") + codex_import_content(name="search"),
     )
-    transport = FakeMcpTransport()
-    client = TestClient(create_app(serve_frontend=False, mcp_transport=transport))
-    client.put("/api/mcp/servers", json=command_server_payload(id="mcp-docs"))
+    client = TestClient(create_app(serve_frontend=False))
 
     response = client.post(
         "/api/mcp/import",
-        json={"duplicate_action": "replace"},
+        json={
+            "server_id": "mcp-search",
+            "source": "codex",
+        },
     )
 
     assert response.status_code == 200
     state = client.get("/api/state").json()
-    assert state["mcp_servers"][0]["name"] == "docs"
-    assert state["mcp_servers"][0]["command"] == "docs-server"
+    assert [server["id"] for server in state["mcp_servers"]] == ["mcp-search"]
 
 
 def test_mcp_import_preview_reports_empty_scan(tmp_path, monkeypatch) -> None:
     isolated_mcp_import_environment(tmp_path, monkeypatch)
     client = TestClient(create_app(serve_frontend=False))
 
-    response = client.get("/api/mcp/import/preview")
+    response = client.post(
+        "/api/mcp/import/preview",
+        json={"source": "codex"},
+    )
 
     assert response.status_code == 200
     assert response.json() == {"servers": [], "sources": []}
@@ -370,16 +382,16 @@ def test_mcp_import_preview_dedupes_discovered_servers(tmp_path, monkeypatch) ->
     write_config(home / ".claude.json", claude_code_import_content())
     client = TestClient(create_app(serve_frontend=False))
 
-    response = client.get("/api/mcp/import/preview")
+    response = client.post(
+        "/api/mcp/import/preview",
+        json={"source": "codex"},
+    )
 
     assert response.status_code == 200
     result = response.json()
-    assert [server["id"] for server in result["servers"]] == [
-        "mcp-linear",
-        "mcp-docs",
-    ]
-    assert result["servers"][1]["command"] == "npx"
-    assert len(result["sources"]) == 3
+    assert [server["id"] for server in result["servers"]] == ["mcp-docs"]
+    assert result["servers"][0]["command"] == "npx"
+    assert len(result["sources"]) == 2
 
 
 def test_disabled_mcp_server_does_not_connect_or_expose_tools(

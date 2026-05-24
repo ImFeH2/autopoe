@@ -24,25 +24,22 @@ import {
   stableScrollbarClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
-import type { McpImportFile, McpServer } from "@/components/flowent/types";
+import type { McpImportSource, McpServer } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
 export function McpView({
   activeServer,
   isCreatingServer,
   isImportOpen,
-  importDuplicateAction,
   importError,
   importPreview,
-  importSources,
-  isImporting,
+  importSource,
+  importingServerId,
   isPreviewing,
   onNewServer,
   onImport,
-  onImportClose,
-  onImportDuplicateActionChange,
-  onImportPreview,
-  onImportConfirm,
+  onImportServer,
+  onImportSourceChange,
   onReconnectServer,
   onRemoveServer,
   onSaveServer,
@@ -53,18 +50,15 @@ export function McpView({
   activeServer: McpServer;
   isCreatingServer: boolean;
   isImportOpen: boolean;
-  importDuplicateAction: "replace" | "skip";
   importError: string;
   importPreview: McpServer[];
-  importSources: McpImportFile[];
-  isImporting: boolean;
+  importSource: McpImportSource;
+  importingServerId: string;
   isPreviewing: boolean;
   onNewServer: () => void;
   onImport: () => void;
-  onImportClose: () => void;
-  onImportDuplicateActionChange: (value: "replace" | "skip") => void;
-  onImportPreview: () => void;
-  onImportConfirm: () => void;
+  onImportServer: (serverId: string) => void;
+  onImportSourceChange: (source: McpImportSource) => void;
   onReconnectServer: () => void;
   onRemoveServer: () => void;
   onSaveServer: () => void;
@@ -90,16 +84,13 @@ export function McpView({
           activeServer={activeServer}
           isCreatingServer={isCreatingServer}
           isImportOpen={isImportOpen}
-          importDuplicateAction={importDuplicateAction}
           importError={importError}
           importPreview={importPreview}
-          importSources={importSources}
-          isImporting={isImporting}
+          importSource={importSource}
+          importingServerId={importingServerId}
           isPreviewing={isPreviewing}
-          onImportDuplicateActionChange={onImportDuplicateActionChange}
-          onImportClose={onImportClose}
-          onImportPreview={onImportPreview}
-          onImportConfirm={onImportConfirm}
+          onImportServer={onImportServer}
+          onImportSourceChange={onImportSourceChange}
           onReconnectServer={onReconnectServer}
           onRemoveServer={onRemoveServer}
           onSaveServer={onSaveServer}
@@ -192,16 +183,13 @@ function McpDetails({
   activeServer,
   isCreatingServer,
   isImportOpen,
-  importDuplicateAction,
   importError,
   importPreview,
-  importSources,
-  isImporting,
+  importSource,
+  importingServerId,
   isPreviewing,
-  onImportDuplicateActionChange,
-  onImportClose,
-  onImportConfirm,
-  onImportPreview,
+  onImportServer,
+  onImportSourceChange,
   onReconnectServer,
   onRemoveServer,
   onSaveServer,
@@ -211,16 +199,13 @@ function McpDetails({
   activeServer: McpServer;
   isCreatingServer: boolean;
   isImportOpen: boolean;
-  importDuplicateAction: "replace" | "skip";
   importError: string;
   importPreview: McpServer[];
-  importSources: McpImportFile[];
-  isImporting: boolean;
+  importSource: McpImportSource;
+  importingServerId: string;
   isPreviewing: boolean;
-  onImportDuplicateActionChange: (value: "replace" | "skip") => void;
-  onImportClose: () => void;
-  onImportConfirm: () => void;
-  onImportPreview: () => void;
+  onImportServer: (serverId: string) => void;
+  onImportSourceChange: (source: McpImportSource) => void;
   onReconnectServer: () => void;
   onRemoveServer: () => void;
   onSaveServer: () => void;
@@ -237,17 +222,14 @@ function McpDetails({
         aria-label="MCP import"
       >
         <McpImportPanel
-          importDuplicateAction={importDuplicateAction}
           importError={importError}
           importPreview={importPreview}
-          importSources={importSources}
-          isImporting={isImporting}
+          importSource={importSource}
+          importingServerId={importingServerId}
           isPreviewing={isPreviewing}
           servers={servers}
-          onImportClose={onImportClose}
-          onImportConfirm={onImportConfirm}
-          onImportDuplicateActionChange={onImportDuplicateActionChange}
-          onImportPreview={onImportPreview}
+          onImportServer={onImportServer}
+          onImportSourceChange={onImportSourceChange}
         />
       </section>
     );
@@ -316,172 +298,123 @@ function McpDetails({
 }
 
 function McpImportPanel({
-  importDuplicateAction,
   importError,
   importPreview,
-  importSources,
-  isImporting,
+  importSource,
+  importingServerId,
   isPreviewing,
   servers,
-  onImportClose,
-  onImportConfirm,
-  onImportDuplicateActionChange,
-  onImportPreview,
+  onImportServer,
+  onImportSourceChange,
 }: {
-  importDuplicateAction: "replace" | "skip";
   importError: string;
   importPreview: McpServer[];
-  importSources: McpImportFile[];
-  isImporting: boolean;
+  importSource: McpImportSource;
+  importingServerId: string;
   isPreviewing: boolean;
   servers: McpServer[];
-  onImportClose: () => void;
-  onImportConfirm: () => void;
-  onImportDuplicateActionChange: (value: "replace" | "skip") => void;
-  onImportPreview: () => void;
+  onImportServer: (serverId: string) => void;
+  onImportSourceChange: (source: McpImportSource) => void;
 }) {
   const existingServerIds = new Set(servers.map((server) => server.id));
 
   return (
     <section className="grid gap-7">
       <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Import</h3>
-        <div className="grid gap-4">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className={subtleButtonClassName}
-              disabled={isPreviewing}
-              onClick={onImportPreview}
-              type="button"
-              variant="outline"
-            >
-              {isPreviewing ? "Scanning" : "Scan"}
-            </Button>
-            <Button
-              aria-pressed={importDuplicateAction === "skip"}
-              className={cn(
-                subtleButtonClassName,
-                importDuplicateAction === "skip" && "bg-input/50",
-              )}
-              disabled={isImporting}
-              onClick={() => onImportDuplicateActionChange("skip")}
-              type="button"
-              variant="outline"
-            >
-              Skip
-            </Button>
-            <Button
-              aria-pressed={importDuplicateAction === "replace"}
-              className={cn(
-                subtleButtonClassName,
-                importDuplicateAction === "replace" && "bg-input/50",
-              )}
-              disabled={isImporting}
-              onClick={() => onImportDuplicateActionChange("replace")}
-              type="button"
-              variant="outline"
-            >
-              Replace
-            </Button>
-            <Button
-              disabled={isImporting || importPreview.length === 0}
-              onClick={onImportConfirm}
-              type="button"
-            >
-              Apply
-            </Button>
-            <Button
-              className={subtleButtonClassName}
-              disabled={isImporting}
-              onClick={onImportClose}
-              type="button"
-              variant="outline"
-            >
-              Close
-            </Button>
-          </div>
-          {importError ? (
-            <p className="m-0 text-xs leading-[1.4] text-destructive">
-              {importError}
-            </p>
-          ) : null}
+        <div className="grid grid-cols-[repeat(2,minmax(0,160px))] gap-2 max-[640px]:grid-cols-1">
+          <Button
+            aria-pressed={importSource === "claude_code"}
+            className={cn(
+              subtleButtonClassName,
+              importSource === "claude_code" && "bg-input/50",
+            )}
+            disabled={isPreviewing || importingServerId !== ""}
+            onClick={() => onImportSourceChange("claude_code")}
+            type="button"
+            variant="outline"
+          >
+            Claude Code
+          </Button>
+          <Button
+            aria-pressed={importSource === "codex"}
+            className={cn(
+              subtleButtonClassName,
+              importSource === "codex" && "bg-input/50",
+            )}
+            disabled={isPreviewing || importingServerId !== ""}
+            onClick={() => onImportSourceChange("codex")}
+            type="button"
+            variant="outline"
+          >
+            Codex
+          </Button>
         </div>
+        {importError ? (
+          <p className="m-0 text-xs leading-[1.4] text-destructive">
+            {importError}
+          </p>
+        ) : null}
       </section>
 
       <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Sources</h3>
-        {importSources.length > 0 ? (
-          <div className={dashedPanelClassName}>
-            {importSources.map((source) => (
-              <div
-                className="grid gap-1 border-b border-white/10 px-3 py-2 last:border-b-0"
-                key={`${source.source}-${source.path}`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[13px] text-white">
-                    {mcpImportSourceLabel(source.source)}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-md border border-white/10 bg-input/30 px-2 py-0.5 text-xs text-white",
-                      source.error && "border-destructive/30 text-destructive",
-                    )}
-                  >
-                    {source.error
-                      ? "Error"
-                      : `${source.servers.length} ${source.servers.length === 1 ? "server" : "servers"}`}
-                  </span>
-                </div>
-                <p className={cn("m-0 break-all text-xs", mutedTextClassName)}>
-                  {source.path}
-                </p>
-                {source.error ? (
-                  <p className="m-0 text-xs leading-[1.4] text-destructive">
-                    {source.error}
-                  </p>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className={emptyStateClassName}>No sources</p>
-        )}
-      </section>
-
-      <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Preview</h3>
+        <h3 className="text-base font-semibold text-white">Servers</h3>
         {importPreview.length > 0 ? (
           <div className={dashedPanelClassName}>
-            {importPreview.map((server) => (
-              <div
-                className="grid gap-1 border-b border-white/10 px-3 py-2 last:border-b-0"
-                key={server.id}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[13px] text-white">{server.name}</span>
-                  <div className="flex items-center gap-2">
-                    {existingServerIds.has(server.id) ? (
-                      <span className="rounded-md border border-white/10 bg-input/30 px-2 py-0.5 text-xs text-white">
-                        Existing
+            {importPreview.map((server) => {
+              const isImportingServer = importingServerId === server.id;
+
+              return (
+                <div
+                  aria-label={server.name}
+                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-3 border-b border-white/10 px-3 py-2 last:border-b-0 max-[640px]:grid-cols-[minmax(0,1fr)_auto]"
+                  key={server.id}
+                  role="listitem"
+                >
+                  <div className="grid min-w-0 gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] text-white">
+                        {server.name}
                       </span>
-                    ) : null}
-                    <span className={cn("text-xs", mutedTextClassName)}>
-                      {server.type === "url" ? "URL" : "Command"}
-                    </span>
+                      {existingServerIds.has(server.id) ? (
+                        <span className="rounded-md border border-white/10 bg-input/30 px-2 py-0.5 text-xs text-white">
+                          Existing
+                        </span>
+                      ) : null}
+                    </div>
+                    <p
+                      className={cn(
+                        "m-0 break-all text-xs",
+                        mutedTextClassName,
+                      )}
+                    >
+                      {server.type === "url"
+                        ? server.url
+                        : [server.command, ...server.args]
+                            .filter(Boolean)
+                            .join(" ")}
+                    </p>
                   </div>
+                  <span className={cn("text-xs", mutedTextClassName)}>
+                    {server.type === "url" ? "URL" : "Command"}
+                  </span>
+                  <Button
+                    className={subtleButtonClassName}
+                    disabled={importingServerId !== ""}
+                    onClick={() => onImportServer(server.id)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {isImportingServer ? "Importing" : "Import"}
+                  </Button>
                 </div>
-                <p className={cn("m-0 text-xs", mutedTextClassName)}>
-                  {server.type === "url"
-                    ? server.url
-                    : [server.command, ...server.args]
-                        .filter(Boolean)
-                        .join(" ")}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
-          <p className={emptyStateClassName}>No preview</p>
+          <p className={emptyStateClassName}>
+            {isPreviewing ? "Scanning" : "No servers"}
+          </p>
         )}
       </section>
     </section>
@@ -660,8 +593,4 @@ function mcpStatusLabel(status: McpServer["status"]): string {
     return "Error";
   }
   return "Disabled";
-}
-
-function mcpImportSourceLabel(source: McpImportFile["source"]): string {
-  return source === "claude_code" ? "Claude Code" : "Codex";
 }

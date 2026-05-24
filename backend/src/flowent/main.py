@@ -105,7 +105,14 @@ class SkillSettingsRequest(BaseModel):
 class McpImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    duplicate_action: Literal["replace", "skip"] = "skip"
+    server_id: str
+    source: Literal["claude_code", "codex"]
+
+
+class McpImportPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["claude_code", "codex"]
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -368,19 +375,24 @@ def create_app(
         saved_server = store.save_mcp_server(server)
         return await mcp_manager.sync_server(saved_server)
 
-    @app.get("/api/mcp/import/preview")
-    async def preview_mcp_import() -> McpImportDiscovery:
-        return discover_imported_mcp_servers(Path.cwd())
+    @app.post("/api/mcp/import/preview")
+    async def preview_mcp_import(
+        request: McpImportPreviewRequest,
+    ) -> McpImportDiscovery:
+        return discover_imported_mcp_servers(Path.cwd(), source=request.source)
 
     @app.post("/api/mcp/import")
     async def import_mcp_servers(request: McpImportRequest) -> list[StoredMcpServer]:
-        imported_servers = discover_imported_mcp_servers(Path.cwd()).servers
+        imported_servers = discover_imported_mcp_servers(
+            Path.cwd(),
+            source=request.source,
+        ).servers
         existing_servers = {server.id for server in store.read_mcp_servers()}
         for server in imported_servers:
-            if request.duplicate_action == "skip" and server.id in existing_servers:
+            if server.id != request.server_id:
                 continue
-            if request.duplicate_action == "replace" and server.id in existing_servers:
-                await mcp_manager.delete_server(server.id)
+            if server.id in existing_servers:
+                continue
             store.save_mcp_server(server)
             existing_servers.add(server.id)
         return mcp_manager.servers_with_status(store.read_mcp_servers())
