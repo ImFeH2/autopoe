@@ -872,3 +872,130 @@ def test_workspace_marks_draft_complete_when_stream_finishes(
     assert assistant["author"] == "assistant"
     assert assistant["content"] == "Done."
     assert assistant.get("status", "completed") == "completed"
+
+
+@pytest.mark.anyio
+async def test_workspace_run_continues_without_stream_consumer(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    first_chunk_sent = asyncio.Event()
+    finish_response = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Partial "}}]}
+            first_chunk_sent.set()
+            await asyncio.wait_for(finish_response.wait(), timeout=2)
+            yield {"choices": [{"delta": {"content": "answer."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Keep working."},
+        )
+        assert response.status_code == 200
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
+        finish_response.set()
+
+        for _ in range(20):
+            state = (await client.get("/api/state")).json()
+            assistant = state["messages"][-1]
+            if (
+                assistant["author"] == "assistant"
+                and assistant.get("status", "completed") == "completed"
+            ):
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("Workspace run did not complete.")
+
+    assert assistant["content"] == "Partial answer."
+
+
+@pytest.mark.anyio
+async def test_workspace_state_exposes_active_run_for_reconnect(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    first_chunk_sent = asyncio.Event()
+    finish_response = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "First "}}]}
+            first_chunk_sent.set()
+            await asyncio.wait_for(finish_response.wait(), timeout=2)
+            yield {"choices": [{"delta": {"content": "second."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Continue if I reconnect."},
+        )
+        run_id = response.json()["run_id"]
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
+        state = (await client.get("/api/state")).json()
+        event_index = state["active_run_event_index"]
+        finish_response.set()
+        stream_response = await client.get(
+            f"/api/workspace/runs/{run_id}/stream?after={event_index}"
+        )
+
+    assert state["active_run_id"] == run_id
+    assert event_index > 0
+    events = stream_events(stream_response.text)
+    assert {"event": "delta", "data": '{"content": "First "}'} not in events
+    assert {"event": "delta", "data": '{"content": "second."}'} in events
+
+
+@pytest.mark.anyio
+async def test_workspace_clear_removes_running_run_draft(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    first_chunk_sent = asyncio.Event()
+    finish_response = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Partial"}}]}
+            first_chunk_sent.set()
+            await finish_response.wait()
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Keep working."},
+        )
+        assert response.status_code == 200
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
+        clear_response = await client.put(
+            "/api/workspace/messages",
+            json={"messages": []},
+        )
+        await asyncio.sleep(0)
+        state = (await client.get("/api/state")).json()
+
+    assert clear_response.status_code == 200
+    assert state["messages"] == []
+    assert state["active_run_id"] is None

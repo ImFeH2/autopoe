@@ -4,11 +4,12 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
@@ -79,6 +80,12 @@ class WorkspaceRespondRequest(BaseModel):
     content: str
 
 
+class WorkspaceRunResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+
+
 class WorkspaceCompactResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -114,6 +121,20 @@ class McpImportPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: Literal["claude_code", "codex"]
+
+
+@dataclass
+class WorkspaceRun:
+    condition: asyncio.Condition
+    discard_on_cancel: bool = False
+    events: list[tuple[int, str, dict[str, object]]] = field(default_factory=list)
+    id: str = field(default_factory=lambda: str(uuid4()))
+    is_done: bool = False
+    task: asyncio.Task[None] | None = None
+
+    @property
+    def latest_event_index(self) -> int:
+        return self.events[-1][0] if self.events else 0
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -249,6 +270,8 @@ def create_app(
     store = StateStore()
     mcp_manager = McpManager(store=store, transport=mcp_transport)
     telegram_bot_manager: TelegramBotManager | None = None
+    workspace_runs: dict[str, WorkspaceRun] = {}
+    active_workspace_run_id: str | None = None
 
     static_dir = frontend_static_directory().resolve(strict=False)
     logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
@@ -363,7 +386,18 @@ def create_app(
     @app.get("/api/state")
     async def app_state() -> StoredState:
         state = store.read_state()
+        active_run = (
+            workspace_runs.get(active_workspace_run_id)
+            if active_workspace_run_id
+            else None
+        )
         update: dict[str, object] = {
+            "active_run_event_index": active_run.latest_event_index
+            if active_run
+            else 0,
+            "active_run_id": active_run.id
+            if active_run and not active_run.is_done
+            else None,
             "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers),
             "skills": discover_skills(Path.cwd(), store),
         }
@@ -476,63 +510,36 @@ def create_app(
     async def save_workspace_messages(
         request: WorkspaceMessagesRequest,
     ) -> WorkspaceMessagesRequest:
+        nonlocal active_workspace_run_id
+        if not request.messages:
+            run = active_workspace_run()
+            if run is not None and run.task is not None and not run.task.done():
+                run.discard_on_cancel = True
+                run.task.cancel()
+                active_workspace_run_id = None
         return WorkspaceMessagesRequest(messages=store.save_messages(request.messages))
 
-    @app.post("/api/workspace/compact")
-    async def compact_workspace() -> WorkspaceCompactResponse:
-        logger.info("Workspace compact requested")
-        state = store.read_state()
-        connection = selected_connection(state)
-        compacted_context = store.read_compacted_context()
-        cwd = Path.cwd()
+    async def append_run_event(
+        run: WorkspaceRun, event: str, data: dict[str, object]
+    ) -> None:
+        async with run.condition:
+            run.events.append((run.latest_event_index + 1, event, data))
+            run.condition.notify_all()
 
-        try:
-            summary = await complete_chat(
-                connection,
-                compact_prompt_messages(
-                    state.messages,
-                    compacted_context,
-                    runtime_context_messages(cwd),
-                ),
-                completion=chat_completion,
-            )
-        except HTTPException:
-            raise
-        except Exception as error:
-            logger.exception("Workspace compact failed")
-            raise HTTPException(
-                status_code=500,
-                detail="Context could not be compacted.",
-            ) from error
+    def active_workspace_run() -> WorkspaceRun | None:
+        if active_workspace_run_id is None:
+            return None
+        return workspace_runs.get(active_workspace_run_id)
 
-        marker = StoredMessage(
-            author="system",
-            content=COMPACTED_CONTEXT_MARKER,
-            id=str(uuid4()),
-        )
-        store.save_compacted_context(summary.content)
-        store.save_messages([*state.messages, marker])
-        logger.info(
-            "Workspace compact completed summary_length=%s", len(summary.content)
-        )
-        logger.log(TRACE_LEVEL, "Workspace compact summary=%r", summary.content)
-        return WorkspaceCompactResponse(message=marker)
-
-    @app.post("/api/workspace/respond")
-    async def respond_to_workspace(
-        request: WorkspaceRespondRequest,
-    ) -> StreamingResponse:
-        logger.info(
-            "Workspace response requested content_length=%s", len(request.content)
-        )
-        logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
+    def create_workspace_run(content: str) -> WorkspaceRun:
+        nonlocal active_workspace_run_id
         state = store.read_state()
         connection = selected_connection(state)
         cwd = Path.cwd()
 
         user_message = StoredMessage(
             author="user",
-            content=request.content,
+            content=content,
             id=str(uuid4()),
         )
         next_messages = [*state.messages, user_message]
@@ -545,12 +552,16 @@ def create_app(
             message.model_dump()
             for message in [
                 *runtime_context_messages(cwd),
-                *explicit_skill_messages(cwd, store, request.content),
+                *explicit_skill_messages(cwd, store, content),
                 *chat_messages,
             ]
         ]
+        run = WorkspaceRun(condition=asyncio.Condition())
+        workspace_runs[run.id] = run
+        active_workspace_run_id = run.id
 
-        async def response_stream() -> AsyncIterator[str]:
+        async def run_task() -> None:
+            nonlocal active_workspace_run_id
             assistant_tools: dict[str, StoredToolItem] = {}
             assistant_message = StoredMessage(
                 author="assistant",
@@ -634,22 +645,141 @@ def create_app(
                                 message.get("thinking") or assistant_thinking
                             )
                             persist_assistant("completed")
-                    yield stream_event(event.event, event.data)
+                    await append_run_event(run, event.event, event.data)
             except asyncio.CancelledError:
-                logger.info("Workspace response interrupted")
-                persist_assistant("interrupted")
+                logger.info("Workspace run stopped")
+                if not run.discard_on_cancel:
+                    persist_assistant("interrupted")
+                    await append_run_event(
+                        run,
+                        "error",
+                        {"message": "Response stopped."},
+                    )
                 raise
             except Exception as error:
                 logger.exception("Workspace response failed")
                 persist_assistant("failed")
-                yield stream_event(
+                await append_run_event(
+                    run,
                     "error",
                     {"message": str(error) or "Message could not be sent."},
                 )
+            finally:
+                run.is_done = True
+                async with run.condition:
+                    run.condition.notify_all()
+                if active_workspace_run_id == run.id:
+                    active_workspace_run_id = None
+
+        run.task = asyncio.create_task(run_task())
+        return run
+
+    async def workspace_run_stream(
+        run: WorkspaceRun, after: int = 0
+    ) -> AsyncIterator[str]:
+        next_event_index = after + 1
+        while True:
+            async with run.condition:
+
+                def has_next_event(index: int = next_event_index) -> bool:
+                    return run.is_done or any(
+                        event_index >= index for event_index, _, _ in run.events
+                    )
+
+                await run.condition.wait_for(has_next_event)
+                events = [event for event in run.events if event[0] >= next_event_index]
+
+            for index, event, data in events:
+                next_event_index = index + 1
+                yield stream_event(event, data)
+                if event in {"done", "error"}:
+                    return
+
+            if run.is_done and not events:
                 return
 
+    @app.post("/api/workspace/runs")
+    async def start_workspace_run(
+        request: WorkspaceRespondRequest,
+    ) -> WorkspaceRunResponse:
+        logger.info("Workspace run requested content_length=%s", len(request.content))
+        logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
+        run = create_workspace_run(request.content)
+        return WorkspaceRunResponse(run_id=run.id)
+
+    @app.get("/api/workspace/runs/{run_id}/stream")
+    async def stream_workspace_run(
+        run_id: str,
+        after: int = Query(default=0, ge=0),
+    ) -> StreamingResponse:
+        run = workspace_runs.get(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found.")
         return StreamingResponse(
-            response_stream(),
+            workspace_run_stream(run, after),
+            media_type="text/event-stream",
+        )
+
+    @app.post("/api/workspace/runs/{run_id}/stop")
+    async def stop_workspace_run(run_id: str) -> dict[str, bool]:
+        run = workspace_runs.get(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found.")
+        if run.task is not None and not run.task.done():
+            run.task.cancel()
+        return {"ok": True}
+
+    @app.post("/api/workspace/compact")
+    async def compact_workspace() -> WorkspaceCompactResponse:
+        logger.info("Workspace compact requested")
+        state = store.read_state()
+        connection = selected_connection(state)
+        compacted_context = store.read_compacted_context()
+        cwd = Path.cwd()
+
+        try:
+            summary = await complete_chat(
+                connection,
+                compact_prompt_messages(
+                    state.messages,
+                    compacted_context,
+                    runtime_context_messages(cwd),
+                ),
+                completion=chat_completion,
+            )
+        except HTTPException:
+            raise
+        except Exception as error:
+            logger.exception("Workspace compact failed")
+            raise HTTPException(
+                status_code=500,
+                detail="Context could not be compacted.",
+            ) from error
+
+        marker = StoredMessage(
+            author="system",
+            content=COMPACTED_CONTEXT_MARKER,
+            id=str(uuid4()),
+        )
+        store.save_compacted_context(summary.content)
+        store.save_messages([*state.messages, marker])
+        logger.info(
+            "Workspace compact completed summary_length=%s", len(summary.content)
+        )
+        logger.log(TRACE_LEVEL, "Workspace compact summary=%r", summary.content)
+        return WorkspaceCompactResponse(message=marker)
+
+    @app.post("/api/workspace/respond")
+    async def respond_to_workspace(
+        request: WorkspaceRespondRequest,
+    ) -> StreamingResponse:
+        logger.info(
+            "Workspace response requested content_length=%s", len(request.content)
+        )
+        logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
+        run = create_workspace_run(request.content)
+        return StreamingResponse(
+            workspace_run_stream(run),
             media_type="text/event-stream",
         )
 

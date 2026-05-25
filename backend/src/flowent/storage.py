@@ -115,6 +115,8 @@ class StoredMessage(BaseModel):
 class StoredState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    active_run_event_index: int = 0
+    active_run_id: str | None = None
     mcp_servers: list[StoredMcpServer]
     messages: list[StoredMessage]
     providers: list[StoredProvider]

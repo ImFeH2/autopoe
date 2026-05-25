@@ -47,6 +47,47 @@ const assistantStreamResponse = (
   });
 };
 
+const assistantDeltaOnlyStreamResponse = (
+  content: string,
+  id = "message-assistant",
+  chunks: string[] = [content],
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(
+          encoder.encode(
+            `event: delta\ndata: ${JSON.stringify({ content: chunk })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
+const runStartResponse = (runId = "run-1") =>
+  new Response(JSON.stringify({ run_id: runId }), {
+    headers: { "Content-Type": "application/json" },
+    status: 200,
+  });
+
 const deferred = () => {
   let resolve!: () => void;
   const promise = new Promise<void>((nextResolve) => {
@@ -1177,6 +1218,144 @@ describe("App", () => {
       }),
     );
     await expectDocumentText("The plan is ready.");
+  });
+
+  it("starts a workspace run and subscribes to its stream", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-checklist");
+      }
+      if (
+        input === "/api/workspace/runs/run-checklist/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return assistantStreamResponse("The plan is ready.");
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("The plan is ready.");
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/runs",
+      expect.objectContaining({
+        body: JSON.stringify({ content: "Draft a launch checklist" }),
+        method: "POST",
+      }),
+    );
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/runs/run-checklist/stream?after=0",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("reloads state and reconnects when a workspace run stream drops", async () => {
+    const user = userEvent.setup();
+    const droppedStream = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(new TypeError("Load failed"));
+        },
+      }),
+      {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      },
+    );
+    const runningState = {
+      ...selectedProviderState(),
+      active_run_event_index: 2,
+      active_run_id: "run-reconnect",
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-user",
+        },
+        {
+          author: "assistant",
+          content: "Partial",
+          id: "message-assistant",
+          status: "running",
+        },
+      ],
+    };
+    let stateRequests = 0;
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-reconnect");
+      }
+      if (
+        input === "/api/workspace/runs/run-reconnect/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return droppedStream;
+      }
+      if (
+        input === "/api/workspace/runs/run-reconnect/stream?after=2" &&
+        init?.method === "GET"
+      ) {
+        return assistantDeltaOnlyStreamResponse(
+          "Partial answer.",
+          "message-assistant",
+          [" answer."],
+        );
+      }
+      if (input === "/api/state") {
+        stateRequests += 1;
+        return new Response(
+          JSON.stringify(
+            stateRequests === 1 ? selectedProviderState() : runningState,
+          ),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("Partial answer.");
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/runs/run-reconnect/stream?after=2",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(document.body).not.toHaveTextContent("Load failed");
   });
 
   it("shows the first assistant stream chunk before the request finishes", async () => {

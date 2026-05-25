@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
@@ -89,6 +89,8 @@ type ApiSkill = Skill;
 type ApiMessage = Message;
 
 type ApiState = {
+  active_run_event_index?: number;
+  active_run_id?: string | null;
   mcp_servers?: ApiMcpServer[];
   messages: ApiMessage[];
   providers: ApiProvider[];
@@ -103,6 +105,10 @@ type ApiState = {
 
 type ApiAbout = {
   version?: string;
+};
+
+type WorkspaceRunResponse = {
+  run_id: string;
 };
 
 type WorkspaceStreamEvent =
@@ -355,6 +361,53 @@ const mcpServerId = (name: string) => {
   return slug ? `mcp-${slug}` : createClientId("mcp");
 };
 
+const assistantGroupsFromMessage = (
+  message: Message,
+): AssistantOutputGroup[] => {
+  if (message.groups?.length) {
+    return message.groups;
+  }
+
+  const thinkingItem: AssistantOutputItem | null = message.thinking
+    ? {
+        content: message.thinking,
+        id: `${message.id}-thinking-existing`,
+        isStreaming: false,
+        type: "thinking",
+      }
+    : null;
+  const toolItems: AssistantOutputItem[] = (message.tools ?? []).map(
+    (tool) => ({
+      id: `tool-${tool.id}`,
+      tool,
+      type: "tool",
+    }),
+  );
+  const groups: AssistantOutputGroup[] = [];
+  const processItems = [...(thinkingItem ? [thinkingItem] : []), ...toolItems];
+
+  if (processItems.length) {
+    groups.push({
+      id: `${message.id}-process-existing`,
+      items: processItems,
+    });
+  }
+  if (message.content) {
+    groups.push({
+      id: `${message.id}-content-existing`,
+      items: [
+        {
+          content: message.content,
+          id: `${message.id}-text-existing`,
+          type: "text",
+        },
+      ],
+    });
+  }
+
+  return groups;
+};
+
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
@@ -389,9 +442,14 @@ function App() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [isResponding, setIsResponding] = useState(false);
+  const [activeRunId, setActiveRunId] = useState("");
   const [responseError, setResponseError] = useState("");
   const responseAbortRef = useRef<AbortController | null>(null);
+  const activeRunIdRef = useRef("");
+  const activeRunEventIndexRef = useRef(0);
+  const messagesRef = useRef<Message[]>([]);
   const responseRunRef = useRef(0);
+  const [streamReconnectKey, setStreamReconnectKey] = useState(0);
 
   const activeProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId),
@@ -405,19 +463,53 @@ function App() {
   );
 
   useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const applyLoadedState = useCallback((state: ApiState) => {
+    const loadedProviders = state.providers.map(providerFromApi);
+    setProviders(loadedProviders);
+    setMessages(state.messages);
+    const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
+    setMcpServers(loadedMcpServers);
+    if (loadedMcpServers[0]) {
+      setMcpEditorId(loadedMcpServers[0].id);
+      setMcpDraft(loadedMcpServers[0]);
+    }
+    setSkills(state.skills ?? []);
+    setActiveSkillId((state.skills ?? [])[0]?.id ?? "");
+    setSelectedProviderId(state.settings.selected_provider_id);
+    setSelectedModel(state.settings.selected_model);
+    setReasoningEffort(state.settings.reasoning_effort ?? "default");
+    setTelegramBot(telegramBotFromApi(state.telegram_bot));
+    activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
+    activeRunIdRef.current = state.active_run_id ?? "";
+    setActiveRunId(state.active_run_id ?? "");
+    setIsResponding(Boolean(state.active_run_id));
+  }, []);
+
+  const refreshAppState = useCallback(async () => {
+    const response = await fetch("/api/state");
+    if (!response.ok) {
+      return null;
+    }
+    const state = (await response.json()) as ApiState;
+    applyLoadedState(state);
+    return state;
+  }, [applyLoadedState]);
+
+  useEffect(() => {
     let isMounted = true;
 
     const loadState = async () => {
       try {
-        const [stateResponse, aboutResponse] = await Promise.all([
-          fetch("/api/state"),
+        const [state, aboutResponse] = await Promise.all([
+          refreshAppState(),
           fetch("/api/about"),
         ]);
-        if (!stateResponse.ok) {
+        if (!state) {
           return;
         }
-
-        const state = (await stateResponse.json()) as ApiState;
         const about = aboutResponse.ok
           ? ((await aboutResponse.json()) as ApiAbout)
           : {};
@@ -425,23 +517,6 @@ function App() {
           return;
         }
 
-        const loadedProviders = state.providers.map(providerFromApi);
-        setProviders(loadedProviders);
-        setMessages(state.messages);
-        const loadedMcpServers = (state.mcp_servers ?? []).map(
-          mcpServerFromApi,
-        );
-        setMcpServers(loadedMcpServers);
-        if (loadedMcpServers[0]) {
-          setMcpEditorId(loadedMcpServers[0].id);
-          setMcpDraft(loadedMcpServers[0]);
-        }
-        setSkills(state.skills ?? []);
-        setActiveSkillId((state.skills ?? [])[0]?.id ?? "");
-        setSelectedProviderId(state.settings.selected_provider_id);
-        setSelectedModel(state.settings.selected_model);
-        setReasoningEffort(state.settings.reasoning_effort ?? "default");
-        setTelegramBot(telegramBotFromApi(state.telegram_bot));
         setAppVersion(typeof about.version === "string" ? about.version : "");
       } catch {
         // Keep the local empty state when persistence is unavailable.
@@ -453,7 +528,7 @@ function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [refreshAppState]);
 
   const loadProviderEditor = (provider: Provider) => {
     setProviderEditorId(provider.id);
@@ -843,7 +918,7 @@ function App() {
     });
   };
 
-  const responseErrorFromApi = async (response: Response) => {
+  const responseErrorFromApi = useCallback(async (response: Response) => {
     try {
       const result = (await response.json()) as { detail?: unknown };
       if (typeof result.detail === "string") {
@@ -853,92 +928,485 @@ function App() {
       return "Message could not be sent.";
     }
     return "Message could not be sent.";
-  };
+  }, []);
 
-  const parseWorkspaceStreamEvent = (
-    rawEvent: string,
-  ): WorkspaceStreamEvent => {
-    const lines = rawEvent.split("\n");
-    const event = lines
-      .find((line) => line.startsWith("event: "))
-      ?.slice("event: ".length);
-    const data = lines
-      .find((line) => line.startsWith("data: "))
-      ?.slice("data: ".length);
+  const parseWorkspaceStreamEvent = useCallback(
+    (rawEvent: string): WorkspaceStreamEvent => {
+      const lines = rawEvent.split("\n");
+      const event = lines
+        .find((line) => line.startsWith("event: "))
+        ?.slice("event: ".length);
+      const data = lines
+        .find((line) => line.startsWith("data: "))
+        ?.slice("data: ".length);
 
-    if (!event || !data) {
+      if (!event || !data) {
+        throw new Error("Message could not be sent.");
+      }
+
+      return {
+        data: JSON.parse(data) as WorkspaceStreamEvent["data"],
+        event,
+      } as WorkspaceStreamEvent;
+    },
+    [],
+  );
+
+  const readWorkspaceStream = useCallback(
+    async (response: Response, handlers: WorkspaceStreamHandlers) => {
+      if (!response.body) {
+        throw new Error("Message could not be sent.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+
+        for (const rawEvent of events) {
+          if (!rawEvent.trim()) {
+            continue;
+          }
+
+          const streamEvent = parseWorkspaceStreamEvent(rawEvent);
+          if (streamEvent.event === "start") {
+            handlers.onStart(streamEvent.data.id);
+          }
+          if (streamEvent.event === "output_start") {
+            handlers.onOutputStart(streamEvent.data.index);
+          }
+          if (streamEvent.event === "delta") {
+            handlers.onDelta(streamEvent.data.content);
+          }
+          if (streamEvent.event === "thinking_delta") {
+            handlers.onThinkingDelta(streamEvent.data.content);
+          }
+          if (streamEvent.event === "done") {
+            handlers.onDone(streamEvent.data.message);
+            return;
+          }
+          if (streamEvent.event === "tool_start") {
+            handlers.onToolStart(streamEvent.data.tool);
+          }
+          if (
+            streamEvent.event === "tool_done" ||
+            streamEvent.event === "tool_error"
+          ) {
+            handlers.onToolDone(streamEvent.data);
+          }
+          if (streamEvent.event === "error") {
+            throw new Error(streamEvent.data.message);
+          }
+        }
+
+        if (done) {
+          break;
+        }
+      }
+
       throw new Error("Message could not be sent.");
-    }
+    },
+    [parseWorkspaceStreamEvent],
+  );
 
-    return {
-      data: JSON.parse(data) as WorkspaceStreamEvent["data"],
-      event,
-    } as WorkspaceStreamEvent;
-  };
-
-  const readWorkspaceStream = async (
-    response: Response,
-    handlers: WorkspaceStreamHandlers,
-  ) => {
-    if (!response.body) {
-      throw new Error("Message could not be sent.");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() ?? "";
-
-      for (const rawEvent of events) {
-        if (!rawEvent.trim()) {
-          continue;
-        }
-
-        const streamEvent = parseWorkspaceStreamEvent(rawEvent);
-        if (streamEvent.event === "start") {
-          handlers.onStart(streamEvent.data.id);
-        }
-        if (streamEvent.event === "output_start") {
-          handlers.onOutputStart(streamEvent.data.index);
-        }
-        if (streamEvent.event === "delta") {
-          handlers.onDelta(streamEvent.data.content);
-        }
-        if (streamEvent.event === "thinking_delta") {
-          handlers.onThinkingDelta(streamEvent.data.content);
-        }
-        if (streamEvent.event === "done") {
-          handlers.onDone(streamEvent.data.message);
+  const createWorkspaceStreamHandlers = useCallback(
+    (baseMessages: Message[], responseRun: number): WorkspaceStreamHandlers => {
+      const latestMessage = baseMessages.at(-1);
+      const existingAssistant =
+        latestMessage?.author === "assistant" ? latestMessage : null;
+      let assistantMessage: Message | null = existingAssistant;
+      let assistantContent = existingAssistant?.content ?? "";
+      let assistantId = existingAssistant?.id ?? "";
+      let assistantThinking = existingAssistant?.thinking ?? "";
+      let assistantThinkingItemId = "";
+      let assistantThinkingItemIndex = 0;
+      let assistantGroups: AssistantOutputGroup[] = existingAssistant
+        ? assistantGroupsFromMessage(existingAssistant)
+        : [];
+      let assistantTextItemId =
+        assistantGroups
+          .flatMap((group) => group.items)
+          .reverse()
+          .find((item) => item.type === "text")?.id ?? "";
+      let assistantTextItemIndex = 0;
+      let assistantIsStreamingThinking = false;
+      let assistantIsStreamingText = false;
+      let assistantTools: ToolItem[] = existingAssistant?.tools ?? [];
+      const nextMessages = existingAssistant
+        ? baseMessages.slice(0, -1)
+        : baseMessages;
+      const isCurrentResponse = () => responseRunRef.current === responseRun;
+      const updateAssistantMessage = () => {
+        if (!assistantId || !isCurrentResponse()) {
           return;
         }
-        if (streamEvent.event === "tool_start") {
-          handlers.onToolStart(streamEvent.data.tool);
+        assistantMessage = {
+          author: "assistant",
+          content: assistantContent,
+          id: assistantId,
+          groups: assistantGroups,
+          thinking: assistantThinking,
+          isStreamingThinking: assistantIsStreamingThinking,
+          tools: assistantTools,
+          isStreamingText: assistantIsStreamingText,
+        };
+        setMessages([...nextMessages, assistantMessage]);
+      };
+      const finishAssistantThinking = () => {
+        if (!assistantIsStreamingThinking) {
+          return;
         }
-        if (
-          streamEvent.event === "tool_done" ||
-          streamEvent.event === "tool_error"
-        ) {
-          handlers.onToolDone(streamEvent.data);
+        assistantIsStreamingThinking = false;
+        assistantGroups = assistantGroups.map((group) => ({
+          ...group,
+          items: group.items.map((item) =>
+            item.type === "thinking" ? { ...item, isStreaming: false } : item,
+          ),
+        }));
+      };
+      const createAssistantGroup = (index: number) => {
+        const groupId = `${assistantId || "assistant"}-group-${index}`;
+        if (assistantGroups.at(-1)?.id === groupId) {
+          return;
         }
-        if (streamEvent.event === "error") {
-          throw new Error(streamEvent.data.message);
+        finishAssistantThinking();
+        assistantTextItemId = "";
+        assistantIsStreamingText = false;
+        assistantGroups = [...assistantGroups, { id: groupId, items: [] }];
+      };
+      const ensureAssistantGroup = () => {
+        if (assistantGroups.length === 0) {
+          createAssistantGroup(1);
         }
+      };
+      const updateCurrentAssistantGroupItems = (
+        updater: (items: AssistantOutputItem[]) => AssistantOutputItem[],
+      ) => {
+        ensureAssistantGroup();
+        const currentGroupIndex = assistantGroups.length - 1;
+        assistantGroups = assistantGroups.map((group, index) =>
+          index === currentGroupIndex
+            ? { ...group, items: updater(group.items) }
+            : group,
+        );
+      };
+      const appendAssistantThinking = (content: string) => {
+        if (!assistantThinkingItemId) {
+          assistantThinkingItemIndex += 1;
+          assistantThinkingItemId = `${assistantId}-thinking-${assistantThinkingItemIndex}`;
+          updateCurrentAssistantGroupItems((items) => [
+            ...items,
+            {
+              content: "",
+              id: assistantThinkingItemId,
+              isStreaming: true,
+              type: "thinking",
+            },
+          ]);
+        }
+
+        assistantThinking += content;
+        assistantIsStreamingThinking = true;
+        updateCurrentAssistantGroupItems((items) =>
+          items.map((item) =>
+            item.type === "thinking" && item.id === assistantThinkingItemId
+              ? {
+                  ...item,
+                  content: item.content + content,
+                  isStreaming: true,
+                }
+              : item,
+          ),
+        );
+        updateAssistantMessage();
+      };
+      const appendAssistantText = (content: string) => {
+        finishAssistantThinking();
+        if (!assistantTextItemId) {
+          assistantTextItemIndex += 1;
+          assistantTextItemId = `${assistantId}-text-${assistantTextItemIndex}`;
+          updateCurrentAssistantGroupItems((items) => [
+            ...items,
+            {
+              content: "",
+              id: assistantTextItemId,
+              type: "text",
+            },
+          ]);
+        }
+
+        assistantContent += content;
+        updateCurrentAssistantGroupItems((items) =>
+          items.map((item) =>
+            item.type === "text" && item.id === assistantTextItemId
+              ? { ...item, content: item.content + content }
+              : item,
+          ),
+        );
+        assistantIsStreamingText = true;
+        updateAssistantMessage();
+      };
+      const assistantGroupsThinking = () =>
+        assistantGroups
+          .flatMap((group) => group.items)
+          .filter((item) => item.type === "thinking")
+          .map((item) => item.content)
+          .join("");
+      const assistantGroupsText = () =>
+        assistantGroups
+          .flatMap((group) => group.items)
+          .filter((item) => item.type === "text")
+          .map((item) => item.content)
+          .join("");
+
+      return {
+        onDelta: (content) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          appendAssistantText(content);
+        },
+        onDone: (message) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          assistantId = message.id;
+          assistantContent = message.content;
+          const messageThinking = message.thinking ?? "";
+          assistantThinking = messageThinking || assistantThinking;
+          finishAssistantThinking();
+          const streamedThinking = assistantGroupsThinking();
+          if (messageThinking && streamedThinking !== messageThinking) {
+            const missingThinking = messageThinking.startsWith(streamedThinking)
+              ? messageThinking.slice(streamedThinking.length)
+              : messageThinking;
+            assistantThinkingItemIndex += 1;
+            updateCurrentAssistantGroupItems((items) => [
+              ...items,
+              {
+                content: missingThinking,
+                id: `${message.id}-thinking-${assistantThinkingItemIndex}`,
+                isStreaming: false,
+                type: "thinking",
+              },
+            ]);
+          }
+          const streamedText = assistantGroupsText();
+          if (message.content && streamedText !== message.content) {
+            assistantTextItemIndex += 1;
+            updateCurrentAssistantGroupItems((items) => [
+              ...items,
+              {
+                content: message.content.slice(streamedText.length),
+                id: `${message.id}-text-${assistantTextItemIndex}`,
+                type: "text",
+              },
+            ]);
+          }
+          assistantMessage = {
+            ...message,
+            groups: assistantGroups,
+            thinking: assistantThinking,
+            tools: assistantTools,
+            isStreamingThinking: false,
+            isStreamingText: false,
+          };
+          setMessages([...nextMessages, assistantMessage]);
+          activeRunIdRef.current = "";
+          activeRunEventIndexRef.current = 0;
+          setActiveRunId("");
+          setIsResponding(false);
+        },
+        onOutputStart: (index) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          createAssistantGroup(index);
+          updateAssistantMessage();
+        },
+        onStart: (id) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          assistantId = id;
+          updateAssistantMessage();
+        },
+        onThinkingDelta: (content) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          appendAssistantThinking(content);
+        },
+        onToolDone: (tool) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          finishAssistantThinking();
+          assistantTextItemId = "";
+          assistantIsStreamingText = false;
+          assistantTools = assistantTools.map((currentTool) =>
+            currentTool.id === tool.id
+              ? { ...currentTool, ...tool }
+              : currentTool,
+          );
+          assistantGroups = assistantGroups.map((group) => ({
+            ...group,
+            items: group.items.map((item) =>
+              item.type === "tool" && item.tool.id === tool.id
+                ? { ...item, tool: { ...item.tool, ...tool } }
+                : item,
+            ),
+          }));
+          updateAssistantMessage();
+        },
+        onToolStart: (tool) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          finishAssistantThinking();
+          assistantTextItemId = "";
+          assistantIsStreamingText = false;
+          assistantTools = [...assistantTools, tool];
+          updateCurrentAssistantGroupItems((items) => [
+            ...items,
+            {
+              id: `tool-${tool.id}`,
+              tool,
+              type: "tool",
+            },
+          ]);
+          updateAssistantMessage();
+        },
+      };
+    },
+    [],
+  );
+
+  const requestWorkspaceRun = useCallback(
+    async (content: string) => {
+      const response = await fetch("/api/workspace/runs", {
+        body: JSON.stringify({ content }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(await responseErrorFromApi(response));
       }
 
-      if (done) {
-        break;
+      const result = (await response.json()) as Partial<WorkspaceRunResponse>;
+      if (typeof result.run_id !== "string" || result.run_id.length === 0) {
+        throw new SyntaxError("Run was not returned.");
       }
+      return result.run_id;
+    },
+    [responseErrorFromApi],
+  );
+
+  const streamWorkspaceRun = useCallback(
+    async (
+      runId: string,
+      handlers: WorkspaceStreamHandlers,
+      after: number,
+      signal?: AbortSignal,
+    ) => {
+      const response = await fetch(
+        `/api/workspace/runs/${encodeURIComponent(runId)}/stream?after=${after}`,
+        {
+          headers: { "Content-Type": "text/event-stream" },
+          method: "GET",
+          signal,
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await responseErrorFromApi(response));
+      }
+
+      await readWorkspaceStream(response, handlers);
+    },
+    [readWorkspaceStream, responseErrorFromApi],
+  );
+
+  useEffect(() => {
+    if (!activeRunId) {
+      return;
     }
 
-    throw new Error("Message could not be sent.");
-  };
+    const responseRun = responseRunRef.current || 1;
+    responseRunRef.current = responseRun;
+    const responseAbortController = new AbortController();
+    responseAbortRef.current = responseAbortController;
+    setIsResponding(true);
+    setResponseError("");
 
-  const requestWorkspaceResponse = async (
+    const streamCurrentRun = async () => {
+      const handlers = createWorkspaceStreamHandlers(
+        messagesRef.current,
+        responseRun,
+      );
+      try {
+        await streamWorkspaceRun(
+          activeRunId,
+          handlers,
+          activeRunEventIndexRef.current,
+          responseAbortController.signal,
+        );
+      } catch (error) {
+        if (
+          responseRunRef.current !== responseRun ||
+          responseAbortController.signal.aborted
+        ) {
+          return;
+        }
+        const state = await refreshAppState().catch(() => null);
+        if (state?.active_run_id) {
+          setStreamReconnectKey((current) => current + 1);
+          return;
+        }
+        activeRunIdRef.current = "";
+        activeRunEventIndexRef.current = 0;
+        setActiveRunId("");
+        setIsResponding(false);
+        setResponseError(
+          error instanceof Error ? error.message : "Message could not be sent.",
+        );
+      } finally {
+        if (
+          responseRunRef.current === responseRun &&
+          activeRunIdRef.current !== activeRunId
+        ) {
+          responseAbortRef.current = null;
+        }
+      }
+    };
+
+    void streamCurrentRun();
+
+    return () => {
+      responseAbortController.abort();
+    };
+  }, [
+    activeRunId,
+    createWorkspaceStreamHandlers,
+    refreshAppState,
+    streamReconnectKey,
+    streamWorkspaceRun,
+  ]);
+
+  const requestLegacyWorkspaceResponse = async (
     content: string,
     handlers: WorkspaceStreamHandlers,
     signal?: AbortSignal,
@@ -1020,10 +1488,20 @@ function App() {
   };
 
   const stopResponse = () => {
+    const runId = activeRunIdRef.current;
+    if (runId) {
+      void fetch(`/api/workspace/runs/${encodeURIComponent(runId)}/stop`, {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    }
+    responseRunRef.current += 1;
+    activeRunIdRef.current = "";
+    activeRunEventIndexRef.current = 0;
     responseAbortRef.current?.abort();
     responseAbortRef.current = null;
-    responseRunRef.current += 1;
     setResponseError("");
+    setActiveRunId("");
     setIsResponding(false);
   };
 
@@ -1036,6 +1514,7 @@ function App() {
     const responseAbortController = new AbortController();
     responseAbortRef.current = responseAbortController;
     responseRunRef.current = responseRun;
+    activeRunEventIndexRef.current = 0;
     const userContent = submittedDraft;
     const nextMessages: Message[] = [
       ...messages,
@@ -1051,262 +1530,26 @@ function App() {
     setDraft("");
 
     try {
-      let assistantMessage: Message | null = null;
-      let assistantContent = "";
-      let assistantId = "";
-      let assistantThinking = "";
-      let assistantThinkingItemId = "";
-      let assistantThinkingItemIndex = 0;
-      let assistantTextItemId = "";
-      let assistantTextItemIndex = 0;
-      let assistantGroups: AssistantOutputGroup[] = [];
-      let assistantIsStreamingThinking = false;
-      let assistantIsStreamingText = false;
-      let assistantTools: ToolItem[] = [];
-      const isCurrentResponse = () => responseRunRef.current === responseRun;
-      const updateAssistantMessage = () => {
-        if (!assistantId || !isCurrentResponse()) {
+      try {
+        const runId = await requestWorkspaceRun(userContent);
+        activeRunIdRef.current = runId;
+        activeRunEventIndexRef.current = 0;
+        setActiveRunId(runId);
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          const handlers = createWorkspaceStreamHandlers(
+            nextMessages,
+            responseRun,
+          );
+          await requestLegacyWorkspaceResponse(
+            userContent,
+            handlers,
+            responseAbortController.signal,
+          );
           return;
         }
-        assistantMessage = {
-          author: "assistant",
-          content: assistantContent,
-          id: assistantId,
-          groups: assistantGroups,
-          thinking: assistantThinking,
-          isStreamingThinking: assistantIsStreamingThinking,
-          tools: assistantTools,
-          isStreamingText: assistantIsStreamingText,
-        };
-        setMessages([...nextMessages, assistantMessage]);
-      };
-      const createAssistantGroup = (index: number) => {
-        const groupId = `${assistantId}-group-${index}`;
-        if (assistantGroups.at(-1)?.id === groupId) {
-          return;
-        }
-        finishAssistantThinking();
-        assistantTextItemId = "";
-        assistantIsStreamingText = false;
-        assistantGroups = [...assistantGroups, { id: groupId, items: [] }];
-      };
-      const ensureAssistantGroup = () => {
-        if (assistantGroups.length === 0) {
-          createAssistantGroup(1);
-        }
-      };
-      const updateCurrentAssistantGroupItems = (
-        updater: (items: AssistantOutputItem[]) => AssistantOutputItem[],
-      ) => {
-        ensureAssistantGroup();
-        const currentGroupIndex = assistantGroups.length - 1;
-        assistantGroups = assistantGroups.map((group, index) =>
-          index === currentGroupIndex
-            ? { ...group, items: updater(group.items) }
-            : group,
-        );
-      };
-      const finishAssistantThinking = () => {
-        if (!assistantIsStreamingThinking) {
-          return;
-        }
-        assistantIsStreamingThinking = false;
-        assistantGroups = assistantGroups.map((group) => ({
-          ...group,
-          items: group.items.map((item) =>
-            item.type === "thinking" ? { ...item, isStreaming: false } : item,
-          ),
-        }));
-      };
-      const appendAssistantThinking = (content: string) => {
-        if (!assistantThinkingItemId) {
-          assistantThinkingItemIndex += 1;
-          assistantThinkingItemId = `${assistantId}-thinking-${assistantThinkingItemIndex}`;
-          updateCurrentAssistantGroupItems((items) => [
-            ...items,
-            {
-              content: "",
-              id: assistantThinkingItemId,
-              isStreaming: true,
-              type: "thinking",
-            },
-          ]);
-        }
-
-        assistantThinking += content;
-        assistantIsStreamingThinking = true;
-        updateCurrentAssistantGroupItems((items) =>
-          items.map((item) =>
-            item.type === "thinking" && item.id === assistantThinkingItemId
-              ? {
-                  ...item,
-                  content: item.content + content,
-                  isStreaming: true,
-                }
-              : item,
-          ),
-        );
-        updateAssistantMessage();
-      };
-      const appendAssistantText = (content: string) => {
-        finishAssistantThinking();
-        if (!assistantTextItemId) {
-          assistantTextItemIndex += 1;
-          assistantTextItemId = `${assistantId}-text-${assistantTextItemIndex}`;
-          updateCurrentAssistantGroupItems((items) => [
-            ...items,
-            {
-              content: "",
-              id: assistantTextItemId,
-              type: "text",
-            },
-          ]);
-        }
-
-        assistantContent += content;
-        updateCurrentAssistantGroupItems((items) =>
-          items.map((item) =>
-            item.type === "text" && item.id === assistantTextItemId
-              ? { ...item, content: item.content + content }
-              : item,
-          ),
-        );
-        assistantIsStreamingText = true;
-        updateAssistantMessage();
-      };
-      const assistantGroupsThinking = () =>
-        assistantGroups
-          .flatMap((group) => group.items)
-          .filter((item) => item.type === "thinking")
-          .map((item) => item.content)
-          .join("");
-      const assistantGroupsText = () =>
-        assistantGroups
-          .flatMap((group) => group.items)
-          .filter((item) => item.type === "text")
-          .map((item) => item.content)
-          .join("");
-      await requestWorkspaceResponse(
-        userContent,
-        {
-          onDelta: (content) => {
-            if (!isCurrentResponse()) {
-              return;
-            }
-            appendAssistantText(content);
-          },
-          onDone: (message) => {
-            if (!isCurrentResponse()) {
-              return;
-            }
-            assistantId = message.id;
-            assistantContent = message.content;
-            const messageThinking = message.thinking ?? "";
-            assistantThinking = messageThinking || assistantThinking;
-            finishAssistantThinking();
-            const streamedThinking = assistantGroupsThinking();
-            if (messageThinking && streamedThinking !== messageThinking) {
-              const missingThinking = messageThinking.startsWith(
-                streamedThinking,
-              )
-                ? messageThinking.slice(streamedThinking.length)
-                : messageThinking;
-              assistantThinkingItemIndex += 1;
-              updateCurrentAssistantGroupItems((items) => [
-                ...items,
-                {
-                  content: missingThinking,
-                  id: `${message.id}-thinking-${assistantThinkingItemIndex}`,
-                  isStreaming: false,
-                  type: "thinking",
-                },
-              ]);
-            }
-            const streamedText = assistantGroupsText();
-            if (message.content && streamedText !== message.content) {
-              assistantTextItemIndex += 1;
-              updateCurrentAssistantGroupItems((items) => [
-                ...items,
-                {
-                  content: message.content.slice(streamedText.length),
-                  id: `${message.id}-text-${assistantTextItemIndex}`,
-                  type: "text",
-                },
-              ]);
-            }
-            assistantMessage = {
-              ...message,
-              groups: assistantGroups,
-              thinking: assistantThinking,
-              tools: assistantTools,
-              isStreamingThinking: false,
-              isStreamingText: false,
-            };
-            setMessages([...nextMessages, assistantMessage]);
-          },
-          onStart: (id) => {
-            if (!isCurrentResponse()) {
-              return;
-            }
-            assistantId = id;
-            updateAssistantMessage();
-          },
-          onOutputStart: (index) => {
-            if (!isCurrentResponse()) {
-              return;
-            }
-            createAssistantGroup(index);
-            updateAssistantMessage();
-          },
-          onThinkingDelta: (content) => {
-            if (!isCurrentResponse()) {
-              return;
-            }
-            appendAssistantThinking(content);
-          },
-          onToolDone: (tool) => {
-            if (!isCurrentResponse()) {
-              return;
-            }
-            finishAssistantThinking();
-            assistantTextItemId = "";
-            assistantIsStreamingText = false;
-            assistantTools = assistantTools.map((currentTool) =>
-              currentTool.id === tool.id
-                ? { ...currentTool, ...tool }
-                : currentTool,
-            );
-            assistantGroups = assistantGroups.map((group) => ({
-              ...group,
-              items: group.items.map((item) =>
-                item.type === "tool" && item.tool.id === tool.id
-                  ? { ...item, tool: { ...item.tool, ...tool } }
-                  : item,
-              ),
-            }));
-            updateAssistantMessage();
-          },
-          onToolStart: (tool) => {
-            if (!isCurrentResponse()) {
-              return;
-            }
-            finishAssistantThinking();
-            assistantTextItemId = "";
-            assistantIsStreamingText = false;
-            assistantTools = [...assistantTools, tool];
-            updateCurrentAssistantGroupItems((items) => [
-              ...items,
-              {
-                id: `tool-${tool.id}`,
-                tool,
-                type: "tool",
-              },
-            ]);
-            updateAssistantMessage();
-          },
-        },
-        responseAbortController.signal,
-      );
+        throw error;
+      }
     } catch (error) {
       if (responseRunRef.current !== responseRun) {
         return;
@@ -1322,7 +1565,7 @@ function App() {
         error instanceof Error ? error.message : "Message could not be sent.",
       );
     } finally {
-      if (responseRunRef.current === responseRun) {
+      if (responseRunRef.current === responseRun && !activeRunIdRef.current) {
         responseAbortRef.current = null;
         setIsResponding(false);
       }
@@ -1334,9 +1577,12 @@ function App() {
 
     responseAbortRef.current?.abort();
     responseAbortRef.current = null;
+    activeRunIdRef.current = "";
+    activeRunEventIndexRef.current = 0;
     responseRunRef.current += 1;
     setMessages([]);
     setResponseError("");
+    setActiveRunId("");
     setIsResponding(false);
 
     try {
