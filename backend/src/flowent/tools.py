@@ -98,12 +98,35 @@ def tool_specs() -> list[dict[str, object]]:
             "type": "function",
             "function": {
                 "name": "shell_command",
-                "description": "Run a shell command.",
+                "description": (
+                    "Run a shell command. If the command needs to write outside the "
+                    "current workspace, set sandbox_permissions to "
+                    "with_additional_permissions and list each needed path in "
+                    "additional_permissions.file_system.write."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "command": {"type": "string"},
                         "timeout_seconds": {"type": "integer", "minimum": 1},
+                        "sandbox_permissions": {
+                            "type": "string",
+                            "enum": ["with_additional_permissions"],
+                        },
+                        "additional_permissions": {
+                            "type": "object",
+                            "properties": {
+                                "file_system": {
+                                    "type": "object",
+                                    "properties": {
+                                        "write": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        }
+                                    },
+                                }
+                            },
+                        },
                     },
                     "required": ["command"],
                 },

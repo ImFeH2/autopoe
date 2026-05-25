@@ -39,6 +39,7 @@ Use tools deliberately:
 - Search files when you need to find definitions, references, or related behavior.
 - Apply structured patches for file edits.
 - Run shell commands for diagnostics, builds, tests, and operations that require the local environment.
+- When a shell command needs to write outside the current workspace, declare each needed writable directory with sandbox_permissions set to with_additional_permissions and additional_permissions.file_system.write.
 - Search the web only when current external information is needed.
 - Update the plan when a task has multiple meaningful steps.
 
