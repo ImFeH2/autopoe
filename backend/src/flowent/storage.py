@@ -68,6 +68,13 @@ class StoredSkill(BaseModel):
     slug: str
 
 
+class StoredWritablePath(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: int = 0
+    path: str
+
+
 class StoredProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -123,6 +130,7 @@ class StoredState(BaseModel):
     settings: StoredSettings
     skills: list[StoredSkill]
     telegram_bot: StoredTelegramBot
+    writable_paths: list[StoredWritablePath] = Field(default_factory=list)
 
 
 class StateStore:
@@ -144,6 +152,7 @@ class StateStore:
         with self.connect() as connection:
             mcp_servers = self._read_mcp_servers(connection)
             telegram_bot = self._read_telegram_bot(connection)
+            writable_paths = self._read_writable_paths(connection)
             providers = [
                 StoredProvider(
                     api_key=row["api_key"],
@@ -204,7 +213,41 @@ class StateStore:
             ),
             skills=[],
             telegram_bot=telegram_bot,
+            writable_paths=writable_paths,
         )
+
+    def read_writable_paths(self) -> list[StoredWritablePath]:
+        with self.connect() as connection:
+            return self._read_writable_paths(connection)
+
+    def save_writable_path(self, path: Path) -> StoredWritablePath:
+        normalized_path = str(path.expanduser().resolve(strict=False))
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO writable_paths (path)
+                VALUES (?)
+                ON CONFLICT(path) DO NOTHING
+                """,
+                (normalized_path,),
+            )
+            row = connection.execute(
+                """
+                SELECT path, created_at
+                FROM writable_paths
+                WHERE path = ?
+                """,
+                (normalized_path,),
+            ).fetchone()
+        return StoredWritablePath(path=row["path"], created_at=row["created_at"])
+
+    def delete_writable_path(self, path: Path) -> list[StoredWritablePath]:
+        normalized_path = str(path.expanduser().resolve(strict=False))
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM writable_paths WHERE path = ?", (normalized_path,)
+            )
+            return self._read_writable_paths(connection)
 
     def read_skill_enabled(self) -> dict[str, bool]:
         with self.connect() as connection:
@@ -671,6 +714,20 @@ class StateStore:
             )
         return servers
 
+    def _read_writable_paths(
+        self, connection: sqlite3.Connection
+    ) -> list[StoredWritablePath]:
+        return [
+            StoredWritablePath(created_at=row["created_at"], path=row["path"])
+            for row in connection.execute(
+                """
+                SELECT path, created_at
+                FROM writable_paths
+                ORDER BY path
+                """
+            )
+        ]
+
     def _migrate(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
             """
@@ -757,6 +814,11 @@ class StateStore:
                 id TEXT PRIMARY KEY,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS writable_paths (
+                path TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
             CREATE TABLE IF NOT EXISTS schema_migrations (

@@ -3,6 +3,7 @@ export type ViewId =
   | "providers"
   | "channels"
   | "mcp"
+  | "permissions"
   | "skills"
   | "settings";
 
@@ -96,6 +97,19 @@ export type Skill = {
   path: string;
   scope: SkillScope;
   slug: string;
+};
+
+export type WritablePath = {
+  createdAt: number;
+  path: string;
+};
+
+export type PermissionDecision = "allow_once" | "always_allow" | "deny";
+
+export type PermissionRequest = {
+  id: string;
+  path: string;
+  reason: string;
 };
 
 export type ToolItemStatus = "failed" | "running" | "success";

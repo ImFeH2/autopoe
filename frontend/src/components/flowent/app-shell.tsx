@@ -5,6 +5,7 @@ import {
   MessageSquare,
   Plug,
   Radio,
+  ShieldCheck,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const navigationItems = [
   { id: "mcp", label: "MCP", icon: Plug },
   { id: "skills", label: "Skills", icon: Sparkles },
   { id: "channels", label: "Channels", icon: Radio },
+  { id: "permissions", label: "Permissions", icon: ShieldCheck },
   { id: "settings", label: "Settings", icon: Settings },
 ] satisfies Array<{ id: ViewId; label: string; icon: LucideIcon }>;
 

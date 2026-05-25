@@ -29,6 +29,7 @@ from flowent.llm import (
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.mcp import McpManager, McpTransport
 from flowent.mcp_import import McpImportDiscovery, discover_imported_mcp_servers
+from flowent.permissions import WritablePathDecision, run_tool_with_path_permissions
 from flowent.sandbox import ensure_sandbox_available
 from flowent.skills import (
     discover_skills,
@@ -46,7 +47,9 @@ from flowent.storage import (
     StoredTelegramBot,
     StoredTelegramSession,
     StoredToolItem,
+    StoredWritablePath,
 )
+from flowent.tools import ToolContext
 
 logger = logging.getLogger("flowent.main")
 
@@ -123,6 +126,31 @@ class McpImportPreviewRequest(BaseModel):
     source: Literal["claude_code", "codex"]
 
 
+class WritablePathRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+
+
+class WritablePathListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    writable_paths: list[StoredWritablePath]
+
+
+class WorkspacePermissionDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["allow_once", "always_allow", "deny"]
+    id: str
+
+
+@dataclass
+class PendingWorkspacePermission:
+    future: asyncio.Future[WritablePathDecision]
+    path: Path
+
+
 @dataclass
 class WorkspaceRun:
     condition: asyncio.Condition
@@ -130,6 +158,9 @@ class WorkspaceRun:
     events: list[tuple[int, str, dict[str, object]]] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid4()))
     is_done: bool = False
+    pending_permissions: dict[str, PendingWorkspacePermission] = field(
+        default_factory=dict
+    )
     task: asyncio.Task[None] | None = None
 
     @property
@@ -229,6 +260,13 @@ def workspace_chat_messages(
         )
         chat_messages.append(ChatMessage(role=role, content=message.content))
     return chat_messages
+
+
+def normalized_request_path(path: str, cwd: Path) -> Path:
+    raw_path = Path(path).expanduser()
+    if not raw_path.is_absolute():
+        raw_path = cwd / raw_path
+    return raw_path.resolve(strict=False)
 
 
 def compact_prompt_messages(
@@ -506,6 +544,43 @@ def create_app(
     async def save_settings(settings: StoredSettings) -> StoredSettings:
         return store.save_settings(settings)
 
+    @app.post("/api/permissions/writable-paths")
+    async def save_writable_path(
+        request: WritablePathRequest,
+    ) -> StoredWritablePath:
+        return store.save_writable_path(
+            normalized_request_path(request.path, Path.cwd())
+        )
+
+    @app.delete("/api/permissions/writable-paths")
+    async def delete_writable_path(
+        request: WritablePathRequest,
+    ) -> WritablePathListResponse:
+        return WritablePathListResponse(
+            writable_paths=store.delete_writable_path(
+                normalized_request_path(request.path, Path.cwd())
+            )
+        )
+
+    @app.post("/api/workspace/permissions/approve")
+    async def approve_workspace_permission(
+        request: WorkspacePermissionDecisionRequest,
+    ) -> dict[str, bool]:
+        run = active_workspace_run()
+        if run is None:
+            raise HTTPException(status_code=404, detail="Request not found.")
+        pending = run.pending_permissions.pop(request.id, None)
+        if pending is None:
+            raise HTTPException(status_code=404, detail="Request not found.")
+        path = pending.path
+        if request.decision == "always_allow":
+            saved_path = store.save_writable_path(path)
+            path = Path(saved_path.path)
+        pending.future.set_result(
+            WritablePathDecision(decision=request.decision, path=path)
+        )
+        return {"ok": True}
+
     @app.put("/api/workspace/messages")
     async def save_workspace_messages(
         request: WorkspaceMessagesRequest,
@@ -588,6 +663,42 @@ def create_app(
                 store.upsert_message(assistant_message)
 
             try:
+
+                async def request_writable_path(
+                    path: Path, reason: str
+                ) -> WritablePathDecision:
+                    permission_id = str(uuid4())
+                    future = asyncio.get_running_loop().create_future()
+                    run.pending_permissions[permission_id] = PendingWorkspacePermission(
+                        future=future,
+                        path=path,
+                    )
+                    await append_run_event(
+                        run,
+                        "permission_request",
+                        {
+                            "id": permission_id,
+                            "path": str(path),
+                            "reason": reason,
+                        },
+                    )
+                    return await future
+
+                async def tool_runner(
+                    name: str,
+                    arguments: dict[str, object],
+                    context: ToolContext,
+                ):
+                    return await run_tool_with_path_permissions(
+                        name,
+                        arguments,
+                        context,
+                        request_writable_path=request_writable_path,
+                        writable_paths=[
+                            Path(path.path) for path in store.read_writable_paths()
+                        ],
+                    )
+
                 async for event in run_agent_stream(
                     completion=chat_completion,
                     connection=connection,
@@ -596,6 +707,7 @@ def create_app(
                     extra_tool_specs=mcp_manager.tool_specs(),
                     extra_tool_title=mcp_manager.tool_title,
                     messages=request_messages,
+                    tool_runner=tool_runner,
                 ):
                     if event.event == "start":
                         event_id = event.data.get("id")

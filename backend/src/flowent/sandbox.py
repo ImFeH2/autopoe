@@ -132,14 +132,22 @@ class SandboxRunner:
         cwd: Path | None = None,
         timeout_seconds: float = 30,
         output_limit: int = 20000,
+        writable_roots: list[Path] | None = None,
     ) -> None:
         self.cwd = (cwd or Path.cwd()).resolve(strict=False)
         self.timeout_seconds = timeout_seconds
         self.output_limit = output_limit
+        self.extra_writable_roots = [
+            root.expanduser().resolve(strict=False) for root in (writable_roots or [])
+        ]
 
     @property
     def writable_roots(self) -> list[Path]:
-        return [self.cwd, Path("/tmp")]
+        roots: list[Path] = [self.cwd, Path("/tmp")]
+        for root in self.extra_writable_roots:
+            if not any(root == existing for existing in roots):
+                roots.append(root)
+        return roots
 
     def ensure_writable_path(self, path: Path) -> None:
         if not path_is_within(path, self.writable_roots):
@@ -162,10 +170,12 @@ class SandboxRunner:
             "--bind",
             str(self.cwd),
             str(self.cwd),
-            "--bind",
-            "/tmp",
-            "/tmp",
         ]
+        for root in self.writable_roots:
+            if root == self.cwd:
+                continue
+            root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            args.extend(["--bind", str(root), str(root)])
         for protected in [".git", ".codex", ".agents"]:
             path = self.cwd / protected
             if path.exists():

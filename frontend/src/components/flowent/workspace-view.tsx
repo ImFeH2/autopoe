@@ -15,11 +15,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
-import { stableScrollbarClassName } from "@/components/flowent/styles";
+import {
+  stableScrollbarClassName,
+  subtleButtonClassName,
+} from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
   Message,
+  PermissionDecision,
+  PermissionRequest,
   Skill,
   ToolItem,
   WorkspaceCommand,
@@ -37,8 +42,10 @@ export function WorkspaceView({
   onCommandError,
   onClearMessages,
   onDraftChange,
+  onPermissionDecision,
   onSendMessage,
   onStopResponse,
+  permissionRequests,
   skills,
 }: {
   commands: WorkspaceCommand[];
@@ -50,8 +57,13 @@ export function WorkspaceView({
   onCommandError: (message: string) => void;
   onClearMessages: () => void;
   onDraftChange: (value: string) => void;
+  onPermissionDecision: (
+    requestId: string,
+    decision: PermissionDecision,
+  ) => void;
   onSendMessage: (content: string) => void;
   onStopResponse: () => void;
+  permissionRequests: PermissionRequest[];
   skills: Skill[];
 }) {
   const [composerOffset, setComposerOffset] = useState(112);
@@ -67,6 +79,8 @@ export function WorkspaceView({
           composerOffset={composerOffset}
           isResponding={isResponding}
           messages={messages}
+          onPermissionDecision={onPermissionDecision}
+          permissionRequests={permissionRequests}
         />
         <ChatComposer
           commands={commands}
@@ -113,10 +127,17 @@ function MessageList({
   composerOffset,
   isResponding,
   messages,
+  onPermissionDecision,
+  permissionRequests,
 }: {
   composerOffset: number;
   isResponding: boolean;
   messages: Message[];
+  onPermissionDecision: (
+    requestId: string,
+    decision: PermissionDecision,
+  ) => void;
+  permissionRequests: PermissionRequest[];
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const shouldFollowRef = useRef(true);
@@ -204,7 +225,72 @@ function MessageList({
           )}
         </Fragment>
       ))}
+      {permissionRequests.map((request) => (
+        <PermissionRequestCard
+          key={request.id}
+          onPermissionDecision={onPermissionDecision}
+          request={request}
+        />
+      ))}
       <div aria-hidden="true" ref={scrollMarkerRef} />
+    </div>
+  );
+}
+
+function PermissionRequestCard({
+  onPermissionDecision,
+  request,
+}: {
+  onPermissionDecision: (
+    requestId: string,
+    decision: PermissionDecision,
+  ) => void;
+  request: PermissionRequest;
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-[640px] justify-start py-3">
+      <div className="grid w-full gap-3 rounded-lg border border-white/10 bg-black px-3 py-3 text-white shadow-none">
+        <div className="grid gap-1">
+          <h3 className="m-0 text-sm font-medium leading-5 text-white">
+            Allow write access?
+          </h3>
+          <p className="m-0 break-words font-mono text-xs leading-5 text-white/75">
+            {request.path}
+          </p>
+          <p className="m-0 text-xs leading-[1.4] text-white/50">
+            {request.reason}
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            className={subtleButtonClassName}
+            onClick={() => onPermissionDecision(request.id, "deny")}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Deny
+          </Button>
+          <Button
+            className={subtleButtonClassName}
+            onClick={() => onPermissionDecision(request.id, "allow_once")}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Allow once
+          </Button>
+          <Button
+            className={subtleButtonClassName}
+            onClick={() => onPermissionDecision(request.id, "always_allow")}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Always allow
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -320,7 +406,7 @@ function assistantOutputGroups(message: Message): AssistantOutputGroup[] {
         items: [...processItems, contentItem],
       });
     }
-  } else if (processItems.length) {
+  } else if (processItems.length && !toolItems.length) {
     groups.push({
       id: `${message.id}-process`,
       items: processItems,

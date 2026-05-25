@@ -7,6 +7,7 @@ import {
   createEmptyProvider,
   providerOptions,
 } from "@/components/flowent/provider-options";
+import { PermissionsView } from "@/components/flowent/permissions-view";
 import { ProvidersView } from "@/components/flowent/providers-view";
 import { SettingsView } from "@/components/flowent/settings-view";
 import { SkillsView } from "@/components/flowent/skills-view";
@@ -18,6 +19,8 @@ import type {
   McpServer,
   McpTool,
   Message,
+  PermissionDecision,
+  PermissionRequest,
   Provider,
   ReasoningEffort,
   Skill,
@@ -25,6 +28,7 @@ import type {
   TelegramSession,
   ToolItem,
   ViewId,
+  WritablePath,
   WorkspaceCommand,
   WorkspaceCommandId,
 } from "@/components/flowent/types";
@@ -86,6 +90,11 @@ type ApiMcpImportPreview = {
 
 type ApiSkill = Skill;
 
+type ApiWritablePath = {
+  created_at: number;
+  path: string;
+};
+
 type ApiMessage = Message;
 
 type ApiState = {
@@ -101,6 +110,7 @@ type ApiState = {
   };
   skills?: ApiSkill[];
   telegram_bot?: ApiTelegramBot;
+  writable_paths?: ApiWritablePath[];
 };
 
 type ApiAbout = {
@@ -163,6 +173,14 @@ type WorkspaceStreamEvent =
         message: string;
       };
       event: "error";
+    }
+  | {
+      data: {
+        id: string;
+        path: string;
+        reason: string;
+      };
+      event: "permission_request";
     };
 
 type WorkspaceStreamHandlers = {
@@ -175,6 +193,7 @@ type WorkspaceStreamHandlers = {
     tool: Pick<ToolItem, "id" | "status"> & Partial<ToolItem>,
   ) => void;
   onToolStart: (tool: ToolItem) => void;
+  onPermissionRequest: (request: PermissionRequest) => void;
 };
 
 const providerFromApi = (provider: ApiProvider): Provider => ({
@@ -241,6 +260,11 @@ const telegramBotToApi = (telegramBot: TelegramBot): ApiTelegramBot => ({
   error: telegramBot.error,
   sessions: telegramBot.sessions.map(telegramSessionToApi),
   status: telegramBot.status,
+});
+
+const writablePathFromApi = (writablePath: ApiWritablePath): WritablePath => ({
+  createdAt: writablePath.created_at,
+  path: writablePath.path,
 });
 
 const mcpCommandLine = (server: Pick<McpServer, "args" | "command">) =>
@@ -442,6 +466,10 @@ function App() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [isResponding, setIsResponding] = useState(false);
+  const [permissionRequests, setPermissionRequests] = useState<
+    PermissionRequest[]
+  >([]);
+  const [writablePaths, setWritablePaths] = useState<WritablePath[]>([]);
   const [activeRunId, setActiveRunId] = useState("");
   const [responseError, setResponseError] = useState("");
   const responseAbortRef = useRef<AbortController | null>(null);
@@ -482,6 +510,7 @@ function App() {
     setSelectedModel(state.settings.selected_model);
     setReasoningEffort(state.settings.reasoning_effort ?? "default");
     setTelegramBot(telegramBotFromApi(state.telegram_bot));
+    setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
     activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
     activeRunIdRef.current = state.active_run_id ?? "";
     setActiveRunId(state.active_run_id ?? "");
@@ -910,6 +939,44 @@ function App() {
     }
   };
 
+  const removeWritablePath = async (path: string) => {
+    const response = await fetch("/api/permissions/writable-paths", {
+      body: JSON.stringify({ path }),
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+
+    if (response.ok) {
+      const result = (await response.json()) as {
+        writable_paths?: ApiWritablePath[];
+      };
+      setWritablePaths((result.writable_paths ?? []).map(writablePathFromApi));
+    }
+  };
+
+  const respondToPermissionRequest = async (
+    requestId: string,
+    decision: PermissionDecision,
+  ) => {
+    const response = await fetch("/api/workspace/permissions/approve", {
+      body: JSON.stringify({ decision, id: requestId }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    if (response.ok) {
+      setPermissionRequests((currentRequests) =>
+        currentRequests.filter((request) => request.id !== requestId),
+      );
+      if (decision === "always_allow") {
+        const state = await refreshAppState().catch(() => null);
+        if (state?.writable_paths) {
+          setWritablePaths(state.writable_paths.map(writablePathFromApi));
+        }
+      }
+    }
+  };
+
   const saveMessages = async (nextMessages: Message[]) => {
     await fetch("/api/workspace/messages", {
       body: JSON.stringify({ messages: nextMessages }),
@@ -992,6 +1059,9 @@ function App() {
           }
           if (streamEvent.event === "tool_start") {
             handlers.onToolStart(streamEvent.data.tool);
+          }
+          if (streamEvent.event === "permission_request") {
+            handlers.onPermissionRequest(streamEvent.data);
           }
           if (
             streamEvent.event === "tool_done" ||
@@ -1230,6 +1300,21 @@ function App() {
           }
           activeRunEventIndexRef.current += 1;
           createAssistantGroup(index);
+          updateAssistantMessage();
+        },
+        onPermissionRequest: (request) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          finishAssistantThinking();
+          assistantIsStreamingText = false;
+          setPermissionRequests((currentRequests) => [
+            ...currentRequests.filter(
+              (currentRequest) => currentRequest.id !== request.id,
+            ),
+            request,
+          ]);
           updateAssistantMessage();
         },
         onStart: (id) => {
@@ -1526,6 +1611,7 @@ function App() {
     ];
     setResponseError("");
     setIsResponding(true);
+    setPermissionRequests([]);
     setMessages(nextMessages);
     setDraft("");
 
@@ -1581,6 +1667,7 @@ function App() {
     activeRunEventIndexRef.current = 0;
     responseRunRef.current += 1;
     setMessages([]);
+    setPermissionRequests([]);
     setResponseError("");
     setActiveRunId("");
     setIsResponding(false);
@@ -1607,12 +1694,16 @@ function App() {
           messages={messages}
           commands={workspaceCommands}
           skills={skills}
+          permissionRequests={permissionRequests}
           onClearMessages={() => {
             void clearMessages();
           }}
           onCommand={runWorkspaceCommand}
           onCommandError={handleWorkspaceCommandError}
           onDraftChange={setDraft}
+          onPermissionDecision={(requestId, decision) => {
+            void respondToPermissionRequest(requestId, decision);
+          }}
           onSendMessage={(content) => {
             void sendMessage(content);
           }}
@@ -1639,6 +1730,14 @@ function App() {
           onSaveTelegramBot={saveTelegramBot}
           onUpdateTelegramBot={updateTelegramBot}
           telegramBot={telegramBot}
+        />
+      </TabsContent>
+      <TabsContent value="permissions" className={viewPanelClassName}>
+        <PermissionsView
+          onRemoveWritablePath={(path) => {
+            void removeWritablePath(path);
+          }}
+          writablePaths={writablePaths}
         />
       </TabsContent>
       <TabsContent value="mcp" className={viewPanelClassName}>
