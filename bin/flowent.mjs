@@ -70,7 +70,7 @@ const child = spawn(
   uvCommand,
   ["run", "--project", backendProject, "flowent", ...passthroughArgs],
   {
-    cwd: packageRoot,
+    cwd: process.cwd(),
     stdio: "inherit",
     env: {
       ...process.env,
