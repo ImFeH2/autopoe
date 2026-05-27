@@ -29,6 +29,7 @@ from flowent.llm import (
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.mcp import McpManager, McpTransport
 from flowent.mcp_import import McpImportDiscovery, discover_imported_mcp_servers
+from flowent.paths import resolve_workdir
 from flowent.permissions import WritablePathDecision, run_tool_with_path_permissions
 from flowent.sandbox import ensure_sandbox_available
 from flowent.skills import (
@@ -301,10 +302,12 @@ def create_app(
     chat_completion: CompletionCallable | None = None,
     mcp_transport: McpTransport | None = None,
     telegram_transport: TelegramTransport | None = None,
+    workdir: Path | str | None = None,
 ) -> FastAPI:
     ensure_logging_configured()
     ensure_sandbox_available()
 
+    cwd = resolve_workdir(workdir)
     store = StateStore()
     mcp_manager = McpManager(store=store, transport=mcp_transport)
     telegram_bot_manager: TelegramBotManager | None = None
@@ -313,12 +316,12 @@ def create_app(
 
     static_dir = frontend_static_directory().resolve(strict=False)
     logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
+    logger.info("Workdir: %s", cwd)
     logger.info("Static directory: %s", static_dir)
 
     async def run_workspace_turn(content: str) -> StoredMessage:
         state = store.read_state()
         connection = selected_connection(state)
-        cwd = Path.cwd()
         user_message = StoredMessage(
             author="user",
             content=content,
@@ -437,7 +440,7 @@ def create_app(
             if active_run and not active_run.is_done
             else None,
             "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers),
-            "skills": discover_skills(Path.cwd(), store),
+            "skills": discover_skills(cwd, store),
         }
         if telegram_bot_manager is not None:
             update["telegram_bot"] = telegram_bot_manager.bot_with_status(
@@ -462,12 +465,12 @@ def create_app(
     async def preview_mcp_import(
         request: McpImportPreviewRequest,
     ) -> McpImportDiscovery:
-        return discover_imported_mcp_servers(Path.cwd(), source=request.source)
+        return discover_imported_mcp_servers(cwd, source=request.source)
 
     @app.post("/api/mcp/import")
     async def import_mcp_servers(request: McpImportRequest) -> list[StoredMcpServer]:
         imported_servers = discover_imported_mcp_servers(
-            Path.cwd(),
+            cwd,
             source=request.source,
         ).servers
         existing_servers = {server.id for server in store.read_mcp_servers()}
@@ -498,7 +501,7 @@ def create_app(
 
     @app.post("/api/skills/reload")
     async def reload_skills() -> list[StoredSkill]:
-        return discover_skills(Path.cwd(), store)
+        return discover_skills(cwd, store)
 
     @app.put("/api/skills/{skill_id:path}")
     async def save_skill_settings(
@@ -506,7 +509,7 @@ def create_app(
         request: SkillSettingsRequest,
     ) -> StoredSkill:
         try:
-            return update_skill_enabled(Path.cwd(), store, skill_id, request.enabled)
+            return update_skill_enabled(cwd, store, skill_id, request.enabled)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Skill not found.") from error
 
@@ -548,9 +551,7 @@ def create_app(
     async def save_writable_path(
         request: WritablePathRequest,
     ) -> StoredWritablePath:
-        return store.save_writable_path(
-            normalized_request_path(request.path, Path.cwd())
-        )
+        return store.save_writable_path(normalized_request_path(request.path, cwd))
 
     @app.delete("/api/permissions/writable-paths")
     async def delete_writable_path(
@@ -558,7 +559,7 @@ def create_app(
     ) -> WritablePathListResponse:
         return WritablePathListResponse(
             writable_paths=store.delete_writable_path(
-                normalized_request_path(request.path, Path.cwd())
+                normalized_request_path(request.path, cwd)
             )
         )
 
@@ -610,7 +611,6 @@ def create_app(
         nonlocal active_workspace_run_id
         state = store.read_state()
         connection = selected_connection(state)
-        cwd = Path.cwd()
 
         user_message = StoredMessage(
             author="user",
@@ -847,7 +847,6 @@ def create_app(
         state = store.read_state()
         connection = selected_connection(state)
         compacted_context = store.read_compacted_context()
-        cwd = Path.cwd()
 
         try:
             summary = await complete_chat(

@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+from flowent.paths import WORKDIR_ENV_VAR, resolve_workdir
+
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
@@ -39,6 +41,11 @@ def main(argv: list[str] | None = None) -> None:
         default="",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--workdir",
+        default="",
+        help="Agent working directory (default: $FLOWENT_WORKDIR or current directory)",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "apply-patch":
@@ -72,6 +79,11 @@ def main(argv: list[str] | None = None) -> None:
     from flowent.logging import configure_logging
 
     configure_logging()
+    try:
+        workdir = resolve_workdir(args.workdir or None)
+    except ValueError as error:
+        parser.error(str(error))
+    os.environ[WORKDIR_ENV_VAR] = str(workdir)
 
     import logging
 

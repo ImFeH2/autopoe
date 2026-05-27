@@ -445,6 +445,116 @@ def test_workspace_response_includes_project_and_environment_context(
     }
 
 
+def test_workspace_response_uses_flowent_workdir(tmp_path, monkeypatch) -> None:
+    launch_dir = tmp_path / "launch"
+    workdir = tmp_path / "workspace"
+    data_dir = tmp_path / "data"
+    launch_dir.mkdir()
+    workdir.mkdir()
+    monkeypatch.chdir(launch_dir)
+    monkeypatch.setenv("FLOWENT_WORKDIR", str(workdir))
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(data_dir))
+    (workdir / ".git").mkdir()
+    (workdir / "AGENTS.md").write_text("Use workspace instructions.")
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    project_message = project_context_message(captured_request)
+    assert project_message == {
+        "role": "user",
+        "content": (
+            f"# AGENTS.md instructions for {workdir}\n\n"
+            "<INSTRUCTIONS>\nUse workspace instructions.\n</INSTRUCTIONS>"
+        ),
+    }
+    environment_message = environment_context_message(captured_request)
+    assert f"<cwd>{workdir}</cwd>" in environment_message["content"]
+
+
+def test_create_app_workdir_overrides_flowent_workdir(tmp_path, monkeypatch) -> None:
+    env_workdir = tmp_path / "env-workspace"
+    app_workdir = tmp_path / "app-workspace"
+    data_dir = tmp_path / "data"
+    env_workdir.mkdir()
+    app_workdir.mkdir()
+    monkeypatch.setenv("FLOWENT_WORKDIR", str(env_workdir))
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(data_dir))
+    (env_workdir / ".git").mkdir()
+    (app_workdir / ".git").mkdir()
+    (env_workdir / "AGENTS.md").write_text("Use env instructions.")
+    (app_workdir / "AGENTS.md").write_text("Use app instructions.")
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(
+            serve_frontend=False,
+            chat_completion=fake_completion,
+            workdir=app_workdir,
+        )
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    project_message = project_context_message(captured_request)
+    assert project_message is not None
+    assert "Use app instructions." in project_message["content"]
+    assert "Use env instructions." not in project_message["content"]
+    environment_message = environment_context_message(captured_request)
+    assert f"<cwd>{app_workdir}</cwd>" in environment_message["content"]
+
+
+def test_workspace_workdir_does_not_change_data_directory(
+    tmp_path, monkeypatch
+) -> None:
+    workdir = tmp_path / "workspace"
+    data_dir = tmp_path / "data"
+    workdir.mkdir()
+    monkeypatch.setenv("FLOWENT_WORKDIR", str(workdir))
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(data_dir))
+
+    client = TestClient(create_app(serve_frontend=False))
+    response = client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-local",
+            "base_url": "",
+            "id": "provider-openai",
+            "models": ["gpt-5.1"],
+            "name": "OpenAI",
+            "type": "openai",
+        },
+    )
+
+    assert response.status_code == 200
+    assert (data_dir / "flowent.db").is_file()
+    assert not (workdir / "flowent.db").exists()
+
+
 def test_workspace_response_uses_selected_reasoning_effort(
     tmp_path, monkeypatch
 ) -> None:
