@@ -176,10 +176,6 @@ class SandboxRunner:
                 continue
             root.mkdir(mode=0o700, parents=True, exist_ok=True)
             args.extend(["--bind", str(root), str(root)])
-        for protected in [".git", ".codex", ".agents"]:
-            path = self.cwd / protected
-            if path.exists():
-                args.extend(["--ro-bind", str(path), str(path)])
         args.extend(
             [
                 "--unshare-user",
