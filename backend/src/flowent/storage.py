@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from flowent.llm import ProviderFormat, ReasoningEffort
+from flowent.llm import ChatMessage, ProviderFormat, ReasoningEffort
 from flowent.paths import data_directory
 
 
@@ -126,6 +126,20 @@ class StoredMessage(BaseModel):
     )
     thinking: str = Field(default="", exclude_if=lambda value: value == "")
     tools: list[StoredToolItem] = Field(default_factory=list)
+
+
+class StoredCompactionCheckpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: int = 0
+    id: str
+    method: str
+    replacement_history: list[ChatMessage]
+    source_message_id: str | None = None
+    summary: str
+    token_after: int = 0
+    token_before: int = 0
+    trigger: str
 
 
 class StoredState(BaseModel):
@@ -617,11 +631,119 @@ class StateStore:
                 VALUES (1, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     compacted_summary = excluded.compacted_summary,
+                    active_compaction_id = NULL,
                     updated_at = unixepoch()
                 """,
                 (summary,),
             )
         return summary
+
+    def read_active_compaction_checkpoint(
+        self,
+    ) -> StoredCompactionCheckpoint | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    checkpoint.id,
+                    checkpoint.trigger,
+                    checkpoint.method,
+                    checkpoint.summary,
+                    checkpoint.replacement_history,
+                    checkpoint.source_message_id,
+                    checkpoint.token_before,
+                    checkpoint.token_after,
+                    checkpoint.created_at
+                FROM workspace_context context
+                JOIN compaction_checkpoints checkpoint
+                    ON checkpoint.id = context.active_compaction_id
+                WHERE context.id = 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return StoredCompactionCheckpoint(
+            created_at=row["created_at"],
+            id=row["id"],
+            method=row["method"],
+            replacement_history=[
+                ChatMessage.model_validate(message)
+                for message in json.loads(row["replacement_history"] or "[]")
+            ],
+            source_message_id=row["source_message_id"],
+            summary=row["summary"],
+            token_after=row["token_after"],
+            token_before=row["token_before"],
+            trigger=row["trigger"],
+        )
+
+    def save_compaction_checkpoint(
+        self, checkpoint: StoredCompactionCheckpoint
+    ) -> StoredCompactionCheckpoint:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO compaction_checkpoints (
+                    id,
+                    trigger,
+                    method,
+                    summary,
+                    replacement_history,
+                    source_message_id,
+                    token_before,
+                    token_after
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    trigger = excluded.trigger,
+                    method = excluded.method,
+                    summary = excluded.summary,
+                    replacement_history = excluded.replacement_history,
+                    source_message_id = excluded.source_message_id,
+                    token_before = excluded.token_before,
+                    token_after = excluded.token_after
+                """,
+                (
+                    checkpoint.id,
+                    checkpoint.trigger,
+                    checkpoint.method,
+                    checkpoint.summary,
+                    json.dumps(
+                        [
+                            message.model_dump()
+                            for message in checkpoint.replacement_history
+                        ],
+                        ensure_ascii=False,
+                    ),
+                    checkpoint.source_message_id,
+                    checkpoint.token_before,
+                    checkpoint.token_after,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO workspace_context (
+                    id,
+                    compacted_summary,
+                    active_compaction_id
+                )
+                VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    compacted_summary = excluded.compacted_summary,
+                    active_compaction_id = excluded.active_compaction_id,
+                    updated_at = unixepoch()
+                """,
+                (checkpoint.summary, checkpoint.id),
+            )
+            row = connection.execute(
+                """
+                SELECT created_at
+                FROM compaction_checkpoints
+                WHERE id = ?
+                """,
+                (checkpoint.id,),
+            ).fetchone()
+        return checkpoint.model_copy(update={"created_at": row["created_at"]})
 
     def _provider_models(
         self, connection: sqlite3.Connection, provider_id: str
@@ -817,7 +939,20 @@ class StateStore:
             CREATE TABLE IF NOT EXISTS workspace_context (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 compacted_summary TEXT NOT NULL DEFAULT '',
+                active_compaction_id TEXT,
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS compaction_checkpoints (
+                id TEXT PRIMARY KEY,
+                trigger TEXT NOT NULL,
+                method TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                replacement_history TEXT NOT NULL DEFAULT '[]',
+                source_message_id TEXT,
+                token_before INTEGER NOT NULL DEFAULT 0,
+                token_after INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
             CREATE TABLE IF NOT EXISTS skill_settings (
@@ -870,4 +1005,12 @@ class StateStore:
             connection.execute(
                 "ALTER TABLE settings "
                 "ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'default'"
+            )
+        workspace_context_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(workspace_context)")
+        }
+        if "active_compaction_id" not in workspace_context_columns:
+            connection.execute(
+                "ALTER TABLE workspace_context ADD COLUMN active_compaction_id TEXT"
             )

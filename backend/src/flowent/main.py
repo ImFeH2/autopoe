@@ -17,13 +17,17 @@ from pydantic import BaseModel, ConfigDict
 from flowent._version import __version__
 from flowent.agent import run_agent_stream
 from flowent.channels import TelegramBotManager, TelegramTransport
+from flowent.compact import (
+    CompactInput,
+    LocalSummaryCompactProvider,
+    transcript_messages_after,
+)
 from flowent.context import runtime_context_messages
 from flowent.llm import (
     ChatMessage,
     CompletionCallable,
     ProviderConnection,
     ProviderFormat,
-    complete_chat,
     list_provider_models,
 )
 from flowent.logging import TRACE_LEVEL, ensure_logging_configured
@@ -39,6 +43,7 @@ from flowent.skills import (
 )
 from flowent.storage import (
     StateStore,
+    StoredCompactionCheckpoint,
     StoredMcpServer,
     StoredMessage,
     StoredPermissionRequest,
@@ -58,7 +63,6 @@ logger = logging.getLogger("flowent.main")
 
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
 COMPACTED_CONTEXT_MARKER = "Context compacted"
-COMPACT_SYSTEM_PROMPT = "You are compacting Flowent workspace context."
 
 
 class ProviderModelsRequest(BaseModel):
@@ -251,8 +255,34 @@ def latest_compacted_context_index(messages: list[StoredMessage]) -> int | None:
 def workspace_chat_messages(
     messages: list[StoredMessage],
     compacted_context: str = "",
+    checkpoint: StoredCompactionCheckpoint | None = None,
 ) -> list[ChatMessage]:
     chat_messages: list[ChatMessage] = []
+
+    if checkpoint is not None:
+        chat_messages.extend(checkpoint.replacement_history)
+        visible_messages = transcript_messages_after(
+            messages,
+            checkpoint.source_message_id,
+        )
+        for message in visible_messages:
+            if (
+                message.author == "system"
+                and message.content == COMPACTED_CONTEXT_MARKER
+            ):
+                continue
+            if message.author not in ("user", "assistant"):
+                raise HTTPException(
+                    status_code=400, detail="Message history is invalid."
+                )
+            checkpoint_role: Literal["user", "assistant"] = (
+                "user" if message.author == "user" else "assistant"
+            )
+            chat_messages.append(
+                ChatMessage(role=checkpoint_role, content=message.content)
+            )
+        return chat_messages
+
     marker_index = latest_compacted_context_index(messages)
     visible_messages = messages
 
@@ -284,32 +314,6 @@ def normalized_request_path(path: str, cwd: Path) -> Path:
     return raw_path.resolve(strict=False)
 
 
-def compact_prompt_messages(
-    messages: list[StoredMessage],
-    compacted_context: str,
-    runtime_messages: list[ChatMessage] | None = None,
-) -> list[ChatMessage]:
-    history_messages = [
-        *(runtime_messages or []),
-        *workspace_chat_messages(messages, compacted_context),
-    ]
-    history = "\n\n".join(
-        f"{message.role}: {message.content}" for message in history_messages
-    )
-    return [
-        ChatMessage(role="system", content=COMPACT_SYSTEM_PROMPT),
-        ChatMessage(
-            role="user",
-            content=(
-                "Compact the current Flowent workspace context for the next turn.\n\n"
-                "Keep the details needed to continue accurately, including decisions, "
-                "constraints, pending work, and referenced facts.\n\n"
-                f"Conversation:\n{history}"
-            ),
-        ),
-    ]
-
-
 def create_app(
     *,
     serve_frontend: bool = True,
@@ -323,6 +327,7 @@ def create_app(
 
     cwd = resolve_workdir(workdir)
     store = StateStore()
+    compact_provider = LocalSummaryCompactProvider()
     mcp_manager = McpManager(store=store, transport=mcp_transport)
     telegram_bot_manager: TelegramBotManager | None = None
     workspace_runs: dict[str, WorkspaceRun] = {}
@@ -346,6 +351,7 @@ def create_app(
         chat_messages = workspace_chat_messages(
             next_messages,
             store.read_compacted_context(),
+            store.read_active_compaction_checkpoint(),
         )
         skill_messages = explicit_skill_messages(cwd, store, content)
         request_messages = [
@@ -639,6 +645,7 @@ def create_app(
         chat_messages = workspace_chat_messages(
             next_messages,
             store.read_compacted_context(),
+            store.read_active_compaction_checkpoint(),
         )
         request_messages = [
             message.model_dump()
@@ -883,18 +890,31 @@ def create_app(
 
     @app.post("/api/workspace/compact")
     async def compact_workspace() -> WorkspaceCompactResponse:
+        if active_workspace_run() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Compact is unavailable while Flowent is responding.",
+            )
         logger.info("Workspace compact requested")
         state = store.read_state()
         connection = selected_connection(state)
-        compacted_context = store.read_compacted_context()
+        checkpoint = store.read_active_compaction_checkpoint()
+        model_history = [
+            *runtime_context_messages(cwd),
+            *workspace_chat_messages(
+                state.messages,
+                store.read_compacted_context(),
+                checkpoint,
+            ),
+        ]
 
         try:
-            summary = await complete_chat(
+            compact_result = await compact_provider.compact(
                 connection,
-                compact_prompt_messages(
-                    state.messages,
-                    compacted_context,
-                    runtime_context_messages(cwd),
+                CompactInput(
+                    messages=state.messages,
+                    model_history=model_history,
+                    trigger="manual",
                 ),
                 completion=chat_completion,
             )
@@ -912,12 +932,28 @@ def create_app(
             content=COMPACTED_CONTEXT_MARKER,
             id=str(uuid4()),
         )
-        store.save_compacted_context(summary.content)
+        source_message_id = state.messages[-1].id if state.messages else None
+        store.save_compaction_checkpoint(
+            StoredCompactionCheckpoint(
+                id=str(uuid4()),
+                method=compact_result.method,
+                replacement_history=compact_result.replacement_history,
+                source_message_id=source_message_id,
+                summary=compact_result.summary,
+                token_after=compact_result.token_after,
+                token_before=compact_result.token_before,
+                trigger="manual",
+            )
+        )
         store.save_messages([*state.messages, marker])
         logger.info(
-            "Workspace compact completed summary_length=%s", len(summary.content)
+            "Workspace compact completed method=%s summary_length=%s token_before=%s token_after=%s",
+            compact_result.method,
+            len(compact_result.summary),
+            compact_result.token_before,
+            compact_result.token_after,
         )
-        logger.log(TRACE_LEVEL, "Workspace compact summary=%r", summary.content)
+        logger.log(TRACE_LEVEL, "Workspace compact summary=%r", compact_result.summary)
         return WorkspaceCompactResponse(message=marker)
 
     @app.post("/api/workspace/respond")

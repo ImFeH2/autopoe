@@ -315,11 +315,14 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
     assert captured_request["model"] == "openai/gpt-5.1"
     assert captured_request["messages"][0] == {
         "role": "system",
-        "content": "You are compacting Flowent workspace context.",
+        "content": "You are performing a context checkpoint compaction for Flowent.",
     }
     assert "AGENTS.md instructions" not in captured_request["messages"][-1]["content"]
     assert "<environment_context>" in captured_request["messages"][-1]["content"]
     assert captured_request["messages"][-1]["role"] == "user"
+    assert (
+        "CONTEXT CHECKPOINT COMPACTION" in captured_request["messages"][-1]["content"]
+    )
     assert "Draft a launch checklist." in captured_request["messages"][-1]["content"]
     assert "Use provider setup first." in captured_request["messages"][-1]["content"]
 
@@ -390,11 +393,20 @@ def test_workspace_response_uses_compacted_context_after_compact(
     }
     assert project_context_message(captured_requests[1]) is None
     assert environment_context_message(captured_requests[1])["role"] == "user"
-    assert response_messages[-3:] == [
-        {"role": "user", "content": "Context compacted"},
-        {"role": "assistant", "content": "Keep the provider setup decision."},
-        {"role": "user", "content": "Continue from there."},
+    compacted_messages = [
+        message
+        for message in response_messages
+        if str(message["content"]).startswith(
+            "Another language model started working on this Flowent workspace session"
+        )
     ]
+    assert len(compacted_messages) == 1
+    assert "Keep the provider setup decision." in compacted_messages[0]["content"]
+    assert response_messages[-1] == {
+        "role": "user",
+        "content": "Continue from there.",
+    }
+    assert {"role": "user", "content": "Context compacted"} not in response_messages
 
 
 def test_workspace_response_includes_project_and_environment_context(
@@ -798,10 +810,15 @@ def test_workspace_compacted_response_includes_latest_runtime_context(
     assert project_message is not None
     assert "Instructions after compact." in project_message["content"]
     assert environment_context_message(captured_requests[1])["role"] == "user"
-    assert {
-        "role": "assistant",
-        "content": "Keep compacted state.",
-    } in response_messages
+    compacted_messages = [
+        message
+        for message in response_messages
+        if str(message["content"]).startswith(
+            "Another language model started working on this Flowent workspace session"
+        )
+    ]
+    assert len(compacted_messages) == 1
+    assert "Keep compacted state." in compacted_messages[0]["content"]
 
 
 def test_project_instructions_are_truncated_to_size_limit(
@@ -1179,3 +1196,113 @@ async def test_workspace_clear_removes_running_run_draft(tmp_path, monkeypatch) 
     assert clear_response.status_code == 200
     assert state["messages"] == []
     assert state["active_run_id"] is None
+
+
+def test_workspace_response_uses_compaction_checkpoint_after_restart(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+        if len(captured_requests) == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Checkpoint summary survives restarts.",
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Continuing."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {"author": "user", "content": "Original request.", "id": "message-1"},
+                {
+                    "author": "assistant",
+                    "content": "Original reply.",
+                    "id": "message-2",
+                },
+            ]
+        },
+    )
+
+    compact_response = client.post("/api/workspace/compact")
+    restarted_client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    response = restarted_client.post(
+        "/api/workspace/respond",
+        json={"content": "Continue after restart."},
+    )
+
+    assert compact_response.status_code == 200
+    assert response.status_code == 200
+    response_messages = captured_requests[1]["messages"]
+    compacted_messages = [
+        message
+        for message in response_messages
+        if str(message["content"]).startswith(
+            "Another language model started working on this Flowent workspace session"
+        )
+    ]
+    assert len(compacted_messages) == 1
+    assert "Checkpoint summary survives restarts." in compacted_messages[0]["content"]
+    assert {"role": "user", "content": "Context compacted"} not in response_messages
+    assert response_messages[-1] == {
+        "role": "user",
+        "content": "Continue after restart.",
+    }
+
+
+def test_workspace_compact_is_unavailable_while_response_is_running(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    continue_stream = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Partial."}}]}
+            await asyncio.wait_for(continue_stream.wait(), timeout=2)
+            yield {"choices": [{"delta": {"content": " Done."}}]}
+
+        return chunks()
+
+    async def run_test() -> None:
+        app = create_app(serve_frontend=False, chat_completion=fake_completion)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            await configure_provider_async(client)
+            response_task = asyncio.create_task(
+                client.post("/api/workspace/respond", json={"content": "Start."})
+            )
+            await asyncio.sleep(0)
+            compact_response = await client.post("/api/workspace/compact")
+            continue_stream.set()
+            response = await response_task
+
+        assert compact_response.status_code == 409
+        assert compact_response.json()["detail"] == (
+            "Compact is unavailable while Flowent is responding."
+        )
+        assert response.status_code == 200
+
+    asyncio.run(run_test())
