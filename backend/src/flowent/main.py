@@ -41,6 +41,7 @@ from flowent.storage import (
     StateStore,
     StoredMcpServer,
     StoredMessage,
+    StoredPermissionRequest,
     StoredProvider,
     StoredSettings,
     StoredSkill,
@@ -150,6 +151,8 @@ class WorkspacePermissionDecisionRequest(BaseModel):
 class PendingWorkspacePermission:
     future: asyncio.Future[WritablePathDecision]
     path: Path
+    reason: str
+    tool_call_id: str | None = None
 
 
 @dataclass
@@ -167,6 +170,17 @@ class WorkspaceRun:
     @property
     def latest_event_index(self) -> int:
         return self.events[-1][0] if self.events else 0
+
+    def permission_requests(self) -> list[StoredPermissionRequest]:
+        return [
+            StoredPermissionRequest(
+                id=permission_id,
+                path=str(permission.path),
+                reason=permission.reason,
+                tool_call_id=permission.tool_call_id,
+            )
+            for permission_id, permission in self.pending_permissions.items()
+        ]
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -440,6 +454,9 @@ def create_app(
             if active_run and not active_run.is_done
             else None,
             "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers),
+            "permission_requests": active_run.permission_requests()
+            if active_run and not active_run.is_done
+            else [],
             "skills": discover_skills(cwd, store),
         }
         if telegram_bot_manager is not None:
@@ -663,6 +680,7 @@ def create_app(
                 store.upsert_message(assistant_message)
 
             try:
+                current_tool_id: str | None = None
 
                 async def request_writable_path(
                     path: Path, reason: str
@@ -672,7 +690,21 @@ def create_app(
                     run.pending_permissions[permission_id] = PendingWorkspacePermission(
                         future=future,
                         path=path,
+                        reason=reason,
+                        tool_call_id=current_tool_id,
                     )
+                    if current_tool_id and current_tool_id in assistant_tools:
+                        assistant_tools[current_tool_id] = (
+                            StoredToolItem.model_validate(
+                                {
+                                    **assistant_tools[current_tool_id].model_dump(
+                                        exclude_none=True
+                                    ),
+                                    "status": "waiting",
+                                }
+                            )
+                        )
+                        persist_assistant()
                     await append_run_event(
                         run,
                         "permission_request",
@@ -680,9 +712,13 @@ def create_app(
                             "id": permission_id,
                             "path": str(path),
                             "reason": reason,
+                            "tool_call_id": current_tool_id,
                         },
                     )
-                    return await future
+                    try:
+                        return await future
+                    finally:
+                        run.pending_permissions.pop(permission_id, None)
 
                 async def tool_runner(
                     name: str,
@@ -719,6 +755,7 @@ def create_app(
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
                         if isinstance(tool, dict) and isinstance(tool.get("id"), str):
+                            current_tool_id = tool["id"]
                             assistant_tools[tool["id"]] = StoredToolItem.model_validate(
                                 tool
                             )
@@ -726,6 +763,9 @@ def create_app(
                     if event.event in {"tool_done", "tool_error"}:
                         tool_id = event.data.get("id")
                         if isinstance(tool_id, str) and tool_id in assistant_tools:
+                            current_tool_id = (
+                                None if current_tool_id == tool_id else current_tool_id
+                            )
                             assistant_tools[tool_id] = StoredToolItem.model_validate(
                                 {
                                     **assistant_tools[tool_id].model_dump(

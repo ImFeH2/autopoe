@@ -102,7 +102,7 @@ type TestTool = {
   id: string;
   name: string;
   output?: string;
-  status?: "failed" | "running" | "success";
+  status?: "failed" | "running" | "success" | "waiting";
   title: string;
 };
 
@@ -162,6 +162,13 @@ type TestSkill = {
 type TestWritablePath = {
   created_at: number;
   path: string;
+};
+
+type TestPermissionRequest = {
+  id: string;
+  path: string;
+  reason: string;
+  tool_call_id?: string;
 };
 
 const controlledThinkingStreamResponse = (
@@ -2027,6 +2034,158 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Always allow" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+  });
+
+  it("marks the active tool as waiting when write access is needed", async () => {
+    const user = userEvent.setup();
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `event: start\ndata: ${JSON.stringify({ id: "message-assistant" })}\n\n`,
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            `event: tool_start\ndata: ${JSON.stringify({
+              tool: {
+                id: "tool-1",
+                name: "apply_patch",
+                status: "running",
+                title: "Editing files",
+              },
+            })}\n\n`,
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            `event: permission_request\ndata: ${JSON.stringify({
+              id: "permission-1",
+              path: "/workspace",
+              reason: "The edit needs to write this path.",
+              tool_call_id: "tool-1",
+            })}\n\n`,
+          ),
+        );
+      },
+    });
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return new Response(JSON.stringify({ run_id: "run-permission" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        input === "/api/workspace/runs/run-permission/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return new Response(stream, {
+          headers: { "Content-Type": "text/event-stream" },
+          status: 200,
+        });
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Edit files");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Editing files")).toBeInTheDocument();
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+    expect(screen.queryByText("Running")).not.toBeInTheDocument();
+    expect(await screen.findByText("Allow write access?")).toBeInTheDocument();
+  });
+
+  it("restores pending write access requests from loaded state", async () => {
+    const runningState = {
+      ...selectedProviderState(),
+      active_run_event_index: 4,
+      active_run_id: "run-permission",
+      messages: [
+        {
+          author: "user",
+          content: "Edit files",
+          id: "message-user",
+        },
+        {
+          author: "assistant",
+          content: "",
+          id: "message-assistant",
+          status: "running",
+          tools: [
+            {
+              id: "tool-1",
+              name: "apply_patch",
+              status: "waiting",
+              title: "Editing files",
+            },
+          ],
+        },
+      ],
+      permission_requests: [
+        {
+          id: "permission-1",
+          path: "/workspace",
+          reason: "The edit needs to write this path.",
+          tool_call_id: "tool-1",
+        },
+      ] satisfies TestPermissionRequest[],
+    };
+    mockInitialState(runningState);
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(runningState), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        input === "/api/workspace/runs/run-permission/stream?after=4" &&
+        init?.method === "GET"
+      ) {
+        return new Response(
+          new ReadableStream({
+            start() {},
+          }),
+          {
+            headers: { "Content-Type": "text/event-stream" },
+            status: 200,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Allow write access?")).toBeInTheDocument();
+    expect(screen.getByText("/workspace")).toBeInTheDocument();
+    expect(screen.getByText("Editing files")).toBeInTheDocument();
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
   });
 
   it("approves a path once from the workspace request", async () => {

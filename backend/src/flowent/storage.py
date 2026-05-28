@@ -75,6 +75,15 @@ class StoredWritablePath(BaseModel):
     path: str
 
 
+class StoredPermissionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    path: str
+    reason: str
+    tool_call_id: str | None = None
+
+
 class StoredProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -127,6 +136,7 @@ class StoredState(BaseModel):
     mcp_servers: list[StoredMcpServer]
     messages: list[StoredMessage]
     providers: list[StoredProvider]
+    permission_requests: list[StoredPermissionRequest] = Field(default_factory=list)
     settings: StoredSettings
     skills: list[StoredSkill]
     telegram_bot: StoredTelegramBot

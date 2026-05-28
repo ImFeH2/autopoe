@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 
 import httpx
@@ -1071,6 +1072,75 @@ async def test_workspace_state_exposes_active_run_for_reconnect(
     events = stream_events(stream_response.text)
     assert {"event": "delta", "data": '{"content": "First "}'} not in events
     assert {"event": "delta", "data": '{"content": "second."}'} in events
+
+
+@pytest.mark.anyio
+async def test_workspace_state_exposes_pending_permission_for_reconnect(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    work_dir = tmp_path / "work"
+    outside_dir = tmp_path / "outside"
+    work_dir.mkdir()
+    outside_dir.mkdir()
+    target = outside_dir / "notes.txt"
+    target.write_text("alpha\n")
+    patch = f"""*** Begin Patch
+*** Update File: {target}
+@@
+-alpha
++beta
+*** End Patch"""
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            if request["messages"][-1]["role"] == "user":
+                yield tool_call_chunk(
+                    "apply_patch",
+                    json.dumps({"patch": patch}),
+                )
+                return
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    app = create_app(
+        workdir=work_dir,
+        serve_frontend=False,
+        chat_completion=fake_completion,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Edit notes."},
+        )
+        run_id = response.json()["run_id"]
+
+        for _ in range(20):
+            state = (await client.get("/api/state")).json()
+            if state.get("permission_requests"):
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("Permission request was not exposed.")
+
+        request = state["permission_requests"][0]
+        await client.post(
+            "/api/workspace/permissions/approve",
+            json={"decision": "deny", "id": request["id"]},
+        )
+
+    assistant = state["messages"][-1]
+    assert state["active_run_id"] == run_id
+    assert request["path"] == str(outside_dir)
+    assert request["reason"] == "The edit needs to write this path."
+    assert request["tool_call_id"] == assistant["tools"][0]["id"]
+    assert assistant["tools"][0]["name"] == "apply_patch"
+    assert assistant["tools"][0]["status"] == "waiting"
 
 
 @pytest.mark.anyio

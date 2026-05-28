@@ -95,6 +95,13 @@ type ApiWritablePath = {
   path: string;
 };
 
+type ApiPermissionRequest = {
+  id: string;
+  path: string;
+  reason: string;
+  tool_call_id?: string | null;
+};
+
 type ApiMessage = Message;
 
 type ApiState = {
@@ -102,6 +109,7 @@ type ApiState = {
   active_run_id?: string | null;
   mcp_servers?: ApiMcpServer[];
   messages: ApiMessage[];
+  permission_requests?: ApiPermissionRequest[];
   providers: ApiProvider[];
   settings: {
     reasoning_effort?: ReasoningEffort;
@@ -179,6 +187,7 @@ type WorkspaceStreamEvent =
         id: string;
         path: string;
         reason: string;
+        tool_call_id?: string | null;
       };
       event: "permission_request";
     };
@@ -265,6 +274,15 @@ const telegramBotToApi = (telegramBot: TelegramBot): ApiTelegramBot => ({
 const writablePathFromApi = (writablePath: ApiWritablePath): WritablePath => ({
   createdAt: writablePath.created_at,
   path: writablePath.path,
+});
+
+const permissionRequestFromApi = (
+  request: ApiPermissionRequest,
+): PermissionRequest => ({
+  id: request.id,
+  path: request.path,
+  reason: request.reason,
+  toolCallId: request.tool_call_id,
 });
 
 const mcpCommandLine = (server: Pick<McpServer, "args" | "command">) =>
@@ -511,6 +529,9 @@ function App() {
     setReasoningEffort(state.settings.reasoning_effort ?? "default");
     setTelegramBot(telegramBotFromApi(state.telegram_bot));
     setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
+    setPermissionRequests(
+      (state.permission_requests ?? []).map(permissionRequestFromApi),
+    );
     activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
     activeRunIdRef.current = state.active_run_id ?? "";
     setActiveRunId(state.active_run_id ?? "");
@@ -1061,7 +1082,9 @@ function App() {
             handlers.onToolStart(streamEvent.data.tool);
           }
           if (streamEvent.event === "permission_request") {
-            handlers.onPermissionRequest(streamEvent.data);
+            handlers.onPermissionRequest(
+              permissionRequestFromApi(streamEvent.data),
+            );
           }
           if (
             streamEvent.event === "tool_done" ||
@@ -1233,6 +1256,22 @@ function App() {
           .filter((item) => item.type === "text")
           .map((item) => item.content)
           .join("");
+      const updateAssistantTool = (
+        toolId: string,
+        updater: (tool: ToolItem) => ToolItem,
+      ) => {
+        assistantTools = assistantTools.map((currentTool) =>
+          currentTool.id === toolId ? updater(currentTool) : currentTool,
+        );
+        assistantGroups = assistantGroups.map((group) => ({
+          ...group,
+          items: group.items.map((item) =>
+            item.type === "tool" && item.tool.id === toolId
+              ? { ...item, tool: updater(item.tool) }
+              : item,
+          ),
+        }));
+      };
 
       return {
         onDelta: (content) => {
@@ -1309,6 +1348,12 @@ function App() {
           activeRunEventIndexRef.current += 1;
           finishAssistantThinking();
           assistantIsStreamingText = false;
+          if (request.toolCallId) {
+            updateAssistantTool(request.toolCallId, (tool) => ({
+              ...tool,
+              status: "waiting",
+            }));
+          }
           setPermissionRequests((currentRequests) => [
             ...currentRequests.filter(
               (currentRequest) => currentRequest.id !== request.id,
@@ -1340,18 +1385,9 @@ function App() {
           finishAssistantThinking();
           assistantTextItemId = "";
           assistantIsStreamingText = false;
-          assistantTools = assistantTools.map((currentTool) =>
-            currentTool.id === tool.id
-              ? { ...currentTool, ...tool }
-              : currentTool,
-          );
-          assistantGroups = assistantGroups.map((group) => ({
-            ...group,
-            items: group.items.map((item) =>
-              item.type === "tool" && item.tool.id === tool.id
-                ? { ...item, tool: { ...item.tool, ...tool } }
-                : item,
-            ),
+          updateAssistantTool(tool.id, (currentTool) => ({
+            ...currentTool,
+            ...tool,
           }));
           updateAssistantMessage();
         },

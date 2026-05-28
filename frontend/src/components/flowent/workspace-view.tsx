@@ -9,6 +9,7 @@ import {
   Square,
   Terminal,
   Trash2,
+  TriangleAlert,
   X,
 } from "lucide-react";
 
@@ -556,11 +557,13 @@ function ThinkingProcessItem({
 function ToolProcessItem({ tool }: { tool: ToolItem }) {
   const [isOpen, setIsOpen] = useState(tool.status === "failed");
   const statusLabel =
-    tool.status === "running"
-      ? "Running"
-      : tool.status === "success"
-        ? "Done"
-        : "Failed";
+    tool.status === "waiting"
+      ? "Waiting"
+      : tool.status === "running"
+        ? "Running"
+        : tool.status === "success"
+          ? "Done"
+          : "Failed";
 
   useEffect(() => {
     if (tool.status === "failed") {
@@ -662,6 +665,7 @@ function ToolProcessIcon({ tool }: { tool: ToolItem }) {
     "size-3.5 shrink-0",
     tool.status === "failed" ? "text-red-300" : "text-white/80",
     tool.status === "running" ? "animate-pulse" : "",
+    tool.status === "waiting" ? "text-amber-300" : "",
   );
 
   if (tool.status === "success") {
@@ -669,6 +673,9 @@ function ToolProcessIcon({ tool }: { tool: ToolItem }) {
   }
   if (tool.status === "failed") {
     return <X aria-hidden="true" className={className} />;
+  }
+  if (tool.status === "waiting") {
+    return <TriangleAlert aria-hidden="true" className={className} />;
   }
   if (tool.name === "web_search" || tool.name === "grep_files") {
     return <Search aria-hidden="true" className={className} />;

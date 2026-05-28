@@ -110,9 +110,10 @@ export type PermissionRequest = {
   id: string;
   path: string;
   reason: string;
+  toolCallId?: string | null;
 };
 
-export type ToolItemStatus = "failed" | "running" | "success";
+export type ToolItemStatus = "failed" | "running" | "success" | "waiting";
 
 export type ToolItem = {
   arguments?: Record<string, unknown>;
