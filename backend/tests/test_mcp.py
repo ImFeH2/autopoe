@@ -411,7 +411,10 @@ def test_disabled_mcp_server_does_not_connect_or_expose_tools(
     assert response.json()["status"] == "disabled"
 
 
-def test_enabled_mcp_server_connects_and_lists_tools(tmp_path, monkeypatch) -> None:
+@pytest.mark.anyio
+async def test_enabled_mcp_server_save_returns_starting_and_connects_in_background(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     transport = FakeMcpTransport()
     transport.tools_by_server["mcp-files"] = [
@@ -426,11 +429,20 @@ def test_enabled_mcp_server_connects_and_lists_tools(tmp_path, monkeypatch) -> N
     response = client.put("/api/mcp/servers", json=command_server_payload())
 
     assert response.status_code == 200
-    assert response.json()["status"] == "ready"
-    assert response.json()["tools"][0]["name"] == "read_file"
+    assert response.json()["status"] == "starting"
+    assert response.json()["tools"] == []
+    manager = client.app.state.mcp_manager
+    connected = await wait_for_status(
+        manager,
+        StoredMcpServer.model_validate(response.json()),
+        "ready",
+    )
+    assert connected.status == "ready"
+    assert connected.tools[0].name == "read_file"
 
 
-def test_mcp_connection_error_is_reported_in_state(tmp_path, monkeypatch) -> None:
+@pytest.mark.anyio
+async def test_mcp_connection_error_is_reported_in_state(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     transport = FakeMcpTransport()
     transport.errors["mcp-files"] = "Command failed"
@@ -439,11 +451,19 @@ def test_mcp_connection_error_is_reported_in_state(tmp_path, monkeypatch) -> Non
     response = client.put("/api/mcp/servers", json=command_server_payload())
 
     assert response.status_code == 200
-    assert response.json()["status"] == "error"
-    assert response.json()["error"] == "Command failed"
+    assert response.json()["status"] == "starting"
+    manager = client.app.state.mcp_manager
+    errored = await wait_for_status(
+        manager,
+        StoredMcpServer.model_validate(response.json()),
+        "error",
+    )
+    assert errored.status == "error"
+    assert errored.error == "Command failed"
 
 
-def test_mcp_server_can_be_reconnected(tmp_path, monkeypatch) -> None:
+@pytest.mark.anyio
+async def test_mcp_server_can_be_reconnected(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     transport = FakeMcpTransport()
     transport.tools_by_server["mcp-files"] = [
@@ -451,6 +471,13 @@ def test_mcp_server_can_be_reconnected(tmp_path, monkeypatch) -> None:
     ]
     client = TestClient(create_app(serve_frontend=False, mcp_transport=transport))
     client.put("/api/mcp/servers", json=command_server_payload())
+
+    connected = await wait_for_status(
+        client.app.state.mcp_manager,
+        StoredMcpServer.model_validate(command_server_payload()),
+        "ready",
+    )
+    assert connected.status == "ready"
     transport.tools_by_server["mcp-files"] = [
         {"inputSchema": {"type": "object"}, "name": "read_file"},
         {"inputSchema": {"type": "object"}, "name": "write_file"},
@@ -552,7 +579,8 @@ def test_mcp_server_delete_removes_saved_server_when_disconnect_fails(
     assert transport.disconnect_calls == ["mcp-files"]
 
 
-def test_ready_mcp_tools_are_included_in_workspace_request(
+@pytest.mark.anyio
+async def test_ready_mcp_tools_are_included_in_workspace_request(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -583,6 +611,12 @@ def test_ready_mcp_tools_are_included_in_workspace_request(
     )
     configure_provider(client)
     client.put("/api/mcp/servers", json=command_server_payload())
+    connected = await wait_for_status(
+        client.app.state.mcp_manager,
+        StoredMcpServer.model_validate(command_server_payload()),
+        "ready",
+    )
+    assert connected.status == "ready"
 
     response = client.post("/api/workspace/respond", json={"content": "Read file"})
 
@@ -595,7 +629,8 @@ def test_ready_mcp_tools_are_included_in_workspace_request(
     assert mcp_tool_name("mcp-files", "read_file") in tool_names
 
 
-def test_mcp_tool_call_is_forwarded_and_result_returns_to_agent(
+@pytest.mark.anyio
+async def test_mcp_tool_call_is_forwarded_and_result_returns_to_agent(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -632,6 +667,12 @@ def test_mcp_tool_call_is_forwarded_and_result_returns_to_agent(
     )
     configure_provider(client)
     client.put("/api/mcp/servers", json=command_server_payload())
+    connected = await wait_for_status(
+        client.app.state.mcp_manager,
+        StoredMcpServer.model_validate(command_server_payload()),
+        "ready",
+    )
+    assert connected.status == "ready"
 
     response = client.post("/api/workspace/respond", json={"content": "Use MCP"})
 
@@ -651,7 +692,10 @@ def test_mcp_tool_call_is_forwarded_and_result_returns_to_agent(
     assert events[3]["data"]["data"]["tool"] == "read_file"
 
 
-def test_mcp_tool_call_failure_is_reported_in_workspace(tmp_path, monkeypatch) -> None:
+@pytest.mark.anyio
+async def test_mcp_tool_call_failure_is_reported_in_workspace(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     captured_requests: list[dict[str, object]] = []
     transport = FakeMcpTransport()
@@ -686,6 +730,12 @@ def test_mcp_tool_call_failure_is_reported_in_workspace(tmp_path, monkeypatch) -
     )
     configure_provider(client)
     client.put("/api/mcp/servers", json=command_server_payload())
+    connected = await wait_for_status(
+        client.app.state.mcp_manager,
+        StoredMcpServer.model_validate(command_server_payload()),
+        "ready",
+    )
+    assert connected.status == "ready"
 
     response = client.post("/api/workspace/respond", json={"content": "Use MCP"})
 
@@ -720,3 +770,19 @@ async def test_mcp_server_reload_reconnects_saved_enabled_servers(
     assert connected.status == "ready"
     assert connected.tools[0].name == "read_file"
     assert transport.connect_calls[0].id == "mcp-files"
+
+
+@pytest.mark.anyio
+async def test_enabled_mcp_server_save_does_not_block_response(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    transport = FakeMcpTransport()
+    transport.sleep_on_connect.add("mcp-files")
+    client = TestClient(create_app(serve_frontend=False, mcp_transport=transport))
+
+    response = client.put("/api/mcp/servers", json=command_server_payload())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "starting"
+    assert response.json()["tools"] == []

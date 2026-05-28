@@ -3334,6 +3334,73 @@ describe("App", () => {
     await expectDocumentText("read_file");
   });
 
+  it("adds a newly saved MCP server immediately while it connects", async () => {
+    const user = userEvent.setup();
+    let stateRequestCount = 0;
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        stateRequestCount += 1;
+        return new Response(
+          JSON.stringify({
+            ...selectedProviderState(),
+            mcp_servers:
+              stateRequestCount > 1
+                ? [
+                    commandMcpServer({
+                      status: stateRequestCount > 2 ? "ready" : "starting",
+                      tools:
+                        stateRequestCount > 2 ? commandMcpServer().tools : [],
+                    }),
+                  ]
+                : [],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      if (input === "/api/mcp/servers" && init?.method === "PUT") {
+        const request = JSON.parse(String(init.body)) as TestMcpServer;
+        return new Response(
+          JSON.stringify({
+            ...request,
+            status: "starting",
+            tools: [],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ version: "test" }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.type(screen.getByLabelText("Name"), "Files");
+    await user.type(
+      screen.getByLabelText("Command line"),
+      "npx -y @modelcontextprotocol/server-filesystem /project",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Files" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Starting")).toBeInTheDocument();
+
+    await expectDocumentText("read_file");
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+  });
+
   it("saves a URL MCP server", async () => {
     const user = userEvent.setup();
     mockInitialState(selectedProviderState());

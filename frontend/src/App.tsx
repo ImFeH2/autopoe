@@ -507,6 +507,10 @@ function App() {
     () => skills.find((skill) => skill.id === activeSkillId) ?? skills[0],
     [activeSkillId, skills],
   );
+  const hasStartingMcpServer = useMemo(
+    () => mcpServers.some((server) => server.status === "starting"),
+    [mcpServers],
+  );
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -579,6 +583,56 @@ function App() {
       isMounted = false;
     };
   }, [refreshAppState]);
+
+  useEffect(() => {
+    if (!hasStartingMcpServer) {
+      return;
+    }
+
+    let isMounted = true;
+    const refreshMcpServers = async () => {
+      try {
+        const response = await fetch("/api/state");
+        if (!response.ok || !isMounted) {
+          return;
+        }
+        const state = (await response.json()) as ApiState;
+        if (!isMounted) {
+          return;
+        }
+        const loadedMcpServers = (state.mcp_servers ?? []).map(
+          mcpServerFromApi,
+        );
+        setMcpServers(loadedMcpServers);
+        setMcpDraft((currentDraft) => {
+          const refreshedServer = loadedMcpServers.find(
+            (server) => server.id === currentDraft.id,
+          );
+          if (!refreshedServer) {
+            return currentDraft;
+          }
+          return {
+            ...currentDraft,
+            error: refreshedServer.error,
+            status: refreshedServer.status,
+            tools: refreshedServer.tools,
+          };
+        });
+      } catch {
+        // Keep showing the optimistic status until the next poll succeeds.
+      }
+    };
+
+    void refreshMcpServers();
+    const intervalId = window.setInterval(() => {
+      void refreshMcpServers();
+    }, 1000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [hasStartingMcpServer]);
 
   const loadProviderEditor = (provider: Provider) => {
     setProviderEditorId(provider.id);

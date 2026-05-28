@@ -305,7 +305,7 @@ class McpManager:
         if not server.enabled:
             await self.disconnect_server(server.id)
             return self.server_with_status(server)
-        await self.connect_server(server)
+        self.schedule_connect_server(server)
         return self.server_with_status(server)
 
     def schedule_connect_server(self, server: StoredMcpServer) -> None:
@@ -315,6 +315,7 @@ class McpManager:
         self._server_names[server.id] = server.name
         self._status_by_server[server.id] = "starting"
         self._error_by_server[server.id] = ""
+        self._tools_by_server[server.id] = []
         connect_task = asyncio.create_task(self.connect_server(server))
         self._connect_tasks[server.id] = connect_task
         connect_task.add_done_callback(self._connect_task_callback(server.id))
@@ -386,6 +387,7 @@ class McpManager:
         self._server_names[server.id] = server.name
         self._status_by_server[server.id] = "starting"
         self._error_by_server[server.id] = ""
+        self._tools_by_server[server.id] = []
         try:
             raw_tools = await asyncio.wait_for(
                 self.transport.connect(server),
