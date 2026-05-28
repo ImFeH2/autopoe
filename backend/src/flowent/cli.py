@@ -20,8 +20,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--host",
         "--hostname",
-        default=os.environ.get("HOSTNAME") or "0.0.0.0",
-        help="Bind host (default: $HOSTNAME or 0.0.0.0)",
+        default="127.0.0.1",
+        help="Bind host (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--port",

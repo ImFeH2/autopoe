@@ -33,7 +33,7 @@
   "scripts": {
     "dev": "concurrently -k -n frontend,backend -c cyan,magenta \"pnpm dev:frontend\" \"pnpm dev:backend\"",
     "dev:frontend": "pnpm --dir frontend dev",
-    "dev:backend": "uv run --project backend uvicorn flowent.main:app --reload --host 0.0.0.0 --port 6874",
+    "dev:backend": "uv run --project backend uvicorn flowent.main:app --reload --host 127.0.0.1 --port 6874",
     "build": "pnpm build:frontend && pnpm build:backend",
     "build:frontend": "pnpm --dir frontend build",
     "build:backend": "node scripts/prepare-python-package.mjs && uv build --project backend",
