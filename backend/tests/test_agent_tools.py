@@ -1,5 +1,6 @@
 import asyncio
 import json
+import subprocess
 import time
 from pathlib import Path
 
@@ -224,6 +225,132 @@ def test_shell_command_has_network_by_default(tmp_path) -> None:
 
     assert result.ok
     assert "network-ready" in result.content
+
+
+def test_shell_command_environment_omits_development_variables(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("NODE_ENV", "production")
+    monkeypatch.setenv("VIRTUAL_ENV", "/tmp/flowent-venv")
+    monkeypatch.setenv("PYTHONPATH", "/tmp/flowent-pythonpath")
+    runner = SandboxRunner(cwd=tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "build_command",
+        lambda command: SandboxCommand(command, seccomp_available=False),
+    )
+
+    result = runner.run(
+        [
+            "/bin/sh",
+            "-c",
+            'printf \'%s|%s|%s\' "${NODE_ENV-unset}" "${VIRTUAL_ENV-unset}" "${PYTHONPATH-unset}"',
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == "unset|unset|unset"
+
+
+def test_shell_command_environment_omits_sensitive_variables(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-local")
+    monkeypatch.setenv("SECRET_TOKEN", "secret")
+    monkeypatch.setenv("NPM_TOKEN", "npm")
+    runner = SandboxRunner(cwd=tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "build_command",
+        lambda command: SandboxCommand(command, seccomp_available=False),
+    )
+
+    result = runner.run(
+        [
+            "/bin/sh",
+            "-c",
+            'printf \'%s|%s|%s\' "${OPENAI_API_KEY-unset}" "${SECRET_TOKEN-unset}" "${NPM_TOKEN-unset}"',
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == "unset|unset|unset"
+
+
+def test_shell_command_environment_keeps_core_variables(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin:/bin")
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setenv("USER", "flowent")
+    runner = SandboxRunner(cwd=tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "build_command",
+        lambda command: SandboxCommand(command, seccomp_available=False),
+    )
+
+    result = runner.run(
+        [
+            "/bin/sh",
+            "-c",
+            'printf \'%s|%s|%s|%s\' "$HOME" "$PATH" "$SHELL" "$USER"',
+        ]
+    )
+
+    assert result.exit_code == 0
+    assert (
+        result.stdout
+        == f"{tmp_path / 'home'}|/usr/local/bin:/usr/bin:/bin|/bin/sh|flowent"
+    )
+
+
+def test_shell_command_environment_uses_default_path_when_missing(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("PATH", raising=False)
+    runner = SandboxRunner(cwd=tmp_path)
+    captured_env: dict[str, str] = {}
+
+    def fake_run(*args, **kwargs):
+        captured_env.update(kwargs["env"])
+        return subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout="", stderr=""
+        )
+
+    monkeypatch.setattr(
+        runner,
+        "build_command",
+        lambda command: SandboxCommand(command, seccomp_available=False),
+    )
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = runner.run(["/bin/sh", "-c", "true"])
+
+    assert result.exit_code == 0
+    assert (
+        captured_env["PATH"]
+        == "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    )
+
+
+def test_shell_command_environment_accepts_explicit_overrides(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("FLOWENT_TOOL_VAR", raising=False)
+    runner = SandboxRunner(cwd=tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "build_command",
+        lambda command: SandboxCommand(command, seccomp_available=False),
+    )
+
+    result = runner.run(
+        ["/bin/sh", "-c", "printf '%s' \"$FLOWENT_TOOL_VAR\""],
+        env={"FLOWENT_TOOL_VAR": "explicit"},
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == "explicit"
 
 
 @pytest.mark.anyio

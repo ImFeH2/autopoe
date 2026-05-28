@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,8 +40,41 @@ SANDBOX_INSTALL_HINT = (
     "Arch: sudo pacman -S bubblewrap."
 )
 
+DEFAULT_SHELL_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+CORE_SHELL_ENVIRONMENT_NAMES = {
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "USER",
+    "USERNAME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+}
+
 SCMP_ACT_ALLOW = 0x7FFF0000
 SCMP_ACT_ERRNO = 0x00050000
+
+
+def is_core_shell_environment_variable(name: str) -> bool:
+    return name in CORE_SHELL_ENVIRONMENT_NAMES or name.startswith("LC_")
+
+
+def build_shell_environment(
+    overrides: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if is_core_shell_environment_variable(name)
+    }
+    if not environment.get("PATH"):
+        environment["PATH"] = DEFAULT_SHELL_PATH
+    if overrides is not None:
+        environment.update(overrides)
+    return environment
 
 
 def sandbox_binary() -> str | None:
@@ -209,9 +243,7 @@ class SandboxRunner:
         if sandbox_command.seccomp_file is not None:
             pass_fds = (sandbox_command.seccomp_file.fileno(),)
 
-        process_env = os.environ.copy()
-        if env is not None:
-            process_env.update(env)
+        process_env = build_shell_environment(env)
         try:
             completed = subprocess.run(
                 sandbox_command.args,
@@ -255,9 +287,7 @@ class SandboxRunner:
         if sandbox_command.seccomp_file is not None:
             pass_fds = (sandbox_command.seccomp_file.fileno(),)
 
-        process_env = os.environ.copy()
-        if env is not None:
-            process_env.update(env)
+        process_env = build_shell_environment(env)
         process = await asyncio.create_subprocess_exec(
             *sandbox_command.args,
             cwd=self.cwd,
