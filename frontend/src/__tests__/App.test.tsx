@@ -97,8 +97,8 @@ const deferred = () => {
 };
 
 type TestTool = {
-  arguments?: Record<string, unknown>;
-  data?: Record<string, unknown>;
+  arguments?: Record<string, unknown> | null;
+  data?: Record<string, unknown> | null;
   id: string;
   name: string;
   output?: string;
@@ -3967,6 +3967,61 @@ describe("App", () => {
     expect(screen.getByText("ARGS")).toBeInTheDocument();
     expect(screen.getByText(/"path": "notes\.txt"/)).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("The notes are ready.");
+  });
+
+  it("opens a running tool with null payloads without crashing", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTimelineResponse(
+      {
+        arguments: null,
+        data: null,
+        id: "tool-1",
+        name: "shell_command",
+        title: "Running npm test",
+      },
+      "Tests are ready.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Run tests");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Running npm test/,
+    });
+    expect(screen.getByText("Running")).toBeInTheDocument();
+
+    await user.click(toolDetails);
+
+    expect(toolDetails).toHaveAttribute("aria-expanded", "true");
+    expect(document.body).not.toHaveTextContent("ARGS");
+    expect(document.body).not.toHaveTextContent("RESULT");
+    expect(document.body).not.toHaveTextContent("Tests are ready.");
   });
 
   it("updates the running tool step when the tool completes", async () => {

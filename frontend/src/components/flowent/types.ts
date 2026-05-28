@@ -116,9 +116,9 @@ export type PermissionRequest = {
 export type ToolItemStatus = "failed" | "running" | "success" | "waiting";
 
 export type ToolItem = {
-  arguments?: Record<string, unknown>;
+  arguments?: Record<string, unknown> | null;
   content?: string;
-  data?: Record<string, unknown>;
+  data?: Record<string, unknown> | null;
   id: string;
   name: string;
   status: ToolItemStatus;

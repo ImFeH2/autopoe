@@ -597,9 +597,8 @@ function ToolProcessItem({ tool }: { tool: ToolItem }) {
 }
 
 function ToolProcessDetails({ tool }: { tool: ToolItem }) {
-  const hasArguments =
-    tool.arguments !== undefined && Object.keys(tool.arguments).length > 0;
-  const hasData = tool.data !== undefined && Object.keys(tool.data).length > 0;
+  const hasArguments = hasToolObjectPayload(tool.arguments);
+  const hasData = hasToolObjectPayload(tool.data);
   const hasContent = tool.content !== undefined;
   const hasResult = hasContent || hasData;
 
@@ -654,10 +653,16 @@ function formatToolResult(tool: ToolItem) {
   if (tool.content !== undefined) {
     result.content = tool.content;
   }
-  if (tool.data !== undefined && Object.keys(tool.data).length > 0) {
+  if (hasToolObjectPayload(tool.data)) {
     result.data = tool.data;
   }
   return formatToolValue(result);
+}
+
+function hasToolObjectPayload(
+  value: Record<string, unknown> | null | undefined,
+) {
+  return value != null && Object.keys(value).length > 0;
 }
 
 function ToolProcessIcon({ tool }: { tool: ToolItem }) {
