@@ -328,7 +328,7 @@ def create_app(
         request_messages = [
             message.model_dump()
             for message in [
-                *runtime_context_messages(cwd),
+                *runtime_context_messages(cwd, state.settings.agent_prompt),
                 *skill_messages,
                 *chat_messages,
             ]
@@ -622,7 +622,7 @@ def create_app(
         request_messages = [
             message.model_dump()
             for message in [
-                *runtime_context_messages(cwd),
+                *runtime_context_messages(cwd, state.settings.agent_prompt),
                 *explicit_skill_messages(cwd, store, content),
                 *chat_messages,
             ]
@@ -841,7 +841,7 @@ def create_app(
         connection = selected_connection(state)
         checkpoint = store.read_active_compaction_checkpoint()
         model_history = [
-            *runtime_context_messages(cwd),
+            *runtime_context_messages(cwd, state.settings.agent_prompt),
             *workspace_chat_messages(
                 state.messages,
                 store.read_compacted_context(),

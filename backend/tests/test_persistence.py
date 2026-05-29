@@ -89,6 +89,7 @@ def test_app_state_persists_settings_and_workspace_messages(
     settings_response = client.put(
         "/api/settings",
         json={
+            "agent_prompt": "Respond with careful implementation plans.",
             "reasoning_effort": "xhigh",
             "selected_model": "claude-sonnet-4-5",
             "selected_provider_id": "provider-anthropic",
@@ -123,6 +124,7 @@ def test_app_state_persists_settings_and_workspace_messages(
     state = restarted_client.get("/api/state").json()
 
     assert state["settings"] == {
+        "agent_prompt": "Respond with careful implementation plans.",
         "reasoning_effort": "xhigh",
         "selected_model": "claude-sonnet-4-5",
         "selected_provider_id": "provider-anthropic",
@@ -169,3 +171,15 @@ def test_app_state_defaults_reasoning_effort_for_existing_settings(
 
     assert response.status_code == 200
     assert response.json()["settings"]["reasoning_effort"] == "default"
+
+
+def test_app_state_defaults_agent_prompt_for_existing_settings(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.get("/api/state")
+
+    assert response.status_code == 200
+    assert response.json()["settings"].get("agent_prompt", "") == ""

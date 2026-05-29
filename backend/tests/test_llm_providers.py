@@ -8,6 +8,7 @@ from flowent.llm import (
     build_litellm_request,
     chunk_delta_reasoning,
     complete_chat,
+    normalize_system_messages,
     stream_chat,
 )
 
@@ -169,3 +170,31 @@ async def test_stream_chat_uses_litellm_streaming() -> None:
     assert captured_request["stream"] is True
     assert captured_request["model"] == "openai/gpt-5.1"
     assert chunks == ["Here is ", "the checklist."]
+
+
+def test_normalize_system_messages_keeps_multiple_system_messages_for_openai() -> None:
+    messages = [
+        {"role": "system", "content": "Base prompt."},
+        {"role": "system", "content": "Configured prompt."},
+        {"role": "user", "content": "Hello."},
+    ]
+
+    assert normalize_system_messages(messages, ProviderFormat.OPENAI) == messages
+
+
+def test_normalize_system_messages_converts_additional_system_messages_for_anthropic() -> (
+    None
+):
+    messages = [
+        {"role": "system", "content": "Base prompt."},
+        {"role": "system", "content": "Configured prompt."},
+        {"role": "system", "content": "Project prompt."},
+        {"role": "user", "content": "Hello."},
+    ]
+
+    assert normalize_system_messages(messages, ProviderFormat.ANTHROPIC) == [
+        {"role": "system", "content": "Base prompt."},
+        {"role": "user", "content": "Configured prompt."},
+        {"role": "user", "content": "Project prompt."},
+        {"role": "user", "content": "Hello."},
+    ]

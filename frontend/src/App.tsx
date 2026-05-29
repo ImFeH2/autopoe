@@ -21,6 +21,7 @@ import type {
   Message,
   Provider,
   ReasoningEffort,
+  RuntimeSettings,
   Skill,
   TelegramBot,
   TelegramSession,
@@ -102,6 +103,7 @@ type ApiState = {
   messages: ApiMessage[];
   providers: ApiProvider[];
   settings: {
+    agent_prompt?: string;
     reasoning_effort?: ReasoningEffort;
     selected_model: string;
     selected_provider_id: string;
@@ -424,6 +426,7 @@ const assistantGroupsFromMessage = (
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
+  const [agentPrompt, setAgentPrompt] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [reasoningEffort, setReasoningEffort] =
@@ -496,6 +499,7 @@ function App() {
     }
     setSkills(state.skills ?? []);
     setActiveSkillId((state.skills ?? [])[0]?.id ?? "");
+    setAgentPrompt(state.settings.agent_prompt ?? "");
     setSelectedProviderId(state.settings.selected_provider_id);
     setSelectedModel(state.settings.selected_model);
     setReasoningEffort(state.settings.reasoning_effort ?? "default");
@@ -718,16 +722,13 @@ function App() {
     setFetchError("");
   };
 
-  const persistSettings = async (
-    providerId: string,
-    model: string,
-    nextReasoningEffort = reasoningEffort,
-  ) => {
+  const persistSettings = async (settings: RuntimeSettings) => {
     await fetch("/api/settings", {
       body: JSON.stringify({
-        reasoning_effort: nextReasoningEffort,
-        selected_model: model,
-        selected_provider_id: providerId,
+        agent_prompt: settings.agentPrompt,
+        reasoning_effort: settings.reasoningEffort,
+        selected_model: settings.selectedModel,
+        selected_provider_id: settings.selectedProviderId,
       }),
       headers: { "Content-Type": "application/json" },
       method: "PUT",
@@ -739,23 +740,51 @@ function App() {
     if (!nextProvider) {
       setSelectedProviderId("");
       setSelectedModel("");
-      void persistSettings("", "");
+      void persistSettings({
+        agentPrompt,
+        reasoningEffort,
+        selectedModel: "",
+        selectedProviderId: "",
+      });
       return;
     }
 
     setSelectedProviderId(nextProvider.id);
     setSelectedModel("");
-    void persistSettings(nextProvider.id, "");
+    void persistSettings({
+      agentPrompt,
+      reasoningEffort,
+      selectedModel: "",
+      selectedProviderId: nextProvider.id,
+    });
   };
 
   const handleActiveModelChange = (value: string) => {
     setSelectedModel(value);
-    void persistSettings(selectedProviderId, value);
+    void persistSettings({
+      agentPrompt,
+      reasoningEffort,
+      selectedModel: value,
+      selectedProviderId,
+    });
   };
 
   const handleReasoningEffortChange = (value: ReasoningEffort) => {
     setReasoningEffort(value);
-    void persistSettings(selectedProviderId, selectedModel, value);
+    void persistSettings({
+      agentPrompt,
+      reasoningEffort: value,
+      selectedModel,
+      selectedProviderId,
+    });
+  };
+
+  const saveRuntimeSettings = (settings: RuntimeSettings) => {
+    setAgentPrompt(settings.agentPrompt);
+    setReasoningEffort(settings.reasoningEffort);
+    setSelectedModel(settings.selectedModel);
+    setSelectedProviderId(settings.selectedProviderId);
+    void persistSettings(settings);
   };
 
   const fetchProviderModels = async () => {
@@ -810,7 +839,12 @@ function App() {
     if (!selectedProviderId) {
       setSelectedProviderId(savedProvider.id);
       setSelectedModel("");
-      void persistSettings(savedProvider.id, "");
+      void persistSettings({
+        agentPrompt,
+        reasoningEffort,
+        selectedModel: "",
+        selectedProviderId: savedProvider.id,
+      });
     }
 
     await fetch("/api/providers", {
@@ -1781,11 +1815,13 @@ function App() {
       </TabsContent>
       <TabsContent value="settings" className={viewPanelClassName}>
         <SettingsView
+          agentPrompt={agentPrompt}
           appVersion={appVersion}
           modelOptions={activeProvider?.models ?? []}
           onModelChange={handleActiveModelChange}
           onProviderChange={handleActiveProviderChange}
           onReasoningEffortChange={handleReasoningEffortChange}
+          onRuntimeSettingsSave={saveRuntimeSettings}
           providers={providers}
           reasoningEffort={reasoningEffort}
           selectedModel={selectedModel}

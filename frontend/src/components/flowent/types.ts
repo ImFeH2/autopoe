@@ -159,3 +159,10 @@ export type WorkspaceCommand = {
   label: string;
   name: string;
 };
+
+export type RuntimeSettings = {
+  agentPrompt: string;
+  reasoningEffort: ReasoningEffort;
+  selectedModel: string;
+  selectedProviderId: string;
+};

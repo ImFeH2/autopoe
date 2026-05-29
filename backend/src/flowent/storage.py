@@ -89,6 +89,7 @@ class StoredProvider(BaseModel):
 class StoredSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    agent_prompt: str = Field(default="", exclude_if=lambda value: value == "")
     reasoning_effort: ReasoningEffort = ReasoningEffort.DEFAULT
     selected_model: str
     selected_provider_id: str
@@ -186,7 +187,7 @@ class StateStore:
             ]
             settings_row = connection.execute(
                 """
-                SELECT selected_provider_id, selected_model, reasoning_effort
+                SELECT selected_provider_id, selected_model, reasoning_effort, agent_prompt
                 FROM settings
                 WHERE id = 1
                 """
@@ -217,6 +218,7 @@ class StateStore:
             messages=messages,
             providers=providers,
             settings=StoredSettings(
+                agent_prompt=settings_row["agent_prompt"] if settings_row else "",
                 reasoning_effort=settings_row["reasoning_effort"]
                 if settings_row
                 else ReasoningEffort.DEFAULT,
@@ -517,19 +519,22 @@ class StateStore:
                     id,
                     selected_provider_id,
                     selected_model,
-                    reasoning_effort
+                    reasoning_effort,
+                    agent_prompt
                 )
-                VALUES (1, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     selected_provider_id = excluded.selected_provider_id,
                     selected_model = excluded.selected_model,
                     reasoning_effort = excluded.reasoning_effort,
+                    agent_prompt = excluded.agent_prompt,
                     updated_at = unixepoch()
                 """,
                 (
                     settings.selected_provider_id,
                     settings.selected_model,
                     settings.reasoning_effort.value,
+                    settings.agent_prompt,
                 ),
             )
         return settings
@@ -915,6 +920,7 @@ class StateStore:
                 selected_provider_id TEXT NOT NULL DEFAULT '',
                 selected_model TEXT NOT NULL DEFAULT '',
                 reasoning_effort TEXT NOT NULL DEFAULT 'default',
+                agent_prompt TEXT NOT NULL DEFAULT '',
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
@@ -995,6 +1001,10 @@ class StateStore:
             connection.execute(
                 "ALTER TABLE settings "
                 "ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'default'"
+            )
+        if "agent_prompt" not in settings_columns:
+            connection.execute(
+                "ALTER TABLE settings ADD COLUMN agent_prompt TEXT NOT NULL DEFAULT ''"
             )
         workspace_context_columns = {
             row["name"]

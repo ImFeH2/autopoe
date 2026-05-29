@@ -119,6 +119,21 @@ def list_provider_models(
     return unique_model_names(provider, models)
 
 
+def normalize_system_messages(
+    messages: Sequence[Mapping[str, Any]],
+    provider: ProviderFormat,
+) -> list[dict[str, Any]]:
+    normalized_messages = [dict(message) for message in messages]
+    if provider in {ProviderFormat.ANTHROPIC, ProviderFormat.GEMINI}:
+        return [
+            {**message, "role": "user"}
+            if message.get("role") == "system" and index > 0
+            else message
+            for index, message in enumerate(normalized_messages)
+        ]
+    return normalized_messages
+
+
 def build_litellm_request(
     connection: ProviderConnection,
     messages: Sequence[ChatMessage | Mapping[str, Any]],
@@ -126,10 +141,13 @@ def build_litellm_request(
     stream: bool = False,
     tools: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    request_messages = [
-        message.model_dump() if isinstance(message, ChatMessage) else dict(message)
-        for message in messages
-    ]
+    request_messages = normalize_system_messages(
+        [
+            message.model_dump() if isinstance(message, ChatMessage) else dict(message)
+            for message in messages
+        ],
+        connection.provider,
+    )
     request: dict[str, Any] = {
         "api_key": connection.secret_reference,
         "messages": request_messages,

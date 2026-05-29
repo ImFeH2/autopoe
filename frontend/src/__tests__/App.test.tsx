@@ -3632,7 +3632,44 @@ describe("App", () => {
       "/api/settings",
       expect.objectContaining({
         body: JSON.stringify({
+          agent_prompt: "",
           reasoning_effort: "xhigh",
+          selected_model: "gpt-5.1",
+          selected_provider_id: "provider-openai",
+        }),
+        method: "PUT",
+      }),
+    );
+  });
+
+  it("loads and saves the configured Agent prompt from Settings", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      settings: {
+        ...selectedProviderState().settings,
+        agent_prompt: "Prefer careful implementation plans.",
+      },
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+    const agentPrompt = screen.getByRole("textbox", {
+      name: "Agent prompt",
+    });
+
+    expect(agentPrompt).toHaveValue("Prefer careful implementation plans.");
+
+    await user.clear(agentPrompt);
+    await user.type(agentPrompt, "Always inspect files before editing.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({
+        body: JSON.stringify({
+          agent_prompt: "Always inspect files before editing.",
+          reasoning_effort: "default",
           selected_model: "gpt-5.1",
           selected_provider_id: "provider-openai",
         }),

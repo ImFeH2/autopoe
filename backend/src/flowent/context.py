@@ -118,10 +118,28 @@ def environment_context_message(cwd: Path) -> ChatMessage:
     )
 
 
-def runtime_context_messages(cwd: Path) -> list[ChatMessage]:
+def runtime_context_messages(cwd: Path, agent_prompt: str = "") -> list[ChatMessage]:
     messages: list[ChatMessage] = []
+    configured_message = configured_agent_prompt_message(agent_prompt)
+    if configured_message is not None:
+        messages.append(configured_message)
     project_message = project_instructions_message(cwd)
     if project_message is not None:
         messages.append(project_message)
     messages.append(environment_context_message(cwd))
     return messages
+
+
+def configured_agent_prompt_message(prompt: str) -> ChatMessage | None:
+    prompt = prompt.strip()
+    if not prompt:
+        return None
+    return ChatMessage(
+        role="system",
+        content=(
+            "# Flowent configured agent prompt\n\n"
+            "These instructions were configured in the Flowent interface. "
+            "Apply them before any AGENTS.md project instructions.\n\n"
+            f"<INSTRUCTIONS>\n{prompt}\n</INSTRUCTIONS>"
+        ),
+    )

@@ -14,6 +14,7 @@ from flowent.sandbox import CommandResult, SandboxRunner
 def configure_provider(
     client,
     *,
+    agent_prompt: str = "",
     base_url: str = "",
     model: str = "gpt-5.1",
     name: str = "OpenAI",
@@ -35,6 +36,7 @@ def configure_provider(
     client.put(
         "/api/settings",
         json={
+            "agent_prompt": agent_prompt,
             "reasoning_effort": reasoning_effort,
             "selected_model": model,
             "selected_provider_id": provider_id,
@@ -45,6 +47,7 @@ def configure_provider(
 async def configure_provider_async(
     client: httpx.AsyncClient,
     *,
+    agent_prompt: str = "",
     base_url: str = "",
     model: str = "gpt-5.1",
     name: str = "OpenAI",
@@ -66,6 +69,7 @@ async def configure_provider_async(
     await client.put(
         "/api/settings",
         json={
+            "agent_prompt": agent_prompt,
             "reasoning_effort": reasoning_effort,
             "selected_model": model,
             "selected_provider_id": provider_id,
@@ -1324,3 +1328,134 @@ def test_workspace_compact_is_unavailable_while_response_is_running(
         assert response.status_code == 200
 
     asyncio.run(run_test())
+
+
+def configured_agent_prompt_message(
+    request: dict[str, object],
+) -> dict[str, object] | None:
+    for message in request["messages"]:
+        if str(message["content"]).startswith("# Flowent configured agent prompt"):
+            return message
+    return None
+
+
+def test_workspace_response_includes_configured_agent_prompt_before_agents_md(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "AGENTS.md").write_text("Use project instructions.")
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client, agent_prompt="Use UI configured instructions first.")
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    configured_message = configured_agent_prompt_message(captured_request)
+    project_message = project_context_message(captured_request)
+    assert configured_message is not None
+    assert project_message is not None
+    assert configured_message["role"] == "system"
+    assert "Use UI configured instructions first." in configured_message["content"]
+    assert "Use project instructions." in project_message["content"]
+    assert captured_request["messages"].index(configured_message) < captured_request[
+        "messages"
+    ].index(project_message)
+
+
+def test_workspace_compacted_response_includes_latest_configured_agent_prompt(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+        if len(captured_requests) == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Keep compacted state.",
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client, agent_prompt="Prompt before compact.")
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {"author": "user", "content": "Original request.", "id": "message-1"}
+            ]
+        },
+    )
+
+    compact_response = client.post("/api/workspace/compact")
+    client.put(
+        "/api/settings",
+        json={
+            "agent_prompt": "Prompt after compact.",
+            "reasoning_effort": "default",
+            "selected_model": "gpt-5.1",
+            "selected_provider_id": "provider-openai",
+        },
+    )
+    response = client.post("/api/workspace/respond", json={"content": "Continue."})
+
+    assert compact_response.status_code == 200
+    assert response.status_code == 200
+    configured_message = configured_agent_prompt_message(captured_requests[1])
+    assert configured_message is not None
+    assert "Prompt after compact." in configured_message["content"]
+    assert "Prompt before compact." not in configured_message["content"]
+
+
+def test_workspace_response_trims_blank_configured_agent_prompt(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client, agent_prompt="\n\n")
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    assert configured_agent_prompt_message(captured_request) is None

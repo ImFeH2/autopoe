@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -7,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   dashedPanelClassName,
   dataRowClassName,
@@ -15,9 +19,14 @@ import {
   fieldLabelClassName,
   fieldTriggerClassName,
   formActionsClassName,
+  mutedTextClassName,
   stableScrollbarClassName,
 } from "@/components/flowent/styles";
-import type { Provider, ReasoningEffort } from "@/components/flowent/types";
+import type {
+  Provider,
+  ReasoningEffort,
+  RuntimeSettings,
+} from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
 const reasoningOptions: Array<{ label: string; value: ReasoningEffort }> = [
@@ -29,26 +38,46 @@ const reasoningOptions: Array<{ label: string; value: ReasoningEffort }> = [
 ];
 
 export function SettingsView({
+  agentPrompt,
   appVersion,
   modelOptions,
   onModelChange,
   onProviderChange,
   onReasoningEffortChange,
+  onRuntimeSettingsSave,
   providers,
   reasoningEffort,
   selectedModel,
   selectedProviderId,
 }: {
+  agentPrompt: string;
   appVersion: string;
   modelOptions: string[];
   onModelChange: (value: string) => void;
   onProviderChange: (value: string) => void;
   onReasoningEffortChange: (value: ReasoningEffort) => void;
+  onRuntimeSettingsSave: (settings: RuntimeSettings) => void;
   providers: Provider[];
   reasoningEffort: ReasoningEffort;
   selectedModel: string;
   selectedProviderId: string;
 }) {
+  const [agentPromptDraft, setAgentPromptDraft] = useState(agentPrompt);
+
+  useEffect(() => {
+    setAgentPromptDraft(agentPrompt);
+  }, [agentPrompt]);
+
+  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onRuntimeSettingsSave({
+      agentPrompt: agentPromptDraft,
+      reasoningEffort,
+      selectedModel,
+      selectedProviderId,
+    });
+  };
+
   return (
     <section
       className={cn(
@@ -59,7 +88,8 @@ export function SettingsView({
     >
       <form
         className="m-8 grid w-[min(620px,calc(100%-64px))] gap-5 self-start bg-black max-[900px]:m-5 max-[900px]:w-auto"
-        aria-label="Model routing"
+        aria-label="Runtime settings"
+        onSubmit={saveSettings}
       >
         <section className="grid gap-3">
           <h3 className="text-base font-semibold text-white">Model routing</h3>
@@ -88,6 +118,30 @@ export function SettingsView({
             </div>
           </div>
         </section>
+
+        <section className="grid gap-3">
+          <div className="grid gap-1">
+            <h3 className="text-base font-semibold text-white">Agent prompt</h3>
+            <p className={cn("m-0 text-xs leading-5", mutedTextClassName)}>
+              These instructions are sent before AGENTS.md project instructions
+              on every workspace turn.
+            </p>
+          </div>
+          <div className={cn(dashedPanelClassName, "p-3")}>
+            <Label className="sr-only" htmlFor="agent-prompt">
+              Agent prompt
+            </Label>
+            <Textarea
+              className="min-h-48 resize-y rounded-md border-white/10 bg-input/30 px-3 py-2 text-[13px] leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
+              id="agent-prompt"
+              value={agentPromptDraft}
+              onChange={(event) => setAgentPromptDraft(event.target.value)}
+              placeholder="Add Flowent-specific instructions for the agent."
+              aria-label="Agent prompt"
+            />
+          </div>
+        </section>
+
         <div className={cn(formActionsClassName, "mt-0")}>
           <Button type="submit">Save</Button>
         </div>
