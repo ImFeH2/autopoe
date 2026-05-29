@@ -327,6 +327,59 @@ class SandboxRunner:
             stdout=completed.stdout[: self.output_limit],
         )
 
+    async def run_unsandboxed_async(
+        self,
+        command: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        input_text: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> CommandResult:
+        process_env = build_shell_environment(env)
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=self.cwd,
+            env=process_env,
+            start_new_session=True,
+            stdin=asyncio.subprocess.PIPE if input_text is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(
+                    input_text.encode() if input_text is not None else None
+                ),
+                timeout=timeout_seconds or self.timeout_seconds,
+            )
+        except TimeoutError as error:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = await process.communicate()
+            return CommandResult(
+                command=" ".join(command),
+                exit_code=124,
+                stderr=str(error) or "Command timed out.",
+                stdout=self._text_output(stdout)[: self.output_limit],
+            )
+        except asyncio.CancelledError:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=1)
+            except TimeoutError:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                await process.wait()
+            raise
+
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=process.returncode or 0,
+            stderr=self._text_output(stderr)[: self.output_limit],
+            stdout=self._text_output(stdout)[: self.output_limit],
+        )
+
     async def run_async(
         self,
         command: list[str],

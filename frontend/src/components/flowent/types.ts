@@ -104,15 +104,6 @@ export type WritablePath = {
   path: string;
 };
 
-export type PermissionDecision = "allow_once" | "always_allow" | "deny";
-
-export type PermissionRequest = {
-  id: string;
-  path: string;
-  reason: string;
-  toolCallId?: string | null;
-};
-
 export type ToolItemStatus = "failed" | "running" | "success" | "waiting";
 
 export type ToolItem = {

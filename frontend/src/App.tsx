@@ -19,8 +19,6 @@ import type {
   McpServer,
   McpTool,
   Message,
-  PermissionDecision,
-  PermissionRequest,
   Provider,
   ReasoningEffort,
   Skill,
@@ -95,13 +93,6 @@ type ApiWritablePath = {
   path: string;
 };
 
-type ApiPermissionRequest = {
-  id: string;
-  path: string;
-  reason: string;
-  tool_call_id?: string | null;
-};
-
 type ApiMessage = Message;
 
 type ApiState = {
@@ -109,7 +100,6 @@ type ApiState = {
   active_run_id?: string | null;
   mcp_servers?: ApiMcpServer[];
   messages: ApiMessage[];
-  permission_requests?: ApiPermissionRequest[];
   providers: ApiProvider[];
   settings: {
     reasoning_effort?: ReasoningEffort;
@@ -181,15 +171,6 @@ type WorkspaceStreamEvent =
         message: string;
       };
       event: "error";
-    }
-  | {
-      data: {
-        id: string;
-        path: string;
-        reason: string;
-        tool_call_id?: string | null;
-      };
-      event: "permission_request";
     };
 
 type WorkspaceStreamHandlers = {
@@ -202,7 +183,6 @@ type WorkspaceStreamHandlers = {
     tool: Pick<ToolItem, "id" | "status"> & Partial<ToolItem>,
   ) => void;
   onToolStart: (tool: ToolItem) => void;
-  onPermissionRequest: (request: PermissionRequest) => void;
 };
 
 const providerFromApi = (provider: ApiProvider): Provider => ({
@@ -274,15 +254,6 @@ const telegramBotToApi = (telegramBot: TelegramBot): ApiTelegramBot => ({
 const writablePathFromApi = (writablePath: ApiWritablePath): WritablePath => ({
   createdAt: writablePath.created_at,
   path: writablePath.path,
-});
-
-const permissionRequestFromApi = (
-  request: ApiPermissionRequest,
-): PermissionRequest => ({
-  id: request.id,
-  path: request.path,
-  reason: request.reason,
-  toolCallId: request.tool_call_id,
 });
 
 const mcpCommandLine = (server: Pick<McpServer, "args" | "command">) =>
@@ -484,9 +455,6 @@ function App() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [isResponding, setIsResponding] = useState(false);
-  const [permissionRequests, setPermissionRequests] = useState<
-    PermissionRequest[]
-  >([]);
   const [writablePaths, setWritablePaths] = useState<WritablePath[]>([]);
   const [activeRunId, setActiveRunId] = useState("");
   const [responseError, setResponseError] = useState("");
@@ -533,9 +501,6 @@ function App() {
     setReasoningEffort(state.settings.reasoning_effort ?? "default");
     setTelegramBot(telegramBotFromApi(state.telegram_bot));
     setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
-    setPermissionRequests(
-      (state.permission_requests ?? []).map(permissionRequestFromApi),
-    );
     activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
     activeRunIdRef.current = state.active_run_id ?? "";
     setActiveRunId(state.active_run_id ?? "");
@@ -1029,29 +994,6 @@ function App() {
     }
   };
 
-  const respondToPermissionRequest = async (
-    requestId: string,
-    decision: PermissionDecision,
-  ) => {
-    const response = await fetch("/api/workspace/permissions/approve", {
-      body: JSON.stringify({ decision, id: requestId }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
-
-    if (response.ok) {
-      setPermissionRequests((currentRequests) =>
-        currentRequests.filter((request) => request.id !== requestId),
-      );
-      if (decision === "always_allow") {
-        const state = await refreshAppState().catch(() => null);
-        if (state?.writable_paths) {
-          setWritablePaths(state.writable_paths.map(writablePathFromApi));
-        }
-      }
-    }
-  };
-
   const saveMessages = async (nextMessages: Message[]) => {
     await fetch("/api/workspace/messages", {
       body: JSON.stringify({ messages: nextMessages }),
@@ -1134,11 +1076,6 @@ function App() {
           }
           if (streamEvent.event === "tool_start") {
             handlers.onToolStart(streamEvent.data.tool);
-          }
-          if (streamEvent.event === "permission_request") {
-            handlers.onPermissionRequest(
-              permissionRequestFromApi(streamEvent.data),
-            );
           }
           if (
             streamEvent.event === "tool_done" ||
@@ -1393,27 +1330,6 @@ function App() {
           }
           activeRunEventIndexRef.current += 1;
           createAssistantGroup(index);
-          updateAssistantMessage();
-        },
-        onPermissionRequest: (request) => {
-          if (!isCurrentResponse()) {
-            return;
-          }
-          activeRunEventIndexRef.current += 1;
-          finishAssistantThinking();
-          assistantIsStreamingText = false;
-          if (request.toolCallId) {
-            updateAssistantTool(request.toolCallId, (tool) => ({
-              ...tool,
-              status: "waiting",
-            }));
-          }
-          setPermissionRequests((currentRequests) => [
-            ...currentRequests.filter(
-              (currentRequest) => currentRequest.id !== request.id,
-            ),
-            request,
-          ]);
           updateAssistantMessage();
         },
         onStart: (id) => {
@@ -1701,7 +1617,6 @@ function App() {
     ];
     setResponseError("");
     setIsResponding(true);
-    setPermissionRequests([]);
     setMessages(nextMessages);
     setDraft("");
 
@@ -1757,7 +1672,6 @@ function App() {
     activeRunEventIndexRef.current = 0;
     responseRunRef.current += 1;
     setMessages([]);
-    setPermissionRequests([]);
     setResponseError("");
     setActiveRunId("");
     setIsResponding(false);
@@ -1784,16 +1698,12 @@ function App() {
           messages={messages}
           commands={workspaceCommands}
           skills={skills}
-          permissionRequests={permissionRequests}
           onClearMessages={() => {
             void clearMessages();
           }}
           onCommand={runWorkspaceCommand}
           onCommandError={handleWorkspaceCommandError}
           onDraftChange={setDraft}
-          onPermissionDecision={(requestId, decision) => {
-            void respondToPermissionRequest(requestId, decision);
-          }}
           onSendMessage={(content) => {
             void sendMessage(content);
           }}

@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from flowent._version import __version__
 from flowent.agent import run_agent_stream
+from flowent.approval import ApprovalReviewRequest, review_approval_request
 from flowent.channels import TelegramBotManager, TelegramTransport
 from flowent.compact import (
     CompactInput,
@@ -34,7 +35,7 @@ from flowent.logging import TRACE_LEVEL, ensure_logging_configured
 from flowent.mcp import McpManager, McpTransport
 from flowent.mcp_import import McpImportDiscovery, discover_imported_mcp_servers
 from flowent.paths import resolve_workdir
-from flowent.permissions import WritablePathDecision, run_tool_with_path_permissions
+from flowent.permissions import run_tool_with_path_permissions
 from flowent.sandbox import ensure_sandbox_available
 from flowent.skills import (
     discover_skills,
@@ -46,7 +47,6 @@ from flowent.storage import (
     StoredCompactionCheckpoint,
     StoredMcpServer,
     StoredMessage,
-    StoredPermissionRequest,
     StoredProvider,
     StoredSettings,
     StoredSkill,
@@ -144,21 +144,6 @@ class WritablePathListResponse(BaseModel):
     writable_paths: list[StoredWritablePath]
 
 
-class WorkspacePermissionDecisionRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    decision: Literal["allow_once", "always_allow", "deny"]
-    id: str
-
-
-@dataclass
-class PendingWorkspacePermission:
-    future: asyncio.Future[WritablePathDecision]
-    path: Path
-    reason: str
-    tool_call_id: str | None = None
-
-
 @dataclass
 class WorkspaceRun:
     condition: asyncio.Condition
@@ -166,25 +151,11 @@ class WorkspaceRun:
     events: list[tuple[int, str, dict[str, object]]] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid4()))
     is_done: bool = False
-    pending_permissions: dict[str, PendingWorkspacePermission] = field(
-        default_factory=dict
-    )
     task: asyncio.Task[None] | None = None
 
     @property
     def latest_event_index(self) -> int:
         return self.events[-1][0] if self.events else 0
-
-    def permission_requests(self) -> list[StoredPermissionRequest]:
-        return [
-            StoredPermissionRequest(
-                id=permission_id,
-                path=str(permission.path),
-                reason=permission.reason,
-                tool_call_id=permission.tool_call_id,
-            )
-            for permission_id, permission in self.pending_permissions.items()
-        ]
 
 
 def stream_event(event: str, data: dict[str, object]) -> str:
@@ -367,6 +338,28 @@ def create_app(
         assistant_tools: dict[str, StoredToolItem] = {}
         assistant_id = str(uuid4())
 
+        async def review_tool_approval(request: ApprovalReviewRequest):
+            return await review_approval_request(
+                connection,
+                request,
+                completion=chat_completion,
+            )
+
+        async def tool_runner(
+            name: str,
+            arguments: dict[str, object],
+            context: ToolContext,
+        ):
+            return await run_tool_with_path_permissions(
+                name,
+                arguments,
+                context,
+                review_approval=review_tool_approval,
+                writable_paths=[
+                    Path(path.path) for path in store.read_writable_paths()
+                ],
+            )
+
         async for event in run_agent_stream(
             completion=chat_completion,
             connection=connection,
@@ -375,6 +368,7 @@ def create_app(
             extra_tool_specs=mcp_manager.tool_specs(),
             extra_tool_title=mcp_manager.tool_title,
             messages=request_messages,
+            tool_runner=tool_runner,
         ):
             if event.event == "delta":
                 assistant_content += str(event.data.get("content") or "")
@@ -460,9 +454,6 @@ def create_app(
             if active_run and not active_run.is_done
             else None,
             "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers),
-            "permission_requests": active_run.permission_requests()
-            if active_run and not active_run.is_done
-            else [],
             "skills": discover_skills(cwd, store),
         }
         if telegram_bot_manager is not None:
@@ -586,25 +577,6 @@ def create_app(
             )
         )
 
-    @app.post("/api/workspace/permissions/approve")
-    async def approve_workspace_permission(
-        request: WorkspacePermissionDecisionRequest,
-    ) -> dict[str, bool]:
-        run = active_workspace_run()
-        if run is None:
-            raise HTTPException(status_code=404, detail="Request not found.")
-        pending = run.pending_permissions.pop(request.id, None)
-        if pending is None:
-            raise HTTPException(status_code=404, detail="Request not found.")
-        path = pending.path
-        if request.decision == "always_allow":
-            saved_path = store.save_writable_path(path)
-            path = Path(saved_path.path)
-        pending.future.set_result(
-            WritablePathDecision(decision=request.decision, path=path)
-        )
-        return {"ok": True}
-
     @app.put("/api/workspace/messages")
     async def save_workspace_messages(
         request: WorkspaceMessagesRequest,
@@ -689,43 +661,12 @@ def create_app(
             try:
                 current_tool_id: str | None = None
 
-                async def request_writable_path(
-                    path: Path, reason: str
-                ) -> WritablePathDecision:
-                    permission_id = str(uuid4())
-                    future = asyncio.get_running_loop().create_future()
-                    run.pending_permissions[permission_id] = PendingWorkspacePermission(
-                        future=future,
-                        path=path,
-                        reason=reason,
-                        tool_call_id=current_tool_id,
+                async def review_tool_approval(request: ApprovalReviewRequest):
+                    return await review_approval_request(
+                        connection,
+                        request,
+                        completion=chat_completion,
                     )
-                    if current_tool_id and current_tool_id in assistant_tools:
-                        assistant_tools[current_tool_id] = (
-                            StoredToolItem.model_validate(
-                                {
-                                    **assistant_tools[current_tool_id].model_dump(
-                                        exclude_none=True
-                                    ),
-                                    "status": "waiting",
-                                }
-                            )
-                        )
-                        persist_assistant()
-                    await append_run_event(
-                        run,
-                        "permission_request",
-                        {
-                            "id": permission_id,
-                            "path": str(path),
-                            "reason": reason,
-                            "tool_call_id": current_tool_id,
-                        },
-                    )
-                    try:
-                        return await future
-                    finally:
-                        run.pending_permissions.pop(permission_id, None)
 
                 async def tool_runner(
                     name: str,
@@ -736,7 +677,7 @@ def create_app(
                         name,
                         arguments,
                         context,
-                        request_writable_path=request_writable_path,
+                        review_approval=review_tool_approval,
                         writable_paths=[
                             Path(path.path) for path in store.read_writable_paths()
                         ],

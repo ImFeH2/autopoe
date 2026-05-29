@@ -1092,7 +1092,7 @@ async def test_workspace_state_exposes_active_run_for_reconnect(
 
 
 @pytest.mark.anyio
-async def test_workspace_state_exposes_pending_permission_for_reconnect(
+async def test_workspace_persists_automatic_review_result_during_stream(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -1110,7 +1110,30 @@ async def test_workspace_state_exposes_pending_permission_for_reconnect(
 +beta
 *** End Patch"""
 
+    review_started = asyncio.Event()
+    finish_review = asyncio.Event()
+
     async def fake_completion(**request: object) -> object:
+        messages = request["messages"]
+        if messages[0]["content"].startswith("You are Flowent Approval Reviewer"):
+            review_started.set()
+            await asyncio.wait_for(finish_review.wait(), timeout=2)
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "decision": "denied",
+                                    "reason": "Outside the task scope.",
+                                }
+                            ),
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
         async def chunks() -> object:
             if request["messages"][-1]["role"] == "user":
                 yield tool_call_chunk(
@@ -1136,28 +1159,23 @@ async def test_workspace_state_exposes_pending_permission_for_reconnect(
             json={"content": "Edit notes."},
         )
         run_id = response.json()["run_id"]
-
-        for _ in range(20):
-            state = (await client.get("/api/state")).json()
-            if state.get("permission_requests"):
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError("Permission request was not exposed.")
-
-        request = state["permission_requests"][0]
-        await client.post(
-            "/api/workspace/permissions/approve",
-            json={"decision": "deny", "id": request["id"]},
+        await asyncio.wait_for(review_started.wait(), timeout=2)
+        state = (await client.get("/api/state")).json()
+        finish_review.set()
+        stream_response = await client.get(
+            f"/api/workspace/runs/{run_id}/stream?after={state['active_run_event_index']}"
         )
 
     assistant = state["messages"][-1]
     assert state["active_run_id"] == run_id
-    assert request["path"] == str(outside_dir)
-    assert request["reason"] == "The edit needs to write this path."
-    assert request["tool_call_id"] == assistant["tools"][0]["id"]
     assert assistant["tools"][0]["name"] == "apply_patch"
-    assert assistant["tools"][0]["status"] == "waiting"
+    assert assistant["tools"][0]["status"] == "running"
+    events = stream_events(stream_response.text)
+    tool_error = next(event for event in events if event["event"] == "tool_error")
+    tool_error_data = json.loads(str(tool_error["data"]))
+    assert tool_error_data["data"]["approval"]["decision"] == "denied"
+    assert tool_error_data["data"]["approval"]["reason"] == "Outside the task scope."
+    assert target.read_text() == "alpha\n"
 
 
 @pytest.mark.anyio

@@ -3,8 +3,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from flowent.approval import ApprovalReviewDecision, ApprovalReviewRequest
 from flowent.main import create_app
-from flowent.permissions import WritablePathDecision, run_tool_with_path_permissions
+from flowent.permissions import run_tool_with_path_permissions
 from flowent.sandbox import CommandResult, SandboxRunner
 from flowent.storage import StateStore
 from flowent.tools import ToolContext
@@ -63,11 +64,12 @@ def test_writable_paths_are_saved_as_normalized_absolute_paths(
 
 
 @pytest.mark.anyio
-async def test_allow_once_runs_tool_with_declared_write_path(
+async def test_approved_declared_write_path_runs_command_with_extra_permission(
     tmp_path, monkeypatch
 ) -> None:
     cache_dir = tmp_path / "cache"
     calls: list[list[Path]] = []
+    reviews: list[ApprovalReviewRequest] = []
 
     async def fake_run_async(self, command, **kwargs):
         calls.append(self.writable_roots)
@@ -78,10 +80,11 @@ async def test_allow_once_runs_tool_with_declared_write_path(
             stdout="created",
         )
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
-        assert path == cache_dir
-        assert "shell command" in reason
-        return WritablePathDecision(decision="allow_once", path=path)
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        reviews.append(request)
+        return ApprovalReviewDecision(
+            decision="approved", reason="Needed for cache writes."
+        )
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
 
@@ -93,7 +96,7 @@ async def test_allow_once_runs_tool_with_declared_write_path(
             "sandbox_permissions": "with_additional_permissions",
         },
         ToolContext(cwd=tmp_path / "work"),
-        request_writable_path=approve,
+        review_approval=approve,
         writable_paths=[],
     )
 
@@ -101,10 +104,21 @@ async def test_allow_once_runs_tool_with_declared_write_path(
     assert result.content == "created"
     assert len(calls) == 1
     assert cache_dir in calls[0]
+    assert reviews[0].tool_name == "shell_command"
+    assert reviews[0].action == "additional_permissions"
+    assert reviews[0].write_paths == [cache_dir]
+    assert result.data["approval"] == {
+        "action": "additional_permissions",
+        "decision": "approved",
+        "reason": "Needed for cache writes.",
+        "tool_name": "shell_command",
+        "tool_result": "",
+        "write_paths": [str(cache_dir)],
+    }
 
 
 @pytest.mark.anyio
-async def test_always_allow_runs_tool_and_persists_declared_path(
+async def test_approved_declared_write_path_does_not_persist_runtime_permission(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -120,9 +134,10 @@ async def test_always_allow_runs_tool_and_persists_declared_path(
             stdout="created",
         )
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
-        saved = store.save_writable_path(path)
-        return WritablePathDecision(decision="always_allow", path=Path(saved.path))
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        return ApprovalReviewDecision(
+            decision="approved", reason="Needed for cache writes."
+        )
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
 
@@ -134,16 +149,16 @@ async def test_always_allow_runs_tool_and_persists_declared_path(
             "sandbox_permissions": "with_additional_permissions",
         },
         ToolContext(cwd=tmp_path / "work"),
-        request_writable_path=approve,
+        review_approval=approve,
         writable_paths=[],
     )
 
     assert result.ok
-    assert [path.path for path in store.read_writable_paths()] == [str(cache_dir)]
+    assert store.read_writable_paths() == []
 
 
 @pytest.mark.anyio
-async def test_deny_returns_failed_tool_result_before_running_command(
+async def test_denied_declared_write_path_returns_failed_result_before_running_command(
     tmp_path, monkeypatch
 ) -> None:
     cache_dir = tmp_path / "cache"
@@ -159,8 +174,10 @@ async def test_deny_returns_failed_tool_result_before_running_command(
             stdout="created",
         )
 
-    async def deny(path: Path, reason: str) -> WritablePathDecision:
-        return WritablePathDecision(decision="deny", path=path)
+    async def deny(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        return ApprovalReviewDecision(
+            decision="denied", reason="Outside the task scope."
+        )
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
 
@@ -172,17 +189,19 @@ async def test_deny_returns_failed_tool_result_before_running_command(
             "sandbox_permissions": "with_additional_permissions",
         },
         ToolContext(cwd=tmp_path / "work"),
-        request_writable_path=deny,
+        review_approval=deny,
         writable_paths=[],
     )
 
     assert not result.ok
-    assert "Permission denied for" in result.content
+    assert "Outside the task scope." in result.content
+    assert result.data["approval"]["decision"] == "denied"
+    assert result.data["approval"]["reason"] == "Outside the task scope."
     assert calls == 0
 
 
 @pytest.mark.anyio
-async def test_existing_writable_path_covers_declared_permission_request(
+async def test_existing_writable_path_covers_declared_review(
     tmp_path, monkeypatch
 ) -> None:
     cache_dir = tmp_path / "cache"
@@ -197,10 +216,10 @@ async def test_existing_writable_path_covers_declared_permission_request(
             stdout="created",
         )
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
         nonlocal requests
         requests += 1
-        return WritablePathDecision(decision="allow_once", path=path)
+        return ApprovalReviewDecision(decision="approved", reason="Already allowed.")
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
 
@@ -212,7 +231,7 @@ async def test_existing_writable_path_covers_declared_permission_request(
             "sandbox_permissions": "with_additional_permissions",
         },
         ToolContext(cwd=tmp_path / "work"),
-        request_writable_path=approve,
+        review_approval=approve,
         writable_paths=[cache_dir],
     )
 
@@ -226,7 +245,7 @@ async def test_multiple_declared_write_paths_request_each_missing_path(
 ) -> None:
     first = tmp_path / "cache"
     second = tmp_path / "downloads"
-    requested: list[Path] = []
+    reviews: list[ApprovalReviewRequest] = []
 
     async def fake_run_async(self, command, **kwargs):
         assert first in self.writable_roots
@@ -238,9 +257,11 @@ async def test_multiple_declared_write_paths_request_each_missing_path(
             stdout="created",
         )
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
-        requested.append(path)
-        return WritablePathDecision(decision="allow_once", path=path)
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        reviews.append(request)
+        return ApprovalReviewDecision(
+            decision="approved", reason="Needed for generated files."
+        )
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
 
@@ -254,20 +275,126 @@ async def test_multiple_declared_write_paths_request_each_missing_path(
             "sandbox_permissions": "with_additional_permissions",
         },
         ToolContext(cwd=tmp_path / "work"),
-        request_writable_path=approve,
+        review_approval=approve,
         writable_paths=[],
     )
 
     assert result.ok
-    assert requested == [first, second]
+    assert len(reviews) == 1
+    assert reviews[0].write_paths == [first, second]
 
 
 @pytest.mark.anyio
-async def test_command_text_is_not_used_to_guess_permissions(
+async def test_sandbox_denied_shell_command_is_reviewed_and_retried_without_sandbox(
+    tmp_path, monkeypatch
+) -> None:
+    calls: list[str] = []
+    reviews: list[ApprovalReviewRequest] = []
+
+    async def fake_run_async(self, command, **kwargs):
+        calls.append("sandbox")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=1,
+            stderr="failed to write file: Read-only file system\n",
+            stdout="",
+        )
+
+    async def fake_run_unsandboxed_async(self, command, **kwargs):
+        calls.append("unsandboxed")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="created",
+        )
+
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        reviews.append(request)
+        return ApprovalReviewDecision(
+            decision="approved", reason="Retry is consistent with the task."
+        )
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+    monkeypatch.setattr(
+        SandboxRunner,
+        "run_unsandboxed_async",
+        fake_run_unsandboxed_async,
+        raising=False,
+    )
+
+    result = await run_tool_with_path_permissions(
+        "shell_command",
+        {"command": "touch output.txt"},
+        ToolContext(cwd=tmp_path / "work"),
+        review_approval=approve,
+        writable_paths=[],
+    )
+
+    assert result.ok
+    assert result.content == "created"
+    assert calls == ["sandbox", "unsandboxed"]
+    assert reviews[0].action == "sandbox_failure"
+    assert "Read-only file system" in reviews[0].tool_result
+    assert result.data["approval"]["action"] == "sandbox_failure"
+    assert result.data["approval"]["decision"] == "approved"
+
+
+@pytest.mark.anyio
+async def test_sandbox_denied_shell_command_is_not_retried_when_reviewer_denies(
+    tmp_path, monkeypatch
+) -> None:
+    calls: list[str] = []
+
+    async def fake_run_async(self, command, **kwargs):
+        calls.append("sandbox")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=1,
+            stderr="failed to write file: Read-only file system\n",
+            stdout="",
+        )
+
+    async def fake_run_unsandboxed_async(self, command, **kwargs):
+        calls.append("unsandboxed")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="created",
+        )
+
+    async def deny(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        return ApprovalReviewDecision(decision="denied", reason="Too broad.")
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+    monkeypatch.setattr(
+        SandboxRunner,
+        "run_unsandboxed_async",
+        fake_run_unsandboxed_async,
+        raising=False,
+    )
+
+    result = await run_tool_with_path_permissions(
+        "shell_command",
+        {"command": "touch output.txt"},
+        ToolContext(cwd=tmp_path / "work"),
+        review_approval=deny,
+        writable_paths=[],
+    )
+
+    assert not result.ok
+    assert calls == ["sandbox"]
+    assert "Too broad." in result.content
+    assert result.data["approval"]["decision"] == "denied"
+
+
+@pytest.mark.anyio
+async def test_command_text_is_not_used_to_guess_write_paths(
     tmp_path, monkeypatch
 ) -> None:
     outside = tmp_path / "outside"
-    requests = 0
+    reviews: list[ApprovalReviewRequest] = []
 
     async def fake_run_async(self, command, **kwargs):
         assert outside not in self.writable_roots
@@ -278,10 +405,11 @@ async def test_command_text_is_not_used_to_guess_permissions(
             stdout="",
         )
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
-        nonlocal requests
-        requests += 1
-        return WritablePathDecision(decision="allow_once", path=path)
+    async def deny(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        reviews.append(request)
+        return ApprovalReviewDecision(
+            decision="denied", reason="No extra write paths were declared."
+        )
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
 
@@ -289,12 +417,13 @@ async def test_command_text_is_not_used_to_guess_permissions(
         "shell_command",
         {"command": f"rm -f {outside / 'file.txt'}"},
         ToolContext(cwd=tmp_path / "work"),
-        request_writable_path=approve,
+        review_approval=deny,
         writable_paths=[],
     )
 
     assert not result.ok
-    assert requests == 0
+    assert reviews[0].action == "sandbox_failure"
+    assert reviews[0].write_paths == []
 
 
 @pytest.mark.anyio
@@ -303,6 +432,7 @@ async def test_additional_permissions_require_matching_sandbox_permissions(
 ) -> None:
     cache_dir = tmp_path / "cache"
     calls = 0
+    reviews = 0
 
     async def fake_run_async(self, command, **kwargs):
         nonlocal calls
@@ -314,8 +444,10 @@ async def test_additional_permissions_require_matching_sandbox_permissions(
             stdout="created",
         )
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
-        return WritablePathDecision(decision="allow_once", path=path)
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        nonlocal reviews
+        reviews += 1
+        return ApprovalReviewDecision(decision="approved", reason="Allowed.")
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
 
@@ -326,17 +458,18 @@ async def test_additional_permissions_require_matching_sandbox_permissions(
             "command": f"touch {cache_dir / 'file.txt'}",
         },
         ToolContext(cwd=tmp_path / "work"),
-        request_writable_path=approve,
+        review_approval=approve,
         writable_paths=[],
     )
 
     assert not result.ok
     assert "with_additional_permissions" in result.content
     assert calls == 0
+    assert reviews == 0
 
 
 @pytest.mark.anyio
-async def test_apply_patch_requests_permission_for_outside_workdir_file(
+async def test_apply_patch_uses_reviewer_before_writing_outside_workdir_file(
     tmp_path, monkeypatch
 ) -> None:
     work_dir = tmp_path / "work"
@@ -345,11 +478,13 @@ async def test_apply_patch_requests_permission_for_outside_workdir_file(
     outside_dir.mkdir()
     target = outside_dir / "notes.txt"
     target.write_text("alpha\n")
-    requested: list[Path] = []
+    reviews: list[ApprovalReviewRequest] = []
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
-        requested.append(path)
-        return WritablePathDecision(decision="allow_once", path=path)
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        reviews.append(request)
+        return ApprovalReviewDecision(
+            decision="approved", reason="The edit matches the request."
+        )
 
     patch = f"""*** Begin Patch
 *** Update File: {target}
@@ -363,12 +498,16 @@ async def test_apply_patch_requests_permission_for_outside_workdir_file(
         "apply_patch",
         {"patch": patch},
         ToolContext(cwd=work_dir),
-        request_writable_path=approve,
+        review_approval=approve,
         writable_paths=[],
     )
 
     assert result.ok
-    assert requested == [outside_dir]
+    assert reviews[0].tool_name == "apply_patch"
+    assert reviews[0].action == "edit"
+    assert reviews[0].write_paths == [outside_dir]
+    assert result.data["approval"]["action"] == "edit"
+    assert result.data["approval"]["decision"] == "approved"
     assert target.read_text() == "beta\n"
 
 
@@ -384,10 +523,10 @@ async def test_apply_patch_uses_existing_writable_path_without_request(
     target.write_text("alpha\n")
     requests = 0
 
-    async def approve(path: Path, reason: str) -> WritablePathDecision:
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
         nonlocal requests
         requests += 1
-        return WritablePathDecision(decision="allow_once", path=path)
+        return ApprovalReviewDecision(decision="approved", reason="Already allowed.")
 
     patch = f"""*** Begin Patch
 *** Update File: {target}
@@ -401,7 +540,7 @@ async def test_apply_patch_uses_existing_writable_path_without_request(
         "apply_patch",
         {"patch": patch},
         ToolContext(cwd=work_dir),
-        request_writable_path=approve,
+        review_approval=approve,
         writable_paths=[outside_dir],
     )
 
@@ -419,8 +558,10 @@ async def test_denied_apply_patch_does_not_modify_file(tmp_path) -> None:
     target = outside_dir / "notes.txt"
     target.write_text("alpha\n")
 
-    async def deny(path: Path, reason: str) -> WritablePathDecision:
-        return WritablePathDecision(decision="deny", path=path)
+    async def deny(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        return ApprovalReviewDecision(
+            decision="denied", reason="The target is outside the allowed scope."
+        )
 
     patch = f"""*** Begin Patch
 *** Update File: {target}
@@ -434,10 +575,12 @@ async def test_denied_apply_patch_does_not_modify_file(tmp_path) -> None:
         "apply_patch",
         {"patch": patch},
         ToolContext(cwd=work_dir),
-        request_writable_path=deny,
+        review_approval=deny,
         writable_paths=[],
     )
 
     assert not result.ok
-    assert "Permission denied for" in result.content
+    assert "outside the allowed scope" in result.content
+    assert result.data["approval"]["action"] == "edit"
+    assert result.data["approval"]["decision"] == "denied"
     assert target.read_text() == "alpha\n"

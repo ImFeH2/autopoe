@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
-
+from flowent.approval import (
+    ApprovalReviewDecision,
+    ApprovalReviewer,
+    ApprovalReviewRequest,
+)
 from flowent.patch import affected_paths
 from flowent.sandbox import SandboxError, SandboxRunner, path_is_within
 from flowent.tools import (
@@ -20,16 +22,6 @@ from flowent.tools import (
 )
 
 SANDBOX_WITH_ADDITIONAL_PERMISSIONS = "with_additional_permissions"
-
-
-class WritablePathDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    decision: Literal["allow_once", "always_allow", "deny"]
-    path: Path
-
-
-WritablePathRequest = Callable[[Path, str], Awaitable[WritablePathDecision]]
 
 
 def normalize_path(path: Path | str, cwd: Path) -> Path:
@@ -94,33 +86,51 @@ def approved_writable_roots(
     return roots
 
 
-async def request_missing_write_paths(
+async def review_missing_write_paths(
     paths: list[Path],
     context: ToolContext,
     *,
-    request_writable_path: WritablePathRequest,
+    arguments: dict[str, object],
+    action: Literal["additional_permissions", "edit"],
+    review_approval: ApprovalReviewer,
+    tool_name: str,
     writable_paths: list[Path],
-    reason: str,
-) -> tuple[list[Path], ToolResult | None]:
+) -> tuple[list[Path], ToolResult | None, dict[str, object] | None]:
     effective_paths = [
         path.expanduser().resolve(strict=False) for path in writable_paths
     ]
     approved_roots = approved_writable_roots(context, effective_paths)
-    for path in paths:
-        if path_is_within(path, approved_roots):
-            continue
-        decision = await request_writable_path(path, reason)
-        if decision.decision == "deny":
-            return effective_paths, ToolResult(
-                content=f"Permission denied for {decision.path}",
-                data={"path": str(decision.path)},
+    missing_paths = [
+        path.expanduser().resolve(strict=False)
+        for path in paths
+        if not path_is_within(path, approved_roots)
+    ]
+    if not missing_paths:
+        return effective_paths, None, None
+    review_request = ApprovalReviewRequest(
+        action=action,
+        arguments=arguments,
+        cwd=context.cwd,
+        tool_name=tool_name,
+        write_paths=missing_paths,
+    )
+    decision = await review_approval(review_request)
+    review_data = approval_result_data(review_request, decision)
+    if decision.decision == "denied":
+        return (
+            effective_paths,
+            ToolResult(
+                content=decision.reason,
+                data=review_data,
                 ok=False,
-                title=f"Denied {decision.path}",
-            )
-        approved_path = decision.path.expanduser().resolve(strict=False)
+                title="Denied by reviewer",
+            ),
+            review_data,
+        )
+    for approved_path in missing_paths:
         effective_paths.append(approved_path)
         approved_roots.append(approved_path)
-    return effective_paths, None
+    return effective_paths, None, review_data
 
 
 async def run_tool_with_path_permissions(
@@ -128,21 +138,21 @@ async def run_tool_with_path_permissions(
     arguments: dict[str, object],
     context: ToolContext,
     *,
-    request_writable_path: WritablePathRequest,
+    review_approval: ApprovalReviewer,
     writable_paths: list[Path],
 ) -> ToolResult:
     if name == "shell_command":
         return await run_shell_command_with_permissions(
             arguments,
             context,
-            request_writable_path=request_writable_path,
+            review_approval=review_approval,
             writable_paths=writable_paths,
         )
     if name == "apply_patch":
         return await run_apply_patch_with_permissions(
             arguments,
             context,
-            request_writable_path=request_writable_path,
+            review_approval=review_approval,
             writable_paths=writable_paths,
         )
     return await run_tool_async(name, arguments, context)
@@ -152,7 +162,7 @@ async def run_shell_command_with_permissions(
     arguments: dict[str, object],
     context: ToolContext,
     *,
-    request_writable_path: WritablePathRequest,
+    review_approval: ApprovalReviewer,
     writable_paths: list[Path],
 ) -> ToolResult:
     validation_error = validate_additional_permissions(arguments)
@@ -160,41 +170,72 @@ async def run_shell_command_with_permissions(
         return validation_error
 
     declared_paths = additional_write_paths(arguments, context.cwd)
-    effective_paths, denied = await request_missing_write_paths(
+    effective_paths, denied, approval_data = await review_missing_write_paths(
         declared_paths,
         context,
-        request_writable_path=request_writable_path,
+        action="additional_permissions",
+        arguments=arguments,
+        review_approval=review_approval,
+        tool_name="shell_command",
         writable_paths=writable_paths,
-        reason="The shell command needs to write this path.",
     )
     if denied is not None:
         return denied
 
-    return await shell_command_with_writable_paths(arguments, context, effective_paths)
+    result = await shell_command_with_writable_paths(
+        arguments, context, effective_paths
+    )
+    if approval_data is not None:
+        result = tool_result_with_data(result, approval_data)
+    if result.ok or not is_likely_sandbox_denied_result(result):
+        return result
+    review_request = ApprovalReviewRequest(
+        action="sandbox_failure",
+        arguments=arguments,
+        cwd=context.cwd,
+        tool_name="shell_command",
+        tool_result=tool_failure_text(result),
+    )
+    decision = await review_approval(review_request)
+    review_data = approval_result_data(review_request, decision)
+    if decision.decision == "denied":
+        return ToolResult(
+            content=decision.reason,
+            data={**result.data, **review_data},
+            ok=False,
+            title="Denied by reviewer",
+        )
+    retry_result = await shell_command_without_sandbox(arguments, context)
+    return tool_result_with_data(retry_result, review_data)
 
 
 async def run_apply_patch_with_permissions(
     arguments: dict[str, object],
     context: ToolContext,
     *,
-    request_writable_path: WritablePathRequest,
+    review_approval: ApprovalReviewer,
     writable_paths: list[Path],
 ) -> ToolResult:
     patch = str(arguments["patch"])
     paths = [
         writable_root_for_path(path) for path in affected_paths(patch, context.cwd)
     ]
-    effective_paths, denied = await request_missing_write_paths(
+    effective_paths, denied, approval_data = await review_missing_write_paths(
         paths,
         context,
-        request_writable_path=request_writable_path,
+        action="edit",
+        arguments=arguments,
+        review_approval=review_approval,
+        tool_name="apply_patch",
         writable_paths=writable_paths,
-        reason="The edit needs to write this path.",
     )
     if denied is not None:
         return denied
 
-    return await apply_patch_with_writable_paths(arguments, context, effective_paths)
+    result = await apply_patch_with_writable_paths(arguments, context, effective_paths)
+    if approval_data is not None:
+        result = tool_result_with_data(result, approval_data)
+    return result
 
 
 async def apply_patch_with_writable_paths(
@@ -257,3 +298,89 @@ async def shell_command_with_writable_paths(
         ok=ok,
         title=f"Ran {command}",
     )
+
+
+def is_likely_sandbox_denied_result(result: ToolResult) -> bool:
+    data = result.data
+    exit_code = int_result_field(data.get("exit_code"))
+    if exit_code == 0:
+        return False
+    output = "\n".join(
+        str(data.get(name, "") or "") for name in ["stderr", "stdout"]
+    ).lower()
+    return any(
+        keyword in output
+        for keyword in [
+            "operation not permitted",
+            "permission denied",
+            "read-only file system",
+            "seccomp",
+            "sandbox",
+            "landlock",
+            "failed to write file",
+        ]
+    )
+
+
+def int_result_field(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def tool_failure_text(result: ToolResult) -> str:
+    stderr = str(result.data.get("stderr", "") or "").strip()
+    stdout = str(result.data.get("stdout", "") or "").strip()
+    content = result.content.strip()
+    return "\n".join(part for part in [stderr, stdout, content] if part)
+
+
+async def shell_command_without_sandbox(
+    arguments: dict[str, object],
+    context: ToolContext,
+) -> ToolResult:
+    command = str(arguments["command"])
+    timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
+    result = await SandboxRunner(cwd=context.cwd).run_unsandboxed_async(
+        ["/bin/sh", "-c", command], timeout_seconds=timeout_seconds
+    )
+    ok = result.exit_code == 0
+    content = result.stdout or result.stderr
+    return ToolResult(
+        content=content,
+        data={
+            "command": command,
+            "exit_code": result.exit_code,
+            "stderr": result.stderr,
+            "stdout": result.stdout,
+        },
+        ok=ok,
+        title=f"Ran {command}",
+    )
+
+
+def approval_result_data(
+    request: ApprovalReviewRequest,
+    decision: ApprovalReviewDecision,
+) -> dict[str, object]:
+    return {
+        "approval": {
+            "action": request.action,
+            "decision": decision.decision,
+            "reason": decision.reason,
+            "tool_name": request.tool_name,
+            "tool_result": request.tool_result,
+            "write_paths": [str(path) for path in request.write_paths],
+        }
+    }
+
+
+def tool_result_with_data(
+    result: ToolResult, extra_data: dict[str, object]
+) -> ToolResult:
+    return result.model_copy(update={"data": {**result.data, **extra_data}})

@@ -164,13 +164,6 @@ type TestWritablePath = {
   path: string;
 };
 
-type TestPermissionRequest = {
-  id: string;
-  path: string;
-  reason: string;
-  tool_call_id?: string;
-};
-
 const controlledThinkingStreamResponse = (
   thinking: string,
   content: string,
@@ -725,33 +718,6 @@ const assistantToolBatchStreamResponse = (
   });
 };
 
-const permissionRequestStreamResponse = () => {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(
-        encoder.encode(
-          `event: start\ndata: ${JSON.stringify({ id: "message-assistant" })}\n\n`,
-        ),
-      );
-      controller.enqueue(
-        encoder.encode(
-          `event: permission_request\ndata: ${JSON.stringify({
-            id: "permission-1",
-            path: "/workspace/.cache/pnpm",
-            reason: "Tool needs to write this path.",
-            tool_call_id: "tool-1",
-          })}\n\n`,
-        ),
-      );
-    },
-  });
-  return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream" },
-    status: 200,
-  });
-};
-
 const mockInitialState = (
   state: Record<string, unknown>,
   modelResults: string[] = ["gpt-5.1"],
@@ -804,16 +770,6 @@ const mockInitialState = (
           status: 200,
         },
       );
-    }
-
-    if (
-      input === "/api/workspace/permissions/approve" &&
-      init?.method === "POST"
-    ) {
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
     }
 
     if (input === "/api/telegram-bot/approve" && init?.method === "POST") {
@@ -1988,24 +1944,50 @@ describe("App", () => {
     await expectDocumentText("The notes are ready.");
   });
 
-  it("shows path approval actions during a workspace run", async () => {
+  it("shows automatic review details when a tool requests elevated access", async () => {
     const user = userEvent.setup();
+    const toolStream = controlledToolTimelineResponse(
+      {
+        arguments: {
+          additional_permissions: {
+            file_system: { write: ["/workspace/.cache/pnpm"] },
+          },
+          command: "pnpm install",
+          sandbox_permissions: "with_additional_permissions",
+        },
+        data: {
+          approval: {
+            action: "additional_permissions",
+            decision: "approved",
+            reason: "Needed for cache writes.",
+            tool_name: "shell_command",
+            write_paths: ["/workspace/.cache/pnpm"],
+          },
+          command: "pnpm install",
+          exit_code: 0,
+          stderr: "",
+          stdout: "done",
+        },
+        id: "tool-1",
+        name: "shell_command",
+        output: "done",
+        title: "Ran pnpm install",
+      },
+      "Dependencies are ready.",
+    );
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/respond" && init?.method === "POST") {
-        return permissionRequestStreamResponse();
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-review");
+      }
+      if (
+        input === "/api/workspace/runs/run-review/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return toolStream.response;
       }
       if (input === "/api/state") {
         return new Response(JSON.stringify(selectedProviderState()), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (
-        input === "/api/workspace/permissions/approve" &&
-        init?.method === "POST"
-      ) {
-        return new Response(JSON.stringify({ ok: true }), {
           headers: { "Content-Type": "application/json" },
           status: 200,
         });
@@ -2028,104 +2010,29 @@ describe("App", () => {
     });
     await user.type(composer, "Install dependencies");
     await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Ran pnpm install/ }),
+    );
+    toolStream.completeTool();
 
-    expect(await screen.findByText("Allow write access?")).toBeInTheDocument();
+    expect(await screen.findByText("REVIEW")).toBeInTheDocument();
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+    expect(screen.getByText("Needed for cache writes.")).toBeInTheDocument();
     expect(screen.getByText("/workspace/.cache/pnpm")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Always allow" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent('"command": "pnpm install"');
+    expect(resultBlock).not.toHaveTextContent("Needed for cache writes.");
   });
 
-  it("marks the active tool as waiting when write access is needed", async () => {
-    const user = userEvent.setup();
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(
-          encoder.encode(
-            `event: start\ndata: ${JSON.stringify({ id: "message-assistant" })}\n\n`,
-          ),
-        );
-        controller.enqueue(
-          encoder.encode(
-            `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
-          ),
-        );
-        controller.enqueue(
-          encoder.encode(
-            `event: tool_start\ndata: ${JSON.stringify({
-              tool: {
-                id: "tool-1",
-                name: "apply_patch",
-                status: "running",
-                title: "Editing files",
-              },
-            })}\n\n`,
-          ),
-        );
-        controller.enqueue(
-          encoder.encode(
-            `event: permission_request\ndata: ${JSON.stringify({
-              id: "permission-1",
-              path: "/workspace",
-              reason: "The edit needs to write this path.",
-              tool_call_id: "tool-1",
-            })}\n\n`,
-          ),
-        );
-      },
-    });
-    mockInitialState(selectedProviderState());
-    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return new Response(JSON.stringify({ run_id: "run-permission" }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (
-        input === "/api/workspace/runs/run-permission/stream?after=0" &&
-        init?.method === "GET"
-      ) {
-        return new Response(stream, {
-          headers: { "Content-Type": "text/event-stream" },
-          status: 200,
-        });
-      }
-      if (input === "/api/state") {
-        return new Response(JSON.stringify(selectedProviderState()), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      return new Response("{}", {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
-    });
-    render(<App />);
-
-    const composer = await screen.findByRole("textbox", {
-      name: "Message Flowent",
-    });
-    await user.type(composer, "Edit files");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-
-    expect(await screen.findByText("Editing files")).toBeInTheDocument();
-    expect(screen.getByText("Waiting")).toBeInTheDocument();
-    expect(screen.queryByText("Running")).not.toBeInTheDocument();
-    expect(await screen.findByText("Allow write access?")).toBeInTheDocument();
-  });
-
-  it("restores pending write access requests from loaded state", async () => {
+  it("restores automatic review details from loaded tool data", async () => {
     const runningState = {
       ...selectedProviderState(),
       active_run_event_index: 4,
-      active_run_id: "run-permission",
+      active_run_id: "run-review",
       messages: [
         {
           author: "user",
-          content: "Edit files",
+          content: "Install dependencies",
           id: "message-user",
         },
         {
@@ -2135,22 +2042,28 @@ describe("App", () => {
           status: "running",
           tools: [
             {
+              content: "Outside the task scope.",
+              data: {
+                approval: {
+                  action: "sandbox_failure",
+                  decision: "denied",
+                  reason: "Outside the task scope.",
+                  tool_name: "shell_command",
+                  write_paths: [],
+                },
+                command: "pnpm install",
+                exit_code: 1,
+                stderr: "Read-only file system",
+                stdout: "",
+              },
               id: "tool-1",
-              name: "apply_patch",
-              status: "waiting",
-              title: "Editing files",
+              name: "shell_command",
+              status: "failed",
+              title: "Ran pnpm install",
             },
           ],
         },
       ],
-      permission_requests: [
-        {
-          id: "permission-1",
-          path: "/workspace",
-          reason: "The edit needs to write this path.",
-          tool_call_id: "tool-1",
-        },
-      ] satisfies TestPermissionRequest[],
     };
     mockInitialState(runningState);
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
@@ -2161,7 +2074,7 @@ describe("App", () => {
         });
       }
       if (
-        input === "/api/workspace/runs/run-permission/stream?after=4" &&
+        input === "/api/workspace/runs/run-review/stream?after=4" &&
         init?.method === "GET"
       ) {
         return new Response(
@@ -2182,156 +2095,14 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Allow write access?")).toBeInTheDocument();
-    expect(screen.getByText("/workspace")).toBeInTheDocument();
-    expect(screen.getByText("Editing files")).toBeInTheDocument();
-    expect(screen.getByText("Waiting")).toBeInTheDocument();
-  });
-
-  it("approves a path once from the workspace request", async () => {
-    const user = userEvent.setup();
-    mockInitialState(selectedProviderState());
-    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/respond" && init?.method === "POST") {
-        return permissionRequestStreamResponse();
-      }
-      if (input === "/api/state") {
-        return new Response(JSON.stringify(selectedProviderState()), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (
-        input === "/api/workspace/permissions/approve" &&
-        init?.method === "POST"
-      ) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      return new Response("{}", {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
-    });
-    render(<App />);
-
-    const composer = await screen.findByRole("textbox", {
-      name: "Message Flowent",
-    });
-    await user.type(composer, "Install dependencies");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    await user.click(await screen.findByRole("button", { name: "Allow once" }));
-
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/permissions/approve",
-      expect.objectContaining({
-        body: JSON.stringify({
-          decision: "allow_once",
-          id: "permission-1",
-        }),
-        method: "POST",
-      }),
-    );
-  });
-
-  it("always approves a path from the workspace request", async () => {
-    const user = userEvent.setup();
-    mockInitialState(selectedProviderState());
-    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/respond" && init?.method === "POST") {
-        return permissionRequestStreamResponse();
-      }
-      if (input === "/api/state") {
-        return new Response(JSON.stringify(selectedProviderState()), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (
-        input === "/api/workspace/permissions/approve" &&
-        init?.method === "POST"
-      ) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      return new Response("{}", {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
-    });
-    render(<App />);
-
-    const composer = await screen.findByRole("textbox", {
-      name: "Message Flowent",
-    });
-    await user.type(composer, "Install dependencies");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Always allow" }),
-    );
-
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/permissions/approve",
-      expect.objectContaining({
-        body: JSON.stringify({
-          decision: "always_allow",
-          id: "permission-1",
-        }),
-        method: "POST",
-      }),
-    );
-  });
-
-  it("denies a path from the workspace request", async () => {
-    const user = userEvent.setup();
-    mockInitialState(selectedProviderState());
-    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/respond" && init?.method === "POST") {
-        return permissionRequestStreamResponse();
-      }
-      if (input === "/api/state") {
-        return new Response(JSON.stringify(selectedProviderState()), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (
-        input === "/api/workspace/permissions/approve" &&
-        init?.method === "POST"
-      ) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      return new Response("{}", {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
-    });
-    render(<App />);
-
-    const composer = await screen.findByRole("textbox", {
-      name: "Message Flowent",
-    });
-    await user.type(composer, "Install dependencies");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    await user.click(await screen.findByRole("button", { name: "Deny" }));
-
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/permissions/approve",
-      expect.objectContaining({
-        body: JSON.stringify({
-          decision: "deny",
-          id: "permission-1",
-        }),
-        method: "POST",
-      }),
-    );
+    expect(
+      await screen.findByRole("button", { name: /Ran pnpm install/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("REVIEW")).toBeInTheDocument();
+    expect(screen.getByText("Denied")).toBeInTheDocument();
+    expect(screen.getByText("Outside the task scope.")).toBeInTheDocument();
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent('"stderr": "Read-only file system"');
   });
 
   it("shows successful tool details after the tool row is opened", async () => {

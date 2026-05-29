@@ -16,16 +16,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
-import {
-  stableScrollbarClassName,
-  subtleButtonClassName,
-} from "@/components/flowent/styles";
+import { stableScrollbarClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
   Message,
-  PermissionDecision,
-  PermissionRequest,
   Skill,
   ToolItem,
   WorkspaceCommand,
@@ -43,10 +38,8 @@ export function WorkspaceView({
   onCommandError,
   onClearMessages,
   onDraftChange,
-  onPermissionDecision,
   onSendMessage,
   onStopResponse,
-  permissionRequests,
   skills,
 }: {
   commands: WorkspaceCommand[];
@@ -58,13 +51,8 @@ export function WorkspaceView({
   onCommandError: (message: string) => void;
   onClearMessages: () => void;
   onDraftChange: (value: string) => void;
-  onPermissionDecision: (
-    requestId: string,
-    decision: PermissionDecision,
-  ) => void;
   onSendMessage: (content: string) => void;
   onStopResponse: () => void;
-  permissionRequests: PermissionRequest[];
   skills: Skill[];
 }) {
   const [composerOffset, setComposerOffset] = useState(112);
@@ -80,8 +68,6 @@ export function WorkspaceView({
           composerOffset={composerOffset}
           isResponding={isResponding}
           messages={messages}
-          onPermissionDecision={onPermissionDecision}
-          permissionRequests={permissionRequests}
         />
         <ChatComposer
           commands={commands}
@@ -128,17 +114,10 @@ function MessageList({
   composerOffset,
   isResponding,
   messages,
-  onPermissionDecision,
-  permissionRequests,
 }: {
   composerOffset: number;
   isResponding: boolean;
   messages: Message[];
-  onPermissionDecision: (
-    requestId: string,
-    decision: PermissionDecision,
-  ) => void;
-  permissionRequests: PermissionRequest[];
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const shouldFollowRef = useRef(true);
@@ -226,72 +205,7 @@ function MessageList({
           )}
         </Fragment>
       ))}
-      {permissionRequests.map((request) => (
-        <PermissionRequestCard
-          key={request.id}
-          onPermissionDecision={onPermissionDecision}
-          request={request}
-        />
-      ))}
       <div aria-hidden="true" ref={scrollMarkerRef} />
-    </div>
-  );
-}
-
-function PermissionRequestCard({
-  onPermissionDecision,
-  request,
-}: {
-  onPermissionDecision: (
-    requestId: string,
-    decision: PermissionDecision,
-  ) => void;
-  request: PermissionRequest;
-}) {
-  return (
-    <div className="mx-auto flex w-full max-w-[640px] justify-start py-3">
-      <div className="grid w-full gap-3 rounded-lg border border-white/10 bg-black px-3 py-3 text-white shadow-none">
-        <div className="grid gap-1">
-          <h3 className="m-0 text-sm font-medium leading-5 text-white">
-            Allow write access?
-          </h3>
-          <p className="m-0 break-words font-mono text-xs leading-5 text-white/75">
-            {request.path}
-          </p>
-          <p className="m-0 text-xs leading-[1.4] text-white/50">
-            {request.reason}
-          </p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            className={subtleButtonClassName}
-            onClick={() => onPermissionDecision(request.id, "deny")}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Deny
-          </Button>
-          <Button
-            className={subtleButtonClassName}
-            onClick={() => onPermissionDecision(request.id, "allow_once")}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Allow once
-          </Button>
-          <Button
-            className={subtleButtonClassName}
-            onClick={() => onPermissionDecision(request.id, "always_allow")}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Always allow
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -597,6 +511,7 @@ function ToolProcessItem({ tool }: { tool: ToolItem }) {
 }
 
 function ToolProcessDetails({ tool }: { tool: ToolItem }) {
+  const approval = toolApprovalData(tool.data);
   const hasArguments = hasToolObjectPayload(tool.arguments);
   const hasData = hasToolObjectPayload(tool.data);
   const hasContent = tool.content !== undefined;
@@ -617,6 +532,42 @@ function ToolProcessDetails({ tool }: { tool: ToolItem }) {
       {hasResult ? (
         <ToolProcessPayload label="RESULT" value={formatToolResult(tool)} />
       ) : null}
+      {approval ? <ToolProcessApproval approval={approval} /> : null}
+    </div>
+  );
+}
+
+type ToolApprovalData = {
+  action?: string;
+  decision?: string;
+  reason?: string;
+  toolName?: string;
+  writePaths?: string[];
+};
+
+function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
+  const decision = approval.decision === "denied" ? "Denied" : "Approved";
+
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 text-[11px] font-medium leading-4 text-white/45">
+        REVIEW
+      </div>
+      <div className="grid gap-1 rounded-md border border-white/10 bg-black px-2.5 py-2 text-xs leading-5 text-white/70">
+        <div className="font-medium text-white">{decision}</div>
+        {approval.reason ? (
+          <div className="break-words text-white/60">{approval.reason}</div>
+        ) : null}
+        {approval.writePaths?.length ? (
+          <div className="grid gap-0.5 font-mono text-[11px] leading-4 text-white/50">
+            {approval.writePaths.map((path) => (
+              <span className="break-words" key={path}>
+                {path}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -653,16 +604,43 @@ function formatToolResult(tool: ToolItem) {
   if (tool.content !== undefined) {
     result.content = tool.content;
   }
-  if (hasToolObjectPayload(tool.data)) {
-    result.data = tool.data;
+  const toolData = tool.data;
+  if (hasToolObjectPayload(toolData)) {
+    const data = Object.fromEntries(
+      Object.entries(toolData).filter(([key]) => key !== "approval"),
+    );
+    if (Object.keys(data).length > 0) {
+      result.data = data;
+    }
   }
   return formatToolValue(result);
 }
 
 function hasToolObjectPayload(
   value: Record<string, unknown> | null | undefined,
-) {
+): value is Record<string, unknown> {
   return value != null && Object.keys(value).length > 0;
+}
+
+function toolApprovalData(
+  data: Record<string, unknown> | null | undefined,
+): ToolApprovalData | null {
+  const approval = data?.approval;
+  if (!approval || typeof approval !== "object" || Array.isArray(approval)) {
+    return null;
+  }
+  const value = approval as Record<string, unknown>;
+  return {
+    action: typeof value.action === "string" ? value.action : undefined,
+    decision: typeof value.decision === "string" ? value.decision : undefined,
+    reason: typeof value.reason === "string" ? value.reason : undefined,
+    toolName: typeof value.tool_name === "string" ? value.tool_name : undefined,
+    writePaths: Array.isArray(value.write_paths)
+      ? value.write_paths.filter(
+          (path): path is string => typeof path === "string",
+        )
+      : undefined,
+  };
 }
 
 function ToolProcessIcon({ tool }: { tool: ToolItem }) {
