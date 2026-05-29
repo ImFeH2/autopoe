@@ -53,6 +53,7 @@ CORE_SHELL_ENVIRONMENT_NAMES = {
     "TMP",
     "LANG",
 }
+SANDBOX_PROC_MOUNT_SUPPORT: dict[str, bool] = {}
 
 SCMP_ACT_ALLOW = 0x7FFF0000
 SCMP_ACT_ERRNO = 0x00050000
@@ -86,6 +87,58 @@ def ensure_sandbox_available() -> str:
     if not bwrap:
         raise SandboxError(f"Sandbox is not available. {SANDBOX_INSTALL_HINT}")
     return bwrap
+
+
+def is_proc_mount_failure(stderr: str) -> bool:
+    return (
+        "Can't mount proc" in stderr
+        and "/newroot/proc" in stderr
+        and (
+            "Invalid argument" in stderr
+            or "Operation not permitted" in stderr
+            or "Permission denied" in stderr
+        )
+    )
+
+
+def true_command() -> str:
+    for candidate in ["/usr/bin/true", "/bin/true"]:
+        if Path(candidate).exists():
+            return candidate
+    return "true"
+
+
+def sandbox_supports_proc_mount() -> bool:
+    bwrap = ensure_sandbox_available()
+    if bwrap in SANDBOX_PROC_MOUNT_SUPPORT:
+        return SANDBOX_PROC_MOUNT_SUPPORT[bwrap]
+
+    result = subprocess.run(
+        [
+            bwrap,
+            "--ro-bind",
+            "/",
+            "/",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--unshare-user",
+            "--unshare-pid",
+            "--new-session",
+            "--die-with-parent",
+            "--",
+            true_command(),
+        ],
+        check=False,
+        capture_output=True,
+        env=build_shell_environment(),
+        text=True,
+        timeout=5,
+    )
+    supported = not is_proc_mount_failure(result.stderr)
+    SANDBOX_PROC_MOUNT_SUPPORT[bwrap] = supported
+    return supported
 
 
 def path_is_within(path: Path, roots: list[Path]) -> bool:
@@ -199,12 +252,12 @@ class SandboxRunner:
             "/",
             "--dev",
             "/dev",
-            "--proc",
-            "/proc",
             "--bind",
             str(self.cwd),
             str(self.cwd),
         ]
+        if sandbox_supports_proc_mount():
+            args[6:6] = ["--proc", "/proc"]
         for root in self.writable_roots:
             if root == self.cwd:
                 continue

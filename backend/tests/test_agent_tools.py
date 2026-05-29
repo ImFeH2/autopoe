@@ -227,6 +227,114 @@ def test_shell_command_has_network_by_default(tmp_path) -> None:
     assert "network-ready" in result.content
 
 
+def test_sandbox_command_keeps_proc_mount_when_preflight_succeeds(
+    tmp_path, monkeypatch
+) -> None:
+    runner = SandboxRunner(cwd=tmp_path)
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: True)
+
+    command = runner.build_command(["/bin/true"])
+
+    assert command.args[command.args.index("--proc") + 1] == "/proc"
+
+
+def test_sandbox_command_omits_proc_mount_when_preflight_reports_permission_error(
+    tmp_path, monkeypatch
+) -> None:
+    runner = SandboxRunner(cwd=tmp_path)
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
+
+    command = runner.build_command(["/bin/true"])
+
+    assert "--proc" not in command.args
+
+
+def test_sandbox_proc_preflight_does_not_hide_non_proc_errors(
+    tmp_path, monkeypatch
+) -> None:
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text("#!/bin/sh\necho 'bwrap: unrelated startup failure' >&2\nexit 1\n")
+    bwrap.chmod(0o700)
+    monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: str(bwrap))
+
+    assert SandboxRunner(cwd=tmp_path).build_command(["/bin/true"]).args[0:7] == [
+        str(bwrap),
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+    ]
+
+
+def test_shell_command_runs_without_proc_mount_after_preflight_fallback(
+    tmp_path, monkeypatch
+) -> None:
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text(
+        "#!/bin/sh\n"
+        'for arg in "$@"; do\n'
+        '  if [ "$arg" = --proc ]; then\n'
+        '    echo "bwrap: Can\'t mount proc on /newroot/proc: Operation not permitted" >&2\n'
+        "    exit 1\n"
+        "  fi\n"
+        "done\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        '  if [ "$1" = -- ]; then\n'
+        "    shift\n"
+        '    exec "$@"\n'
+        "  fi\n"
+        "  shift\n"
+        "done\n"
+    )
+    bwrap.chmod(0o700)
+    monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: str(bwrap))
+
+    result = SandboxRunner(cwd=tmp_path).run(["/bin/sh", "-c", "printf ok"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "ok"
+
+
+def test_apply_patch_runs_without_proc_mount_after_preflight_fallback(
+    tmp_path, monkeypatch
+) -> None:
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text(
+        "#!/bin/sh\n"
+        'for arg in "$@"; do\n'
+        '  if [ "$arg" = --proc ]; then\n'
+        '    echo "bwrap: Can\'t mount proc on /newroot/proc: Operation not permitted" >&2\n'
+        "    exit 1\n"
+        "  fi\n"
+        "done\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        '  if [ "$1" = -- ]; then\n'
+        "    shift\n"
+        '    exec "$@"\n'
+        "  fi\n"
+        "  shift\n"
+        "done\n"
+    )
+    bwrap.chmod(0o700)
+    monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: str(bwrap))
+    target = tmp_path / "notes.txt"
+    target.write_text("alpha\n")
+    patch = """*** Begin Patch
+*** Update File: notes.txt
+@@
+-alpha
++beta
+*** End Patch
+"""
+
+    result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
+
+    assert result.ok
+    assert target.read_text() == "beta\n"
+
+
 def test_shell_command_environment_omits_development_variables(
     tmp_path, monkeypatch
 ) -> None:
