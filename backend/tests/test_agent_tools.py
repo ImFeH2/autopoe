@@ -249,6 +249,19 @@ def test_sandbox_command_omits_proc_mount_when_preflight_reports_permission_erro
     assert "--proc" not in command.args
 
 
+def test_sandbox_command_binds_writable_socket_path(tmp_path, monkeypatch) -> None:
+    socket_path = tmp_path / "docker.sock"
+    socket_path.touch()
+    runner = SandboxRunner(cwd=tmp_path, writable_roots=[socket_path])
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
+
+    command = runner.build_command(["/bin/true"])
+
+    bind_index = command.args.index(str(socket_path))
+    assert command.args[bind_index - 1] == "--bind"
+    assert command.args[bind_index + 1] == str(socket_path)
+
+
 def test_sandbox_proc_preflight_does_not_hide_non_proc_errors(
     tmp_path, monkeypatch
 ) -> None:

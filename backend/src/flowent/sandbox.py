@@ -261,7 +261,8 @@ class SandboxRunner:
         for root in self.writable_roots:
             if root == self.cwd:
                 continue
-            root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if not root.exists():
+                root.mkdir(mode=0o700, parents=True, exist_ok=True)
             args.extend(["--bind", str(root), str(root)])
         args.extend(
             [
