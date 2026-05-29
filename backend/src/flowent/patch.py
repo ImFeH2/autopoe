@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 class PatchError(RuntimeError):
@@ -14,6 +15,12 @@ class PatchChange:
     path: Path
     kind: str
     move_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class PatchLine:
+    kind: Literal["context", "remove", "add"]
+    text: str
 
 
 def affected_paths(patch: str, cwd: Path) -> list[Path]:
@@ -73,24 +80,29 @@ def parse_patch(patch: str, cwd: Path) -> list[dict[str, object]]:
                     strict=False
                 )
                 index += 1
-            chunks: list[dict[str, list[str]]] = []
-            current: dict[str, list[str]] | None = None
+            chunks: list[dict[str, list[PatchLine]]] = []
+            current: dict[str, list[PatchLine]] | None = None
             while index < len(lines) - 1 and not lines[index].startswith("*** "):
                 content_line = lines[index]
                 if content_line.startswith("@@"):
-                    current = {"remove": [], "add": []}
+                    current = {"lines": []}
                     chunks.append(current)
                 elif content_line.startswith("-"):
                     if current is None:
-                        current = {"remove": [], "add": []}
+                        current = {"lines": []}
                         chunks.append(current)
-                    current["remove"].append(content_line[1:])
+                    current["lines"].append(PatchLine("remove", content_line[1:]))
                 elif content_line.startswith("+"):
                     if current is None:
-                        current = {"remove": [], "add": []}
+                        current = {"lines": []}
                         chunks.append(current)
-                    current["add"].append(content_line[1:])
-                elif content_line.startswith(" ") or content_line == "*** End of File":
+                    current["lines"].append(PatchLine("add", content_line[1:]))
+                elif content_line.startswith(" "):
+                    if current is None:
+                        current = {"lines": []}
+                        chunks.append(current)
+                    current["lines"].append(PatchLine("context", content_line[1:]))
+                elif content_line == "*** End of File":
                     pass
                 else:
                     raise PatchError(
@@ -113,30 +125,42 @@ def parse_patch(patch: str, cwd: Path) -> list[dict[str, object]]:
     return operations
 
 
-def apply_update(original: str, chunks: list[dict[str, list[str]]]) -> str:
-    content = original
+def find_lines(haystack: list[str], needle: list[str], start: int) -> int:
+    if not needle:
+        return len(haystack)
+    last_start = len(haystack) - len(needle)
+    for index in range(start, last_start + 1):
+        if haystack[index : index + len(needle)] == needle:
+            return index
+    return -1
+
+
+def apply_update(original: str, chunks: list[dict[str, list[PatchLine]]]) -> str:
+    lines = original.splitlines()
+    trailing_newline = original.endswith("\n")
+    cursor = 0
     for chunk in chunks:
-        remove = "\n".join(chunk["remove"])
-        add = "\n".join(chunk["add"])
-        if remove:
-            candidates = [remove, remove + "\n"]
-            for candidate in candidates:
-                if candidate in content:
-                    replacement = add + (
-                        "\n" if candidate.endswith("\n") and add else ""
-                    )
-                    content = content.replace(candidate, replacement, 1)
-                    break
-            else:
-                raise PatchError("Patch context was not found.")
-        elif add:
-            content = (
-                content
-                + ("" if content.endswith("\n") or not content else "\n")
-                + add
-                + "\n"
-            )
-    return content
+        patch_lines = chunk["lines"]
+        old_lines = [
+            line.text for line in patch_lines if line.kind in {"context", "remove"}
+        ]
+        new_lines = [
+            line.text for line in patch_lines if line.kind in {"context", "add"}
+        ]
+        if not old_lines:
+            lines.extend(new_lines)
+            cursor = len(lines)
+            if new_lines:
+                trailing_newline = True
+            continue
+        match_index = find_lines(lines, old_lines, cursor)
+        if match_index == -1:
+            raise PatchError("Patch context was not found.")
+        lines[match_index : match_index + len(old_lines)] = new_lines
+        cursor = match_index + len(new_lines)
+    if not lines:
+        return ""
+    return "\n".join(lines) + ("\n" if trailing_newline else "")
 
 
 def apply_patch(patch: str, cwd: Path) -> dict[str, object]:
