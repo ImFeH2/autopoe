@@ -1151,10 +1151,12 @@ async def test_workspace_persists_automatic_review_result_during_stream(
 
     review_started = asyncio.Event()
     finish_review = asyncio.Event()
+    review_payload: dict[str, object] = {}
 
     async def fake_completion(**request: object) -> object:
         messages = request["messages"]
         if messages[0]["content"].startswith("You are Flowent Approval Reviewer"):
+            review_payload.update(json.loads(messages[-1]["content"]))
             review_started.set()
             await asyncio.wait_for(finish_review.wait(), timeout=2)
             return {
@@ -1214,6 +1216,7 @@ async def test_workspace_persists_automatic_review_result_during_stream(
     tool_error_data = json.loads(str(tool_error["data"]))
     assert tool_error_data["data"]["approval"]["decision"] == "denied"
     assert tool_error_data["data"]["approval"]["reason"] == "Outside the task scope."
+    assert review_payload["user_request"] == "Edit notes."
     assert target.read_text() == "alpha\n"
 
 

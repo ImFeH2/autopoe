@@ -341,7 +341,7 @@ def create_app(
         async def review_tool_approval(request: ApprovalReviewRequest):
             return await review_approval_request(
                 connection,
-                request,
+                request.model_copy(update={"user_request": content}),
                 completion=chat_completion,
             )
 
@@ -664,7 +664,7 @@ def create_app(
                 async def review_tool_approval(request: ApprovalReviewRequest):
                     return await review_approval_request(
                         connection,
-                        request,
+                        request.model_copy(update={"user_request": content}),
                         completion=chat_completion,
                     )
 

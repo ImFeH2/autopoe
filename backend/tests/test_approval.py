@@ -14,6 +14,42 @@ def provider_connection() -> ProviderConnection:
 
 
 @pytest.mark.anyio
+async def test_review_payload_includes_current_user_request(tmp_path) -> None:
+    captured_messages: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_messages.extend(request["messages"])
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"decision":"approved","reason":"Matches request."}',
+                        "role": "assistant",
+                    }
+                },
+            ],
+        }
+
+    decision = await review_approval_request(
+        provider_connection(),
+        ApprovalReviewRequest(
+            action="additional_permissions",
+            arguments={"command": "docker compose up -d --build"},
+            cwd=tmp_path,
+            tool_name="shell_command",
+            user_request="Start the dev container with Docker Compose.",
+            write_paths=[tmp_path / "docker.sock"],
+        ),
+        completion=fake_completion,
+    )
+
+    assert decision.decision == "approved"
+    assert "Start the dev container with Docker Compose." in str(
+        captured_messages[-1]["content"]
+    )
+
+
+@pytest.mark.anyio
 async def test_invalid_reviewer_json_is_denied(tmp_path) -> None:
     async def fake_completion(**request: object) -> object:
         return {

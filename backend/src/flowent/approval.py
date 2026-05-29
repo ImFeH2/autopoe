@@ -35,6 +35,7 @@ class ApprovalReviewRequest(BaseModel):
     cwd: Path
     tool_name: str
     tool_result: str = ""
+    user_request: str = ""
     write_paths: list[Path] = Field(default_factory=list)
 
 
@@ -55,6 +56,7 @@ def review_payload(request: ApprovalReviewRequest) -> dict[str, object]:
         "cwd": str(request.cwd),
         "tool_name": request.tool_name,
         "tool_result": request.tool_result,
+        "user_request": request.user_request,
         "write_paths": [str(path) for path in request.write_paths],
     }
 
