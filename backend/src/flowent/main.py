@@ -758,6 +758,20 @@ def create_app(
                 raise
             except Exception as error:
                 logger.exception("Workspace response failed")
+                if (
+                    current_tool_id is not None
+                    and current_tool_id in assistant_tools
+                    and assistant_tools[current_tool_id].status == "running"
+                ):
+                    assistant_tools[current_tool_id] = StoredToolItem.model_validate(
+                        {
+                            **assistant_tools[current_tool_id].model_dump(
+                                exclude_none=True
+                            ),
+                            "content": str(error) or "Tool failed.",
+                            "status": "failed",
+                        }
+                    )
                 persist_assistant("failed")
                 await append_run_event(
                     run,

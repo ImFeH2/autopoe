@@ -979,6 +979,41 @@ def test_workspace_persists_failed_draft_when_stream_errors(
     assert assistant["status"] == "failed"
 
 
+def test_workspace_marks_running_tool_failed_when_stream_errors(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_run_async(self, command, **kwargs):
+        raise RuntimeError("sandbox failed")
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield tool_call_chunk("shell_command", '{"command": "boom"}')
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Run it."})
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert events[-1]["event"] == "error"
+    state = client.get("/api/state").json()
+    assistant = state["messages"][-1]
+    assert assistant["status"] == "failed"
+    assert assistant["tools"][0]["name"] == "shell_command"
+    assert assistant["tools"][0]["status"] == "failed"
+    assert "sandbox failed" in assistant["tools"][0]["content"]
+
+
 def test_workspace_marks_draft_complete_when_stream_finishes(
     tmp_path, monkeypatch
 ) -> None:
