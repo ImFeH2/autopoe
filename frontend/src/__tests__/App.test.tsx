@@ -1221,6 +1221,35 @@ describe("App", () => {
     await expectDocumentText("Here is the checklist.");
   });
 
+  it("scrolls to the bottom after a message is sent", async () => {
+    const user = userEvent.setup();
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      mockInitialState(selectedProviderState());
+      render(<App />);
+
+      const composer = await screen.findByRole("textbox", {
+        name: "Message Flowent",
+      });
+
+      scrollIntoView.mockClear();
+      await user.type(composer, "Draft a launch checklist");
+      await user.click(screen.getByRole("button", { name: "Send message" }));
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          behavior: "smooth",
+          block: "end",
+        });
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it("requests a workspace reply and appends the assistant message", async () => {
     const user = userEvent.setup();
     mockInitialState(

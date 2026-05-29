@@ -122,8 +122,12 @@ function MessageList({
   const listRef = useRef<HTMLDivElement>(null);
   const shouldFollowRef = useRef(true);
   const scrollMarkerRef = useRef<HTMLDivElement>(null);
+  const latestMessage = messages.at(-1);
+  const latestMessageAuthor = latestMessage?.author ?? "";
+  const latestMessageId = latestMessage?.id ?? "";
+  const lastMessageIdRef = useRef(latestMessageId);
   const displayMessages = useMemo(() => {
-    if (!isResponding || messages.at(-1)?.author === "assistant") {
+    if (!isResponding || latestMessageAuthor === "assistant") {
       return messages;
     }
     return [
@@ -134,13 +138,19 @@ function MessageList({
         id: "assistant-pending",
       },
     ];
-  }, [isResponding, messages]);
+  }, [isResponding, latestMessageAuthor, messages]);
   const streamingMessageId =
-    isResponding && messages.at(-1)?.author === "assistant"
-      ? messages.at(-1)?.id
-      : "";
+    isResponding && latestMessageAuthor === "assistant" ? latestMessageId : "";
 
   useEffect(() => {
+    if (latestMessageId !== lastMessageIdRef.current) {
+      lastMessageIdRef.current = latestMessageId;
+
+      if (latestMessageAuthor === "user") {
+        shouldFollowRef.current = true;
+      }
+    }
+
     if (!shouldFollowRef.current) {
       return;
     }
@@ -148,7 +158,7 @@ function MessageList({
       block: "end",
       behavior: "smooth",
     });
-  }, [displayMessages]);
+  }, [displayMessages, latestMessageAuthor, latestMessageId]);
 
   const updateFollowState = () => {
     const list = listRef.current;
