@@ -8,6 +8,9 @@ services:
     image: flowent:dev
     environment:
       FLOWENT_FRONTEND_HOST: 0.0.0.0
+      FLOWENT_WORKDIR: /workspace
+    working_dir: /workspace
+    command: pnpm --dir /app dev
     ports:
       - "${FLOWENT_DEV_PORT:-6873}:6873"
     volumes:
