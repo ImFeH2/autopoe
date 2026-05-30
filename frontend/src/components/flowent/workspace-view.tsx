@@ -218,9 +218,19 @@ function MessageList({
 }
 
 function SystemMessage({ message }: { message: Message }) {
+  const Icon =
+    message.content === "Context optimized"
+      ? Sparkles
+      : message.content === "Context compacted"
+        ? Check
+        : null;
+
   return (
     <div className="mx-auto flex w-full max-w-[640px] justify-center py-3">
-      <div className="rounded-full border border-white/10 bg-input/30 px-3 py-1.5 text-sm leading-5 text-white/70">
+      <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-input/30 px-3 py-1.5 text-sm leading-5 text-white/70">
+        {Icon ? (
+          <Icon aria-hidden="true" className="size-3.5 text-white/50" />
+        ) : null}
         {message.content}
       </div>
     </div>

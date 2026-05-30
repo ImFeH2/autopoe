@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from flowent._version import __version__
-from flowent.agent import run_agent_stream
+from flowent.agent import AgentContextUpdate, run_agent_stream
 from flowent.approval import ApprovalReviewRequest, review_approval_request
 from flowent.channels import TelegramBotManager, TelegramTransport
 from flowent.compact import (
@@ -67,6 +67,9 @@ logger = logging.getLogger("flowent.main")
 
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
 COMPACTED_CONTEXT_MARKER = "Context compacted"
+OPTIMIZED_CONTEXT_MARKER = "Context optimized"
+DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 120_000
+AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET = 20_000
 
 
 class ProviderModelsRequest(BaseModel):
@@ -377,9 +380,31 @@ def selected_connection(state: StoredState) -> ProviderConnection:
 def latest_compacted_context_index(messages: list[StoredMessage]) -> int | None:
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
-        if message.author == "system" and message.content == COMPACTED_CONTEXT_MARKER:
+        if message.author == "system" and is_context_marker(message):
             return index
     return None
+
+
+def is_context_marker(message: StoredMessage) -> bool:
+    return message.content in {COMPACTED_CONTEXT_MARKER, OPTIMIZED_CONTEXT_MARKER}
+
+
+def auto_compact_token_limit() -> int:
+    raw_limit = os.environ.get("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "")
+    try:
+        return max(0, int(raw_limit))
+    except ValueError:
+        return DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
+
+
+def should_auto_compact(messages: list[ChatMessage]) -> bool:
+    token_limit = auto_compact_token_limit()
+    if token_limit <= 0:
+        return False
+    return (
+        sum(max(1, (len(message.content) + 3) // 4) for message in messages)
+        >= token_limit
+    )
 
 
 def workspace_chat_messages(
@@ -396,10 +421,7 @@ def workspace_chat_messages(
             checkpoint.source_message_id,
         )
         for message in visible_messages:
-            if (
-                message.author == "system"
-                and message.content == COMPACTED_CONTEXT_MARKER
-            ):
+            if message.author == "system" and is_context_marker(message):
                 continue
             if message.author not in ("user", "assistant"):
                 raise HTTPException(
@@ -426,7 +448,7 @@ def workspace_chat_messages(
         visible_messages = messages[marker_index + 1 :]
 
     for message in visible_messages:
-        if message.author == "system" and message.content == COMPACTED_CONTEXT_MARKER:
+        if message.author == "system" and is_context_marker(message):
             continue
         if message.author not in ("user", "assistant"):
             raise HTTPException(status_code=400, detail="Message history is invalid.")
@@ -468,6 +490,99 @@ def create_app(
     logger.info("Workdir: %s", cwd)
     logger.info("Static directory: %s", static_dir)
 
+    def request_messages_for_content(
+        state: StoredState,
+        messages: list[StoredMessage],
+        content: str,
+    ) -> list[dict[str, object]]:
+        compacted_context = store.read_compacted_context()
+        checkpoint = store.read_active_compaction_checkpoint()
+        chat_messages = workspace_chat_messages(
+            messages,
+            compacted_context,
+            checkpoint,
+        )
+        return [
+            message.model_dump()
+            for message in [
+                *runtime_context_messages(cwd, state.settings.agent_prompt),
+                *explicit_skill_messages(cwd, store, content),
+                *chat_messages,
+            ]
+        ]
+
+    async def save_context_checkpoint(
+        *,
+        connection: ProviderConnection,
+        messages: list[StoredMessage],
+        model_history: list[ChatMessage],
+        marker_content: str,
+        source_message_id: str | None = None,
+        trigger: Literal["manual", "auto"],
+    ) -> tuple[StoredMessage, list[dict[str, object]]]:
+        marker = StoredMessage(
+            author="system",
+            content=marker_content,
+            id=str(uuid4()),
+        )
+        compact_result = await compact_provider.compact(
+            connection,
+            CompactInput(
+                messages=messages,
+                model_history=model_history,
+                retained_message_token_budget=AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET,
+                trigger=trigger,
+            ),
+            completion=chat_completion,
+        )
+        store.save_compaction_checkpoint(
+            StoredCompactionCheckpoint(
+                id=str(uuid4()),
+                method=compact_result.method,
+                replacement_history=compact_result.replacement_history,
+                source_message_id=source_message_id or marker.id,
+                summary=compact_result.summary,
+                token_after=compact_result.token_after,
+                token_before=compact_result.token_before,
+                trigger=trigger,
+            )
+        )
+        logger.info(
+            "Workspace compact checkpoint saved trigger=%s method=%s summary_length=%s token_before=%s token_after=%s",
+            trigger,
+            compact_result.method,
+            len(compact_result.summary),
+            compact_result.token_before,
+            compact_result.token_after,
+        )
+        logger.log(TRACE_LEVEL, "Workspace compact summary=%r", compact_result.summary)
+        return marker, [
+            message.model_dump() for message in compact_result.replacement_history
+        ]
+
+    async def auto_compact_workspace_messages(
+        *,
+        connection: ProviderConnection,
+        messages: list[StoredMessage],
+        model_history: list[ChatMessage],
+        source_message_id: str | None = None,
+    ) -> tuple[StoredMessage, list[dict[str, object]]] | None:
+        if not should_auto_compact(model_history):
+            return None
+        logger.info("Workspace auto compact requested")
+        try:
+            return await save_context_checkpoint(
+                connection=connection,
+                marker_content=OPTIMIZED_CONTEXT_MARKER,
+                messages=messages,
+                model_history=model_history,
+                source_message_id=source_message_id,
+                trigger="auto",
+            )
+        except Exception as error:
+            logger.exception("Workspace auto compact failed")
+            raise RuntimeError("Context could not be optimized.") from error
+
     async def run_workspace_turn(content: str) -> StoredMessage:
         state = store.read_state()
         connection = selected_connection(state)
@@ -478,20 +593,25 @@ def create_app(
         )
         next_messages = [*state.messages, user_message]
         store.save_messages(next_messages)
-        chat_messages = workspace_chat_messages(
-            next_messages,
-            store.read_compacted_context(),
-            store.read_active_compaction_checkpoint(),
-        )
-        skill_messages = explicit_skill_messages(cwd, store, content)
-        request_messages = [
-            message.model_dump()
-            for message in [
-                *runtime_context_messages(cwd, state.settings.agent_prompt),
-                *skill_messages,
-                *chat_messages,
-            ]
+        model_history = [
+            *runtime_context_messages(cwd, state.settings.agent_prompt),
+            *workspace_chat_messages(
+                state.messages,
+                store.read_compacted_context(),
+                store.read_active_compaction_checkpoint(),
+            ),
         ]
+        auto_compaction = await auto_compact_workspace_messages(
+            connection=connection,
+            messages=state.messages,
+            model_history=model_history,
+            source_message_id=None,
+        )
+        if auto_compaction is not None:
+            marker, _ = auto_compaction
+            next_messages = [*state.messages, marker, user_message]
+            store.save_messages(next_messages)
+        request_messages = request_messages_for_content(state, next_messages, content)
         assistant_id = str(uuid4())
         assistant_output = AssistantOutputBuilder(assistant_id)
 
@@ -774,25 +894,13 @@ def create_app(
         )
         next_messages = [*state.messages, user_message]
         store.save_messages(next_messages)
-        chat_messages = workspace_chat_messages(
-            next_messages,
-            store.read_compacted_context(),
-            store.read_active_compaction_checkpoint(),
-        )
-        request_messages = [
-            message.model_dump()
-            for message in [
-                *runtime_context_messages(cwd, state.settings.agent_prompt),
-                *explicit_skill_messages(cwd, store, content),
-                *chat_messages,
-            ]
-        ]
         run = WorkspaceRun(condition=asyncio.Condition())
         workspace_runs[run.id] = run
         active_workspace_run_id = run.id
 
         async def run_task() -> None:
             nonlocal active_workspace_run_id
+            nonlocal next_messages
             assistant_message = StoredMessage(
                 author="assistant",
                 content="",
@@ -819,6 +927,39 @@ def create_app(
 
             try:
                 current_tool_id: str | None = None
+                current_request_messages = request_messages_for_content(
+                    state,
+                    next_messages,
+                    content,
+                )
+                pre_turn_request_messages = request_messages_for_content(
+                    state,
+                    state.messages,
+                    content,
+                )
+                auto_compaction = await auto_compact_workspace_messages(
+                    connection=connection,
+                    messages=state.messages,
+                    model_history=[
+                        ChatMessage.model_validate(message)
+                        for message in pre_turn_request_messages
+                    ],
+                    source_message_id=None,
+                )
+                if auto_compaction is not None:
+                    marker, _ = auto_compaction
+                    next_messages = [*state.messages, marker, user_message]
+                    store.save_messages(next_messages)
+                    await append_run_event(
+                        run,
+                        "context_optimized",
+                        {"message": marker.model_dump()},
+                    )
+                    current_request_messages = request_messages_for_content(
+                        state,
+                        next_messages,
+                        content,
+                    )
 
                 async def review_tool_approval(request: ApprovalReviewRequest):
                     return await review_approval_request(
@@ -842,14 +983,73 @@ def create_app(
                         ],
                     )
 
+                async def context_compactor(
+                    conversation: Sequence[Mapping[str, object]],
+                ) -> AgentContextUpdate | None:
+                    nonlocal next_messages
+                    assistant_snapshot = StoredMessage(
+                        author="assistant",
+                        content=assistant_output.content,
+                        groups=assistant_output.groups,
+                        id=assistant_message.id,
+                        status="running",
+                        thinking=assistant_output.thinking,
+                        tools=list(assistant_output.tools.values()),
+                    )
+                    model_history: list[ChatMessage] = []
+                    for message in conversation:
+                        role_value = message.get("role")
+                        content = str(message.get("content") or "")
+                        if role_value == "system":
+                            model_history.append(
+                                ChatMessage(role="system", content=content)
+                            )
+                        if role_value == "user":
+                            model_history.append(
+                                ChatMessage(role="user", content=content)
+                            )
+                        if role_value == "assistant":
+                            model_history.append(
+                                ChatMessage(role="assistant", content=content)
+                            )
+                        if role_value == "tool":
+                            model_history.append(
+                                ChatMessage(
+                                    role="user",
+                                    content=f"Tool result: {content}",
+                                )
+                            )
+                    auto_result = await auto_compact_workspace_messages(
+                        connection=connection,
+                        messages=next_messages,
+                        model_history=model_history,
+                        source_message_id=assistant_snapshot.id,
+                    )
+                    if auto_result is None:
+                        return None
+                    marker, replacement_history = auto_result
+                    next_messages = append_or_replace_message(
+                        [*next_messages, marker], assistant_snapshot
+                    )
+                    store.save_messages(next_messages)
+                    compacted_conversation = [
+                        dict(conversation[0]),
+                        *replacement_history,
+                    ]
+                    return AgentContextUpdate(
+                        conversation=compacted_conversation,
+                        message=marker.model_dump(),
+                    )
+
                 async for event in run_agent_stream(
                     completion=chat_completion,
                     connection=connection,
+                    context_compactor=context_compactor,
                     cwd=cwd,
                     extra_tool_runner=mcp_manager.run_tool,
                     extra_tool_specs=mcp_manager.tool_specs(),
                     extra_tool_title=mcp_manager.tool_title,
-                    messages=request_messages,
+                    messages=current_request_messages,
                     tool_runner=tool_runner,
                 ):
                     if event.event == "start":
@@ -1019,14 +1219,13 @@ def create_app(
         ]
 
         try:
-            compact_result = await compact_provider.compact(
-                connection,
-                CompactInput(
-                    messages=state.messages,
-                    model_history=model_history,
-                    trigger="manual",
-                ),
-                completion=chat_completion,
+            marker, _ = await save_context_checkpoint(
+                connection=connection,
+                marker_content=COMPACTED_CONTEXT_MARKER,
+                messages=state.messages,
+                model_history=model_history,
+                source_message_id=None,
+                trigger="manual",
             )
         except HTTPException:
             raise
@@ -1037,33 +1236,8 @@ def create_app(
                 detail="Context could not be compacted.",
             ) from error
 
-        marker = StoredMessage(
-            author="system",
-            content=COMPACTED_CONTEXT_MARKER,
-            id=str(uuid4()),
-        )
-        source_message_id = state.messages[-1].id if state.messages else None
-        store.save_compaction_checkpoint(
-            StoredCompactionCheckpoint(
-                id=str(uuid4()),
-                method=compact_result.method,
-                replacement_history=compact_result.replacement_history,
-                source_message_id=source_message_id,
-                summary=compact_result.summary,
-                token_after=compact_result.token_after,
-                token_before=compact_result.token_before,
-                trigger="manual",
-            )
-        )
         store.save_messages([*state.messages, marker])
-        logger.info(
-            "Workspace compact completed method=%s summary_length=%s token_before=%s token_after=%s",
-            compact_result.method,
-            len(compact_result.summary),
-            compact_result.token_before,
-            compact_result.token_after,
-        )
-        logger.log(TRACE_LEVEL, "Workspace compact summary=%r", compact_result.summary)
+        logger.info("Workspace compact completed")
         return WorkspaceCompactResponse(message=marker)
 
     @app.post("/api/workspace/respond")

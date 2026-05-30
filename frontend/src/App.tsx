@@ -154,6 +154,12 @@ type WorkspaceStreamEvent =
     }
   | {
       data: {
+        message: ApiMessage;
+      };
+      event: "context_optimized";
+    }
+  | {
+      data: {
         tool: ToolItem;
       };
       event: "tool_start";
@@ -176,6 +182,7 @@ type WorkspaceStreamEvent =
     };
 
 type WorkspaceStreamHandlers = {
+  onContextOptimized: (message: ApiMessage) => void;
   onDelta: (content: string) => void;
   onDone: (message: ApiMessage) => void;
   onOutputStart: (index: number) => void;
@@ -1104,6 +1111,9 @@ function App() {
           if (streamEvent.event === "thinking_delta") {
             handlers.onThinkingDelta(streamEvent.data.content);
           }
+          if (streamEvent.event === "context_optimized") {
+            handlers.onContextOptimized(streamEvent.data.message);
+          }
           if (streamEvent.event === "done") {
             handlers.onDone(streamEvent.data.message);
             return;
@@ -1159,6 +1169,18 @@ function App() {
         ? baseMessages.slice(0, -1)
         : baseMessages;
       const isCurrentResponse = () => responseRunRef.current === responseRun;
+      const appendSystemMessage = (message: ApiMessage) => {
+        if (!isCurrentResponse()) {
+          return;
+        }
+        activeRunEventIndexRef.current += 1;
+        nextMessages.push(message);
+        if (assistantMessage) {
+          setMessages([...nextMessages, assistantMessage]);
+          return;
+        }
+        setMessages([...nextMessages]);
+      };
       const updateAssistantMessage = () => {
         if (!assistantId || !isCurrentResponse()) {
           return;
@@ -1299,6 +1321,7 @@ function App() {
       };
 
       return {
+        onContextOptimized: appendSystemMessage,
         onDelta: (content) => {
           if (!isCurrentResponse()) {
             return;

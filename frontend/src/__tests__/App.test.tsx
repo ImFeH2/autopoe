@@ -164,6 +164,57 @@ type TestWritablePath = {
   path: string;
 };
 
+const assistantOptimizedContextStreamResponse = (
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `event: context_optimized\ndata: ${JSON.stringify({
+            message: {
+              author: "system",
+              content: "Context optimized",
+              id: "context-optimized",
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
 const controlledThinkingStreamResponse = (
   thinking: string,
   content: string,
@@ -4949,6 +5000,42 @@ describe("App", () => {
     await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Context compacted")).toBeInTheDocument();
+  });
+
+  it("shows the optimized context marker after automatic context optimization", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-optimized");
+      }
+      if (
+        input === "/api/workspace/runs/run-optimized/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return assistantOptimizedContextStreamResponse("Continuing.");
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Continue from there");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Context optimized")).toBeInTheDocument();
+    expect(await screen.findByText("Continuing.")).toBeInTheDocument();
   });
 
   it("keeps compacted context available for the next message", async () => {

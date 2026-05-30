@@ -413,6 +413,288 @@ def test_workspace_response_uses_compacted_context_after_compact(
     assert {"role": "user", "content": "Context compacted"} not in response_messages
 
 
+def test_workspace_response_auto_compacts_before_next_message(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "120")
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+        if not request.get("stream"):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Keep the launch plan summary.",
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Continuing."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "user",
+                    "content": "Original request. " * 80,
+                    "id": "message-1",
+                },
+                {
+                    "author": "assistant",
+                    "content": "Detailed work log. " * 80,
+                    "id": "message-2",
+                },
+            ]
+        },
+    )
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Continue from there."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert events[0]["event"] == "context_optimized"
+    assert json.loads(events[0]["data"])["message"]["content"] == ("Context optimized")
+    assert len(captured_requests) == 2
+    assert (
+        "CONTEXT CHECKPOINT COMPACTION"
+        in captured_requests[0]["messages"][-1]["content"]
+    )
+    response_messages = captured_requests[1]["messages"]
+    compacted_messages = [
+        message
+        for message in response_messages
+        if str(message["content"]).startswith(
+            "Another language model started working on this Flowent workspace session"
+        )
+    ]
+    assert len(compacted_messages) == 1
+    assert "Keep the launch plan summary." in compacted_messages[0]["content"]
+    assert {"role": "user", "content": "Context optimized"} not in response_messages
+    state = client.get("/api/state").json()
+    assert [message["content"] for message in state["messages"]][-3:] == [
+        "Context optimized",
+        "Continue from there.",
+        "Continuing.",
+    ]
+
+
+def test_workspace_response_auto_compacts_after_tool_result(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "1200")
+    (tmp_path / "notes.txt").write_text("Launch notes. " * 600)
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+        if not request.get("stream"):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Keep the file findings from notes.txt.",
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
+                return
+            yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Read the launch notes."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert [event["event"] for event in events] == [
+        "start",
+        "output_start",
+        "tool_start",
+        "tool_done",
+        "context_optimized",
+        "output_start",
+        "delta",
+        "done",
+    ]
+    assert json.loads(events[4]["data"])["message"]["content"] == ("Context optimized")
+    assert len(captured_requests) == 3
+    assert "Launch notes." in captured_requests[1]["messages"][-1]["content"]
+    response_messages = captured_requests[2]["messages"]
+    compacted_messages = [
+        message
+        for message in response_messages
+        if str(message["content"]).startswith(
+            "Another language model started working on this Flowent workspace session"
+        )
+    ]
+    assert len(compacted_messages) == 1
+    assert "Keep the file findings from notes.txt." in compacted_messages[0]["content"]
+    state = client.get("/api/state").json()
+    assert [message["content"] for message in state["messages"]] == [
+        "Read the launch notes.",
+        "Context optimized",
+        "Done.",
+    ]
+
+
+def test_workspace_auto_compact_failure_keeps_existing_checkpoint(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "120")
+
+    async def fake_completion(**request: object) -> object:
+        if not request.get("stream"):
+            raise RuntimeError("summary failed")
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Should not run."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "user",
+                    "content": "Original request. " * 80,
+                    "id": "message-1",
+                }
+            ]
+        },
+    )
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Continue from there."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert events[-1]["event"] == "error"
+    assert json.loads(events[-1]["data"])["message"] == (
+        "Context could not be optimized."
+    )
+    state = client.get("/api/state").json()
+    assert "Context optimized" not in [
+        message["content"] for message in state["messages"]
+    ]
+
+
+def test_workspace_response_uses_auto_compaction_checkpoint_after_restart(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "120")
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+        if not request.get("stream"):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Auto checkpoint survives restarts.",
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Continuing."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "user",
+                    "content": "Original request. " * 80,
+                    "id": "message-1",
+                }
+            ]
+        },
+    )
+
+    first_response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Continue from there."},
+    )
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "100000")
+    restarted_client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    second_response = restarted_client.post(
+        "/api/workspace/respond",
+        json={"content": "Continue after restart."},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    response_messages = captured_requests[2]["messages"]
+    compacted_messages = [
+        message
+        for message in response_messages
+        if str(message["content"]).startswith(
+            "Another language model started working on this Flowent workspace session"
+        )
+    ]
+    assert len(compacted_messages) == 1
+    assert "Auto checkpoint survives restarts." in compacted_messages[0]["content"]
+    assert {"role": "user", "content": "Context optimized"} not in response_messages
+    assert response_messages[-1] == {
+        "role": "user",
+        "content": "Continue after restart.",
+    }
+
+
 def test_workspace_response_includes_project_and_environment_context(
     tmp_path, monkeypatch
 ) -> None:

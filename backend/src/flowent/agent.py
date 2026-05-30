@@ -71,6 +71,12 @@ class PendingToolCall:
             self.arguments += delta.arguments
 
 
+@dataclass(frozen=True)
+class AgentContextUpdate:
+    conversation: Sequence[Mapping[str, object]]
+    message: Mapping[str, object]
+
+
 def assistant_tool_call_message(
     tool_calls: Sequence[PendingToolCall],
     content: str,
@@ -110,6 +116,10 @@ async def run_agent_stream(
     | None = None,
     extra_tool_specs: Sequence[Mapping[str, object]] | None = None,
     extra_tool_title: Callable[[str], str | None] | None = None,
+    context_compactor: Callable[
+        [Sequence[Mapping[str, object]]], Awaitable[AgentContextUpdate | None]
+    ]
+    | None = None,
     tool_runner: Callable[[str, dict[str, object], ToolContext], Awaitable[ToolResult]]
     | None = None,
     web_searcher: Callable[[str], Sequence[dict[str, str]]] | None = None,
@@ -287,3 +297,12 @@ async def run_agent_stream(
                     },
                 )
             conversation.append(tool_result_message(tool_call_id, result_content))
+
+        if context_compactor is not None:
+            compaction = await context_compactor(conversation)
+            if compaction is not None:
+                conversation = [dict(message) for message in compaction.conversation]
+                yield AgentStreamEvent(
+                    event="context_optimized",
+                    data={"message": dict(compaction.message)},
+                )
