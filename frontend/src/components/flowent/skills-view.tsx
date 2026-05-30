@@ -29,11 +29,8 @@ export function SkillsView({
   skills: Skill[];
 }) {
   return (
-    <section
-      className="grid h-full min-h-0 bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)]"
-      aria-label="Skills"
-    >
-      <div className="grid h-full min-h-0 grid-cols-[260px_minmax(0,1fr)] max-[900px]:h-auto max-[900px]:grid-cols-1">
+    <section className="grid h-full min-h-0 bg-black" aria-label="Skills">
+      <div className="grid h-full min-h-0 grid-cols-[260px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
         <SkillsSidebar
           activeSkill={activeSkill}
           onReloadSkills={onReloadSkills}
@@ -117,7 +114,7 @@ function SkillDetails({
 }) {
   if (!activeSkill) {
     return (
-      <div className="grid min-h-0 content-start overflow-auto px-12 py-8 max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5">
+      <div className="grid min-h-0 content-start overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5">
         <p className={emptyStateClassName}>No skills</p>
       </div>
     );
@@ -126,7 +123,7 @@ function SkillDetails({
   return (
     <div
       className={cn(
-        "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5",
+        "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
         stableScrollbarClassName,
       )}
       aria-label="Skill"

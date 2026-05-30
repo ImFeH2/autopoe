@@ -45,13 +45,10 @@ export function ChannelsView({
   );
 
   return (
-    <section
-      className="grid h-full min-h-0 bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)]"
-      aria-label="Channels"
-    >
+    <section className="grid h-full min-h-0 bg-black" aria-label="Channels">
       <form
         className={cn(
-          "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5",
+          "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
           stableScrollbarClassName,
         )}
         aria-label="Telegram Bot"

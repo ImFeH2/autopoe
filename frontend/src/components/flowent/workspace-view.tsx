@@ -58,10 +58,7 @@ export function WorkspaceView({
   const [composerOffset, setComposerOffset] = useState(112);
 
   return (
-    <section
-      className="h-full min-h-0 bg-black max-[900px]:h-[calc(100vh-126px)] max-[900px]:min-h-[calc(100vh-126px)]"
-      aria-label="Workspace"
-    >
+    <section className="h-full min-h-0 bg-black" aria-label="Workspace">
       <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
         <WorkspaceControls onClearMessages={onClearMessages} />
         <MessageList

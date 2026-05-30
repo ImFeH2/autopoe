@@ -19,7 +19,6 @@ import {
   fieldLabelClassName,
   fieldTriggerClassName,
   formActionsClassName,
-  mutedTextClassName,
   stableScrollbarClassName,
 } from "@/components/flowent/styles";
 import type {
@@ -81,13 +80,13 @@ export function SettingsView({
   return (
     <section
       className={cn(
-        "flex h-full min-h-0 flex-col overflow-auto bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)] max-[900px]:overflow-visible",
+        "flex h-full min-h-0 flex-col overflow-auto bg-black",
         stableScrollbarClassName,
       )}
       aria-label="Settings"
     >
       <form
-        className="m-8 grid w-[min(620px,calc(100%-64px))] gap-5 self-start bg-black max-[900px]:m-5 max-[900px]:w-auto"
+        className="m-8 grid gap-5 bg-black max-[900px]:m-5"
         aria-label="Runtime settings"
         onSubmit={saveSettings}
       >
@@ -122,10 +121,6 @@ export function SettingsView({
         <section className="grid gap-3">
           <div className="grid gap-1">
             <h3 className="text-base font-semibold text-white">Agent prompt</h3>
-            <p className={cn("m-0 text-xs leading-5", mutedTextClassName)}>
-              These instructions are sent before AGENTS.md project instructions
-              on every workspace turn.
-            </p>
           </div>
           <div className={cn(dashedPanelClassName, "p-3")}>
             <Label className="sr-only" htmlFor="agent-prompt">

@@ -67,11 +67,8 @@ export function McpView({
   servers: McpServer[];
 }) {
   return (
-    <section
-      className="grid h-full min-h-0 bg-black max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)]"
-      aria-label="MCP"
-    >
-      <div className="grid h-full min-h-0 grid-cols-[260px_minmax(0,1fr)] max-[900px]:h-auto max-[900px]:grid-cols-1">
+    <section className="grid h-full min-h-0 bg-black" aria-label="MCP">
+      <div className="grid h-full min-h-0 grid-cols-[260px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
         <McpSidebar
           activeServer={activeServer}
           isCreatingServer={isCreatingServer}
@@ -219,7 +216,7 @@ function McpDetails({
     return (
       <section
         className={cn(
-          "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5",
+          "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
           stableScrollbarClassName,
         )}
         aria-label="MCP import"
@@ -241,7 +238,7 @@ function McpDetails({
   return (
     <form
       className={cn(
-        "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5",
+        "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
         stableScrollbarClassName,
       )}
       aria-label="MCP server"

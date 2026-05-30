@@ -25,7 +25,18 @@
   --ring: oklch(0.82 0 0);
   --radius: 0.45rem;
   --font-sans: "Geist Variable", sans-serif;
+  --flowent-viewport-height: 100vh;
+  --flowent-safe-area-top: env(safe-area-inset-top, 0px);
+  --flowent-safe-area-right: env(safe-area-inset-right, 0px);
+  --flowent-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --flowent-safe-area-left: env(safe-area-inset-left, 0px);
   color-scheme: dark;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --flowent-viewport-height: 100dvh;
+  }
 }
 
 @theme inline {
@@ -60,6 +71,7 @@
 html,
 body,
 #root {
+  height: 100%;
   min-height: 100%;
 }
 

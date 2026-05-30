@@ -20,7 +20,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY frontend/package.json ./frontend/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store HUSKY=0 pnpm install --frozen-lockfile
 
-COPY backend/pyproject.toml backend/uv.lock ./backend/
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./backend/
+COPY backend/src ./backend/src
 RUN uv sync --project backend --frozen
 
 COPY . .

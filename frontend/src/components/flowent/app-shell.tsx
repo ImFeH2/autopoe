@@ -41,7 +41,7 @@ export function AppShell({
       value={activeView}
       onValueChange={(value) => onViewChange(value as ViewId)}
       orientation="vertical"
-      className="grid h-screen min-h-0 grid-cols-[260px_minmax(0,1fr)] gap-0 overflow-hidden bg-black text-white max-[900px]:grid-cols-1 max-[900px]:overflow-auto"
+      className="grid h-[var(--flowent-viewport-height)] min-h-0 grid-cols-[260px_minmax(0,1fr)] gap-0 overflow-hidden bg-black pt-[var(--flowent-safe-area-top)] pr-[var(--flowent-safe-area-right)] pb-[var(--flowent-safe-area-bottom)] pl-[var(--flowent-safe-area-left)] text-white max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]"
     >
       <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black px-5 py-6 max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3">
         <div className="flex min-h-10 items-center gap-3 bg-black max-[560px]:min-h-10">
@@ -89,7 +89,9 @@ export function AppShell({
         </div>
       </aside>
 
-      <main className="min-h-0 min-w-0 bg-black">{children}</main>
+      <main className="min-h-0 min-w-0 overflow-hidden bg-black">
+        {children}
+      </main>
     </Tabs>
   );
 }

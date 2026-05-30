@@ -1,5 +1,4 @@
-export const viewPanelClassName =
-  "h-screen min-h-0 min-w-0 overflow-hidden max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)] max-[900px]:overflow-visible";
+export const viewPanelClassName = "h-full min-h-0 min-w-0 overflow-hidden";
 
 export const surfaceBorderClassName = "border-white/10";
 

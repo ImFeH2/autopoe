@@ -23,7 +23,7 @@ export function PermissionsView({
     <section
       aria-label="Permissions"
       className={cn(
-        "grid h-full min-h-0 content-start gap-7 overflow-auto bg-black px-12 py-8 max-[900px]:h-auto max-[900px]:min-h-[calc(100vh-126px)] max-[900px]:overflow-visible max-[900px]:px-5 max-[900px]:py-5",
+        "grid h-full min-h-0 content-start gap-7 overflow-auto bg-black px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
         stableScrollbarClassName,
       )}
     >
