@@ -6,6 +6,7 @@ import pytest
 
 from flowent.cli import main
 from flowent.main import create_app
+from flowent.paths import WORKDIR_ENV_VAR
 from flowent.sandbox import SandboxError
 
 
@@ -77,6 +78,59 @@ def test_main_sets_workdir_for_server_start(tmp_path, monkeypatch) -> None:
     )
 
     assert os.environ["FLOWENT_WORKDIR"] == str(workdir.resolve(strict=False))
+    assert calls == [("flowent.main:app", {"host": "127.0.0.1", "port": 6899})]
+
+
+def test_main_uses_default_host_when_environment_is_not_set(
+    tmp_path, monkeypatch
+) -> None:
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_run(app: str, **kwargs: object) -> None:
+        calls.append((app, kwargs))
+
+    monkeypatch.delenv("FLOWENT_HOST", raising=False)
+    monkeypatch.setenv(WORKDIR_ENV_VAR, str(workdir))
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=fake_run))
+
+    main(["--workdir", str(workdir), "--port", "6899"])
+
+    assert calls == [("flowent.main:app", {"host": "127.0.0.1", "port": 6899})]
+
+
+def test_main_reads_host_from_environment(tmp_path, monkeypatch) -> None:
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_run(app: str, **kwargs: object) -> None:
+        calls.append((app, kwargs))
+
+    monkeypatch.setenv("FLOWENT_HOST", "0.0.0.0")
+    monkeypatch.setenv(WORKDIR_ENV_VAR, str(workdir))
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=fake_run))
+
+    main(["--workdir", str(workdir), "--port", "6899"])
+
+    assert calls == [("flowent.main:app", {"host": "0.0.0.0", "port": 6899})]
+
+
+def test_main_prefers_host_argument_over_environment(tmp_path, monkeypatch) -> None:
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_run(app: str, **kwargs: object) -> None:
+        calls.append((app, kwargs))
+
+    monkeypatch.setenv("FLOWENT_HOST", "0.0.0.0")
+    monkeypatch.setenv(WORKDIR_ENV_VAR, str(workdir))
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=fake_run))
+
+    main(["--workdir", str(workdir), "--host", "127.0.0.1", "--port", "6899"])
+
     assert calls == [("flowent.main:app", {"host": "127.0.0.1", "port": 6899})]
 
 

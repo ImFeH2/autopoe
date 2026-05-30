@@ -4,6 +4,8 @@ services:
   flowent:
     image: ghcr.io/imfeh2/flowent:${FLOWENT_VERSION:-latest}
     restart: unless-stopped
+    environment:
+      FLOWENT_HOST: 0.0.0.0
     ports:
       - "${FLOWENT_PORT:-6873}:6873"
     volumes:

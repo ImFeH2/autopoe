@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     image: flowent:dev
+    environment:
+      FLOWENT_FRONTEND_HOST: 0.0.0.0
     ports:
       - "${FLOWENT_DEV_PORT:-6873}:6873"
     volumes:

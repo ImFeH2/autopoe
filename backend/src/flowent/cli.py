@@ -7,6 +7,8 @@ from pathlib import Path
 
 from flowent.paths import WORKDIR_ENV_VAR, resolve_workdir
 
+HOST_ENV_VAR = "FLOWENT_HOST"
+
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
@@ -20,8 +22,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--host",
         "--hostname",
-        default="127.0.0.1",
-        help="Bind host (default: 127.0.0.1)",
+        default=os.environ.get(HOST_ENV_VAR) or "127.0.0.1",
+        help="Bind host (default: $FLOWENT_HOST or 127.0.0.1)",
     )
     parser.add_argument(
         "--port",

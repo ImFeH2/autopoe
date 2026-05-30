@@ -18,7 +18,7 @@ RUN pnpm build:frontend
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS runner
 
 ENV FLOWENT_STATIC_DIR=/app/frontend
-ENV HOSTNAME=0.0.0.0
+ENV FLOWENT_HOST=0.0.0.0
 ENV PORT=6873
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy

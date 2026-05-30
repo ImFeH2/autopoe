@@ -6,6 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
 const rootDirectory = fileURLToPath(new URL(".", import.meta.url));
+const serverHost = process.env.FLOWENT_FRONTEND_HOST || "127.0.0.1";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -15,7 +16,7 @@ export default defineConfig({
     },
   },
   server: {
-    host: "127.0.0.1",
+    host: serverHost,
     allowedHosts: true,
     port: 6873,
     proxy: {
