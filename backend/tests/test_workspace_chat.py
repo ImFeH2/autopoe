@@ -1041,6 +1041,62 @@ def test_workspace_marks_draft_complete_when_stream_finishes(
     assert assistant.get("status", "completed") == "completed"
 
 
+def test_workspace_persists_assistant_output_groups_after_tool_round(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "notes.txt").write_text("Launch notes")
+    completion_calls = 0
+
+    async def fake_completion(**request: object) -> object:
+        nonlocal completion_calls
+        completion_calls += 1
+
+        async def chunks() -> object:
+            if completion_calls == 1:
+                yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
+                return
+            yield {"choices": [{"delta": {"content": "The notes are ready."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Read notes."})
+    state = client.get("/api/state").json()
+    assistant = state["messages"][-1]
+    tool_id = assistant["tools"][0]["id"]
+
+    assert response.status_code == 200
+    assert assistant["content"] == "The notes are ready."
+    assert assistant["groups"] == [
+        {
+            "id": f"{assistant['id']}-group-1",
+            "items": [
+                {
+                    "id": f"tool-{tool_id}",
+                    "tool": assistant["tools"][0],
+                    "type": "tool",
+                }
+            ],
+        },
+        {
+            "id": f"{assistant['id']}-group-2",
+            "items": [
+                {
+                    "content": "The notes are ready.",
+                    "id": f"{assistant['id']}-text-1",
+                    "type": "text",
+                }
+            ],
+        },
+    ]
+
+
 @pytest.mark.anyio
 async def test_workspace_run_continues_without_stream_consumer(
     tmp_path, monkeypatch

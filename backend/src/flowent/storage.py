@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -107,11 +108,51 @@ class StoredToolItem(BaseModel):
     data: dict[str, object] | None = None
 
 
+class StoredThinkingOutputItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+    id: str
+    type: Literal["thinking"]
+
+
+class StoredTextOutputItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+    id: str
+    type: Literal["text"]
+
+
+class StoredToolOutputItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    tool: StoredToolItem
+    type: Literal["tool"]
+
+
+StoredOutputItem = Annotated[
+    StoredThinkingOutputItem | StoredTextOutputItem | StoredToolOutputItem,
+    Field(discriminator="type"),
+]
+
+
+class StoredAssistantOutputGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    items: list[StoredOutputItem]
+
+
 class StoredMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     author: str
     content: str
+    groups: list[StoredAssistantOutputGroup] = Field(
+        default_factory=list, exclude_if=lambda value: value == []
+    )
     id: str
     status: str = Field(
         default="completed", exclude_if=lambda value: value == "completed"
@@ -196,6 +237,10 @@ class StateStore:
                 StoredMessage(
                     author=row["author"],
                     content=row["content"],
+                    groups=[
+                        StoredAssistantOutputGroup.model_validate(group)
+                        for group in json.loads(row["groups"] or "[]")
+                    ],
                     id=row["id"],
                     status=row["status"],
                     thinking=row["thinking"],
@@ -206,7 +251,7 @@ class StateStore:
                 )
                 for row in connection.execute(
                     """
-                    SELECT id, author, content, tools, thinking, status
+                    SELECT id, author, content, tools, thinking, groups, status
                     FROM messages
                     ORDER BY position, id
                     """
@@ -544,8 +589,17 @@ class StateStore:
             connection.execute("DELETE FROM messages")
             connection.executemany(
                 """
-                INSERT INTO messages (id, author, content, tools, thinking, status, position)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (
+                    id,
+                    author,
+                    content,
+                    tools,
+                    thinking,
+                    groups,
+                    status,
+                    position
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -559,6 +613,13 @@ class StateStore:
                             ]
                         ),
                         message.thinking,
+                        json.dumps(
+                            [
+                                group.model_dump(exclude_none=True)
+                                for group in message.groups
+                            ],
+                            ensure_ascii=False,
+                        ),
                         message.status,
                         position,
                     )
@@ -583,13 +644,23 @@ class StateStore:
                 position = position_row["position"]
             connection.execute(
                 """
-                INSERT INTO messages (id, author, content, tools, thinking, status, position)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (
+                    id,
+                    author,
+                    content,
+                    tools,
+                    thinking,
+                    groups,
+                    status,
+                    position
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     author = excluded.author,
                     content = excluded.content,
                     tools = excluded.tools,
                     thinking = excluded.thinking,
+                    groups = excluded.groups,
                     status = excluded.status,
                     position = excluded.position
                 """,
@@ -601,6 +672,13 @@ class StateStore:
                         [tool.model_dump(exclude_none=True) for tool in message.tools]
                     ),
                     message.thinking,
+                    json.dumps(
+                        [
+                            group.model_dump(exclude_none=True)
+                            for group in message.groups
+                        ],
+                        ensure_ascii=False,
+                    ),
                     message.status,
                     position,
                 ),
@@ -993,6 +1071,10 @@ class StateStore:
         if "status" not in columns:
             connection.execute(
                 "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
+            )
+        if "groups" not in columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN groups TEXT NOT NULL DEFAULT '[]'"
             )
         settings_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(settings)")

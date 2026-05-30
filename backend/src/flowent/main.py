@@ -44,6 +44,7 @@ from flowent.skills import (
 )
 from flowent.storage import (
     StateStore,
+    StoredAssistantOutputGroup,
     StoredCompactionCheckpoint,
     StoredMcpServer,
     StoredMessage,
@@ -53,7 +54,10 @@ from flowent.storage import (
     StoredState,
     StoredTelegramBot,
     StoredTelegramSession,
+    StoredTextOutputItem,
+    StoredThinkingOutputItem,
     StoredToolItem,
+    StoredToolOutputItem,
     StoredWritablePath,
 )
 from flowent.tools import ToolContext
@@ -169,6 +173,161 @@ def append_or_replace_message(
         *(current for current in messages if current.id != message.id),
         message,
     ]
+
+
+class AssistantOutputBuilder:
+    def __init__(self, assistant_id: str = "") -> None:
+        self.assistant_id = assistant_id
+        self.content = ""
+        self.groups: list[StoredAssistantOutputGroup] = []
+        self.text_item_index = 0
+        self.text_item_id = ""
+        self.thinking = ""
+        self.thinking_item_index = 0
+        self.thinking_item_id = ""
+        self.tools: dict[str, StoredToolItem] = {}
+
+    def set_assistant_id(self, assistant_id: str) -> None:
+        self.assistant_id = assistant_id
+
+    def start_group(self, index: int) -> None:
+        group_id = f"{self.assistant_id or 'assistant'}-group-{index}"
+        if self.groups and self.groups[-1].id == group_id:
+            return
+        self.text_item_id = ""
+        self.thinking_item_id = ""
+        self.groups.append(StoredAssistantOutputGroup(id=group_id, items=[]))
+
+    def append_text(self, content: str) -> None:
+        if not content:
+            return
+        self._ensure_group()
+        if not self.text_item_id:
+            self.text_item_index += 1
+            self.text_item_id = f"{self.assistant_id}-text-{self.text_item_index}"
+            self._append_current_item(
+                StoredTextOutputItem(content="", id=self.text_item_id, type="text")
+            )
+        self.content += content
+        self.groups[-1] = self.groups[-1].model_copy(
+            update={
+                "items": [
+                    item.model_copy(update={"content": item.content + content})
+                    if item.type == "text" and item.id == self.text_item_id
+                    else item
+                    for item in self.groups[-1].items
+                ]
+            }
+        )
+
+    def append_thinking(self, content: str) -> None:
+        if not content:
+            return
+        self._ensure_group()
+        if not self.thinking_item_id:
+            self.thinking_item_index += 1
+            self.thinking_item_id = (
+                f"{self.assistant_id}-thinking-{self.thinking_item_index}"
+            )
+            self._append_current_item(
+                StoredThinkingOutputItem(
+                    content="", id=self.thinking_item_id, type="thinking"
+                )
+            )
+        self.thinking += content
+        self.groups[-1] = self.groups[-1].model_copy(
+            update={
+                "items": [
+                    item.model_copy(update={"content": item.content + content})
+                    if item.type == "thinking" and item.id == self.thinking_item_id
+                    else item
+                    for item in self.groups[-1].items
+                ]
+            }
+        )
+
+    def start_tool(self, tool: StoredToolItem) -> None:
+        self._ensure_group()
+        self.text_item_id = ""
+        self.thinking_item_id = ""
+        self.tools[tool.id] = tool
+        self._append_current_item(
+            StoredToolOutputItem(id=f"tool-{tool.id}", tool=tool, type="tool")
+        )
+
+    def update_tool(self, tool_id: str, data: dict[str, object]) -> None:
+        current_tool = self.tools.get(tool_id)
+        if current_tool is None:
+            return
+        updated_tool = StoredToolItem.model_validate(
+            {**current_tool.model_dump(exclude_none=True), **data}
+        )
+        self.tools[tool_id] = updated_tool
+        self.groups = [
+            group.model_copy(
+                update={
+                    "items": [
+                        item.model_copy(update={"tool": updated_tool})
+                        if item.type == "tool" and item.tool.id == tool_id
+                        else item
+                        for item in group.items
+                    ]
+                }
+            )
+            for group in self.groups
+        ]
+
+    def apply_done_message(self, message: dict[str, object]) -> None:
+        final_content = str(message.get("content") or self.content)
+        final_thinking = str(message.get("thinking") or self.thinking)
+        self._append_missing_done_text(final_content)
+        self._append_missing_done_thinking(final_thinking)
+        self.content = final_content
+        self.thinking = final_thinking
+
+    def _append_missing_done_text(self, final_content: str) -> None:
+        streamed_text = "".join(
+            item.content
+            for group in self.groups
+            for item in group.items
+            if item.type == "text"
+        )
+        if not final_content or streamed_text == final_content:
+            return
+        missing_text = (
+            final_content[len(streamed_text) :]
+            if final_content.startswith(streamed_text)
+            else final_content
+        )
+        self.append_text(missing_text)
+
+    def _append_missing_done_thinking(self, final_thinking: str) -> None:
+        streamed_thinking = "".join(
+            item.content
+            for group in self.groups
+            for item in group.items
+            if item.type == "thinking"
+        )
+        if not final_thinking or streamed_thinking == final_thinking:
+            return
+        missing_thinking = (
+            final_thinking[len(streamed_thinking) :]
+            if final_thinking.startswith(streamed_thinking)
+            else final_thinking
+        )
+        self.append_thinking(missing_thinking)
+
+    def _ensure_group(self) -> None:
+        if not self.groups:
+            self.start_group(1)
+
+    def _append_current_item(
+        self,
+        item: StoredTextOutputItem | StoredThinkingOutputItem | StoredToolOutputItem,
+    ) -> None:
+        self.groups[-1] = self.groups[-1].model_copy(
+            update={"items": [*self.groups[-1].items, item]}
+        )
 
 
 def frontend_static_directory() -> Path:
@@ -333,10 +492,8 @@ def create_app(
                 *chat_messages,
             ]
         ]
-        assistant_content = ""
-        assistant_thinking = ""
-        assistant_tools: dict[str, StoredToolItem] = {}
         assistant_id = str(uuid4())
+        assistant_output = AssistantOutputBuilder(assistant_id)
 
         async def review_tool_approval(request: ApprovalReviewRequest):
             return await review_approval_request(
@@ -370,39 +527,42 @@ def create_app(
             messages=request_messages,
             tool_runner=tool_runner,
         ):
+            if event.event == "start":
+                event_id = event.data.get("id")
+                if isinstance(event_id, str):
+                    assistant_id = event_id
+                    assistant_output.set_assistant_id(event_id)
+            if event.event == "output_start":
+                index = event.data.get("index")
+                if isinstance(index, int):
+                    assistant_output.start_group(index)
             if event.event == "delta":
-                assistant_content += str(event.data.get("content") or "")
+                assistant_output.append_text(str(event.data.get("content") or ""))
             if event.event == "thinking_delta":
-                assistant_thinking += str(event.data.get("content") or "")
+                assistant_output.append_thinking(str(event.data.get("content") or ""))
             if event.event == "tool_start":
                 tool = event.data.get("tool")
                 if isinstance(tool, dict) and isinstance(tool.get("id"), str):
-                    assistant_tools[tool["id"]] = StoredToolItem.model_validate(tool)
+                    assistant_output.start_tool(StoredToolItem.model_validate(tool))
             if event.event in {"tool_done", "tool_error"}:
                 tool_id = event.data.get("id")
-                if isinstance(tool_id, str) and tool_id in assistant_tools:
-                    assistant_tools[tool_id] = StoredToolItem.model_validate(
-                        {
-                            **assistant_tools[tool_id].model_dump(exclude_none=True),
-                            **event.data,
-                        }
-                    )
+                if isinstance(tool_id, str):
+                    assistant_output.update_tool(tool_id, event.data)
             if event.event == "done":
                 message = event.data.get("message")
                 if isinstance(message, dict):
                     assistant_id = str(message.get("id") or assistant_id)
-                    assistant_content = str(message.get("content") or assistant_content)
-                    assistant_thinking = str(
-                        message.get("thinking") or assistant_thinking
-                    )
+                    assistant_output.set_assistant_id(assistant_id)
+                    assistant_output.apply_done_message(message)
 
         assistant_message = StoredMessage(
             author="assistant",
-            content=assistant_content,
+            content=assistant_output.content,
+            groups=assistant_output.groups,
             id=assistant_id,
             status="completed",
-            thinking=assistant_thinking,
-            tools=list(assistant_tools.values()),
+            thinking=assistant_output.thinking,
+            tools=list(assistant_output.tools.values()),
         )
         store.save_messages([*next_messages, assistant_message])
         return assistant_message
@@ -633,25 +793,24 @@ def create_app(
 
         async def run_task() -> None:
             nonlocal active_workspace_run_id
-            assistant_tools: dict[str, StoredToolItem] = {}
             assistant_message = StoredMessage(
                 author="assistant",
                 content="",
                 id=str(uuid4()),
                 status="running",
             )
-            assistant_content = ""
-            assistant_thinking = ""
+            assistant_output = AssistantOutputBuilder(assistant_message.id)
 
             def persist_assistant(status: str = "running") -> None:
                 nonlocal next_messages, assistant_message
                 assistant_message = StoredMessage(
                     author="assistant",
-                    content=assistant_content,
+                    content=assistant_output.content,
+                    groups=assistant_output.groups,
                     id=assistant_message.id,
                     status=status,
-                    thinking=assistant_thinking,
-                    tools=list(assistant_tools.values()),
+                    thinking=assistant_output.thinking,
+                    tools=list(assistant_output.tools.values()),
                 )
                 next_messages = append_or_replace_message(
                     next_messages, assistant_message
@@ -699,35 +858,41 @@ def create_app(
                             assistant_message = assistant_message.model_copy(
                                 update={"id": event_id}
                             )
+                            assistant_output.set_assistant_id(event_id)
+                            persist_assistant()
+                    if event.event == "output_start":
+                        index = event.data.get("index")
+                        if isinstance(index, int):
+                            assistant_output.start_group(index)
                             persist_assistant()
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
                         if isinstance(tool, dict) and isinstance(tool.get("id"), str):
                             current_tool_id = tool["id"]
-                            assistant_tools[tool["id"]] = StoredToolItem.model_validate(
-                                tool
+                            assistant_output.start_tool(
+                                StoredToolItem.model_validate(tool)
                             )
                             persist_assistant()
                     if event.event in {"tool_done", "tool_error"}:
                         tool_id = event.data.get("id")
-                        if isinstance(tool_id, str) and tool_id in assistant_tools:
+                        if (
+                            isinstance(tool_id, str)
+                            and tool_id in assistant_output.tools
+                        ):
                             current_tool_id = (
                                 None if current_tool_id == tool_id else current_tool_id
                             )
-                            assistant_tools[tool_id] = StoredToolItem.model_validate(
-                                {
-                                    **assistant_tools[tool_id].model_dump(
-                                        exclude_none=True
-                                    ),
-                                    **event.data,
-                                }
-                            )
+                            assistant_output.update_tool(tool_id, event.data)
                             persist_assistant()
                     if event.event == "delta":
-                        assistant_content += str(event.data.get("content") or "")
+                        assistant_output.append_text(
+                            str(event.data.get("content") or "")
+                        )
                         persist_assistant()
                     if event.event == "thinking_delta":
-                        assistant_thinking += str(event.data.get("content") or "")
+                        assistant_output.append_thinking(
+                            str(event.data.get("content") or "")
+                        )
                         persist_assistant()
                     logger.log(
                         TRACE_LEVEL,
@@ -738,12 +903,7 @@ def create_app(
                     if event.event == "done":
                         message = event.data.get("message")
                         if isinstance(message, dict):
-                            assistant_content = str(
-                                message.get("content") or assistant_content
-                            )
-                            assistant_thinking = str(
-                                message.get("thinking") or assistant_thinking
-                            )
+                            assistant_output.apply_done_message(message)
                             persist_assistant("completed")
                     await append_run_event(run, event.event, event.data)
             except asyncio.CancelledError:
@@ -760,17 +920,12 @@ def create_app(
                 logger.exception("Workspace response failed")
                 if (
                     current_tool_id is not None
-                    and current_tool_id in assistant_tools
-                    and assistant_tools[current_tool_id].status == "running"
+                    and current_tool_id in assistant_output.tools
+                    and assistant_output.tools[current_tool_id].status == "running"
                 ):
-                    assistant_tools[current_tool_id] = StoredToolItem.model_validate(
-                        {
-                            **assistant_tools[current_tool_id].model_dump(
-                                exclude_none=True
-                            ),
-                            "content": str(error) or "Tool failed.",
-                            "status": "failed",
-                        }
+                    assistant_output.update_tool(
+                        current_tool_id,
+                        {"content": str(error) or "Tool failed.", "status": "failed"},
                     )
                 persist_assistant("failed")
                 await append_run_event(

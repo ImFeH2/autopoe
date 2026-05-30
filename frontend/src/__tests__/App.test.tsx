@@ -4427,6 +4427,93 @@ describe("App", () => {
     ).toBeTruthy();
   });
 
+  it("loads persisted assistant output groups with separators", async () => {
+    mockInitialState({
+      messages: [
+        {
+          author: "assistant",
+          content: "The notes are ready.",
+          groups: [
+            {
+              id: "message-1-group-1",
+              items: [
+                {
+                  id: "tool-tool-1",
+                  tool: {
+                    id: "tool-1",
+                    name: "list_files",
+                    status: "success",
+                    title: "Listed /project/flowent",
+                  },
+                  type: "tool",
+                },
+              ],
+            },
+            {
+              id: "message-1-group-2",
+              items: [
+                {
+                  id: "tool-tool-2",
+                  tool: {
+                    id: "tool-2",
+                    name: "read_file",
+                    status: "success",
+                    title: "Read README.md",
+                  },
+                  type: "tool",
+                },
+              ],
+            },
+            {
+              id: "message-1-group-3",
+              items: [
+                {
+                  content: "The notes are ready.",
+                  id: "message-1-text-1",
+                  type: "text",
+                },
+              ],
+            },
+          ],
+          id: "message-1",
+          tools: [
+            {
+              id: "tool-1",
+              name: "list_files",
+              status: "success",
+              title: "Listed /project/flowent",
+            },
+            {
+              id: "tool-2",
+              name: "read_file",
+              status: "success",
+              title: "Read README.md",
+            },
+          ],
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+
+    render(<App />);
+
+    const listed = await screen.findByText("Listed /project/flowent");
+    const read = screen.getByText("Read README.md");
+    const reply = screen.getByText("The notes are ready.");
+
+    expect(
+      listed.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      read.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getAllByTestId("assistant-output-separator")).toHaveLength(2);
+  });
+
   it("does not add assistant output separators for a reply without tools", async () => {
     const user = userEvent.setup();
     mockInitialState(
