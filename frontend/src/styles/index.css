@@ -26,6 +26,7 @@
   --radius: 0.45rem;
   --font-sans: "Geist Variable", sans-serif;
   --flowent-viewport-height: 100vh;
+  --flowent-keyboard-offset: 0px;
   --flowent-safe-area-top: env(safe-area-inset-top, 0px);
   --flowent-safe-area-right: env(safe-area-inset-right, 0px);
   --flowent-safe-area-bottom: env(safe-area-inset-bottom, 0px);

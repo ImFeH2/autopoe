@@ -815,8 +815,10 @@ function ChatComposer({
     if (!composer) {
       return;
     }
+    let animationFrameId = 0;
 
     const updateOffset = () => {
+      animationFrameId = 0;
       const measuredBottomOffset = Number.parseFloat(
         getComputedStyle(composer).bottom,
       );
@@ -827,18 +829,71 @@ function ChatComposer({
       onOffsetChange(composer.offsetHeight + bottomOffset + 24);
     };
 
+    const scheduleUpdateOffset = () => {
+      if (animationFrameId !== 0) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+
+      animationFrameId = window.requestAnimationFrame(updateOffset);
+    };
+
     updateOffset();
 
-    if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateOffset);
+    window.addEventListener("resize", scheduleUpdateOffset, {
+      passive: true,
+    });
+    window.addEventListener("focusin", scheduleUpdateOffset, {
+      passive: true,
+    });
+    window.addEventListener("focusout", scheduleUpdateOffset, {
+      passive: true,
+    });
+    window.visualViewport?.addEventListener("resize", scheduleUpdateOffset, {
+      passive: true,
+    });
+    window.visualViewport?.addEventListener("scroll", scheduleUpdateOffset, {
+      passive: true,
+    });
 
-      return () => window.removeEventListener("resize", updateOffset);
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        if (animationFrameId !== 0) {
+          window.cancelAnimationFrame(animationFrameId);
+        }
+        window.removeEventListener("resize", scheduleUpdateOffset);
+        window.removeEventListener("focusin", scheduleUpdateOffset);
+        window.removeEventListener("focusout", scheduleUpdateOffset);
+        window.visualViewport?.removeEventListener(
+          "resize",
+          scheduleUpdateOffset,
+        );
+        window.visualViewport?.removeEventListener(
+          "scroll",
+          scheduleUpdateOffset,
+        );
+      };
     }
 
-    const resizeObserver = new ResizeObserver(updateOffset);
+    const resizeObserver = new ResizeObserver(scheduleUpdateOffset);
     resizeObserver.observe(composer);
 
-    return () => resizeObserver.disconnect();
+    return () => {
+      if (animationFrameId !== 0) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      window.removeEventListener("resize", scheduleUpdateOffset);
+      window.removeEventListener("focusin", scheduleUpdateOffset);
+      window.removeEventListener("focusout", scheduleUpdateOffset);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        scheduleUpdateOffset,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        scheduleUpdateOffset,
+      );
+      resizeObserver.disconnect();
+    };
   }, [onOffsetChange]);
 
   const runCommand = (command: WorkspaceCommand) => {
@@ -942,7 +997,7 @@ function ChatComposer({
 
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 bottom-6 z-10 px-6 max-[900px]:px-4"
+      className="pointer-events-none absolute inset-x-0 bottom-[calc(1.5rem+var(--flowent-keyboard-offset))] z-10 px-6 max-[900px]:px-4"
       ref={composerRef}
     >
       <div className="pointer-events-auto mx-auto w-full max-w-[640px]">
