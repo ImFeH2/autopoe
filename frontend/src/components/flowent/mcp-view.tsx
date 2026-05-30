@@ -124,7 +124,7 @@ function McpSidebar({
     >
       <Button
         aria-pressed={isCreatingServer}
-        className="h-8 w-full border-dashed border-white/20 bg-input/30 text-xs text-white shadow-none hover:bg-input/50"
+        className="h-8 w-full border-dashed border-white/20 bg-input/30 text-base text-white shadow-none hover:bg-input/50"
         onClick={onNewServer}
         size="sm"
         type="button"
@@ -134,7 +134,7 @@ function McpSidebar({
         New
       </Button>
       <Button
-        className="mt-2 h-8 w-full border-dashed border-white/20 bg-input/30 text-xs text-white shadow-none hover:bg-input/50"
+        className="mt-2 h-8 w-full border-dashed border-white/20 bg-input/30 text-base text-white shadow-none hover:bg-input/50"
         onClick={onImport}
         size="sm"
         type="button"
@@ -372,7 +372,7 @@ function McpImportPanel({
                 >
                   <div className="grid min-w-0 gap-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-[13px] text-white">
+                      <span className="text-base text-white">
                         {server.name}
                       </span>
                       {existingServerIds.has(server.id) ? (
@@ -562,7 +562,7 @@ function McpTools({ server }: { server: McpServer }) {
     <div className={dashedPanelClassName}>
       {server.tools.map((tool) => (
         <div
-          className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-[13px] leading-5 text-white last:border-b-0 max-[640px]:grid-cols-1"
+          className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-white/10 px-3 py-2 text-base leading-5 text-white last:border-b-0 max-[640px]:grid-cols-1"
           key={tool.name}
         >
           <div className="flex min-w-0 items-center gap-2">

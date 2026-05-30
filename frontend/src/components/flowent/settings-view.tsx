@@ -127,7 +127,7 @@ export function SettingsView({
               Agent prompt
             </Label>
             <Textarea
-              className="min-h-48 resize-y rounded-md border-white/10 bg-input/30 px-3 py-2 text-[13px] leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
+              className="min-h-48 resize-y rounded-md border-white/10 bg-input/30 px-3 py-2 text-base leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
               id="agent-prompt"
               value={agentPromptDraft}
               onChange={(event) => setAgentPromptDraft(event.target.value)}

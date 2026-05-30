@@ -98,7 +98,7 @@ function ProviderSidebar({
     >
       <Button
         aria-pressed={isCreatingProvider}
-        className="h-8 w-full border-dashed border-white/20 bg-input/30 text-xs text-white shadow-none hover:bg-input/50"
+        className="h-8 w-full border-dashed border-white/20 bg-input/30 text-base text-white shadow-none hover:bg-input/50"
         onClick={onNewProvider}
         size="sm"
         type="button"
@@ -308,7 +308,7 @@ function ProviderModels({
           {models.map((model) => (
             <div
               className={cn(
-                "min-h-10 border-b border-white/10 px-3 py-2 text-[13px] leading-5 text-white last:border-b-0",
+                "min-h-10 border-b border-white/10 px-3 py-2 text-base leading-5 text-white last:border-b-0",
                 mutedTextClassName,
               )}
               key={model}

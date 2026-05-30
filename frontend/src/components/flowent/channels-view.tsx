@@ -69,7 +69,7 @@ export function ChannelsView({
               </Label>
               <div
                 className={cn(
-                  "text-[13px] leading-5 text-white",
+                  "text-base leading-5 text-white",
                   mutedTextClassName,
                 )}
                 id="telegram-status"
@@ -188,7 +188,7 @@ function ConversationRow({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-white/10 px-3 py-3 last:border-b-0 max-[640px]:grid-cols-1">
       <div className="grid min-w-0 gap-1">
-        <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-white">
+        <div className="flex min-w-0 items-center gap-2 text-base font-medium text-white">
           <MessageCircle className="size-4 shrink-0 text-[#9b9b9b]" />
           <span className="truncate">{sessionTitle(session)}</span>
         </div>
@@ -198,7 +198,7 @@ function ConversationRow({
           {session.username ? ` · @${session.username}` : ""}
         </p>
         {session.recentMessage ? (
-          <p className="m-0 max-w-3xl truncate text-[13px] leading-[1.45] text-white">
+          <p className="m-0 max-w-3xl truncate text-base leading-[1.45] text-white">
             {session.recentMessage}
           </p>
         ) : null}

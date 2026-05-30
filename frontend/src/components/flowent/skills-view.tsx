@@ -63,7 +63,7 @@ function SkillsSidebar({
       aria-label="Skills list"
     >
       <Button
-        className="h-8 w-full border-dashed border-white/20 bg-input/30 text-xs text-white shadow-none hover:bg-input/50"
+        className="h-8 w-full border-dashed border-white/20 bg-input/30 text-base text-white shadow-none hover:bg-input/50"
         onClick={onReloadSkills}
         size="sm"
         type="button"
@@ -134,7 +134,7 @@ function SkillDetails({
             <div className={cn(fieldLabelClassName, dataRowLabelClassName)}>
               Name
             </div>
-            <div className="min-w-0 text-[13px] leading-5 text-white">
+            <div className="min-w-0 text-base leading-5 text-white">
               {activeSkill.name}
             </div>
           </div>
@@ -142,7 +142,7 @@ function SkillDetails({
             <div className={cn(fieldLabelClassName, dataRowLabelClassName)}>
               Call
             </div>
-            <div className="min-w-0 font-mono text-[13px] leading-5 text-white">
+            <div className="min-w-0 font-mono text-base leading-5 text-white">
               ${activeSkill.slug}
             </div>
           </div>
@@ -150,7 +150,7 @@ function SkillDetails({
             <div className={cn(fieldLabelClassName, dataRowLabelClassName)}>
               Scope
             </div>
-            <div className="min-w-0 text-[13px] leading-5 text-white">
+            <div className="min-w-0 text-base leading-5 text-white">
               {scopeLabel(activeSkill.scope)}
             </div>
           </div>
@@ -158,7 +158,7 @@ function SkillDetails({
             <div className={cn(fieldLabelClassName, dataRowLabelClassName)}>
               Status
             </div>
-            <div className="min-w-0 text-[13px] leading-5 text-white">
+            <div className="min-w-0 text-base leading-5 text-white">
               {activeSkill.enabled ? "On" : "Off"}
             </div>
           </div>

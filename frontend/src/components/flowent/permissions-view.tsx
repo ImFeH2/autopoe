@@ -62,7 +62,7 @@ function WritablePathRow({
           className="size-4 shrink-0 text-white/60"
         />
         <div className="min-w-0">
-          <p className="m-0 truncate font-mono text-[13px] leading-5 text-white">
+          <p className="m-0 truncate font-mono text-base leading-5 text-white">
             {writablePath.path}
           </p>
           <p className={cn("m-0 text-xs leading-[1.4]", mutedTextClassName)}>

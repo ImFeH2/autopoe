@@ -31,13 +31,13 @@ export const fieldGroupClassName = "grid gap-1.5";
 export const fieldLabelClassName = "text-xs font-medium text-[#dedede]";
 
 export const fieldInputClassName =
-  "h-8 rounded-md border-white/10 bg-input/30 px-2.5 text-[13px] text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25";
+  "h-8 rounded-md border-white/10 bg-input/30 px-2.5 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25";
 
 export const fieldTriggerClassName =
-  "h-8 w-full rounded-md border-white/10 bg-input/30 px-2.5 text-[13px] text-white shadow-none focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25";
+  "h-8 w-full rounded-md border-white/10 bg-input/30 px-2.5 text-base text-white shadow-none focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25";
 
 export const formActionsClassName =
   "mt-4 flex justify-end gap-2 max-[900px]:flex-col max-[900px]:items-stretch";
 
 export const subtleButtonClassName =
-  "h-8 border-dashed border-white/20 bg-input/30 text-xs text-white shadow-none hover:bg-input/50";
+  "h-8 border-dashed border-white/20 bg-input/30 text-base text-white shadow-none hover:bg-input/50";

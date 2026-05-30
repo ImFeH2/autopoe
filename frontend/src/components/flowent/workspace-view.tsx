@@ -95,7 +95,7 @@ function WorkspaceControls({
       className="pointer-events-none absolute right-6 top-5 z-20 flex items-center gap-1 max-[900px]:right-4 max-[900px]:top-4"
     >
       <Button
-        className="pointer-events-auto h-8 rounded-lg border-white/10 bg-input/30 px-2.5 text-[13px] text-white shadow-[0_12px_28px_rgba(0,0,0,0.32)] hover:bg-input/50 hover:text-white"
+        className="pointer-events-auto h-8 rounded-lg border-white/10 bg-input/30 px-2.5 text-base text-white shadow-[0_12px_28px_rgba(0,0,0,0.32)] hover:bg-input/50 hover:text-white"
         onClick={onClearMessages}
         type="button"
         variant="outline"
@@ -227,7 +227,7 @@ function SystemMessage({ message }: { message: Message }) {
 
   return (
     <div className="mx-auto flex w-full max-w-[640px] justify-center py-3">
-      <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-input/30 px-3 py-1.5 text-sm leading-5 text-white/70">
+      <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-input/30 px-3 py-1.5 text-base leading-5 text-white/70">
         {Icon ? (
           <Icon aria-hidden="true" className="size-3.5 text-white/50" />
         ) : null}
@@ -448,10 +448,10 @@ function ThinkingProcessItem({
   const isExpanded = isStreaming || isOpen;
 
   return (
-    <div className="max-w-full text-sm leading-5 text-white">
+    <div className="max-w-full text-base leading-5 text-white">
       <Button
         aria-expanded={isExpanded}
-        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-sm text-white/75 shadow-none hover:bg-input/30 hover:text-white"
+        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-base text-white/75 shadow-none hover:bg-input/30 hover:text-white"
         onClick={() => setIsOpen((current) => !current)}
         type="button"
         variant="ghost"
@@ -476,7 +476,7 @@ function ThinkingProcessItem({
       </Button>
       {isExpanded ? (
         <div className="py-1">
-          <div className="whitespace-pre-wrap break-words text-[13px] leading-5 text-white/60">
+          <div className="whitespace-pre-wrap break-words text-base leading-5 text-white/60">
             {content}
           </div>
         </div>
@@ -503,10 +503,10 @@ function ToolProcessItem({ tool }: { tool: ToolItem }) {
   }, [tool.status]);
 
   return (
-    <div className="max-w-full text-sm leading-5 text-white">
+    <div className="max-w-full text-base leading-5 text-white">
       <Button
         aria-expanded={isOpen}
-        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-sm text-white shadow-none hover:bg-transparent hover:text-white aria-expanded:bg-transparent aria-expanded:text-white active:not-aria-[haspopup]:translate-y-0"
+        className="h-8 w-full justify-start gap-2 rounded-lg border-0 bg-transparent px-2 text-base text-white shadow-none hover:bg-transparent hover:text-white aria-expanded:bg-transparent aria-expanded:text-white active:not-aria-[haspopup]:translate-y-0"
         onClick={() => setIsOpen((current) => !current)}
         type="button"
         variant="ghost"
@@ -1021,7 +1021,7 @@ function ChatComposer({
               <Button
                 aria-selected={index === selectedCommandIndex}
                 className={cn(
-                  "flex h-auto w-full items-center justify-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm text-white shadow-none transition-colors hover:bg-input/50 hover:text-white",
+                  "flex h-auto w-full items-center justify-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-base text-white shadow-none transition-colors hover:bg-input/50 hover:text-white",
                   index === selectedCommandIndex && "bg-input/40",
                 )}
                 key={command.id}
@@ -1055,7 +1055,7 @@ function ChatComposer({
               <Button
                 aria-selected={index === selectedSkillIndex}
                 className={cn(
-                  "flex h-auto w-full items-center justify-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm text-white shadow-none transition-colors hover:bg-input/50 hover:text-white",
+                  "flex h-auto w-full items-center justify-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left text-base text-white shadow-none transition-colors hover:bg-input/50 hover:text-white",
                   index === selectedSkillIndex && "bg-input/40",
                 )}
                 key={skill.id}
@@ -1080,7 +1080,7 @@ function ChatComposer({
           </div>
         ) : null}
         {errorMessage ? (
-          <p className="mb-2 rounded-md bg-black/80 px-3 py-2 text-sm leading-5 text-red-300 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
+          <p className="mb-2 rounded-md bg-black/80 px-3 py-2 text-base leading-5 text-red-300 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
             {errorMessage}
           </p>
         ) : null}
