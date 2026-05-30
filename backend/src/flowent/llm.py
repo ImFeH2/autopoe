@@ -5,7 +5,11 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from flowent.logging import TRACE_LEVEL, configure_litellm_logging
+from flowent.logging import (
+    TRACE_LEVEL,
+    configure_litellm_logging,
+    write_llm_request_diagnostic,
+)
 
 
 class ProviderFormat(StrEnum):
@@ -175,6 +179,24 @@ def build_litellm_request(
     return request
 
 
+def record_litellm_request_diagnostic(
+    connection: ProviderConnection,
+    request: Mapping[str, Any],
+) -> None:
+    write_llm_request_diagnostic(
+        {
+            "base_url": connection.base_url,
+            "litellm_model": request["model"],
+            "messages": request["messages"],
+            "model": connection.model,
+            "provider": connection.provider.value,
+            "reasoning_effort": connection.reasoning_effort.value,
+            "stream": request.get("stream", False),
+            "tools": request.get("tools", []),
+        }
+    )
+
+
 async def complete_chat(
     connection: ProviderConnection,
     messages: Sequence[ChatMessage | Mapping[str, Any]],
@@ -193,9 +215,9 @@ async def complete_chat(
         connection.provider,
         connection.model,
     )
-    response = await completion(
-        **build_litellm_request(connection, messages, tools=tools)
-    )
+    request = build_litellm_request(connection, messages, tools=tools)
+    record_litellm_request_diagnostic(connection, request)
+    response = await completion(**request)
     logger.log(TRACE_LEVEL, "LLM completion response=%r", response)
     choice = response["choices"][0]["message"]
     return ChatMessage(role=choice.get("role", "assistant"), content=choice["content"])
@@ -302,9 +324,9 @@ async def stream_chat_chunks(
         connection.provider,
         connection.model,
     )
-    response = await completion(
-        **build_litellm_request(connection, messages, stream=True, tools=tools)
-    )
+    request = build_litellm_request(connection, messages, stream=True, tools=tools)
+    record_litellm_request_diagnostic(connection, request)
+    response = await completion(**request)
     async for chunk in response:
         logger.log(TRACE_LEVEL, "LLM stream chunk=%r", chunk)
         yield chunk

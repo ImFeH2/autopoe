@@ -8,6 +8,7 @@ from flowent.logging import (
     configure_logging,
     ensure_logging_configured,
     redact_log_value,
+    sanitize_diagnostic_value,
 )
 
 
@@ -101,6 +102,35 @@ def test_logging_redacts_full_api_key_but_keeps_context(tmp_path, monkeypatch) -
     assert redact_log_value("authorization=Bearer sk-secret-value") == (
         "authorization=[REDACTED]"
     )
+
+
+def test_diagnostic_sanitizer_removes_secret_fields_and_values() -> None:
+    sanitized = sanitize_diagnostic_value(
+        {
+            "api_key": "sk-root-secret",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "authorization=Bearer sk-message-secret",
+                }
+            ],
+            "tools": [
+                {
+                    "function": {
+                        "name": "send_message",
+                        "description": "Needs api_key=sk-tool-secret.",
+                    }
+                }
+            ],
+        }
+    )
+
+    rendered = str(sanitized)
+
+    assert "api_key" not in rendered
+    assert "sk-root-secret" not in rendered
+    assert "sk-message-secret" not in rendered
+    assert "sk-tool-secret" not in rendered
 
 
 def test_direct_main_app_import_creates_data_log_file(tmp_path, monkeypatch) -> None:

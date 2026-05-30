@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from flowent.paths import data_directory
 
@@ -14,6 +16,7 @@ DEFAULT_LOG_RETENTION = 5
 LITELLM_LOGGER_NAMES = ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy")
 _configured_log_file: Path | None = None
 _configured_log_process_id: int | None = None
+_llm_request_counter = 0
 _SECRET_PATTERNS = (
     re.compile(r"(?i)\b(bearer)\s+([^\s,}]+)"),
     re.compile(
@@ -36,8 +39,19 @@ def redact_log_value(value: object) -> str:
     return text
 
 
+def redact_diagnostic_value(value: object) -> str:
+    text = str(value)
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    return text
+
+
 def log_directory(directory: Path | None = None) -> Path:
     return (directory or data_directory()) / "logs"
+
+
+def llm_request_log_directory(directory: Path | None = None) -> Path:
+    return log_directory(directory) / "llm-requests"
 
 
 def parse_log_level(value: str | None, default: int) -> int:
@@ -110,6 +124,52 @@ def new_log_file_path(directory: Path | None = None) -> Path:
     logs = log_directory(directory)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return logs / f"flowent-{timestamp}-{os.getpid()}.log"
+
+
+def sanitize_diagnostic_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: sanitize_diagnostic_value(item)
+            for key, item in value.items()
+            if not secret_field_name(str(key))
+        }
+    if isinstance(value, list | tuple):
+        return [sanitize_diagnostic_value(item) for item in value]
+    if isinstance(value, str):
+        return redact_diagnostic_value(value)
+    return value
+
+
+def secret_field_name(name: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", name.lower())
+    return "secret" in normalized or normalized in {
+        "accesstoken",
+        "apikey",
+        "authorization",
+        "password",
+        "refreshtoken",
+        "token",
+    }
+
+
+def write_llm_request_diagnostic(payload: dict[str, Any]) -> Path | None:
+    global _llm_request_counter
+
+    if not development_mode():
+        return None
+
+    _llm_request_counter += 1
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    path = llm_request_log_directory() / (
+        f"llm-request-{timestamp}-{os.getpid()}-{_llm_request_counter:06d}.json"
+    )
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(sanitize_diagnostic_value(payload), ensure_ascii=False, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def prune_old_logs(logs: Path, *, keep: int = DEFAULT_LOG_RETENTION) -> None:
