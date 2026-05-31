@@ -11,7 +11,7 @@ from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT, run_agent_stream
 from flowent.llm import ProviderConnection, ProviderFormat
 from flowent.main import create_app
 from flowent.sandbox import SandboxCommand, SandboxRunner
-from flowent.tools import ToolContext, run_tool
+from flowent.tools import ToolContext, ToolResult, run_tool
 
 
 def stream_events(content: str) -> list[dict[str, object]]:
@@ -912,6 +912,69 @@ def test_tool_failure_is_reported_and_agent_continues(tmp_path, monkeypatch) -> 
     assert captured_requests[1]["messages"][-1]["tool_call_id"] == "call-1"
     assert "missing.txt" in captured_requests[1]["messages"][-1]["content"]
     assert events[-1]["data"]["message"]["content"] == "I could not read it."
+
+
+@pytest.mark.anyio
+async def test_approval_denial_result_is_sent_to_agent(tmp_path) -> None:
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk(
+                    "shell_command",
+                    {"command": "rm -rf /important"},
+                )
+            else:
+                yield text_chunk("I need explicit approval for that risk.")
+
+        return chunks()
+
+    async def denying_tool_runner(
+        name: str,
+        arguments: dict[str, object],
+        context: ToolContext,
+    ) -> ToolResult:
+        return ToolResult(
+            content=(
+                "Automatic approval review denied this action as high risk: "
+                "The command can delete broad data. The agent must not work around "
+                "this denial."
+            ),
+            ok=False,
+            title="Denied by reviewer",
+        )
+
+    events = [
+        event
+        async for event in run_agent_stream(
+            completion=fake_completion,
+            connection=ProviderConnection(
+                model="gpt-5.1",
+                name="Provider",
+                provider=ProviderFormat.OPENAI,
+                secret_reference="secret",
+            ),
+            cwd=tmp_path,
+            messages=[{"role": "user", "content": "Delete the important directory."}],
+            tool_runner=denying_tool_runner,
+        )
+    ]
+
+    assert len(captured_requests) == 2
+    assert captured_requests[1]["messages"][-1]["role"] == "tool"
+    assert "Automatic approval review denied this action" in str(
+        captured_requests[1]["messages"][-1]["content"]
+    )
+    assert "must not work around" in str(
+        captured_requests[1]["messages"][-1]["content"]
+    )
+    assert events[-2].data["content"] == "I need explicit approval for that risk."
+    assert events[-1].data["message"]["content"] == (
+        "I need explicit approval for that risk."
+    )
 
 
 def test_update_plan_outputs_plan_state(tmp_path) -> None:

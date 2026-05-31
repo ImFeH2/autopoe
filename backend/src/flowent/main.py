@@ -16,7 +16,11 @@ from pydantic import BaseModel, ConfigDict
 
 from flowent._version import __version__
 from flowent.agent import AgentContextUpdate, run_agent_stream
-from flowent.approval import ApprovalReviewRequest, review_approval_request
+from flowent.approval import (
+    ApprovalReviewRequest,
+    ApprovalTranscriptEntry,
+    review_approval_request,
+)
 from flowent.channels import TelegramBotManager, TelegramTransport
 from flowent.compact import (
     CompactInput,
@@ -70,6 +74,8 @@ COMPACTED_CONTEXT_MARKER = "Context compacted"
 OPTIMIZED_CONTEXT_MARKER = "Context optimized"
 DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 120_000
 AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET = 20_000
+APPROVAL_TRANSCRIPT_MESSAGE_LIMIT = 12
+APPROVAL_TRANSCRIPT_TEXT_LIMIT = 2_000
 
 
 class ProviderModelsRequest(BaseModel):
@@ -176,6 +182,38 @@ def append_or_replace_message(
         *(current for current in messages if current.id != message.id),
         message,
     ]
+
+
+def approval_transcript_text(content: str | None) -> str:
+    text = (content or "").strip()
+    if len(text) <= APPROVAL_TRANSCRIPT_TEXT_LIMIT:
+        return text
+    return f"{text[:APPROVAL_TRANSCRIPT_TEXT_LIMIT]}\n[truncated]"
+
+
+def approval_transcript(
+    messages: Sequence[StoredMessage],
+) -> list[ApprovalTranscriptEntry]:
+    entries: list[ApprovalTranscriptEntry] = []
+    for message in messages[-APPROVAL_TRANSCRIPT_MESSAGE_LIMIT:]:
+        if message.author in ("user", "assistant"):
+            role: Literal["user", "assistant"] = (
+                "user" if message.author == "user" else "assistant"
+            )
+            content = approval_transcript_text(message.content)
+            if content:
+                entries.append(ApprovalTranscriptEntry(role=role, content=content))
+            for tool in message.tools:
+                tool_content = approval_transcript_text(tool.content)
+                if tool_content:
+                    entries.append(
+                        ApprovalTranscriptEntry(
+                            role="tool",
+                            content=tool_content,
+                            name=tool.name,
+                        )
+                    )
+    return entries
 
 
 class AssistantOutputBuilder:
@@ -618,7 +656,12 @@ def create_app(
         async def review_tool_approval(request: ApprovalReviewRequest):
             return await review_approval_request(
                 connection,
-                request.model_copy(update={"user_request": content}),
+                request.model_copy(
+                    update={
+                        "transcript": approval_transcript(next_messages),
+                        "user_request": content,
+                    }
+                ),
                 completion=chat_completion,
             )
 
@@ -964,7 +1007,12 @@ def create_app(
                 async def review_tool_approval(request: ApprovalReviewRequest):
                     return await review_approval_request(
                         connection,
-                        request.model_copy(update={"user_request": content}),
+                        request.model_copy(
+                            update={
+                                "transcript": approval_transcript(next_messages),
+                                "user_request": content,
+                            }
+                        ),
                         completion=chat_completion,
                     )
 

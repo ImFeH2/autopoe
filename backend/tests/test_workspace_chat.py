@@ -1503,8 +1503,10 @@ async def test_workspace_persists_automatic_review_result_during_stream(
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "decision": "denied",
-                                    "reason": "Outside the task scope.",
+                                    "risk_level": "high",
+                                    "risk_score": 85,
+                                    "rationale": "Outside the task scope.",
+                                    "evidence": [],
                                 }
                             ),
                             "role": "assistant",
@@ -1556,6 +1558,123 @@ async def test_workspace_persists_automatic_review_result_during_stream(
     assert tool_error_data["data"]["approval"]["reason"] == "Outside the task scope."
     assert review_payload["user_request"] == "Edit notes."
     assert target.read_text() == "alpha\n"
+
+
+@pytest.mark.anyio
+async def test_workspace_review_request_includes_recent_transcript(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    review_payload: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        messages = request["messages"]
+        if messages[0]["content"].startswith("You are Flowent Approval Reviewer"):
+            review_payload.update(json.loads(messages[-1]["content"]))
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "risk_level": "high",
+                                    "risk_score": 85,
+                                    "rationale": "No run is needed for this test.",
+                                    "evidence": [],
+                                }
+                            ),
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
+        async def chunks() -> object:
+            if request["messages"][-1]["role"] == "user":
+                yield tool_call_chunk(
+                    "shell_command",
+                    json.dumps(
+                        {
+                            "additional_permissions": {
+                                "file_system": {"write": ["/var/run/docker.sock"]}
+                            },
+                            "command": (
+                                "docker compose up -d --force-recreate flowent"
+                            ),
+                            "sandbox_permissions": "with_additional_permissions",
+                        }
+                    ),
+                )
+                return
+            yield {"choices": [{"delta": {"content": "Stopped."}}]}
+
+        return chunks()
+
+    app = create_app(
+        workdir=work_dir,
+        serve_frontend=False,
+        chat_completion=fake_completion,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Can you recreate the dev container?",
+                        "id": "user-1",
+                    },
+                    {
+                        "author": "assistant",
+                        "content": (
+                            "This will recreate the Flowent dev container through "
+                            "Docker and may briefly interrupt the running service."
+                        ),
+                        "id": "assistant-1",
+                        "tools": [
+                            {
+                                "arguments": {"command": "docker compose ps"},
+                                "content": "flowent-dev-preview-flowent-1 running",
+                                "data": {},
+                                "id": "tool-1",
+                                "name": "shell_command",
+                                "status": "success",
+                                "title": "Ran docker compose ps",
+                            }
+                        ],
+                    },
+                ]
+            },
+        )
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "确认"},
+        )
+        run_id = response.json()["run_id"]
+        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+
+    events = stream_events(stream_response.text)
+    assert "tool_error" in [event["event"] for event in events]
+    assert review_payload["user_request"] == "确认"
+    transcript = review_payload["transcript"]
+    assert {"role": "user", "content": "确认"} in transcript
+    assert any(
+        entry["role"] == "assistant" and "briefly interrupt" in entry["content"]
+        for entry in transcript
+    )
+    assert any(
+        entry["role"] == "tool"
+        and entry["name"] == "shell_command"
+        and "flowent-dev-preview-flowent-1" in entry["content"]
+        for entry in transcript
+    )
 
 
 @pytest.mark.anyio

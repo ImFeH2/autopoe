@@ -194,7 +194,9 @@ async def test_denied_declared_write_path_returns_failed_result_before_running_c
     )
 
     assert not result.ok
+    assert "Automatic approval review denied this action" in result.content
     assert "Outside the task scope." in result.content
+    assert "must not work around" in result.content
     assert result.data["approval"]["decision"] == "denied"
     assert result.data["approval"]["reason"] == "Outside the task scope."
     assert calls == 0

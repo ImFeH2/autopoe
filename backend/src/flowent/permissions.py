@@ -75,6 +75,15 @@ def validate_additional_permissions(arguments: dict[str, object]) -> ToolResult 
     return None
 
 
+def approval_denial_content(decision: ApprovalReviewDecision) -> str:
+    return (
+        "Automatic approval review denied this action as high risk: "
+        f"{decision.reason} The agent must not work around this denial; choose a "
+        "safer alternative or ask the user for explicit approval after explaining "
+        "the concrete risk."
+    )
+
+
 def approved_writable_roots(
     context: ToolContext, writable_paths: list[Path]
 ) -> list[Path]:
@@ -120,7 +129,7 @@ async def review_missing_write_paths(
         return (
             effective_paths,
             ToolResult(
-                content=decision.reason,
+                content=approval_denial_content(decision),
                 data=review_data,
                 ok=False,
                 title="Denied by reviewer",
@@ -200,7 +209,7 @@ async def run_shell_command_with_permissions(
     review_data = approval_result_data(review_request, decision)
     if decision.decision == "denied":
         return ToolResult(
-            content=decision.reason,
+            content=approval_denial_content(decision),
             data={**result.data, **review_data},
             ok=False,
             title="Denied by reviewer",
@@ -368,15 +377,22 @@ def approval_result_data(
     request: ApprovalReviewRequest,
     decision: ApprovalReviewDecision,
 ) -> dict[str, object]:
+    approval: dict[str, object] = {
+        "action": request.action,
+        "decision": decision.decision,
+        "reason": decision.reason,
+        "tool_name": request.tool_name,
+        "tool_result": request.tool_result,
+        "write_paths": [str(path) for path in request.write_paths],
+    }
+    if decision.risk_level is not None:
+        approval["risk_level"] = decision.risk_level
+    if decision.risk_score is not None:
+        approval["risk_score"] = decision.risk_score
+    if decision.evidence:
+        approval["evidence"] = [item.model_dump() for item in decision.evidence]
     return {
-        "approval": {
-            "action": request.action,
-            "decision": decision.decision,
-            "reason": decision.reason,
-            "tool_name": request.tool_name,
-            "tool_result": request.tool_result,
-            "write_paths": [str(path) for path in request.write_paths],
-        }
+        "approval": approval,
     }
 
 
