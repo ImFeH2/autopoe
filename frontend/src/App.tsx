@@ -176,6 +176,7 @@ type WorkspaceStreamEvent =
     }
   | {
       data: {
+        error?: Extract<AssistantOutputItem, { type: "error" }>;
         message: string;
       };
       event: "error";
@@ -185,6 +186,7 @@ type WorkspaceStreamHandlers = {
   onContextOptimized: (message: ApiMessage) => void;
   onDelta: (content: string) => void;
   onDone: (message: ApiMessage) => void;
+  onError: (error: Extract<AssistantOutputItem, { type: "error" }>) => void;
   onOutputStart: (index: number) => void;
   onStart: (id: string) => void;
   onThinkingDelta: (content: string) => void;
@@ -429,6 +431,16 @@ const assistantGroupsFromMessage = (
 
   return groups;
 };
+
+const streamErrorFromMessage = (
+  message: string,
+  assistantId: string,
+): Extract<AssistantOutputItem, { type: "error" }> => ({
+  id: `${assistantId || "assistant"}-error-1`,
+  message,
+  title: "Response interrupted",
+  type: "error",
+});
 
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
@@ -1128,6 +1140,10 @@ function App() {
             handlers.onToolDone(streamEvent.data);
           }
           if (streamEvent.event === "error") {
+            handlers.onError(
+              streamEvent.data.error ??
+                streamErrorFromMessage(streamEvent.data.message, ""),
+            );
             throw new Error(streamEvent.data.message);
           }
         }
@@ -1291,6 +1307,15 @@ function App() {
         assistantIsStreamingText = true;
         updateAssistantMessage();
       };
+      const appendAssistantError = (
+        error: Extract<AssistantOutputItem, { type: "error" }>,
+      ) => {
+        finishAssistantThinking();
+        assistantTextItemId = "";
+        assistantIsStreamingText = false;
+        updateCurrentAssistantGroupItems((items) => [...items, error]);
+        updateAssistantMessage();
+      };
       const assistantGroupsThinking = () =>
         assistantGroups
           .flatMap((group) => group.items)
@@ -1380,6 +1405,15 @@ function App() {
           activeRunEventIndexRef.current = 0;
           setActiveRunId("");
           setIsResponding(false);
+        },
+        onError: (error) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          appendAssistantError(
+            error.id ? error : { ...error, id: `${assistantId}-error-1` },
+          );
         },
         onOutputStart: (index) => {
           if (!isCurrentResponse()) {

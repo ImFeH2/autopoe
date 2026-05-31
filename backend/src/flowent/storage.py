@@ -124,6 +124,16 @@ class StoredTextOutputItem(BaseModel):
     type: Literal["text"]
 
 
+class StoredErrorOutputItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    detail: str = Field(default="", exclude_if=lambda value: value == "")
+    id: str
+    message: str
+    title: str
+    type: Literal["error"]
+
+
 class StoredToolOutputItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -133,7 +143,10 @@ class StoredToolOutputItem(BaseModel):
 
 
 StoredOutputItem = Annotated[
-    StoredThinkingOutputItem | StoredTextOutputItem | StoredToolOutputItem,
+    StoredThinkingOutputItem
+    | StoredTextOutputItem
+    | StoredErrorOutputItem
+    | StoredToolOutputItem,
     Field(discriminator="type"),
 ]
 

@@ -150,6 +150,70 @@ def test_app_state_persists_settings_and_workspace_messages(
     ]
 
 
+def test_app_state_persists_workspace_error_blocks_across_app_instances(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+
+    messages_response = client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "assistant",
+                    "content": "",
+                    "groups": [
+                        {
+                            "id": "message-1-errors",
+                            "items": [
+                                {
+                                    "detail": "HTML response returned.",
+                                    "id": "message-1-error-1",
+                                    "message": "Check the model connection settings and try again.",
+                                    "title": "Request failed",
+                                    "type": "error",
+                                }
+                            ],
+                        }
+                    ],
+                    "id": "message-1",
+                    "status": "failed",
+                }
+            ]
+        },
+    )
+
+    assert messages_response.status_code == 200
+
+    restarted_client = TestClient(create_app(serve_frontend=False))
+    state = restarted_client.get("/api/state").json()
+
+    assert state["messages"] == [
+        {
+            "author": "assistant",
+            "content": "",
+            "groups": [
+                {
+                    "id": "message-1-errors",
+                    "items": [
+                        {
+                            "detail": "HTML response returned.",
+                            "id": "message-1-error-1",
+                            "message": "Check the model connection settings and try again.",
+                            "title": "Request failed",
+                            "type": "error",
+                        }
+                    ],
+                }
+            ],
+            "id": "message-1",
+            "status": "failed",
+            "tools": [],
+        }
+    ]
+
+
 def test_data_directory_uses_flowent_data_dir(tmp_path, monkeypatch) -> None:
     data_dir = tmp_path / "custom-flowent"
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(data_dir))

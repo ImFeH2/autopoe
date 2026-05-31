@@ -28,6 +28,7 @@ from flowent.tools import (
 )
 
 logger = logging.getLogger("flowent.agent")
+EMPTY_MODEL_RESPONSE_ERROR = "The model did not return a response."
 
 
 FLOWENT_AGENT_SYSTEM_PROMPT = """You are Flowent, an agent that completes tasks by combining conversation context with available tools.
@@ -189,6 +190,8 @@ async def run_agent_stream(
             tool_calls,
         )
         if not tool_calls:
+            if not final_content and not final_thinking:
+                raise RuntimeError(EMPTY_MODEL_RESPONSE_ERROR)
             logger.info(
                 "Agent response completed id=%s content_length=%s",
                 assistant_id,

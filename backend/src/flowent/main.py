@@ -35,7 +35,11 @@ from flowent.llm import (
     ProviderFormat,
     list_provider_models,
 )
-from flowent.logging import TRACE_LEVEL, ensure_logging_configured
+from flowent.logging import (
+    TRACE_LEVEL,
+    ensure_logging_configured,
+    redact_diagnostic_value,
+)
 from flowent.mcp import McpManager, McpTransport
 from flowent.mcp_import import McpImportDiscovery, discover_imported_mcp_servers
 from flowent.paths import resolve_workdir
@@ -50,6 +54,7 @@ from flowent.storage import (
     StateStore,
     StoredAssistantOutputGroup,
     StoredCompactionCheckpoint,
+    StoredErrorOutputItem,
     StoredMcpServer,
     StoredMessage,
     StoredProvider,
@@ -184,6 +189,54 @@ def append_or_replace_message(
     ]
 
 
+USER_VISIBLE_RUN_ERROR_TITLE = "Request failed"
+USER_VISIBLE_RUN_ERROR_MESSAGE = "Check the model connection settings and try again."
+USER_VISIBLE_CONTEXT_OPTIMIZATION_ERROR_MESSAGE = "Context could not be optimized."
+EMPTY_MODEL_RESPONSE_DETAIL = "The model did not return a response."
+
+
+def user_visible_run_error_message(detail: str) -> str:
+    if detail.strip() == USER_VISIBLE_CONTEXT_OPTIMIZATION_ERROR_MESSAGE:
+        return USER_VISIBLE_CONTEXT_OPTIMIZATION_ERROR_MESSAGE
+    return USER_VISIBLE_RUN_ERROR_MESSAGE
+
+
+def run_error_output_item(
+    assistant_id: str,
+    detail: str,
+    index: int = 1,
+) -> StoredErrorOutputItem:
+    redacted_detail = redact_diagnostic_value(detail.strip())
+    message = user_visible_run_error_message(redacted_detail)
+    return StoredErrorOutputItem(
+        detail="" if redacted_detail == message else redacted_detail,
+        id=f"{assistant_id}-error-{index}",
+        message=message,
+        title=USER_VISIBLE_RUN_ERROR_TITLE,
+        type="error",
+    )
+
+
+def run_error_event_data(error: StoredErrorOutputItem) -> dict[str, object]:
+    return {
+        "error": error.model_dump(exclude_none=True),
+        "message": error.message,
+    }
+
+
+def message_error_items(message: StoredMessage) -> list[StoredErrorOutputItem]:
+    return [
+        item for group in message.groups for item in group.items if item.type == "error"
+    ]
+
+
+def error_context_summary(error: StoredErrorOutputItem) -> str:
+    parts = [f"Previous response failed: {error.title}.", error.message]
+    if error.detail and error.detail != error.message:
+        parts.append(f"Detail: {error.detail}")
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
 def approval_transcript_text(content: str | None) -> str:
     text = (content or "").strip()
     if len(text) <= APPROVAL_TRANSCRIPT_TEXT_LIMIT:
@@ -226,6 +279,7 @@ class AssistantOutputBuilder:
         self.thinking = ""
         self.thinking_item_index = 0
         self.thinking_item_id = ""
+        self.error_item_index = 0
         self.tools: dict[str, StoredToolItem] = {}
 
     def set_assistant_id(self, assistant_id: str) -> None:
@@ -318,6 +372,26 @@ class AssistantOutputBuilder:
             for group in self.groups
         ]
 
+    def append_error(self, error: StoredErrorOutputItem) -> StoredErrorOutputItem:
+        self.error_item_index += 1
+        if not error.id:
+            error = error.model_copy(
+                update={"id": f"{self.assistant_id}-error-{self.error_item_index}"}
+            )
+        error_group_id = f"{self.assistant_id}-errors"
+        if self.groups and self.groups[-1].id == error_group_id:
+            self.groups[-1] = self.groups[-1].model_copy(
+                update={"items": [*self.groups[-1].items, error]}
+            )
+        else:
+            self.groups.append(
+                StoredAssistantOutputGroup(id=error_group_id, items=[error])
+            )
+        return error
+
+    def has_output(self) -> bool:
+        return any(group.items for group in self.groups)
+
     def apply_done_message(self, message: dict[str, object]) -> None:
         final_content = str(message.get("content") or self.content)
         final_thinking = str(message.get("thinking") or self.thinking)
@@ -364,7 +438,10 @@ class AssistantOutputBuilder:
 
     def _append_current_item(
         self,
-        item: StoredTextOutputItem | StoredThinkingOutputItem | StoredToolOutputItem,
+        item: StoredTextOutputItem
+        | StoredThinkingOutputItem
+        | StoredErrorOutputItem
+        | StoredToolOutputItem,
     ) -> None:
         self.groups[-1] = self.groups[-1].model_copy(
             update={"items": [*self.groups[-1].items, item]}
@@ -465,6 +542,16 @@ def workspace_chat_messages(
                 raise HTTPException(
                     status_code=400, detail="Message history is invalid."
                 )
+            if message.author == "assistant":
+                errors = message_error_items(message)
+                if errors:
+                    chat_messages.extend(
+                        ChatMessage(
+                            role="assistant", content=error_context_summary(error)
+                        )
+                        for error in errors
+                    )
+                    continue
             checkpoint_role: Literal["user", "assistant"] = (
                 "user" if message.author == "user" else "assistant"
             )
@@ -490,6 +577,14 @@ def workspace_chat_messages(
             continue
         if message.author not in ("user", "assistant"):
             raise HTTPException(status_code=400, detail="Message history is invalid.")
+        if message.author == "assistant":
+            errors = message_error_items(message)
+            if errors:
+                chat_messages.extend(
+                    ChatMessage(role="assistant", content=error_context_summary(error))
+                    for error in errors
+                )
+                continue
         role: Literal["user", "assistant"] = (
             "user" if message.author == "user" else "assistant"
         )
@@ -1175,12 +1270,14 @@ def create_app(
                         current_tool_id,
                         {"content": str(error) or "Tool failed.", "status": "failed"},
                     )
-                persist_assistant("failed")
-                await append_run_event(
-                    run,
-                    "error",
-                    {"message": str(error) or "Message could not be sent."},
+                error_item = assistant_output.append_error(
+                    run_error_output_item(
+                        assistant_message.id,
+                        str(error) or EMPTY_MODEL_RESPONSE_DETAIL,
+                    )
                 )
+                persist_assistant("failed")
+                await append_run_event(run, "error", run_error_event_data(error_item))
             finally:
                 run.is_done = True
                 async with run.condition:

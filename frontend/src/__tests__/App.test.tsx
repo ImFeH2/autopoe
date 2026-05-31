@@ -404,6 +404,49 @@ const assistantErrorStreamResponse = (
   });
 };
 
+const assistantStructuredErrorStreamResponse = (
+  error: {
+    detail?: string;
+    id: string;
+    message: string;
+    title: string;
+    type: "error";
+  },
+  firstChunk = "Partial response",
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      if (firstChunk) {
+        controller.enqueue(
+          encoder.encode(
+            `event: delta\ndata: ${JSON.stringify({ content: firstChunk })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(
+        encoder.encode(
+          `event: error\ndata: ${JSON.stringify({ error, message: error.message })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
 const assistantToolStreamResponse = (
   tool: TestTool,
   content: string,
@@ -1969,7 +2012,93 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await expectDocumentText("Partial response");
-    expect(await screen.findByText("Connection lost.")).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Response interrupted");
+    expect(alert).toHaveTextContent("Connection lost.");
+    expect(alert.textContent?.match(/Connection lost\./g)).toHaveLength(1);
+    expect(
+      screen.queryByRole("status", { name: "Thinking" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders persisted assistant error blocks from loaded state", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "assistant",
+          content: "",
+          groups: [
+            {
+              id: "message-assistant-errors",
+              items: [
+                {
+                  detail: "HTML response returned.",
+                  id: "message-assistant-error-1",
+                  message: "Check the model connection settings and try again.",
+                  title: "Request failed",
+                  type: "error",
+                },
+              ],
+            },
+          ],
+          id: "message-assistant",
+          status: "failed",
+        },
+      ],
+    });
+
+    render(<App />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Request failed");
+    expect(alert).toHaveTextContent(
+      "Check the model connection settings and try again.",
+    );
+    expect(alert).toHaveTextContent("HTML response returned.");
+  });
+
+  it("renders a structured stream error in the assistant turn", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStructuredErrorStreamResponse(
+          {
+            detail: "HTML response returned.",
+            id: "message-assistant-error-1",
+            message: "Check the model connection settings and try again.",
+            title: "Request failed",
+            type: "error",
+          },
+          "",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Request failed");
+    expect(alert).toHaveTextContent(
+      "Check the model connection settings and try again.",
+    );
+    expect(alert).toHaveTextContent("HTML response returned.");
     expect(
       screen.queryByRole("status", { name: "Thinking" }),
     ).not.toBeInTheDocument();

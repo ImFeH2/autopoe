@@ -407,6 +407,8 @@ function AssistantOutputTimeline({
                   content={item.content}
                   isStreaming={item.isStreaming === true}
                 />
+              ) : item.type === "error" ? (
+                <AssistantErrorItem key={item.id} item={item} />
               ) : (
                 <MarkdownMessage
                   key={item.id}
@@ -423,6 +425,33 @@ function AssistantOutputTimeline({
           <AssistantWaitingIndicator />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function AssistantErrorItem({
+  item,
+}: {
+  item: Extract<AssistantOutputItem, { type: "error" }>;
+}) {
+  return (
+    <div
+      className="flex items-start gap-3 rounded-lg border border-red-500/15 bg-red-500/[0.06] p-3 text-base leading-5 text-red-100/90"
+      role="alert"
+    >
+      <TriangleAlert
+        aria-hidden="true"
+        className="mt-0.5 size-4 shrink-0 text-red-400"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold text-red-100/95">{item.title}</div>
+        <div className="mt-1 text-red-100/75">{item.message}</div>
+        {item.detail ? (
+          <div className="mt-2 break-words text-xs leading-5 text-red-100/55">
+            {item.detail}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

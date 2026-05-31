@@ -1259,6 +1259,172 @@ def test_workspace_persists_failed_draft_when_stream_errors(
     assert assistant["author"] == "assistant"
     assert assistant["content"] == "Partial answer."
     assert assistant["status"] == "failed"
+    assert assistant["groups"][-1] == {
+        "id": f"{assistant['id']}-errors",
+        "items": [
+            {
+                "detail": "provider stopped",
+                "id": f"{assistant['id']}-error-1",
+                "message": "Check the model connection settings and try again.",
+                "title": "Request failed",
+                "type": "error",
+            }
+        ],
+    }
+
+
+def test_workspace_persists_error_block_when_model_fails_before_output(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        raise RuntimeError("provider unavailable")
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert events[-1]["event"] == "error"
+    assistant_id = json.loads(events[0]["data"])["id"]
+    assert json.loads(events[-1]["data"]) == {
+        "error": {
+            "detail": "provider unavailable",
+            "id": f"{assistant_id}-error-1",
+            "message": "Check the model connection settings and try again.",
+            "title": "Request failed",
+            "type": "error",
+        },
+        "message": "Check the model connection settings and try again.",
+    }
+    state = client.get("/api/state").json()
+    assistant = state["messages"][-1]
+    assert assistant["author"] == "assistant"
+    assert assistant["content"] == ""
+    assert assistant["status"] == "failed"
+    assert assistant["groups"] == [
+        {
+            "id": f"{assistant['id']}-group-1",
+            "items": [],
+        },
+        {
+            "id": f"{assistant['id']}-errors",
+            "items": [
+                {
+                    "detail": "provider unavailable",
+                    "id": f"{assistant['id']}-error-1",
+                    "message": "Check the model connection settings and try again.",
+                    "title": "Request failed",
+                    "type": "error",
+                }
+            ],
+        },
+    ]
+
+
+def test_workspace_treats_empty_model_result_as_failed_error_block(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            if False:
+                yield {}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert events[-1]["event"] == "error"
+    state = client.get("/api/state").json()
+    assistant = state["messages"][-1]
+    assert assistant["status"] == "failed"
+    assert assistant["groups"][-1]["items"] == [
+        {
+            "detail": "The model did not return a response.",
+            "id": f"{assistant['id']}-error-1",
+            "message": "Check the model connection settings and try again.",
+            "title": "Request failed",
+            "type": "error",
+        }
+    ]
+
+
+def test_workspace_includes_previous_error_summary_in_next_request(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Recovered."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "user",
+                    "content": "Try once.",
+                    "id": "message-user-1",
+                },
+                {
+                    "author": "assistant",
+                    "content": "",
+                    "groups": [
+                        {
+                            "id": "message-assistant-1-errors",
+                            "items": [
+                                {
+                                    "detail": "HTML response returned.",
+                                    "id": "message-assistant-1-error-1",
+                                    "message": "Check the model connection settings and try again.",
+                                    "title": "Request failed",
+                                    "type": "error",
+                                }
+                            ],
+                        }
+                    ],
+                    "id": "message-assistant-1",
+                    "status": "failed",
+                },
+            ]
+        },
+    )
+
+    response = client.post("/api/workspace/respond", json={"content": "Try again."})
+
+    assert response.status_code == 200
+    request_messages = captured_requests[0]["messages"]
+    assert {
+        "role": "assistant",
+        "content": "Previous response failed: Request failed. Check the model connection settings and try again. Detail: HTML response returned.",
+    } in request_messages
 
 
 def test_workspace_marks_running_tool_failed_when_stream_errors(

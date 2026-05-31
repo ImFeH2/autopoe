@@ -129,6 +129,13 @@ export type AssistantOutputItem =
       type: "text";
     }
   | {
+      detail?: string;
+      id: string;
+      message: string;
+      title: string;
+      type: "error";
+    }
+  | {
       id: string;
       tool: ToolItem;
       type: "tool";
