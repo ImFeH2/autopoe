@@ -8,6 +8,7 @@ services:
     image: flowent:dev
     environment:
       FLOWENT_FRONTEND_HOST: 0.0.0.0
+      FLOWENT_DATA_DIR: /data/flowent
       FLOWENT_WORKDIR: /workspace
     working_dir: /workspace
     command:
@@ -24,8 +25,10 @@ services:
       - flowent-dev-node-modules:/app/node_modules
       - flowent-dev-frontend-node-modules:/app/frontend/node_modules
       - flowent-dev-backend-venv:/app/backend/.venv
+      - flowent-dev-data:/data/flowent
 
 volumes:
   flowent-dev-node-modules:
   flowent-dev-frontend-node-modules:
   flowent-dev-backend-venv:
+  flowent-dev-data:
