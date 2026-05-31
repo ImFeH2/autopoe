@@ -891,6 +891,55 @@ async def test_agent_logs_model_call_failure_after_tool_result(
     assert "chunk_count=0" in rendered_logs
 
 
+@pytest.mark.anyio
+async def test_agent_does_not_log_final_response_when_responses_stream_fails(
+    tmp_path, caplog, fake_litellm_responses_transformer
+) -> None:
+    caplog.set_level(logging.INFO, logger="flowent.agent")
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            from litellm.completion_extras.litellm_responses_transformation.transformation import (
+                OpenAiResponsesToChatCompletionStreamIterator,
+            )
+
+            yield text_chunk("Partial answer.")
+            yield OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream(
+                {
+                    "response": {
+                        "error": {
+                            "code": "upstream_error",
+                            "message": "Upstream request failed",
+                        },
+                        "status": "failed",
+                    },
+                    "type": "response.failed",
+                }
+            )
+
+        return chunks()
+
+    with pytest.raises(RuntimeError, match="Upstream request failed"):
+        [
+            event
+            async for event in run_agent_stream(
+                completion=fake_completion,
+                connection=ProviderConnection(
+                    model="gpt-5.1",
+                    name="Provider",
+                    provider=ProviderFormat.OPENAI,
+                    secret_reference="secret",
+                ),
+                cwd=tmp_path,
+                messages=[{"role": "user", "content": "Inspect notes."}],
+            )
+        ]
+    rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
+
+    assert "Agent model call failed" in rendered_logs
+    assert "decision=final_response" not in rendered_logs
+
+
 def test_agent_finishes_without_tools(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)

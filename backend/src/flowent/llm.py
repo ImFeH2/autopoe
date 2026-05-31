@@ -1,7 +1,7 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from enum import StrEnum
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -66,12 +66,17 @@ class ModelListCallable(Protocol):
 logger = logging.getLogger("flowent.llm")
 
 
+class LLMStreamError(RuntimeError):
+    pass
+
+
 MODEL_PREFIXES: dict[ProviderFormat, str] = {
     ProviderFormat.OPENAI: "openai",
     ProviderFormat.OPENAI_RESPONSES: "openai",
     ProviderFormat.ANTHROPIC: "anthropic",
     ProviderFormat.GEMINI: "gemini",
 }
+_litellm_stream_error_patch_installed = False
 
 
 def provider_model_name(connection: ProviderConnection) -> str:
@@ -87,6 +92,71 @@ def normalize_provider_model_name(provider: ProviderFormat, model: str) -> str:
     if model.startswith(prefix):
         return model.removeprefix(prefix)
     return model
+
+
+def stream_failure_message(chunk: Any) -> str:
+    if isinstance(chunk, BaseModel):
+        chunk = chunk.model_dump()
+    if not isinstance(chunk, Mapping):
+        return ""
+
+    event_type = getattr(chunk.get("type"), "value", chunk.get("type"))
+    event_type = str(event_type or "")
+    if event_type == "error":
+        error = chunk.get("error", {})
+    elif event_type == "response.failed":
+        response = chunk.get("response", {})
+        error = value_at(response, "error", {})
+    else:
+        return ""
+
+    message = value_at(error, "message", "")
+    if isinstance(message, str) and message:
+        return message
+    code = value_at(error, "code", "")
+    if isinstance(code, str) and code:
+        return code
+    return "Upstream request failed"
+
+
+def raise_for_stream_failure(chunk: Any) -> None:
+    message = stream_failure_message(chunk)
+    if message:
+        raise LLMStreamError(message)
+
+
+def configure_litellm_stream_error_handling() -> None:
+    global _litellm_stream_error_patch_installed
+
+    if _litellm_stream_error_patch_installed:
+        return
+    try:
+        from litellm.completion_extras.litellm_responses_transformation.transformation import (
+            OpenAiResponsesToChatCompletionStreamIterator,
+        )
+    except Exception:
+        return
+
+    if getattr(
+        OpenAiResponsesToChatCompletionStreamIterator,
+        "_flowent_stream_error_patch_installed",
+        False,
+    ):
+        _litellm_stream_error_patch_installed = True
+        return
+
+    transformer = cast(Any, OpenAiResponsesToChatCompletionStreamIterator)
+    original = transformer.translate_responses_chunk_to_openai_stream
+
+    def translate_responses_chunk_to_openai_stream(parsed_chunk: Any) -> Any:
+        raise_for_stream_failure(parsed_chunk)
+        return original(parsed_chunk)
+
+    transformer.translate_responses_chunk_to_openai_stream = staticmethod(
+        translate_responses_chunk_to_openai_stream
+    )
+    transformer._flowent_stream_error_patch_installed = True
+    _litellm_stream_error_patch_installed = True
 
 
 def unique_model_names(provider: ProviderFormat, models: Sequence[str]) -> list[str]:
@@ -317,6 +387,7 @@ async def stream_chat_chunks(
         from litellm import acompletion
 
         configure_litellm_logging()
+        configure_litellm_stream_error_handling()
         completion = acompletion
 
     logger.debug(
@@ -328,6 +399,7 @@ async def stream_chat_chunks(
     record_litellm_request_diagnostic(connection, request)
     response = await completion(**request)
     async for chunk in response:
+        raise_for_stream_failure(chunk)
         logger.log(TRACE_LEVEL, "LLM stream chunk=%r", chunk)
         yield chunk
 

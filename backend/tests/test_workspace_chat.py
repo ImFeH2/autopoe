@@ -1273,6 +1273,58 @@ def test_workspace_persists_failed_draft_when_stream_errors(
     }
 
 
+def test_workspace_persists_error_block_when_responses_stream_fails(
+    tmp_path, monkeypatch, fake_litellm_responses_transformer
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            from litellm.completion_extras.litellm_responses_transformation.transformation import (
+                OpenAiResponsesToChatCompletionStreamIterator,
+            )
+
+            yield {"choices": [{"delta": {"content": "Partial answer."}}]}
+            yield OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream(
+                {
+                    "response": {
+                        "error": {
+                            "code": "upstream_error",
+                            "message": "Upstream request failed",
+                        },
+                        "status": "failed",
+                    },
+                    "type": "response.failed",
+                }
+            )
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post("/api/workspace/respond", json={"content": "Hello."})
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert events[-1]["event"] == "error"
+    state = client.get("/api/state").json()
+    assistant = state["messages"][-1]
+    assert assistant["author"] == "assistant"
+    assert assistant["content"] == "Partial answer."
+    assert assistant["status"] == "failed"
+    assert json.loads(events[-1]["data"])["error"] == {
+        "detail": "Upstream request failed",
+        "id": f"{assistant['id']}-error-1",
+        "message": "Check the model connection settings and try again.",
+        "title": "Request failed",
+        "type": "error",
+    }
+
+
 def test_workspace_persists_error_block_when_model_fails_before_output(
     tmp_path, monkeypatch
 ) -> None:

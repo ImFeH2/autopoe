@@ -4,6 +4,7 @@ import pytest
 
 from flowent.llm import (
     ChatMessage,
+    LLMStreamError,
     ProviderConnection,
     ProviderFormat,
     ReasoningEffort,
@@ -12,6 +13,7 @@ from flowent.llm import (
     complete_chat,
     normalize_system_messages,
     stream_chat,
+    stream_chat_chunks,
 )
 
 
@@ -235,6 +237,50 @@ async def test_stream_chat_uses_litellm_streaming() -> None:
     assert captured_request["stream"] is True
     assert captured_request["model"] == "openai/gpt-5.1"
     assert chunks == ["Here is ", "the checklist."]
+
+
+@pytest.mark.anyio
+async def test_stream_chat_chunks_raises_when_responses_stream_fails(
+    fake_litellm_responses_transformer,
+) -> None:
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            from litellm.completion_extras.litellm_responses_transformation.transformation import (
+                OpenAiResponsesToChatCompletionStreamIterator,
+            )
+
+            yield {"choices": [{"delta": {"content": "Partial answer."}}]}
+            yield OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream(
+                {
+                    "response": {
+                        "error": {
+                            "code": "upstream_error",
+                            "message": "Upstream request failed",
+                        },
+                        "status": "failed",
+                    },
+                    "type": "response.failed",
+                }
+            )
+
+        return chunks()
+
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="connection-responses",
+    )
+
+    with pytest.raises(LLMStreamError, match="Upstream request failed"):
+        [
+            chunk
+            async for chunk in stream_chat_chunks(
+                connection,
+                [ChatMessage(role="user", content="Create a checklist.")],
+                completion=fake_completion,
+            )
+        ]
 
 
 @pytest.mark.anyio
