@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import subprocess
 import time
 from pathlib import Path
@@ -802,6 +803,92 @@ def test_agent_continues_until_final_text_after_multiple_tool_rounds(
         "content": "Launch notes",
     }
     assert events[-1]["data"]["message"]["content"] == "The notes are ready."
+
+
+@pytest.mark.anyio
+async def test_agent_logs_model_call_decisions_after_tool_rounds(
+    tmp_path, caplog
+) -> None:
+    (tmp_path / "notes.txt").write_text("Launch notes")
+    captured_requests: list[dict[str, object]] = []
+    caplog.set_level(logging.INFO, logger="flowent.agent")
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk("read_file", {"path": "notes.txt"})
+            else:
+                yield text_chunk("The notes are ready.")
+
+        return chunks()
+
+    events = [
+        event
+        async for event in run_agent_stream(
+            completion=fake_completion,
+            connection=ProviderConnection(
+                model="gpt-5.1",
+                name="Provider",
+                provider=ProviderFormat.OPENAI,
+                secret_reference="secret",
+            ),
+            cwd=tmp_path,
+            messages=[{"role": "user", "content": "Inspect notes."}],
+        )
+    ]
+    rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
+
+    assert events[-1].data["message"]["content"] == "The notes are ready."
+    assert "Agent model call started" in rendered_logs
+    assert "round=1" in rendered_logs
+    assert "round=2" in rendered_logs
+    assert "decision=run_tools" in rendered_logs
+    assert "decision=final_response" in rendered_logs
+    assert "Agent continuing after tools" in rendered_logs
+
+
+@pytest.mark.anyio
+async def test_agent_logs_model_call_failure_after_tool_result(
+    tmp_path, caplog
+) -> None:
+    (tmp_path / "notes.txt").write_text("Launch notes")
+    captured_requests: list[dict[str, object]] = []
+    caplog.set_level(logging.INFO, logger="flowent.agent")
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk("read_file", {"path": "notes.txt"})
+                return
+            raise RuntimeError("stream request failed")
+
+        return chunks()
+
+    with pytest.raises(RuntimeError, match="stream request failed"):
+        [
+            event
+            async for event in run_agent_stream(
+                completion=fake_completion,
+                connection=ProviderConnection(
+                    model="gpt-5.1",
+                    name="Provider",
+                    provider=ProviderFormat.OPENAI,
+                    secret_reference="secret",
+                ),
+                cwd=tmp_path,
+                messages=[{"role": "user", "content": "Inspect notes."}],
+            )
+        ]
+    rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
+
+    assert len(captured_requests) == 2
+    assert "Agent model call failed" in rendered_logs
+    assert "round=2" in rendered_logs
+    assert "chunk_count=0" in rendered_logs
 
 
 def test_agent_finishes_without_tools(tmp_path, monkeypatch) -> None:

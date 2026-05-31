@@ -146,56 +146,102 @@ async def run_agent_stream(
     while True:
         round_number += 1
         logger.debug("Agent round started id=%s round=%s", assistant_id, round_number)
+        logger.info(
+            "Agent model call started id=%s round=%s conversation_messages=%s",
+            assistant_id,
+            round_number,
+            len(conversation),
+        )
         yield AgentStreamEvent(event="output_start", data={"index": round_number})
         round_content = ""
         pending: dict[int, PendingToolCall] = {}
+        chunk_count = 0
+        content_delta_count = 0
+        reasoning_delta_count = 0
+        tool_delta_count = 0
 
-        async for chunk in stream_chat_chunks(
-            connection,
-            conversation,
-            completion=completion,
-            tools=[*tool_specs(), *list(extra_tool_specs or [])],
-        ):
-            reasoning = chunk_delta_reasoning(chunk)
-            if reasoning:
-                final_thinking += reasoning
-                logger.log(
-                    TRACE_LEVEL,
-                    "Agent stream reasoning id=%s content=%r",
-                    assistant_id,
-                    reasoning,
-                )
-                yield AgentStreamEvent(
-                    event="thinking_delta", data={"content": reasoning}
-                )
-            content = chunk_delta_content(chunk)
-            if content:
-                round_content += content
-                final_content += content
-                logger.log(
-                    TRACE_LEVEL,
-                    "Agent stream delta id=%s content=%r",
-                    assistant_id,
-                    content,
-                )
-                yield AgentStreamEvent(event="delta", data={"content": content})
-            for delta in chunk_delta_tool_calls(chunk):
-                pending.setdefault(delta.index, PendingToolCall()).apply_delta(delta)
+        try:
+            async for chunk in stream_chat_chunks(
+                connection,
+                conversation,
+                completion=completion,
+                tools=[*tool_specs(), *list(extra_tool_specs or [])],
+            ):
+                chunk_count += 1
+                reasoning = chunk_delta_reasoning(chunk)
+                if reasoning:
+                    reasoning_delta_count += 1
+                    final_thinking += reasoning
+                    logger.log(
+                        TRACE_LEVEL,
+                        "Agent stream reasoning id=%s round=%s content=%r",
+                        assistant_id,
+                        round_number,
+                        reasoning,
+                    )
+                    yield AgentStreamEvent(
+                        event="thinking_delta", data={"content": reasoning}
+                    )
+                content = chunk_delta_content(chunk)
+                if content:
+                    content_delta_count += 1
+                    round_content += content
+                    final_content += content
+                    logger.log(
+                        TRACE_LEVEL,
+                        "Agent stream delta id=%s round=%s content=%r",
+                        assistant_id,
+                        round_number,
+                        content,
+                    )
+                    yield AgentStreamEvent(event="delta", data={"content": content})
+                for delta in chunk_delta_tool_calls(chunk):
+                    tool_delta_count += 1
+                    pending.setdefault(delta.index, PendingToolCall()).apply_delta(
+                        delta
+                    )
+        except Exception:
+            logger.exception(
+                "Agent model call failed id=%s round=%s chunk_count=%s content_deltas=%s reasoning_deltas=%s tool_deltas=%s conversation_messages=%s",
+                assistant_id,
+                round_number,
+                chunk_count,
+                content_delta_count,
+                reasoning_delta_count,
+                tool_delta_count,
+                len(conversation),
+            )
+            raise
 
         tool_calls = [pending[index] for index in sorted(pending)]
+        logger.info(
+            "Agent model call completed id=%s round=%s chunk_count=%s content_deltas=%s reasoning_deltas=%s tool_deltas=%s tool_calls=%s content_length=%s decision=%s",
+            assistant_id,
+            round_number,
+            chunk_count,
+            content_delta_count,
+            reasoning_delta_count,
+            tool_delta_count,
+            len(tool_calls),
+            len(round_content),
+            "run_tools" if tool_calls else "final_response",
+        )
         logger.log(
             TRACE_LEVEL,
-            "Agent round tool calls id=%s tool_calls=%r",
+            "Agent round tool calls id=%s round=%s tool_calls=%r",
             assistant_id,
+            round_number,
             tool_calls,
         )
         if not tool_calls:
             if not final_content and not final_thinking:
                 raise RuntimeError(EMPTY_MODEL_RESPONSE_ERROR)
             logger.info(
-                "Agent response completed id=%s content_length=%s",
+                "Agent response completed id=%s rounds=%s content_length=%s thinking_length=%s decision=final_response",
                 assistant_id,
+                round_number,
                 len(final_content),
+                len(final_thinking),
             )
             logger.log(
                 TRACE_LEVEL,
@@ -301,9 +347,24 @@ async def run_agent_stream(
                 )
             conversation.append(tool_result_message(tool_call_id, result_content))
 
+        logger.info(
+            "Agent continuing after tools id=%s completed_round=%s tool_results=%s conversation_messages=%s decision=continue",
+            assistant_id,
+            round_number,
+            len(tool_calls),
+            len(conversation),
+        )
+
         if context_compactor is not None:
             compaction = await context_compactor(conversation)
             if compaction is not None:
+                logger.info(
+                    "Agent context optimized id=%s round=%s conversation_messages_before=%s conversation_messages_after=%s",
+                    assistant_id,
+                    round_number,
+                    len(conversation),
+                    len(compaction.conversation),
+                )
                 conversation = [dict(message) for message in compaction.conversation]
                 yield AgentStreamEvent(
                     event="context_optimized",
