@@ -171,55 +171,162 @@ function MessageList({
       list.scrollHeight - list.scrollTop - list.clientHeight;
     shouldFollowRef.current = distanceFromBottom < 96;
   };
+  const shortcutMessages = useMemo(
+    () => conversationShortcutMessages(displayMessages),
+    [displayMessages],
+  );
 
   return (
-    <div
-      aria-live="polite"
-      className={cn(
-        "absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pt-12 max-[900px]:px-4",
-        stableScrollbarClassName,
-      )}
-      onScroll={updateFollowState}
-      ref={listRef}
-      style={{
-        paddingBottom: composerOffset,
-        scrollPaddingBottom: composerOffset,
+    <>
+      <div
+        aria-live="polite"
+        className={cn(
+          "absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pt-12 max-[900px]:px-4",
+          stableScrollbarClassName,
+        )}
+        onScroll={updateFollowState}
+        ref={listRef}
+        style={{
+          paddingBottom: composerOffset,
+          scrollPaddingBottom: composerOffset,
+        }}
+      >
+        {displayMessages.length === 0 ? (
+          <div className="mx-auto grid min-h-full w-full max-w-4xl place-items-center pb-24">
+            <h1 className="m-0 text-center text-[28px] font-medium leading-[1.2] text-white max-[560px]:text-2xl">
+              Where should we begin?
+            </h1>
+          </div>
+        ) : null}
+        {displayMessages.map((message) => (
+          <Fragment key={message.id}>
+            {message.author === "system" ? (
+              <SystemMessage message={message} />
+            ) : (
+              <MessageRow
+                isStreaming={
+                  isResponding &&
+                  message.id === streamingMessageId &&
+                  message.author === "assistant" &&
+                  message.isStreamingText === true
+                }
+                isPending={
+                  message.id === "assistant-pending" ||
+                  (isResponding &&
+                    message.author === "assistant" &&
+                    message.id === streamingMessageId &&
+                    message.isStreamingText !== true)
+                }
+                message={message}
+              />
+            )}
+          </Fragment>
+        ))}
+        <div aria-hidden="true" ref={scrollMarkerRef} />
+      </div>
+      <MessageShortcutRail messages={shortcutMessages} />
+    </>
+  );
+}
+
+function conversationShortcutMessages(messages: Message[]) {
+  return messages.filter(
+    (message) =>
+      message.id !== "assistant-pending" &&
+      (message.author === "user" || message.author === "assistant") &&
+      message.content.trim().length > 0,
+  );
+}
+
+function MessageShortcutRail({ messages }: { messages: Message[] }) {
+  const [hoveredMessageId, setHoveredMessageId] = useState("");
+  const [isRailActive, setIsRailActive] = useState(false);
+
+  if (messages.length === 0) {
+    return null;
+  }
+
+  const scrollToMessage = (messageId: string) => {
+    document.getElementById(messageId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  };
+
+  return (
+    <nav
+      aria-label="Conversation shortcuts"
+      className="group/shortcut-rail pointer-events-none fixed right-5 top-1/2 z-20 hidden -translate-y-1/2 items-center justify-end max-[1180px]:hidden min-[1181px]:flex"
+      onMouseEnter={() => setIsRailActive(true)}
+      onMouseLeave={() => {
+        setHoveredMessageId("");
+        setIsRailActive(false);
       }}
     >
-      {displayMessages.length === 0 ? (
-        <div className="mx-auto grid min-h-full w-full max-w-[640px] place-items-center pb-24">
-          <h1 className="m-0 text-center text-[28px] font-medium leading-[1.2] text-white max-[560px]:text-2xl">
-            Where should we begin?
-          </h1>
-        </div>
-      ) : null}
-      {displayMessages.map((message) => (
-        <Fragment key={message.id}>
-          {message.author === "system" ? (
-            <SystemMessage message={message} />
-          ) : (
-            <MessageRow
-              isStreaming={
-                isResponding &&
-                message.id === streamingMessageId &&
-                message.author === "assistant" &&
-                message.isStreamingText === true
-              }
-              isPending={
-                message.id === "assistant-pending" ||
-                (isResponding &&
-                  message.author === "assistant" &&
-                  message.id === streamingMessageId &&
-                  message.isStreamingText !== true)
-              }
-              message={message}
-            />
-          )}
-        </Fragment>
-      ))}
-      <div aria-hidden="true" ref={scrollMarkerRef} />
-    </div>
+      <div className="pointer-events-auto flex max-h-[min(70vh,520px)] flex-col-reverse items-end gap-1.5 overflow-hidden rounded-full border border-white/5 bg-black/20 p-1.5 shadow-[0_16px_44px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-all duration-300 group-hover/shortcut-rail:max-h-[min(78vh,620px)] group-hover/shortcut-rail:rounded-2xl group-hover/shortcut-rail:bg-black/70 group-hover/shortcut-rail:p-3 group-hover/shortcut-rail:shadow-[0_20px_60px_rgba(0,0,0,0.42)]">
+        {messages.map((message) => {
+          const isHovered = hoveredMessageId === message.id;
+          const summary = messageShortcutSummary(message.content);
+          const actor = message.author === "user" ? "You" : "Flowent";
+          const showSummary = isRailActive || isHovered;
+
+          return (
+            <Button
+              aria-label={`Jump to ${actor}: ${summary}`}
+              className="group/shortcut h-auto max-w-[260px] justify-end gap-2 rounded-full border-0 bg-transparent px-0 py-0 text-right text-xs text-white shadow-none transition-all duration-200 hover:bg-transparent hover:text-white focus-visible:ring-2 focus-visible:ring-white/20"
+              key={message.id}
+              onClick={() => scrollToMessage(message.id)}
+              onMouseEnter={() => setHoveredMessageId(message.id)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {showSummary ? (
+                <span
+                  className={cn(
+                    "grid max-w-[220px] gap-0.5 overflow-hidden whitespace-nowrap opacity-70 transition-all duration-300 ease-out group-focus-visible/shortcut:opacity-100",
+                    isHovered && "opacity-100",
+                  )}
+                >
+                  <span className="text-[10px] font-semibold tracking-wider text-white/45 uppercase">
+                    {actor}
+                  </span>
+                  <span className="truncate text-[11px] font-medium leading-4 text-white/85">
+                    {summary}
+                  </span>
+                </span>
+              ) : null}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-1.5 rounded-full bg-white/25 shadow-[0_0_0_1px_rgba(255,255,255,0.08)] transition-all duration-200 group-hover/shortcut-rail:size-2 group-hover/shortcut-rail:bg-white/35 group-hover/shortcut:scale-125",
+                  message.author === "user" && "bg-white/45",
+                  isHovered && "size-2.5 scale-150 bg-white",
+                )}
+              />
+            </Button>
+          );
+        })}
+      </div>
+    </nav>
   );
+}
+
+function messageShortcutSummary(content: string) {
+  const summary = content
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+    ?.replace(/\s+/g, " ");
+
+  if (!summary) {
+    return "Message";
+  }
+  if (summary.length <= 64) {
+    return summary;
+  }
+
+  return `${summary.slice(0, 61)}…`;
 }
 
 function SystemMessage({ message }: { message: Message }) {
@@ -231,7 +338,7 @@ function SystemMessage({ message }: { message: Message }) {
         : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-[640px] justify-center py-3">
+    <div className="mx-auto flex w-full max-w-4xl justify-center py-3">
       <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-input/30 px-3 py-1.5 text-base leading-5 text-white/70">
         {Icon ? (
           <Icon aria-hidden="true" className="size-3.5 text-white/50" />
@@ -259,8 +366,9 @@ function MessageRow({
 
   return (
     <article
+      id={message.id}
       className={cn(
-        "flowent-message-row mx-auto flex w-full max-w-[640px] py-3",
+        "flowent-message-row mx-auto flex w-full max-w-4xl scroll-mt-12 scroll-mb-40 py-3",
         message.author === "user" ? "justify-end" : "justify-start",
       )}
     >

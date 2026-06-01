@@ -1360,6 +1360,264 @@ describe("App", () => {
     expect(within(composer).queryByText(/token/i)).not.toBeInTheDocument();
   });
 
+  it("uses a wider conversation layout without changing the composer width", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Please make the report easier to scan",
+          id: "message-user-layout",
+        },
+        {
+          author: "assistant",
+          content: "The report can use wider reading space.",
+          id: "message-assistant-layout",
+        },
+      ],
+    });
+    render(<App />);
+
+    const userMessage = await screen.findByText(
+      "Please make the report easier to scan",
+      { selector: "p" },
+    );
+    const messageRow = userMessage.closest("article");
+    const composer = screen.getByRole("form", {
+      name: "Workspace composer",
+    });
+
+    expect(messageRow).toHaveClass("max-w-4xl");
+    expect(composer.parentElement).toHaveClass("max-w-[640px]");
+  });
+
+  it("shows message shortcuts for conversation messages on desktop", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Plan the launch checklist",
+          id: "message-user-anchor",
+        },
+        {
+          author: "assistant",
+          content: "Here is a focused launch plan.",
+          id: "message-assistant-anchor",
+        },
+        {
+          author: "system",
+          content: "Context optimized",
+          id: "message-system-anchor",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+
+    expect(
+      within(shortcuts).getByRole("button", {
+        name: "Jump to You: Plan the launch checklist",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(shortcuts).getByRole("button", {
+        name: "Jump to Flowent: Here is a focused launch plan.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(shortcuts).queryByRole("button", {
+        name: /Context optimized/,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("jumps to the selected message from a message shortcut", async () => {
+    const user = userEvent.setup();
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      mockInitialState({
+        ...selectedProviderState(),
+        messages: [
+          {
+            author: "user",
+            content: "Find the setup notes",
+            id: "message-user-jump",
+          },
+          {
+            author: "assistant",
+            content: "The setup notes are ready.",
+            id: "message-assistant-jump",
+          },
+        ],
+      });
+      render(<App />);
+
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Jump to Flowent: The setup notes are ready.",
+        }),
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "center",
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("shows a message summary when hovering a shortcut", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Review the deployment plan",
+          id: "message-user-hover",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcut = await screen.findByRole("button", {
+      name: "Jump to You: Review the deployment plan",
+    });
+
+    expect(
+      within(shortcut).queryByText("Review the deployment plan"),
+    ).not.toBeInTheDocument();
+    await user.hover(shortcut);
+    expect(
+      within(shortcut).getByText("Review the deployment plan").parentElement,
+    ).toHaveClass("opacity-100");
+  });
+
+  it("hides the message shortcuts on narrow screens", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Keep the narrow layout clear",
+          id: "message-user-narrow",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+
+    expect(shortcuts).toHaveClass("max-[1180px]:hidden");
+  });
+
+  it("updates message shortcuts when new conversation messages are added", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    await within(shortcuts).findByRole("button", {
+      name: "Jump to You: Draft a launch checklist",
+    });
+    await within(shortcuts).findByRole("button", {
+      name: "Jump to Flowent: Here is the checklist.",
+    });
+    expect(within(shortcuts).getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("keeps system and process-only entries out of message shortcuts", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Summarize the work",
+          id: "message-user-filtered-anchor",
+        },
+        {
+          author: "system",
+          content: "Context compacted",
+          id: "message-system-filtered-anchor",
+        },
+        {
+          author: "assistant",
+          content: "",
+          id: "message-process-filtered-anchor",
+          thinking: "Reading project files",
+          tools: [
+            {
+              id: "tool-filtered-anchor",
+              name: "read_file",
+              status: "success",
+              title: "Read file",
+            },
+          ],
+        },
+        {
+          author: "assistant",
+          content: "The work is summarized.",
+          id: "message-assistant-filtered-anchor",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+
+    expect(within(shortcuts).getAllByRole("button")).toHaveLength(2);
+    expect(within(shortcuts).queryByText("Context compacted")).toBeNull();
+    expect(within(shortcuts).queryByText("Reading project files")).toBeNull();
+    expect(within(shortcuts).queryByText("Read file")).toBeNull();
+  });
+
+  it("does not expose internal wording in message shortcuts", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Review the launch plan",
+          id: "message-user-wording-anchor",
+        },
+        {
+          author: "assistant",
+          content: "The launch plan is ready.",
+          id: "message-assistant-wording-anchor",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+
+    expect(within(shortcuts).queryByText(/token/i)).not.toBeInTheDocument();
+    expect(within(shortcuts).queryByText(/backend/i)).not.toBeInTheDocument();
+    expect(within(shortcuts).queryByText(/API/)).not.toBeInTheDocument();
+  });
+
   it("shows a refining state in the composer tray while Compact is running", async () => {
     const user = userEvent.setup();
     const compactRequest = deferred();
