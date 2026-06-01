@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from flowent.llm import ChatMessage, ProviderFormat, ReasoningEffort
 from flowent.paths import data_directory
+from flowent.usage import TokenUsageInfo
 
 
 class StoredTelegramSession(BaseModel):
@@ -172,6 +173,9 @@ class StoredMessage(BaseModel):
     )
     thinking: str = Field(default="", exclude_if=lambda value: value == "")
     tools: list[StoredToolItem] = Field(default_factory=list)
+    usage_info: TokenUsageInfo | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class StoredCompactionCheckpoint(BaseModel):
@@ -199,6 +203,9 @@ class StoredState(BaseModel):
     settings: StoredSettings
     skills: list[StoredSkill]
     telegram_bot: StoredTelegramBot
+    usage_info: TokenUsageInfo | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     writable_paths: list[StoredWritablePath] = Field(default_factory=list)
 
 
@@ -261,15 +268,30 @@ class StateStore:
                         StoredToolItem.model_validate(tool)
                         for tool in json.loads(row["tools"] or "[]")
                     ],
+                    usage_info=TokenUsageInfo.model_validate_json(row["usage_info"])
+                    if row["usage_info"]
+                    else None,
                 )
                 for row in connection.execute(
                     """
-                    SELECT id, author, content, tools, thinking, groups, status
+                    SELECT id, author, content, tools, thinking, groups, status, usage_info
                     FROM messages
                     ORDER BY position, id
                     """
                 )
             ]
+            usage_row = connection.execute(
+                """
+                SELECT usage_info
+                FROM workspace_context
+                WHERE id = 1
+                """
+            ).fetchone()
+            usage_info = (
+                TokenUsageInfo.model_validate_json(usage_row["usage_info"])
+                if usage_row and usage_row["usage_info"]
+                else None
+            )
 
         return StoredState(
             mcp_servers=mcp_servers,
@@ -287,6 +309,7 @@ class StateStore:
             ),
             skills=[],
             telegram_bot=telegram_bot,
+            usage_info=usage_info,
             writable_paths=writable_paths,
         )
 
@@ -600,6 +623,26 @@ class StateStore:
     def save_messages(self, messages: list[StoredMessage]) -> list[StoredMessage]:
         with self.connect() as connection:
             connection.execute("DELETE FROM messages")
+            if messages:
+                latest_usage_info = next(
+                    (
+                        message.usage_info
+                        for message in reversed(messages)
+                        if message.usage_info is not None
+                    ),
+                    None,
+                )
+                if latest_usage_info is not None:
+                    connection.execute(
+                        """
+                        INSERT INTO workspace_context (id, usage_info)
+                        VALUES (1, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            usage_info = excluded.usage_info,
+                            updated_at = unixepoch()
+                        """,
+                        (latest_usage_info.model_dump_json(),),
+                    )
             connection.executemany(
                 """
                 INSERT INTO messages (
@@ -610,9 +653,10 @@ class StateStore:
                     thinking,
                     groups,
                     status,
+                    usage_info,
                     position
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -634,6 +678,9 @@ class StateStore:
                             ensure_ascii=False,
                         ),
                         message.status,
+                        message.usage_info.model_dump_json()
+                        if message.usage_info
+                        else None,
                         position,
                     )
                     for position, message in enumerate(messages)
@@ -665,9 +712,10 @@ class StateStore:
                     thinking,
                     groups,
                     status,
+                    usage_info,
                     position
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     author = excluded.author,
                     content = excluded.content,
@@ -675,6 +723,7 @@ class StateStore:
                     thinking = excluded.thinking,
                     groups = excluded.groups,
                     status = excluded.status,
+                    usage_info = excluded.usage_info,
                     position = excluded.position
                 """,
                 (
@@ -693,10 +742,51 @@ class StateStore:
                         ensure_ascii=False,
                     ),
                     message.status,
+                    message.usage_info.model_dump_json()
+                    if message.usage_info
+                    else None,
                     position,
                 ),
             )
+            if message.usage_info is not None:
+                connection.execute(
+                    """
+                    INSERT INTO workspace_context (id, usage_info)
+                    VALUES (1, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        usage_info = excluded.usage_info,
+                        updated_at = unixepoch()
+                    """,
+                    (message.usage_info.model_dump_json(),),
+                )
         return message
+
+    def read_usage_info(self) -> TokenUsageInfo | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT usage_info
+                FROM workspace_context
+                WHERE id = 1
+                """
+            ).fetchone()
+        if row is None or not row["usage_info"]:
+            return None
+        return TokenUsageInfo.model_validate_json(row["usage_info"])
+
+    def save_usage_info(self, usage_info: TokenUsageInfo) -> TokenUsageInfo:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_context (id, usage_info)
+                VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    usage_info = excluded.usage_info,
+                    updated_at = unixepoch()
+                """,
+                (usage_info.model_dump_json(),),
+            )
+        return usage_info
 
     def read_compacted_context(self) -> str:
         with self.connect() as connection:
@@ -718,6 +808,7 @@ class StateStore:
                 ON CONFLICT(id) DO UPDATE SET
                     compacted_summary = excluded.compacted_summary,
                     active_compaction_id = NULL,
+                    usage_info = NULL,
                     updated_at = unixepoch()
                 """,
                 (summary,),
@@ -1020,6 +1111,7 @@ class StateStore:
                 author TEXT NOT NULL,
                 content TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'completed',
+                usage_info TEXT,
                 position INTEGER NOT NULL
             );
 
@@ -1027,6 +1119,7 @@ class StateStore:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 compacted_summary TEXT NOT NULL DEFAULT '',
                 active_compaction_id TEXT,
+                usage_info TEXT,
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
@@ -1089,6 +1182,8 @@ class StateStore:
             connection.execute(
                 "ALTER TABLE messages ADD COLUMN groups TEXT NOT NULL DEFAULT '[]'"
             )
+        if "usage_info" not in columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN usage_info TEXT")
         settings_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(settings)")
         }
@@ -1108,4 +1203,8 @@ class StateStore:
         if "active_compaction_id" not in workspace_context_columns:
             connection.execute(
                 "ALTER TABLE workspace_context ADD COLUMN active_compaction_id TEXT"
+            )
+        if "usage_info" not in workspace_context_columns:
+            connection.execute(
+                "ALTER TABLE workspace_context ADD COLUMN usage_info TEXT"
             )

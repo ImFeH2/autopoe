@@ -19,6 +19,7 @@ import type {
   McpServer,
   McpTool,
   Message,
+  ContextUsageInfo,
   Provider,
   ReasoningEffort,
   RuntimeSettings,
@@ -110,6 +111,7 @@ type ApiState = {
   };
   skills?: ApiSkill[];
   telegram_bot?: ApiTelegramBot;
+  usage_info?: ContextUsageInfo | null;
   writable_paths?: ApiWritablePath[];
 };
 
@@ -155,8 +157,15 @@ type WorkspaceStreamEvent =
   | {
       data: {
         message: ApiMessage;
+        usage_info?: ContextUsageInfo;
       };
       event: "context_optimized";
+    }
+  | {
+      data: {
+        usage_info: ContextUsageInfo;
+      };
+      event: "usage";
     }
   | {
       data: {
@@ -194,6 +203,7 @@ type WorkspaceStreamHandlers = {
     tool: Pick<ToolItem, "id" | "status"> & Partial<ToolItem>,
   ) => void;
   onToolStart: (tool: ToolItem) => void;
+  onUsage: (usageInfo: ContextUsageInfo) => void;
 };
 
 const providerFromApi = (provider: ApiProvider): Provider => ({
@@ -442,6 +452,18 @@ const streamErrorFromMessage = (
   type: "error",
 });
 
+const latestUsageInfoFromMessages = (
+  messages: Message[],
+): ContextUsageInfo | null => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const currentUsageInfo = messages[index]?.usage_info;
+    if (currentUsageInfo) {
+      return currentUsageInfo;
+    }
+  }
+  return null;
+};
+
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
@@ -452,6 +474,7 @@ function App() {
     useState<ReasoningEffort>("default");
   const [appVersion, setAppVersion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [usageInfo, setUsageInfo] = useState<ContextUsageInfo | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -511,6 +534,9 @@ function App() {
     const loadedProviders = state.providers.map(providerFromApi);
     setProviders(loadedProviders);
     setMessages(state.messages);
+    setUsageInfo(
+      state.usage_info ?? latestUsageInfoFromMessages(state.messages),
+    );
     const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
     setMcpServers(loadedMcpServers);
     if (loadedMcpServers[0]) {
@@ -1125,7 +1151,13 @@ function App() {
             handlers.onThinkingDelta(streamEvent.data.content);
           }
           if (streamEvent.event === "context_optimized") {
+            if (streamEvent.data.usage_info) {
+              handlers.onUsage(streamEvent.data.usage_info);
+            }
             handlers.onContextOptimized(streamEvent.data.message);
+          }
+          if (streamEvent.event === "usage") {
+            handlers.onUsage(streamEvent.data.usage_info);
           }
           if (streamEvent.event === "done") {
             handlers.onDone(streamEvent.data.message);
@@ -1182,6 +1214,7 @@ function App() {
       let assistantIsStreamingThinking = false;
       let assistantIsStreamingText = false;
       let assistantTools: ToolItem[] = existingAssistant?.tools ?? [];
+      let latestUsageInfo = usageInfo;
       const nextMessages = existingAssistant
         ? baseMessages.slice(0, -1)
         : baseMessages;
@@ -1211,6 +1244,7 @@ function App() {
           isStreamingThinking: assistantIsStreamingThinking,
           tools: assistantTools,
           isStreamingText: assistantIsStreamingText,
+          usage_info: latestUsageInfo,
         };
         setMessages([...nextMessages, assistantMessage]);
       };
@@ -1400,6 +1434,7 @@ function App() {
             tools: assistantTools,
             isStreamingThinking: false,
             isStreamingText: false,
+            usage_info: message.usage_info ?? latestUsageInfo,
           };
           setMessages([...nextMessages, assistantMessage]);
           activeRunIdRef.current = "";
@@ -1472,9 +1507,18 @@ function App() {
           ]);
           updateAssistantMessage();
         },
+        onUsage: (nextUsageInfo) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current += 1;
+          latestUsageInfo = nextUsageInfo;
+          setUsageInfo(nextUsageInfo);
+          updateAssistantMessage();
+        },
       };
     },
-    [],
+    [usageInfo],
   );
 
   const requestWorkspaceRun = useCallback(
@@ -1622,7 +1666,13 @@ function App() {
         throw new Error(await responseErrorFromApi(response));
       }
 
-      const result = (await response.json()) as { message: ApiMessage };
+      const result = (await response.json()) as {
+        message: ApiMessage;
+        usage_info?: ContextUsageInfo;
+      };
+      if (result.usage_info) {
+        setUsageInfo(result.usage_info);
+      }
       setMessages((currentMessages) => [...currentMessages, result.message]);
     } catch (error) {
       setResponseError(
@@ -1760,6 +1810,7 @@ function App() {
 
   const clearMessages = async () => {
     const previousMessages = messages;
+    const previousUsageInfo = usageInfo;
 
     responseAbortRef.current?.abort();
     responseAbortRef.current = null;
@@ -1767,6 +1818,7 @@ function App() {
     activeRunEventIndexRef.current = 0;
     responseRunRef.current += 1;
     setMessages([]);
+    setUsageInfo(null);
     setResponseError("");
     setActiveRunId("");
     setIsResponding(false);
@@ -1775,6 +1827,7 @@ function App() {
       await saveMessages([]);
     } catch {
       setMessages(previousMessages);
+      setUsageInfo(previousUsageInfo);
       setResponseError("Conversation could not be cleared.");
     }
   };
@@ -1792,6 +1845,7 @@ function App() {
           isRefiningContext={isRefiningContext}
           isResponding={isResponding}
           messages={messages}
+          usageInfo={usageInfo}
           commands={workspaceCommands}
           skills={skills}
           onClearMessages={() => {

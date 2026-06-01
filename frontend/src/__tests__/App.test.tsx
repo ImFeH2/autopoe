@@ -170,9 +170,41 @@ type TestWritablePath = {
   path: string;
 };
 
+type TestContextUsage = {
+  cached_input_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+  total_tokens: number;
+};
+
+type TestContextUsageInfo = {
+  last_token_usage: TestContextUsage;
+  model_context_window?: number | null;
+  total_token_usage: TestContextUsage;
+};
+
+const contextUsage = (totalTokens: number): TestContextUsage => ({
+  cached_input_tokens: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  reasoning_output_tokens: 0,
+  total_tokens: totalTokens,
+});
+
+const contextUsageInfo = (
+  totalTokens: number,
+  modelContextWindow = 120_000,
+): TestContextUsageInfo => ({
+  last_token_usage: contextUsage(totalTokens),
+  model_context_window: modelContextWindow,
+  total_token_usage: contextUsage(totalTokens),
+});
+
 const assistantOptimizedContextStreamResponse = (
   content: string,
   id = "message-assistant",
+  usageInfo?: TestContextUsageInfo,
 ) => {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -184,7 +216,9 @@ const assistantOptimizedContextStreamResponse = (
               author: "system",
               content: "Context optimized",
               id: "context-optimized",
+              usage_info: usageInfo,
             },
+            usage_info: usageInfo,
           })}\n\n`,
         ),
       );
@@ -199,6 +233,52 @@ const assistantOptimizedContextStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
+const assistantUsageStreamResponse = (
+  content: string,
+  usageInfo: TestContextUsageInfo,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: usage\ndata: ${JSON.stringify({ usage_info: usageInfo })}\n\n`,
         ),
       );
       controller.enqueue(
@@ -1330,6 +1410,82 @@ describe("App", () => {
     expect(screen.getByText("75%")).toBeInTheDocument();
   });
 
+  it("uses model-reported context usage from loaded state before local estimates", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "A".repeat(360_000),
+          id: "message-history-before-usage",
+        },
+      ],
+      usage_info: contextUsageInfo(12_000, 48_000),
+    });
+    render(<App />);
+
+    expect(await screen.findByText("12k / 48k")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.queryByText("90k / 120k")).toBeNull();
+  });
+
+  it("falls back to local context estimates when loaded state has no usage info", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "A".repeat(360_000),
+          id: "message-local-estimate-fallback",
+        },
+      ],
+    });
+    render(<App />);
+
+    expect(await screen.findByText("90k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+  });
+
+  it("adds the current draft to the model-reported context baseline", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      usage_info: contextUsageInfo(20_000, 100_000),
+    });
+    render(<App />);
+
+    expect(await screen.findByText("20k / 100k")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Flowent" }), {
+      target: { value: "A".repeat(4_000) },
+    });
+
+    expect(await screen.findByText("21k / 100k")).toBeInTheDocument();
+    expect(screen.getByText("21%")).toBeInTheDocument();
+  });
+
+  it("continues counting messages after the latest saved usage marker", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "assistant",
+          content: "Baseline reply",
+          id: "message-usage-baseline",
+          usage_info: contextUsageInfo(30_000, 100_000),
+        },
+        {
+          author: "user",
+          content: "A".repeat(4_000),
+          id: "message-after-usage-baseline",
+        },
+      ],
+    });
+    render(<App />);
+
+    expect(await screen.findByText("31k / 100k")).toBeInTheDocument();
+    expect(screen.getByText("31%")).toBeInTheDocument();
+  });
+
   it("uses a warning tone when context capacity is nearly full", async () => {
     const highCapacityContent = "A".repeat(360_000);
     mockInitialState({
@@ -2414,6 +2570,168 @@ describe("App", () => {
       }),
     ).toHaveAttribute("aria-valuenow", "0");
     expect(screen.getByText("Context compacted")).toBeInTheDocument();
+  });
+
+  it("updates context usage from a compact response", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      usage_info: contextUsageInfo(90_000, 120_000),
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            ...selectedProviderState(),
+            usage_info: contextUsageInfo(90_000, 120_000),
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        const usageInfo = contextUsageInfo(12_000, 120_000);
+        return new Response(
+          JSON.stringify({
+            message: {
+              author: "system",
+              content: "Context compacted",
+              id: "compact-message",
+              tools: [],
+              usage_info: usageInfo,
+            },
+            usage_info: usageInfo,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    expect(await screen.findByText("90k / 120k")).toBeInTheDocument();
+
+    const composer = screen.getByRole("textbox", { name: "Message Flowent" });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    await screen.findByText("Context compacted");
+    expect(await screen.findByText("12k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(screen.queryByText("90k / 120k")).toBeNull();
+  });
+
+  it("updates context usage from automatic context optimization", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      usage_info: contextUsageInfo(90_000, 120_000),
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            ...selectedProviderState(),
+            usage_info: contextUsageInfo(90_000, 120_000),
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-optimized-usage");
+      }
+      if (
+        input === "/api/workspace/runs/run-optimized-usage/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return assistantOptimizedContextStreamResponse(
+          "Continuing.",
+          "message-optimized-usage",
+          contextUsageInfo(10_000, 120_000),
+        );
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    expect(await screen.findByText("90k / 120k")).toBeInTheDocument();
+
+    const composer = screen.getByRole("textbox", { name: "Message Flowent" });
+    await user.type(composer, "Continue from there");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await screen.findByText("Context optimized");
+    expect(await screen.findByText("10k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("8%")).toBeInTheDocument();
+    expect(screen.queryByText("90k / 120k")).toBeNull();
+  });
+
+  it("updates context usage from streaming usage events", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-usage");
+      }
+      if (
+        input === "/api/workspace/runs/run-usage/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return assistantUsageStreamResponse(
+          "Done with measured usage.",
+          contextUsageInfo(24_000, 60_000),
+          "message-usage-event",
+        );
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    expect(await screen.findByText("0 / 120k")).toBeInTheDocument();
+
+    const composer = screen.getByRole("textbox", { name: "Message Flowent" });
+    await user.type(composer, "Measure this response");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await screen.findByText("Done with measured usage.");
+    expect(await screen.findByText("24k / 60k")).toBeInTheDocument();
+    expect(screen.getByText("40%")).toBeInTheDocument();
+    expect(screen.queryByText("0 / 120k")).toBeNull();
   });
 
   it("enables the composer after content is drafted", async () => {
@@ -5959,6 +6277,33 @@ describe("App", () => {
       screen.queryByText("Draft a launch checklist"),
     ).not.toBeInTheDocument();
     expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
+  });
+
+  it("clears loaded context usage when the Workspace is cleared", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+      usage_info: contextUsageInfo(24_000, 120_000),
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("24k / 120k")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Clear/ }));
+
+    expect(await screen.findByText("0 / 120k")).toBeInTheDocument();
+    expect(screen.queryByText("24k / 120k")).toBeNull();
   });
 
   it("persists an empty Workspace message list when Clear is clicked", async () => {

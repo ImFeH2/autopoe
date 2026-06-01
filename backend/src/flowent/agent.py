@@ -15,6 +15,7 @@ from flowent.llm import (
     chunk_delta_content,
     chunk_delta_reasoning,
     chunk_delta_tool_calls,
+    chunk_token_usage,
     stream_chat_chunks,
 )
 from flowent.logging import TRACE_LEVEL
@@ -168,6 +169,12 @@ async def run_agent_stream(
                 tools=[*tool_specs(), *list(extra_tool_specs or [])],
             ):
                 chunk_count += 1
+                usage = chunk_token_usage(chunk)
+                if usage is not None:
+                    yield AgentStreamEvent(
+                        event="usage",
+                        data={"usage": usage.model_dump()},
+                    )
                 reasoning = chunk_delta_reasoning(chunk)
                 if reasoning:
                     reasoning_delta_count += 1
@@ -366,7 +373,9 @@ async def run_agent_stream(
                     len(compaction.conversation),
                 )
                 conversation = [dict(message) for message in compaction.conversation]
-                yield AgentStreamEvent(
-                    event="context_optimized",
-                    data={"message": dict(compaction.message)},
-                )
+                compaction_message = dict(compaction.message)
+                usage_info = compaction_message.pop("usage_info", None)
+                event_data: dict[str, object] = {"message": compaction_message}
+                if isinstance(usage_info, dict):
+                    event_data["usage_info"] = usage_info
+                yield AgentStreamEvent(event="context_optimized", data=event_data)

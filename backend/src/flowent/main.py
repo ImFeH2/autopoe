@@ -70,6 +70,14 @@ from flowent.storage import (
     StoredWritablePath,
 )
 from flowent.tools import ToolContext
+from flowent.usage import (
+    TokenUsage,
+    TokenUsageInfo,
+    append_token_usage,
+    current_model_context_window,
+    estimated_token_usage_for_messages,
+    recompute_context_usage,
+)
 
 logger = logging.getLogger("flowent.main")
 
@@ -117,6 +125,7 @@ class WorkspaceCompactResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: StoredMessage
+    usage_info: TokenUsageInfo
 
 
 class AboutResponse(BaseModel):
@@ -522,6 +531,20 @@ def should_auto_compact(messages: list[ChatMessage]) -> bool:
     )
 
 
+def model_visible_messages_for_usage(
+    messages: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        dict(message)
+        for message in messages
+        if message.get("role") in {"system", "user", "assistant", "tool"}
+    ]
+
+
+def usage_event_data(usage_info: TokenUsageInfo) -> dict[str, object]:
+    return {"usage_info": usage_info.model_dump()}
+
+
 def workspace_chat_messages(
     messages: list[StoredMessage],
     compacted_context: str = "",
@@ -652,12 +675,7 @@ def create_app(
         marker_content: str,
         source_message_id: str | None = None,
         trigger: Literal["manual", "auto"],
-    ) -> tuple[StoredMessage, list[dict[str, object]]]:
-        marker = StoredMessage(
-            author="system",
-            content=marker_content,
-            id=str(uuid4()),
-        )
+    ) -> tuple[StoredMessage, list[dict[str, object]], TokenUsageInfo]:
         compact_result = await compact_provider.compact(
             connection,
             CompactInput(
@@ -667,6 +685,25 @@ def create_app(
                 trigger=trigger,
             ),
             completion=chat_completion,
+        )
+        usage_info = store.read_usage_info()
+        if compact_result.summary_usage is not None:
+            usage_info = append_token_usage(
+                usage_info,
+                compact_result.summary_usage,
+                model_context_window=current_model_context_window(),
+            )
+        usage_info = recompute_context_usage(
+            usage_info,
+            compact_result.token_after,
+            model_context_window=current_model_context_window(),
+        )
+        store.save_usage_info(usage_info)
+        marker = StoredMessage(
+            author="system",
+            content=marker_content,
+            id=str(uuid4()),
+            usage_info=usage_info,
         )
         store.save_compaction_checkpoint(
             StoredCompactionCheckpoint(
@@ -689,9 +726,11 @@ def create_app(
             compact_result.token_after,
         )
         logger.log(TRACE_LEVEL, "Workspace compact summary=%r", compact_result.summary)
-        return marker, [
-            message.model_dump() for message in compact_result.replacement_history
-        ]
+        return (
+            marker,
+            [message.model_dump() for message in compact_result.replacement_history],
+            usage_info,
+        )
 
     async def auto_compact_workspace_messages(
         *,
@@ -699,7 +738,7 @@ def create_app(
         messages: list[StoredMessage],
         model_history: list[ChatMessage],
         source_message_id: str | None = None,
-    ) -> tuple[StoredMessage, list[dict[str, object]]] | None:
+    ) -> tuple[StoredMessage, list[dict[str, object]], TokenUsageInfo] | None:
         if not should_auto_compact(model_history):
             return None
         logger.info("Workspace auto compact requested")
@@ -741,12 +780,13 @@ def create_app(
             source_message_id=None,
         )
         if auto_compaction is not None:
-            marker, _ = auto_compaction
+            marker, _, _ = auto_compaction
             next_messages = [*state.messages, marker, user_message]
             store.save_messages(next_messages)
         request_messages = request_messages_for_content(state, next_messages, content)
         assistant_id = str(uuid4())
         assistant_output = AssistantOutputBuilder(assistant_id)
+        turn_usage_info: TokenUsageInfo | None = None
 
         async def review_tool_approval(request: ApprovalReviewRequest):
             return await review_approval_request(
@@ -798,6 +838,16 @@ def create_app(
                 assistant_output.append_text(str(event.data.get("content") or ""))
             if event.event == "thinking_delta":
                 assistant_output.append_thinking(str(event.data.get("content") or ""))
+            if event.event == "usage":
+                usage_data = event.data.get("usage")
+                if isinstance(usage_data, dict):
+                    usage_info = append_token_usage(
+                        store.read_usage_info(),
+                        TokenUsage.model_validate(usage_data),
+                        model_context_window=current_model_context_window(),
+                    )
+                    store.save_usage_info(usage_info)
+                    turn_usage_info = usage_info
             if event.event == "tool_start":
                 tool = event.data.get("tool")
                 if isinstance(tool, dict) and isinstance(tool.get("id"), str):
@@ -813,6 +863,18 @@ def create_app(
                     assistant_output.set_assistant_id(assistant_id)
                     assistant_output.apply_done_message(message)
 
+        final_usage_info = turn_usage_info
+        if final_usage_info is None:
+            final_usage_info = recompute_context_usage(
+                store.read_usage_info(),
+                estimated_token_usage_for_messages(
+                    model_visible_messages_for_usage(request_messages),
+                    output_content=assistant_output.content,
+                ).total_tokens,
+                model_context_window=current_model_context_window(),
+            )
+            store.save_usage_info(final_usage_info)
+
         assistant_message = StoredMessage(
             author="assistant",
             content=assistant_output.content,
@@ -821,6 +883,7 @@ def create_app(
             status="completed",
             thinking=assistant_output.thinking,
             tools=list(assistant_output.tools.values()),
+            usage_info=final_usage_info,
         )
         store.save_messages([*next_messages, assistant_message])
         return assistant_message
@@ -1057,6 +1120,7 @@ def create_app(
                     status=status,
                     thinking=assistant_output.thinking,
                     tools=list(assistant_output.tools.values()),
+                    usage_info=store.read_usage_info(),
                 )
                 next_messages = append_or_replace_message(
                     next_messages, assistant_message
@@ -1065,6 +1129,7 @@ def create_app(
 
             try:
                 current_tool_id: str | None = None
+                turn_usage_info: TokenUsageInfo | None = None
                 current_request_messages = request_messages_for_content(
                     state,
                     next_messages,
@@ -1085,13 +1150,16 @@ def create_app(
                     source_message_id=None,
                 )
                 if auto_compaction is not None:
-                    marker, _ = auto_compaction
+                    marker, _, usage_info = auto_compaction
                     next_messages = [*state.messages, marker, user_message]
                     store.save_messages(next_messages)
                     await append_run_event(
                         run,
                         "context_optimized",
-                        {"message": marker.model_dump()},
+                        {
+                            "message": marker.model_dump(),
+                            **usage_event_data(usage_info),
+                        },
                     )
                     current_request_messages = request_messages_for_content(
                         state,
@@ -1138,6 +1206,7 @@ def create_app(
                         status="running",
                         thinking=assistant_output.thinking,
                         tools=list(assistant_output.tools.values()),
+                        usage_info=store.read_usage_info(),
                     )
                     model_history: list[ChatMessage] = []
                     for message in conversation:
@@ -1170,7 +1239,10 @@ def create_app(
                     )
                     if auto_result is None:
                         return None
-                    marker, replacement_history = auto_result
+                    marker, replacement_history, usage_info = auto_result
+                    assistant_snapshot = assistant_snapshot.model_copy(
+                        update={"usage_info": usage_info}
+                    )
                     next_messages = append_or_replace_message(
                         [*next_messages, marker], assistant_snapshot
                     )
@@ -1181,7 +1253,10 @@ def create_app(
                     ]
                     return AgentContextUpdate(
                         conversation=compacted_conversation,
-                        message=marker.model_dump(),
+                        message={
+                            **marker.model_dump(),
+                            "usage_info": usage_info.model_dump(),
+                        },
                     )
 
                 async for event in run_agent_stream(
@@ -1237,6 +1312,21 @@ def create_app(
                             str(event.data.get("content") or "")
                         )
                         persist_assistant()
+                    if event.event == "usage":
+                        usage_data = event.data.get("usage")
+                        if isinstance(usage_data, dict):
+                            usage_info = append_token_usage(
+                                store.read_usage_info(),
+                                TokenUsage.model_validate(usage_data),
+                                model_context_window=current_model_context_window(),
+                            )
+                            store.save_usage_info(usage_info)
+                            turn_usage_info = usage_info
+                            await append_run_event(
+                                run,
+                                "usage",
+                                usage_event_data(usage_info),
+                            )
                     logger.log(
                         TRACE_LEVEL,
                         "Workspace stream event=%s data=%r",
@@ -1247,8 +1337,27 @@ def create_app(
                         message = event.data.get("message")
                         if isinstance(message, dict):
                             assistant_output.apply_done_message(message)
+                            response_usage_info = store.read_usage_info()
+                            final_usage_info = turn_usage_info
+                            if final_usage_info is None:
+                                final_usage_info = recompute_context_usage(
+                                    response_usage_info,
+                                    estimated_token_usage_for_messages(
+                                        model_visible_messages_for_usage(
+                                            current_request_messages
+                                        ),
+                                        output_content=assistant_output.content,
+                                    ).total_tokens,
+                                    model_context_window=current_model_context_window(),
+                                )
+                                store.save_usage_info(final_usage_info)
+                            if final_usage_info == response_usage_info:
+                                assistant_message = assistant_message.model_copy(
+                                    update={"usage_info": final_usage_info}
+                                )
                             persist_assistant("completed")
-                    await append_run_event(run, event.event, event.data)
+                    if event.event != "usage":
+                        await append_run_event(run, event.event, event.data)
             except asyncio.CancelledError:
                 logger.info("Workspace run stopped")
                 if not run.discard_on_cancel:
@@ -1364,7 +1473,7 @@ def create_app(
         ]
 
         try:
-            marker, _ = await save_context_checkpoint(
+            marker, _, usage_info = await save_context_checkpoint(
                 connection=connection,
                 marker_content=COMPACTED_CONTEXT_MARKER,
                 messages=state.messages,
@@ -1383,7 +1492,7 @@ def create_app(
 
         store.save_messages([*state.messages, marker])
         logger.info("Workspace compact completed")
-        return WorkspaceCompactResponse(message=marker)
+        return WorkspaceCompactResponse(message=marker, usage_info=usage_info)
 
     @app.post("/api/workspace/respond")
     async def respond_to_workspace(

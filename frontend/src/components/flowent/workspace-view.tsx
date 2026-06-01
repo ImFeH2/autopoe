@@ -29,6 +29,7 @@ import { stableScrollbarClassName } from "@/components/flowent/styles";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
+  ContextUsageInfo,
   Message,
   Skill,
   ToolItem,
@@ -44,6 +45,7 @@ export function WorkspaceView({
   isRefiningContext,
   isResponding,
   messages,
+  usageInfo,
   onCommand,
   onCommandError,
   onClearMessages,
@@ -58,6 +60,7 @@ export function WorkspaceView({
   isRefiningContext: boolean;
   isResponding: boolean;
   messages: Message[];
+  usageInfo: ContextUsageInfo | null;
   onCommand: (commandId: WorkspaceCommandId) => boolean;
   onCommandError: (message: string) => void;
   onClearMessages: () => void;
@@ -84,6 +87,7 @@ export function WorkspaceView({
           isRefiningContext={isRefiningContext}
           isSending={isResponding}
           messages={messages}
+          usageInfo={usageInfo}
           onCommand={onCommand}
           onCommandError={onCommandError}
           onDraftChange={onDraftChange}
@@ -963,6 +967,7 @@ function ChatComposer({
   isRefiningContext,
   isSending,
   messages,
+  usageInfo,
   onCommand,
   onCommandError,
   onDraftChange,
@@ -977,6 +982,7 @@ function ChatComposer({
   isRefiningContext: boolean;
   isSending: boolean;
   messages: Message[];
+  usageInfo: ContextUsageInfo | null;
   onCommand: (commandId: WorkspaceCommandId) => boolean;
   onCommandError: (message: string) => void;
   onDraftChange: (value: string) => void;
@@ -1048,8 +1054,8 @@ function ChatComposer({
   const isSendUnavailable = !showStopButton && !canSubmit;
   const isSendDisabled = isSendUnavailable && !handlesSoftKeyboardSubmit;
   const capacity = useMemo(
-    () => contextCapacityFromMessages(messages, draft),
-    [draft, messages],
+    () => contextCapacityFromMessages(messages, draft, usageInfo),
+    [draft, messages, usageInfo],
   );
 
   useEffect(() => {
@@ -1570,22 +1576,47 @@ function ContextCapacityTray({
 function contextCapacityFromMessages(
   messages: Message[],
   draft: string,
+  usageInfo: ContextUsageInfo | null,
 ): ContextCapacity {
-  const used = [...messages.map((message) => message.content), draft].reduce(
+  const latestUsageIndex = latestUsageInfoMessageIndex(messages);
+  const latestUsageInfo =
+    usageInfo ??
+    (latestUsageIndex >= 0 ? messages[latestUsageIndex].usage_info : null);
+  const baseUsed = latestUsageInfo?.last_token_usage.total_tokens;
+  const countedMessages =
+    latestUsageInfo && latestUsageIndex >= 0
+      ? messages.slice(latestUsageIndex + 1)
+      : latestUsageInfo
+        ? []
+        : messages;
+  const used = [
+    ...countedMessages.map((message) => message.content),
+    draft,
+  ].reduce(
     (total, content) => total + approximateContextUnits(content),
-    0,
+    Math.max(0, baseUsed ?? 0),
   );
-  const percent = Math.min(
-    100,
-    Math.floor((used / CONTEXT_CAPACITY_LIMIT) * 100),
+  const total = Math.max(
+    1,
+    latestUsageInfo?.model_context_window ?? CONTEXT_CAPACITY_LIMIT,
   );
+  const percent = Math.min(100, Math.floor((used / total) * 100));
 
   return {
     percent,
     tone: percent > 90 ? "critical" : percent >= 75 ? "warning" : "neutral",
-    total: CONTEXT_CAPACITY_LIMIT,
+    total,
     used,
   };
+}
+
+function latestUsageInfoMessageIndex(messages: Message[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].usage_info) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function formatContextUnits(units: number) {

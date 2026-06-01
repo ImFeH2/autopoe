@@ -10,7 +10,9 @@ from flowent.llm import (
     ReasoningEffort,
     build_litellm_request,
     chunk_delta_reasoning,
+    chunk_token_usage,
     complete_chat,
+    complete_chat_with_usage,
     list_provider_models,
     normalize_system_messages,
     stream_chat,
@@ -350,8 +352,98 @@ async def test_stream_chat_uses_litellm_streaming() -> None:
     ]
 
     assert captured_request["stream"] is True
+    assert captured_request["stream_options"] == {"include_usage": True}
     assert captured_request["model"] == "openai/gpt-5.1"
     assert chunks == ["Here is ", "the checklist."]
+
+
+@pytest.mark.anyio
+async def test_complete_chat_with_usage_reads_completion_usage() -> None:
+    async def fake_completion(**request: object) -> dict[str, object]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Here is the checklist.",
+                        "role": "assistant",
+                    },
+                }
+            ],
+            "usage": {
+                "completion_tokens": 9,
+                "completion_tokens_details": {"reasoning_tokens": 4},
+                "prompt_tokens": 30,
+                "prompt_tokens_details": {"cached_tokens": 12},
+                "total_tokens": 39,
+            },
+        }
+
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="connection-responses",
+    )
+
+    result = await complete_chat_with_usage(
+        connection,
+        [ChatMessage(role="user", content="Create a checklist.")],
+        completion=fake_completion,
+    )
+
+    assert result.message == ChatMessage(
+        role="assistant", content="Here is the checklist."
+    )
+    assert result.usage is not None
+    assert result.usage.model_dump() == {
+        "cached_input_tokens": 12,
+        "input_tokens": 30,
+        "output_tokens": 9,
+        "reasoning_output_tokens": 4,
+        "total_tokens": 39,
+    }
+
+
+def test_chunk_token_usage_reads_mapping_and_object_usage() -> None:
+    class Usage:
+        input_tokens = 21
+        cached_input_tokens = 5
+        output_tokens = 8
+        reasoning_output_tokens = 3
+        total_tokens = 29
+
+    class Chunk:
+        usage = Usage()
+
+    mapping_usage = chunk_token_usage(
+        {
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 4},
+                "output_tokens": 6,
+                "output_tokens_details": {"reasoning_tokens": 2},
+                "total_tokens": 16,
+            }
+        }
+    )
+    object_usage = chunk_token_usage(Chunk())
+
+    assert mapping_usage is not None
+    assert mapping_usage.model_dump() == {
+        "cached_input_tokens": 4,
+        "input_tokens": 10,
+        "output_tokens": 6,
+        "reasoning_output_tokens": 2,
+        "total_tokens": 16,
+    }
+    assert object_usage is not None
+    assert object_usage.model_dump() == {
+        "cached_input_tokens": 5,
+        "input_tokens": 21,
+        "output_tokens": 8,
+        "reasoning_output_tokens": 3,
+        "total_tokens": 29,
+    }
 
 
 @pytest.mark.anyio

@@ -12,6 +12,7 @@ from flowent.logging import (
     configure_litellm_logging,
     write_llm_request_diagnostic,
 )
+from flowent.usage import TokenUsage, token_usage_from_response
 
 
 class ProviderFormat(StrEnum):
@@ -55,6 +56,13 @@ class ToolCallDelta(BaseModel):
     index: int = 0
     name: str = ""
     type: str = "function"
+
+
+class ChatCompletionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: ChatMessage
+    usage: TokenUsage | None = None
 
 
 class CompletionCallable(Protocol):
@@ -276,6 +284,7 @@ def build_litellm_request(
         request["tools"] = list(tools)
     if stream:
         request["stream"] = True
+        request["stream_options"] = {"include_usage": True}
     normalized_base_url = normalize_provider_base_url(
         connection.provider, connection.base_url
     )
@@ -322,6 +331,23 @@ async def complete_chat(
     completion: CompletionCallable | None = None,
     tools: Sequence[Mapping[str, Any]] | None = None,
 ) -> ChatMessage:
+    return (
+        await complete_chat_with_usage(
+            connection,
+            messages,
+            completion=completion,
+            tools=tools,
+        )
+    ).message
+
+
+async def complete_chat_with_usage(
+    connection: ProviderConnection,
+    messages: Sequence[ChatMessage | Mapping[str, Any]],
+    *,
+    completion: CompletionCallable | None = None,
+    tools: Sequence[Mapping[str, Any]] | None = None,
+) -> ChatCompletionResult:
     if completion is None:
         from litellm import acompletion
 
@@ -338,7 +364,12 @@ async def complete_chat(
     response = await completion(**request)
     logger.log(TRACE_LEVEL, "LLM completion response=%r", response)
     choice = response["choices"][0]["message"]
-    return ChatMessage(role=choice.get("role", "assistant"), content=choice["content"])
+    return ChatCompletionResult(
+        message=ChatMessage(
+            role=choice.get("role", "assistant"), content=choice["content"]
+        ),
+        usage=token_usage_from_response(response),
+    )
 
 
 def value_at(value: Any, key: str, default: Any = None) -> Any:
@@ -422,6 +453,10 @@ def chunk_delta_tool_calls(chunk: Any) -> list[ToolCallDelta]:
             )
         )
     return tool_call_deltas
+
+
+def chunk_token_usage(chunk: Any) -> TokenUsage | None:
+    return token_usage_from_response(chunk)
 
 
 async def stream_chat_chunks(

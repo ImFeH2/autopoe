@@ -8,8 +8,9 @@ from flowent.llm import (
     ChatMessage,
     CompletionCallable,
     ProviderConnection,
-    complete_chat,
+    complete_chat_with_usage,
 )
+from flowent.usage import TokenUsage
 
 if TYPE_CHECKING:
     from flowent.storage import StoredMessage
@@ -44,6 +45,7 @@ class CompactResult:
     method: CompactMethod
     replacement_history: list[ChatMessage]
     summary: str
+    summary_usage: TokenUsage | None
     token_after: int
     token_before: int
 
@@ -66,12 +68,12 @@ class LocalSummaryCompactProvider:
         *,
         completion: CompletionCallable | None = None,
     ) -> CompactResult:
-        summary_message = await complete_chat(
+        summary_result = await complete_chat_with_usage(
             connection,
             compact_prompt_messages(compact_input.model_history),
             completion=completion,
         )
-        summary = summary_message.content.strip()
+        summary = summary_result.message.content.strip()
         replacement_history = build_replacement_history(
             summary,
             compact_input.messages,
@@ -81,6 +83,7 @@ class LocalSummaryCompactProvider:
             method="local_summary",
             replacement_history=replacement_history,
             summary=summary,
+            summary_usage=summary_result.usage,
             token_after=approximate_tokens_for_messages(replacement_history),
             token_before=approximate_tokens_for_messages(compact_input.model_history),
         )

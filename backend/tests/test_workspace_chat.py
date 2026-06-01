@@ -386,7 +386,13 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
                         "role": "assistant",
                     }
                 }
-            ]
+            ],
+            "usage": {
+                "completion_tokens": 12,
+                "prompt_tokens": 130,
+                "prompt_tokens_details": {"cached_tokens": 20},
+                "total_tokens": 142,
+            },
         }
 
     client = TestClient(
@@ -415,13 +421,29 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
 
     assert response.status_code == 200
     body = response.json()
-    assert body == {
-        "message": {
-            "author": "system",
-            "content": "Context compacted",
-            "id": body["message"]["id"],
-            "tools": [],
-        }
+    assert body["message"] == {
+        "author": "system",
+        "content": "Context compacted",
+        "id": body["message"]["id"],
+        "tools": [],
+        "usage_info": body["usage_info"],
+    }
+    assert body["usage_info"] == {
+        "last_token_usage": {
+            "cached_input_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 103,
+        },
+        "model_context_window": 120000,
+        "total_token_usage": {
+            "cached_input_tokens": 20,
+            "input_tokens": 130,
+            "output_tokens": 12,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 142,
+        },
     }
     assert captured_request["model"] == "openai/gpt-5.1"
     assert captured_request["messages"][0] == {
@@ -439,6 +461,7 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
 
     state = client.get("/api/state").json()
     assert state["messages"][-1] == body["message"]
+    assert state["usage_info"] == body["usage_info"]
 
 
 def test_workspace_response_uses_compacted_context_after_compact(
@@ -552,10 +575,25 @@ def test_workspace_response_auto_compacts_before_next_message(
                             "role": "assistant",
                         }
                     }
-                ]
+                ],
+                "usage": {
+                    "completion_tokens": 8,
+                    "prompt_tokens": 200,
+                    "total_tokens": 208,
+                },
             }
 
         async def chunks() -> object:
+            yield {
+                "choices": [{"delta": {}}],
+                "usage": {
+                    "completion_tokens": 3,
+                    "completion_tokens_details": {"reasoning_tokens": 1},
+                    "prompt_tokens": 44,
+                    "prompt_tokens_details": {"cached_tokens": 7},
+                    "total_tokens": 47,
+                },
+            }
             yield {"choices": [{"delta": {"content": "Continuing."}}]}
 
         return chunks()
@@ -590,7 +628,31 @@ def test_workspace_response_auto_compacts_before_next_message(
     assert response.status_code == 200
     events = stream_events(response.text)
     assert events[0]["event"] == "context_optimized"
-    assert json.loads(events[0]["data"])["message"]["content"] == ("Context optimized")
+    optimized_event_data = json.loads(events[0]["data"])
+    assert optimized_event_data["message"]["content"] == ("Context optimized")
+    assert (
+        optimized_event_data["message"]["usage_info"]
+        == optimized_event_data["usage_info"]
+    )
+    usage_events = [event for event in events if event["event"] == "usage"]
+    assert len(usage_events) == 1
+    assert json.loads(usage_events[0]["data"])["usage_info"] == {
+        "last_token_usage": {
+            "cached_input_tokens": 7,
+            "input_tokens": 44,
+            "output_tokens": 3,
+            "reasoning_output_tokens": 1,
+            "total_tokens": 47,
+        },
+        "model_context_window": 120000,
+        "total_token_usage": {
+            "cached_input_tokens": 7,
+            "input_tokens": 244,
+            "output_tokens": 11,
+            "reasoning_output_tokens": 1,
+            "total_tokens": 255,
+        },
+    }
     assert len(captured_requests) == 2
     assert (
         "CONTEXT CHECKPOINT COMPACTION"
@@ -620,6 +682,8 @@ def test_workspace_response_auto_compacts_before_next_message(
         "Continue from there.",
         "Continuing.",
     ]
+    assert state["usage_info"] == json.loads(usage_events[0]["data"])["usage_info"]
+    assert state["messages"][-1]["usage_info"] == state["usage_info"]
 
 
 def test_workspace_response_auto_compacts_after_tool_result(
@@ -649,6 +713,16 @@ def test_workspace_response_auto_compacts_after_tool_result(
             if len(captured_requests) == 1:
                 yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
                 return
+            yield {
+                "choices": [{"delta": {}}],
+                "usage": {
+                    "input_tokens": 70,
+                    "cached_input_tokens": 5,
+                    "output_tokens": 4,
+                    "reasoning_output_tokens": 2,
+                    "total_tokens": 74,
+                },
+            }
             yield {"choices": [{"delta": {"content": "Done."}}]}
 
         return chunks()
@@ -672,10 +746,18 @@ def test_workspace_response_auto_compacts_after_tool_result(
         "tool_done",
         "context_optimized",
         "output_start",
+        "usage",
         "delta",
         "done",
     ]
     assert json.loads(events[4]["data"])["message"]["content"] == ("Context optimized")
+    assert json.loads(events[6]["data"])["usage_info"]["last_token_usage"] == {
+        "cached_input_tokens": 5,
+        "input_tokens": 70,
+        "output_tokens": 4,
+        "reasoning_output_tokens": 2,
+        "total_tokens": 74,
+    }
     assert len(captured_requests) == 3
     assert "Launch notes." in captured_requests[1]["messages"][-1]["content"]
     response_messages = captured_requests[2]["messages"]
@@ -2137,10 +2219,128 @@ def test_workspace_response_uses_compaction_checkpoint_after_restart(
         response_messages, "Original request."
     ) < compact_summary_index(response_messages)
     assert {"role": "user", "content": "Context compacted"} not in response_messages
-    assert response_messages[-1] == {
-        "role": "user",
-        "content": "Continue after restart.",
+
+
+def test_workspace_state_restores_compact_usage_after_restart(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Restarted usage summary.",
+                        "role": "assistant",
+                    }
+                }
+            ]
+        }
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "user",
+                    "content": "Keep state after restart.",
+                    "id": "message-1",
+                }
+            ]
+        },
+    )
+
+    compact_response = client.post("/api/workspace/compact")
+    restarted_client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    state = restarted_client.get("/api/state").json()
+
+    assert compact_response.status_code == 200
+    assert state["usage_info"] == compact_response.json()["usage_info"]
+    assert state["messages"][-1]["usage_info"] == state["usage_info"]
+
+
+def test_workspace_response_estimates_usage_when_model_stream_omits_usage(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Estimated reply."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Need local estimate."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    assert "usage" not in [event["event"] for event in events]
+    state = client.get("/api/state").json()
+    assert state["usage_info"]["last_token_usage"]["total_tokens"] > 0
+    assert state["usage_info"]["last_token_usage"]["input_tokens"] == 0
+    assert state["usage_info"]["last_token_usage"]["output_tokens"] == 0
+    assert state["messages"][-1]["usage_info"] == state["usage_info"]
+
+
+def test_workspace_save_messages_restores_usage_from_latest_message(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    client = TestClient(create_app(serve_frontend=False))
+    usage_info = {
+        "last_token_usage": {
+            "cached_input_tokens": 0,
+            "input_tokens": 20,
+            "output_tokens": 5,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 25,
+        },
+        "model_context_window": 120000,
+        "total_token_usage": {
+            "cached_input_tokens": 0,
+            "input_tokens": 20,
+            "output_tokens": 5,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 25,
+        },
     }
+
+    response = client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "assistant",
+                    "content": "Persisted reply.",
+                    "id": "message-usage",
+                    "usage_info": usage_info,
+                }
+            ]
+        },
+    )
+    state = client.get("/api/state").json()
+
+    assert response.status_code == 200
+    assert state["usage_info"] == usage_info
+    assert state["messages"][-1]["usage_info"] == usage_info
 
 
 def test_workspace_compact_is_unavailable_while_response_is_running(

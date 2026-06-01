@@ -146,6 +146,20 @@ export type AssistantOutputGroup = {
   items: AssistantOutputItem[];
 };
 
+export type ContextUsage = {
+  cached_input_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+  total_tokens: number;
+};
+
+export type ContextUsageInfo = {
+  last_token_usage: ContextUsage;
+  model_context_window?: number | null;
+  total_token_usage: ContextUsage;
+};
+
 export type Message = {
   author: "assistant" | "system" | "user";
   content: string;
@@ -156,6 +170,7 @@ export type Message = {
   items?: AssistantOutputItem[];
   thinking?: string;
   tools?: ToolItem[];
+  usage_info?: ContextUsageInfo | null;
 };
 
 export type WorkspaceCommandId = "clear" | "compact";
