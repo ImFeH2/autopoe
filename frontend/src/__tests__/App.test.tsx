@@ -1282,8 +1282,27 @@ describe("App", () => {
     });
 
     expect(within(composer).getByText("Context")).toBeInTheDocument();
+    expect(within(composer).getByText("0 / 120k")).toBeInTheDocument();
     expect(within(composer).getByText("0%")).toBeInTheDocument();
     expect(capacityStatus).toHaveAttribute("aria-valuenow", "0");
+  });
+
+  it("shows formatted context usage beside the capacity bar", async () => {
+    const highCapacityContent = "A".repeat(360_000);
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: highCapacityContent,
+          id: "message-high-capacity",
+        },
+      ],
+    });
+    render(<App />);
+
+    expect(await screen.findByText("90k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
   });
 
   it("uses a warning tone when context capacity is nearly full", async () => {
@@ -1311,6 +1330,7 @@ describe("App", () => {
       throw new Error("Capacity indicator was not rendered.");
     }
     expect(capacityStatus.firstElementChild).toHaveClass("bg-amber-500");
+    expect(screen.getByText("90k / 120k")).toBeInTheDocument();
     expect(screen.getByText("75%")).toHaveClass("text-amber-400");
   });
 
@@ -1326,7 +1346,18 @@ describe("App", () => {
     );
 
     expect(capacityLabel).toHaveClass("hidden", "sm:inline");
+    expect(within(composer).getByText("0 / 120k")).toBeInTheDocument();
     expect(capacityTrack).toHaveClass("w-16", "sm:w-24");
+  });
+
+  it("does not expose technical wording in the context capacity tray", () => {
+    render(<App />);
+
+    const composer = screen.getByRole("form", {
+      name: "Workspace composer",
+    });
+
+    expect(within(composer).queryByText(/token/i)).not.toBeInTheDocument();
   });
 
   it("shows a refining state in the composer tray while Compact is running", async () => {
@@ -1384,6 +1415,7 @@ describe("App", () => {
       "animate-pulse",
       "text-zinc-300",
     );
+    expect(within(composerForm).queryByText("0 / 120k")).toBeNull();
     expect(
       within(composerForm).getByRole("progressbar", {
         name: "Context capacity status",
@@ -1497,6 +1529,7 @@ describe("App", () => {
     const composerForm = screen.getByRole("form", {
       name: "Workspace composer",
     });
+    expect(within(composerForm).getByText("5 / 120k")).toBeInTheDocument();
     expect(within(composerForm).getByText("0%")).toBeInTheDocument();
     expect(
       within(composerForm).getByRole("progressbar", {

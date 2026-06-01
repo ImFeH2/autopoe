@@ -1268,6 +1268,8 @@ const CONTEXT_CAPACITY_LIMIT = 120_000;
 type ContextCapacity = {
   percent: number;
   tone: "critical" | "neutral" | "warning";
+  total: number;
+  used: number;
 };
 
 function ContextCapacityTray({
@@ -1289,6 +1291,7 @@ function ContextCapacityTray({
       : capacity.tone === "warning"
         ? "text-amber-400"
         : "text-zinc-300";
+  const capacityAmount = `${formatContextUnits(capacity.used)} / ${formatContextUnits(capacity.total)}`;
 
   return (
     <div
@@ -1306,11 +1309,13 @@ function ContextCapacityTray({
       <div className="flex min-w-0 items-center gap-2">
         <span
           className={cn(
-            "text-[10px] font-semibold",
-            isRefining ? "animate-pulse text-zinc-300" : textClassName,
+            "text-[10px] font-semibold whitespace-nowrap",
+            isRefining
+              ? "animate-pulse text-zinc-300"
+              : "text-zinc-500 uppercase",
           )}
         >
-          {isRefining ? "Refining..." : `${capacity.percent}%`}
+          {isRefining ? "Refining..." : capacityAmount}
         </span>
         <div
           aria-label="Context capacity status"
@@ -1330,6 +1335,11 @@ function ContextCapacityTray({
             style={{ width: isRefining ? undefined : `${capacity.percent}%` }}
           />
         </div>
+        {!isRefining && (
+          <span className={cn("text-[10px] font-semibold", textClassName)}>
+            {capacity.percent}%
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1351,7 +1361,17 @@ function contextCapacityFromMessages(
   return {
     percent,
     tone: percent > 90 ? "critical" : percent >= 75 ? "warning" : "neutral",
+    total: CONTEXT_CAPACITY_LIMIT,
+    used,
   };
+}
+
+function formatContextUnits(units: number) {
+  if (units >= 1000) {
+    return `${Math.floor(units / 1000)}k`;
+  }
+
+  return units.toString();
 }
 
 function approximateContextUnits(content: string) {
