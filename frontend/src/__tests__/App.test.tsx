@@ -1492,6 +1492,7 @@ describe("App", () => {
       name: "Jump to You: Review the deployment plan",
     });
 
+    expect(shortcut).toHaveClass("cursor-pointer");
     expect(
       within(shortcut).queryByText("Review the deployment plan"),
     ).not.toBeInTheDocument();
@@ -1499,6 +1500,109 @@ describe("App", () => {
     expect(
       within(shortcut).getByText("Review the deployment plan").parentElement,
     ).toHaveClass("opacity-100");
+  });
+
+  it("allows long message shortcuts to scroll in their own list", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 32 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Conversation checkpoint ${index + 1}`,
+        id: `message-shortcut-long-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    expect(within(shortcuts).getAllByRole("button")).toHaveLength(32);
+    expect(shortcutList).toHaveClass("overflow-y-auto");
+    expect(shortcutList).toHaveClass("overscroll-contain");
+  });
+
+  it("keeps message summaries available inside the scrollable shortcut list", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 12 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Inspect release note ${index + 1}`,
+        id: `message-shortcut-summary-scroll-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+    const shortcut = within(shortcuts).getByRole("button", {
+      name: "Jump to Flowent: Inspect release note 12",
+    });
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    expect(shortcutList).toHaveClass("overflow-y-auto");
+    expect(
+      within(shortcut).queryByText("Inspect release note 12"),
+    ).not.toBeInTheDocument();
+
+    await user.hover(shortcut);
+
+    expect(
+      within(shortcut).getByText("Inspect release note 12"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps shortcut list scrolling separate from message jump behavior", async () => {
+    const user = userEvent.setup();
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      mockInitialState({
+        ...selectedProviderState(),
+        messages: Array.from({ length: 24 }, (_, index) => ({
+          author: index % 2 === 0 ? "user" : "assistant",
+          content: `Jump target message ${index + 1}`,
+          id: `message-shortcut-jump-scroll-${index + 1}`,
+        })),
+      });
+      render(<App />);
+
+      const shortcuts = await screen.findByRole("navigation", {
+        name: "Conversation shortcuts",
+      });
+      const shortcutList = shortcuts.firstElementChild;
+
+      if (!shortcutList) {
+        throw new Error("Conversation shortcut list was not rendered.");
+      }
+
+      expect(shortcutList).toHaveClass("overflow-y-auto");
+      await user.click(
+        within(shortcuts).getByRole("button", {
+          name: "Jump to Flowent: Jump target message 24",
+        }),
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "center",
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
   });
 
   it("hides the message shortcuts on narrow screens", async () => {

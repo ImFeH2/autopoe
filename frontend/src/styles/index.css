@@ -183,6 +183,28 @@ textarea {
   animation: flowent-context-refining 1.2s ease-in-out infinite;
 }
 
+.flowent-shortcut-scrollbar {
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  scrollbar-width: thin;
+}
+
+.flowent-shortcut-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.flowent-shortcut-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.flowent-shortcut-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.flowent-shortcut-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.26);
+}
+
 @keyframes flowent-message-enter {
   from {
     opacity: 0;
