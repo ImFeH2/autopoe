@@ -1435,6 +1435,116 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("orders message shortcuts from oldest to newest", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "First planning note",
+          id: "message-shortcut-first",
+        },
+        {
+          author: "assistant",
+          content: "Second planning note",
+          id: "message-shortcut-second",
+        },
+        {
+          author: "user",
+          content: "Third planning note",
+          id: "message-shortcut-third",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    expect(shortcutList).toHaveClass("flex-col");
+    expect(shortcutList).not.toHaveClass("flex-col-reverse");
+    expect(
+      within(shortcuts)
+        .getAllByRole("button")
+        .map((shortcut) => shortcut.getAttribute("aria-label")),
+    ).toEqual([
+      "Jump to You: First planning note",
+      "Jump to Flowent: Second planning note",
+      "Jump to You: Third planning note",
+    ]);
+  });
+
+  it("keeps the first message as the first shortcut", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Oldest message in this conversation",
+          id: "message-shortcut-oldest",
+        },
+        {
+          author: "assistant",
+          content: "Middle message in this conversation",
+          id: "message-shortcut-middle",
+        },
+        {
+          author: "user",
+          content: "Newest message in this conversation",
+          id: "message-shortcut-newest",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+
+    expect(within(shortcuts).getAllByRole("button")[0]).toHaveAccessibleName(
+      "Jump to You: Oldest message in this conversation",
+    );
+  });
+
+  it("keeps the last message as the last shortcut", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Oldest message for final shortcut check",
+          id: "message-shortcut-final-oldest",
+        },
+        {
+          author: "assistant",
+          content: "Middle message for final shortcut check",
+          id: "message-shortcut-final-middle",
+        },
+        {
+          author: "assistant",
+          content: "Newest message for final shortcut check",
+          id: "message-shortcut-final-newest",
+        },
+      ],
+    });
+    render(<App />);
+
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutButtons = within(shortcuts).getAllByRole("button");
+
+    expect(shortcutButtons.at(-1)).toHaveAccessibleName(
+      "Jump to Flowent: Newest message for final shortcut check",
+    );
+  });
+
   it("jumps to the selected message from a message shortcut", async () => {
     const user = userEvent.setup();
     const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
@@ -1467,11 +1577,68 @@ describe("App", () => {
 
       expect(scrollIntoView).toHaveBeenCalledWith({
         behavior: "smooth",
-        block: "center",
+        block: "start",
       });
     } finally {
       window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+
+  it("uses top-aligned message shortcut jumps", async () => {
+    const user = userEvent.setup();
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      mockInitialState({
+        ...selectedProviderState(),
+        messages: [
+          {
+            author: "user",
+            content: "Open this note near the top",
+            id: "message-user-top-jump",
+          },
+        ],
+      });
+      render(<App />);
+
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Jump to You: Open this note near the top",
+        }),
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "start",
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("keeps message rows offset from the very top after shortcut jumps", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Keep some room above this message",
+          id: "message-user-scroll-margin",
+        },
+      ],
+    });
+    render(<App />);
+
+    const message = await screen.findByText(
+      "Keep some room above this message",
+      {
+        selector: "p",
+      },
+    );
+
+    expect(message.closest("article")).toHaveClass("scroll-mt-12");
   });
 
   it("shows a message summary when hovering a shortcut", async () => {
@@ -1607,7 +1774,7 @@ describe("App", () => {
 
       expect(scrollIntoView).toHaveBeenCalledWith({
         behavior: "smooth",
-        block: "center",
+        block: "start",
       });
     } finally {
       window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
