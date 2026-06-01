@@ -1525,6 +1525,13 @@ describe("App", () => {
     expect(within(shortcuts).getAllByRole("button")).toHaveLength(32);
     expect(shortcutList).toHaveClass("overflow-y-auto");
     expect(shortcutList).toHaveClass("overscroll-contain");
+    expect(shortcutList).toHaveClass("flowent-hidden-scrollbar");
+    expect(shortcutList).not.toHaveClass("flowent-shortcut-scrollbar");
+    expect(shortcutList).toHaveClass("rounded-2xl");
+    expect(shortcutList).not.toHaveClass("rounded-full");
+    expect(shortcutList.className).not.toContain(
+      "group-hover/shortcut-rail:rounded",
+    );
   });
 
   it("keeps message summaries available inside the scrollable shortcut list", async () => {
@@ -1552,6 +1559,7 @@ describe("App", () => {
     }
 
     expect(shortcutList).toHaveClass("overflow-y-auto");
+    expect(shortcutList).toHaveClass("flowent-hidden-scrollbar");
     expect(
       within(shortcut).queryByText("Inspect release note 12"),
     ).not.toBeInTheDocument();
@@ -1590,6 +1598,7 @@ describe("App", () => {
       }
 
       expect(shortcutList).toHaveClass("overflow-y-auto");
+      expect(shortcutList).toHaveClass("flowent-hidden-scrollbar");
       await user.click(
         within(shortcuts).getByRole("button", {
           name: "Jump to Flowent: Jump target message 24",

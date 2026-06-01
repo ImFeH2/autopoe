@@ -183,26 +183,13 @@ textarea {
   animation: flowent-context-refining 1.2s ease-in-out infinite;
 }
 
-.flowent-shortcut-scrollbar {
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
-  scrollbar-width: thin;
+.flowent-hidden-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
-.flowent-shortcut-scrollbar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.flowent-shortcut-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.flowent-shortcut-scrollbar::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.flowent-shortcut-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.26);
+.flowent-hidden-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 @keyframes flowent-message-enter {

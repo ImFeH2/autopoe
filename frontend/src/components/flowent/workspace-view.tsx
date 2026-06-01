@@ -263,7 +263,7 @@ function MessageShortcutRail({ messages }: { messages: Message[] }) {
         setIsRailActive(false);
       }}
     >
-      <div className="pointer-events-auto flowent-shortcut-scrollbar flex max-h-[min(70vh,520px)] flex-col-reverse items-end gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain rounded-full border border-white/5 bg-black/20 p-1.5 shadow-[0_16px_44px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-all duration-300 group-hover/shortcut-rail:max-h-[min(78vh,620px)] group-hover/shortcut-rail:rounded-2xl group-hover/shortcut-rail:bg-black/70 group-hover/shortcut-rail:p-3 group-hover/shortcut-rail:shadow-[0_20px_60px_rgba(0,0,0,0.42)]">
+      <div className="pointer-events-auto flowent-hidden-scrollbar flex max-h-[min(78vh,620px)] flex-col-reverse items-end gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-white/5 bg-black/20 p-2 shadow-[0_16px_44px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-colors duration-200 group-hover/shortcut-rail:bg-black/70">
         {messages.map((message) => {
           const isHovered = hoveredMessageId === message.id;
           const summary = messageShortcutSummary(message.content);
