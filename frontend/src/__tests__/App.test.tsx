@@ -1271,6 +1271,64 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows context capacity in the composer tray", () => {
+    render(<App />);
+
+    const composer = screen.getByRole("form", {
+      name: "Workspace composer",
+    });
+    const capacityStatus = within(composer).getByRole("progressbar", {
+      name: "Context capacity status",
+    });
+
+    expect(within(composer).getByText("Context")).toBeInTheDocument();
+    expect(within(composer).getByText("0%")).toBeInTheDocument();
+    expect(capacityStatus).toHaveAttribute("aria-valuenow", "0");
+  });
+
+  it("uses a warning tone when context capacity is nearly full", async () => {
+    const highCapacityContent = "A".repeat(360_000);
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: highCapacityContent,
+          id: "message-high-capacity",
+        },
+      ],
+    });
+    render(<App />);
+
+    const capacityStatus = screen.getByRole("progressbar", {
+      name: "Context capacity status",
+    });
+
+    await waitFor(() => {
+      expect(capacityStatus).toHaveAttribute("aria-valuenow", "75");
+    });
+    if (!(capacityStatus.firstElementChild instanceof HTMLElement)) {
+      throw new Error("Capacity indicator was not rendered.");
+    }
+    expect(capacityStatus.firstElementChild).toHaveClass("bg-amber-500");
+    expect(screen.getByText("75%")).toHaveClass("text-amber-400");
+  });
+
+  it("keeps context capacity compact on narrow screens", () => {
+    render(<App />);
+
+    const composer = screen.getByRole("form", {
+      name: "Workspace composer",
+    });
+    const capacityLabel = within(composer).getByText("Context");
+    const capacityTrack = within(composer).getByLabelText(
+      "Context capacity status",
+    );
+
+    expect(capacityLabel).toHaveClass("hidden", "sm:inline");
+    expect(capacityTrack).toHaveClass("w-16", "sm:w-24");
+  });
+
   it("enables the composer after content is drafted", async () => {
     const user = userEvent.setup();
     render(<App />);

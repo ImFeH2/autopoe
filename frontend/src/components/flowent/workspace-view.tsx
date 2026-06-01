@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   ArrowUp,
   Check,
   ChevronRight,
@@ -71,6 +72,7 @@ export function WorkspaceView({
           draft={draft}
           errorMessage={errorMessage}
           isSending={isResponding}
+          messages={messages}
           onCommand={onCommand}
           onCommandError={onCommandError}
           onDraftChange={onDraftChange}
@@ -734,6 +736,7 @@ function ChatComposer({
   draft,
   errorMessage,
   isSending,
+  messages,
   onCommand,
   onCommandError,
   onDraftChange,
@@ -746,6 +749,7 @@ function ChatComposer({
   draft: string;
   errorMessage: string;
   isSending: boolean;
+  messages: Message[];
   onCommand: (commandId: WorkspaceCommandId) => boolean;
   onCommandError: (message: string) => void;
   onDraftChange: (value: string) => void;
@@ -816,6 +820,10 @@ function ChatComposer({
   const showStopButton = isSending && !canSubmitCommand;
   const isSendUnavailable = !showStopButton && !canSubmit;
   const isSendDisabled = isSendUnavailable && !handlesSoftKeyboardSubmit;
+  const capacity = useMemo(
+    () => contextCapacityFromMessages(messages, draft),
+    [draft, messages],
+  );
 
   useEffect(() => {
     if (preserveCommandMenuDismissalRef.current) {
@@ -1114,134 +1122,215 @@ function ChatComposer({
           </p>
         ) : null}
         <form
-          className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 overflow-clip rounded-[28px] bg-[#212121] p-2.5 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.22)] transition-colors"
           aria-label="Workspace composer"
+          className="overflow-clip rounded-[28px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"
           onSubmit={(event) => {
             event.preventDefault();
             handleSubmit();
           }}
         >
-          <Textarea
-            aria-label="Message Flowent"
-            className="flowent-composer-textarea max-h-[216px] min-h-9 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-white shadow-none placeholder:text-[#9b9b9b] focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
-            enterKeyHint="send"
-            ref={textareaRef}
-            value={draft}
-            onChange={(event) => onDraftChange(event.target.value)}
-            onInput={(event) => onDraftChange(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              allowNextLineBreakRef.current =
-                event.key === "Enter" && event.shiftKey;
+          <div className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 bg-[#212121] p-2.5">
+            <Textarea
+              aria-label="Message Flowent"
+              className="flowent-composer-textarea max-h-[216px] min-h-9 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-white shadow-none placeholder:text-[#9b9b9b] focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+              enterKeyHint="send"
+              ref={textareaRef}
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              onInput={(event) => onDraftChange(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                allowNextLineBreakRef.current =
+                  event.key === "Enter" && event.shiftKey;
 
-              if (showSkillMenu) {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setSelectedSkillIndex(
-                    (selectedSkillIndex + 1) % matchingSkills.length,
-                  );
-                  return;
-                }
-
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setSelectedSkillIndex(
-                    (selectedSkillIndex - 1 + matchingSkills.length) %
-                      matchingSkills.length,
-                  );
-                  return;
-                }
-
-                if (event.key === "Tab") {
-                  const skill = matchingSkills[selectedSkillIndex];
-                  if (skill) {
+                if (showSkillMenu) {
+                  if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    insertSkill(skill);
+                    setSelectedSkillIndex(
+                      (selectedSkillIndex + 1) % matchingSkills.length,
+                    );
+                    return;
                   }
-                  return;
-                }
 
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setIsSkillMenuDismissed(true);
-                  return;
-                }
-              }
-
-              if (showCommandMenu) {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setSelectedCommandIndex(
-                    (selectedCommandIndex + 1) % matchingCommands.length,
-                  );
-                  return;
-                }
-
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setSelectedCommandIndex(
-                    (selectedCommandIndex - 1 + matchingCommands.length) %
-                      matchingCommands.length,
-                  );
-                  return;
-                }
-
-                if (event.key === "Tab") {
-                  const command = matchingCommands[selectedCommandIndex];
-                  if (command) {
+                  if (event.key === "ArrowUp") {
                     event.preventDefault();
-                    preserveCommandMenuDismissalRef.current = true;
-                    onDraftChange(command.label);
+                    setSelectedSkillIndex(
+                      (selectedSkillIndex - 1 + matchingSkills.length) %
+                        matchingSkills.length,
+                    );
+                    return;
+                  }
+
+                  if (event.key === "Tab") {
+                    const skill = matchingSkills[selectedSkillIndex];
+                    if (skill) {
+                      event.preventDefault();
+                      insertSkill(skill);
+                    }
+                    return;
+                  }
+
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setIsSkillMenuDismissed(true);
+                    return;
+                  }
+                }
+
+                if (showCommandMenu) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setSelectedCommandIndex(
+                      (selectedCommandIndex + 1) % matchingCommands.length,
+                    );
+                    return;
+                  }
+
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setSelectedCommandIndex(
+                      (selectedCommandIndex - 1 + matchingCommands.length) %
+                        matchingCommands.length,
+                    );
+                    return;
+                  }
+
+                  if (event.key === "Tab") {
+                    const command = matchingCommands[selectedCommandIndex];
+                    if (command) {
+                      event.preventDefault();
+                      preserveCommandMenuDismissalRef.current = true;
+                      onDraftChange(command.label);
+                      setIsCommandMenuDismissed(true);
+                    }
+                    return;
+                  }
+
+                  if (event.key === "Escape") {
+                    event.preventDefault();
                     setIsCommandMenuDismissed(true);
+                    return;
                   }
+                }
+
+                if (
+                  event.key !== "Enter" ||
+                  event.shiftKey ||
+                  event.nativeEvent.isComposing
+                ) {
                   return;
                 }
 
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setIsCommandMenuDismissed(true);
-                  return;
-                }
-              }
-
-              if (
-                event.key !== "Enter" ||
-                event.shiftKey ||
-                event.nativeEvent.isComposing
-              ) {
-                return;
-              }
-
-              event.preventDefault();
-              handleSubmit();
-            }}
-            placeholder="Message Flowent"
-          />
-          <Button
-            aria-label={showStopButton ? "Stop" : "Send message"}
-            className={cn(
-              "size-9 rounded-full shadow-none disabled:bg-transparent disabled:text-white/35 disabled:opacity-100 [&_svg]:size-5",
-              showStopButton
-                ? "bg-white text-black hover:bg-[#e5e5e5] [&_svg]:size-3.5"
-                : "bg-white text-black hover:bg-[#e5e5e5]",
-              isSendUnavailable &&
-                "bg-transparent text-white/35 hover:bg-transparent",
-            )}
-            aria-disabled={isSendUnavailable}
-            disabled={isSendDisabled}
-            onClick={showStopButton ? onStopResponse : undefined}
-            size="icon-lg"
-            type={showStopButton ? "button" : "submit"}
-          >
-            {showStopButton ? (
-              <Square aria-hidden="true" fill="currentColor" />
-            ) : (
-              <ArrowUp aria-hidden="true" />
-            )}
-          </Button>
+                event.preventDefault();
+                handleSubmit();
+              }}
+              placeholder="Message Flowent"
+            />
+            <Button
+              aria-label={showStopButton ? "Stop" : "Send message"}
+              className={cn(
+                "size-9 rounded-full shadow-none disabled:bg-transparent disabled:text-white/35 disabled:opacity-100 [&_svg]:size-5",
+                showStopButton
+                  ? "bg-white text-black hover:bg-[#e5e5e5] [&_svg]:size-3.5"
+                  : "bg-white text-black hover:bg-[#e5e5e5]",
+                isSendUnavailable &&
+                  "bg-transparent text-white/35 hover:bg-transparent",
+              )}
+              aria-disabled={isSendUnavailable}
+              disabled={isSendDisabled}
+              onClick={showStopButton ? onStopResponse : undefined}
+              size="icon-lg"
+              type={showStopButton ? "button" : "submit"}
+            >
+              {showStopButton ? (
+                <Square aria-hidden="true" fill="currentColor" />
+              ) : (
+                <ArrowUp aria-hidden="true" />
+              )}
+            </Button>
+          </div>
+          <ContextCapacityTray capacity={capacity} />
         </form>
       </div>
     </div>
   );
+}
+
+const CONTEXT_CAPACITY_LIMIT = 120_000;
+
+type ContextCapacity = {
+  percent: number;
+  tone: "critical" | "neutral" | "warning";
+};
+
+function ContextCapacityTray({ capacity }: { capacity: ContextCapacity }) {
+  const toneClassName =
+    capacity.tone === "critical"
+      ? "bg-red-500"
+      : capacity.tone === "warning"
+        ? "bg-amber-500"
+        : "bg-zinc-400";
+  const textClassName =
+    capacity.tone === "critical"
+      ? "text-red-400"
+      : capacity.tone === "warning"
+        ? "text-amber-400"
+        : "text-zinc-300";
+
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-3 border-t border-zinc-800/50 bg-zinc-900/40 px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors">
+      <div className="flex min-w-0 items-center gap-2 text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
+        <Activity aria-hidden="true" className="size-3 shrink-0" />
+        <span className="hidden sm:inline">Context</span>
+      </div>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className={cn("text-[10px] font-semibold", textClassName)}>
+          {capacity.percent}%
+        </span>
+        <div
+          aria-label="Context capacity status"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={capacity.percent}
+          className="h-1 w-16 overflow-hidden rounded-full bg-zinc-800 sm:w-24"
+          role="progressbar"
+        >
+          <div
+            className={cn(
+              "h-full rounded-full transition-all duration-500 ease-in-out",
+              toneClassName,
+            )}
+            style={{ width: `${capacity.percent}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function contextCapacityFromMessages(
+  messages: Message[],
+  draft: string,
+): ContextCapacity {
+  const used = [...messages.map((message) => message.content), draft].reduce(
+    (total, content) => total + approximateContextUnits(content),
+    0,
+  );
+  const percent = Math.min(
+    100,
+    Math.floor((used / CONTEXT_CAPACITY_LIMIT) * 100),
+  );
+
+  return {
+    percent,
+    tone: percent > 90 ? "critical" : percent >= 75 ? "warning" : "neutral",
+  };
+}
+
+function approximateContextUnits(content: string) {
+  if (!content) {
+    return 0;
+  }
+  return Math.max(1, Math.ceil(content.length / 4));
 }
 
 function shouldHandleSoftKeyboardSubmit() {
