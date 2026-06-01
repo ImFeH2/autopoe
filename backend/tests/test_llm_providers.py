@@ -11,6 +11,7 @@ from flowent.llm import (
     build_litellm_request,
     chunk_delta_reasoning,
     complete_chat,
+    list_provider_models,
     normalize_system_messages,
     stream_chat,
     stream_chat_chunks,
@@ -56,6 +57,120 @@ def test_build_litellm_request_maps_provider_connection_to_completion_args() -> 
         ],
         "model": "anthropic/claude-sonnet-4-5",
     }
+
+
+def test_build_litellm_request_appends_default_api_version_to_base_url() -> None:
+    connection = ProviderConnection(
+        name="OpenAI Compatible",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+        base_url="https://example.test",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["api_base"] == "https://example.test/v1"
+
+
+def test_build_litellm_request_appends_anthropic_api_version_to_base_url() -> None:
+    connection = ProviderConnection(
+        name="Anthropic",
+        provider=ProviderFormat.ANTHROPIC,
+        model="claude-sonnet-4-5",
+        secret_reference="connection-primary",
+        base_url="https://example.test",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["api_base"] == "https://example.test/v1"
+
+
+def test_build_litellm_request_does_not_duplicate_existing_api_version() -> None:
+    connection = ProviderConnection(
+        name="OpenAI Compatible",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+        base_url="https://example.test/v1/",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["api_base"] == "https://example.test/v1"
+
+
+def test_build_litellm_request_preserves_custom_versioned_base_path() -> None:
+    connection = ProviderConnection(
+        name="OpenAI Compatible",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+        base_url="https://example.test/api/v3",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["api_base"] == "https://example.test/api/v3"
+
+
+def test_build_litellm_request_allows_base_url_version_opt_out() -> None:
+    connection = ProviderConnection(
+        name="OpenAI Compatible",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+        base_url="https://example.test#",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["api_base"] == "https://example.test"
+
+
+def test_build_litellm_request_appends_gemini_api_version_to_base_url() -> None:
+    connection = ProviderConnection(
+        name="Gemini",
+        provider=ProviderFormat.GEMINI,
+        model="gemini-3-pro-preview",
+        secret_reference="connection-primary",
+        base_url="https://example.test",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["api_base"] == "https://example.test/v1beta"
+
+
+def test_list_provider_models_uses_normalized_base_url() -> None:
+    captured_request: dict[str, object] = {}
+
+    def fake_model_lister(**request: object) -> list[str]:
+        captured_request.update(request)
+        return ["openai/gpt-5.1", "gpt-5.1-mini"]
+
+    models = list_provider_models(
+        provider=ProviderFormat.OPENAI,
+        secret_reference="connection-primary",
+        base_url="https://example.test",
+        model_lister=fake_model_lister,
+    )
+
+    assert captured_request["api_base"] == "https://example.test/v1"
+    assert models == ["gpt-5.1", "gpt-5.1-mini"]
 
 
 def test_build_litellm_request_omits_default_reasoning_effort() -> None:

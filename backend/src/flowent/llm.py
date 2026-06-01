@@ -1,7 +1,9 @@
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, Literal, Protocol, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -78,6 +80,15 @@ MODEL_PREFIXES: dict[ProviderFormat, str] = {
 }
 _litellm_stream_error_patch_installed = False
 
+PROVIDER_API_VERSIONS: dict[ProviderFormat, str] = {
+    ProviderFormat.OPENAI: "v1",
+    ProviderFormat.OPENAI_RESPONSES: "v1",
+    ProviderFormat.ANTHROPIC: "v1",
+    ProviderFormat.GEMINI: "v1beta",
+}
+
+VERSION_PATH_SEGMENT = re.compile(r"^v\d+(?:[a-z]+)?$", re.IGNORECASE)
+
 
 def provider_model_name(connection: ProviderConnection) -> str:
     return f"{MODEL_PREFIXES[connection.provider]}/{connection.model}"
@@ -85,6 +96,40 @@ def provider_model_name(connection: ProviderConnection) -> str:
 
 def provider_litellm_name(provider: ProviderFormat) -> str:
     return MODEL_PREFIXES[provider]
+
+
+def normalize_provider_base_url(
+    provider: ProviderFormat, base_url: str | None
+) -> str | None:
+    if base_url is None:
+        return None
+    raw_base_url = base_url.strip()
+    if not raw_base_url:
+        return None
+    if raw_base_url.endswith("#"):
+        return raw_base_url[:-1].rstrip("/") or None
+
+    trimmed_base_url = raw_base_url.rstrip("/")
+    parsed_base_url = urlsplit(trimmed_base_url)
+    path_segments = [segment for segment in parsed_base_url.path.split("/") if segment]
+    if any(VERSION_PATH_SEGMENT.fullmatch(segment) for segment in path_segments):
+        return trimmed_base_url
+
+    version = PROVIDER_API_VERSIONS[provider]
+    if parsed_base_url.scheme and parsed_base_url.netloc:
+        path = parsed_base_url.path.rstrip("/")
+        normalized_path = f"{path}/{version}" if path else f"/{version}"
+        return urlunsplit(
+            (
+                parsed_base_url.scheme,
+                parsed_base_url.netloc,
+                normalized_path,
+                parsed_base_url.query,
+                parsed_base_url.fragment,
+            )
+        )
+
+    return f"{trimmed_base_url}/{version}"
 
 
 def normalize_provider_model_name(provider: ProviderFormat, model: str) -> str:
@@ -185,7 +230,7 @@ def list_provider_models(
         model_lister = get_valid_models
 
     models = model_lister(
-        api_base=base_url,
+        api_base=normalize_provider_base_url(provider, base_url),
         api_key=secret_reference,
         check_provider_endpoint=True,
         custom_llm_provider=provider_litellm_name(provider),
@@ -231,8 +276,11 @@ def build_litellm_request(
         request["tools"] = list(tools)
     if stream:
         request["stream"] = True
-    if connection.base_url:
-        request["api_base"] = connection.base_url
+    normalized_base_url = normalize_provider_base_url(
+        connection.provider, connection.base_url
+    )
+    if normalized_base_url:
+        request["api_base"] = normalized_base_url
     if connection.reasoning_effort != ReasoningEffort.DEFAULT:
         request["reasoning_effort"] = connection.reasoning_effort.value
     logger.log(
@@ -240,7 +288,7 @@ def build_litellm_request(
         "Built LiteLLM request provider=%s model=%s base_url=%s stream=%s tools=%s reasoning_effort=%s messages=%r",
         connection.provider,
         connection.model,
-        connection.base_url or "",
+        normalized_base_url or "",
         stream,
         bool(tools),
         connection.reasoning_effort,
@@ -255,7 +303,7 @@ def record_litellm_request_diagnostic(
 ) -> None:
     write_llm_request_diagnostic(
         {
-            "base_url": connection.base_url,
+            "base_url": request.get("api_base"),
             "litellm_model": request["model"],
             "messages": request["messages"],
             "model": connection.model,
