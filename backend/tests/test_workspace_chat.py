@@ -7,8 +7,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT
+from flowent.compact import (
+    COMPACT_SUMMARY_PREFIX,
+    build_replacement_history,
+    retained_recent_user_messages,
+)
+from flowent.llm import ChatMessage
 from flowent.main import create_app
 from flowent.sandbox import CommandResult, SandboxRunner
+from flowent.storage import StoredMessage
 
 
 def configure_provider(
@@ -130,6 +137,106 @@ def tool_call_chunk(
             }
         ]
     }
+
+
+def content_index(messages: list[dict[str, object]], content: str) -> int:
+    for index, message in enumerate(messages):
+        if message["content"] == content:
+            return index
+    raise AssertionError(f"Message content not found: {content}")
+
+
+def compact_summary_messages(
+    messages: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        message
+        for message in messages
+        if str(message["content"]).startswith(COMPACT_SUMMARY_PREFIX)
+    ]
+
+
+def compact_summary_index(messages: list[dict[str, object]]) -> int:
+    summaries = compact_summary_messages(messages)
+    assert len(summaries) == 1
+    return content_index(messages, str(summaries[0]["content"]))
+
+
+def test_build_replacement_history_keeps_recent_user_messages_without_assistant() -> (
+    None
+):
+    history = build_replacement_history(
+        "Keep the provider setup decision.",
+        [
+            StoredMessage(author="user", content="Original request.", id="message-1"),
+            StoredMessage(
+                author="assistant", content="Original reply.", id="message-2"
+            ),
+            StoredMessage(author="system", content="Context compacted", id="message-3"),
+            StoredMessage(author="user", content="Follow-up request.", id="message-4"),
+        ],
+    )
+
+    assert history == [
+        ChatMessage(role="user", content="Original request."),
+        ChatMessage(role="user", content="Follow-up request."),
+        ChatMessage(
+            role="user",
+            content=f"{COMPACT_SUMMARY_PREFIX}Keep the provider setup decision.",
+        ),
+    ]
+
+
+def test_retained_recent_user_messages_respects_budget() -> None:
+    history = retained_recent_user_messages(
+        [
+            StoredMessage(author="user", content="older message", id="message-1"),
+            StoredMessage(author="user", content="recent message", id="message-2"),
+        ],
+        token_budget=4,
+    )
+
+    assert history == [ChatMessage(role="user", content="recent message")]
+
+
+def test_retained_recent_user_messages_truncates_latest_oversized_message() -> None:
+    history = retained_recent_user_messages(
+        [
+            StoredMessage(author="user", content="0123456789abcdef", id="message-1"),
+        ],
+        token_budget=2,
+    )
+
+    assert history == [ChatMessage(role="user", content="0123…2 tokens truncated…cdef")]
+
+
+def test_build_replacement_history_places_compact_summary_after_retained_users() -> (
+    None
+):
+    history = build_replacement_history(
+        "Keep current task state.",
+        [
+            StoredMessage(author="user", content="First request.", id="message-1"),
+            StoredMessage(author="user", content="Latest request.", id="message-2"),
+        ],
+    )
+
+    assert history[-1] == ChatMessage(
+        role="user",
+        content=f"{COMPACT_SUMMARY_PREFIX}Keep current task state.",
+    )
+
+
+def test_build_replacement_history_excludes_compact_markers() -> None:
+    history = build_replacement_history(
+        "Keep current task state.",
+        [
+            StoredMessage(author="user", content="Before compact.", id="message-1"),
+            StoredMessage(author="system", content="Context compacted", id="message-2"),
+        ],
+    )
+
+    assert ChatMessage(role="user", content="Context compacted") not in history
 
 
 @pytest.mark.anyio
@@ -406,6 +513,19 @@ def test_workspace_response_uses_compacted_context_after_compact(
     ]
     assert len(compacted_messages) == 1
     assert "Keep the provider setup decision." in compacted_messages[0]["content"]
+    assert response_messages[
+        content_index(response_messages, "Original detailed request.")
+    ] == {
+        "role": "user",
+        "content": "Original detailed request.",
+    }
+    assert {
+        "role": "assistant",
+        "content": "Original detailed reply.",
+    } not in response_messages
+    assert content_index(
+        response_messages, "Original detailed request."
+    ) < compact_summary_index(response_messages)
     assert response_messages[-1] == {
         "role": "user",
         "content": "Continue from there.",
@@ -486,6 +606,13 @@ def test_workspace_response_auto_compacts_before_next_message(
     ]
     assert len(compacted_messages) == 1
     assert "Keep the launch plan summary." in compacted_messages[0]["content"]
+    assert {
+        "role": "assistant",
+        "content": "Detailed work log. " * 80,
+    } not in response_messages
+    assert content_index(
+        response_messages, "Original request. " * 80
+    ) < compact_summary_index(response_messages)
     assert {"role": "user", "content": "Context optimized"} not in response_messages
     state = client.get("/api/state").json()
     assert [message["content"] for message in state["messages"]][-3:] == [
@@ -688,6 +815,9 @@ def test_workspace_response_uses_auto_compaction_checkpoint_after_restart(
     ]
     assert len(compacted_messages) == 1
     assert "Auto checkpoint survives restarts." in compacted_messages[0]["content"]
+    assert content_index(
+        response_messages, "Original request. " * 80
+    ) < compact_summary_index(response_messages)
     assert {"role": "user", "content": "Context optimized"} not in response_messages
     assert response_messages[-1] == {
         "role": "user",
@@ -1998,6 +2128,14 @@ def test_workspace_response_uses_compaction_checkpoint_after_restart(
     ]
     assert len(compacted_messages) == 1
     assert "Checkpoint summary survives restarts." in compacted_messages[0]["content"]
+    assert response_messages[content_index(response_messages, "Original request.")] == {
+        "role": "user",
+        "content": "Original request.",
+    }
+    assert {"role": "assistant", "content": "Original reply."} not in response_messages
+    assert content_index(
+        response_messages, "Original request."
+    ) < compact_summary_index(response_messages)
     assert {"role": "user", "content": "Context compacted"} not in response_messages
     assert response_messages[-1] == {
         "role": "user",

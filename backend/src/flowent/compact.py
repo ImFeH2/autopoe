@@ -127,15 +127,15 @@ def build_replacement_history(
     token_budget: int = DEFAULT_RETAINED_MESSAGE_TOKEN_BUDGET,
 ) -> list[ChatMessage]:
     return [
-        ChatMessage(role="user", content=f"{COMPACT_SUMMARY_PREFIX}{summary}"),
-        *retained_recent_chat_messages(
+        *retained_recent_user_messages(
             recent_messages,
             token_budget=token_budget,
         ),
+        ChatMessage(role="user", content=f"{COMPACT_SUMMARY_PREFIX}{summary}"),
     ]
 
 
-def retained_recent_chat_messages(
+def retained_recent_user_messages(
     messages: Sequence[StoredMessage],
     *,
     token_budget: int = DEFAULT_RETAINED_MESSAGE_TOKEN_BUDGET,
@@ -143,22 +143,40 @@ def retained_recent_chat_messages(
     retained: list[ChatMessage] = []
     remaining_tokens = max(token_budget, 0)
     for message in reversed(messages):
-        if message.author not in {"user", "assistant"}:
+        if message.author != "user":
             continue
         token_count = approximate_token_count(message.content)
-        if retained and token_count > remaining_tokens:
+        if token_count > remaining_tokens:
+            if remaining_tokens > 0:
+                retained.append(
+                    ChatMessage(
+                        role="user",
+                        content=truncate_text_to_token_budget(
+                            message.content,
+                            remaining_tokens,
+                        ),
+                    )
+                )
             break
-        if token_count > token_budget:
-            continue
-        role: Literal["user", "assistant"] = (
-            "user" if message.author == "user" else "assistant"
-        )
-        retained.append(ChatMessage(role=role, content=message.content))
+        retained.append(ChatMessage(role="user", content=message.content))
         remaining_tokens -= token_count
         if remaining_tokens <= 0:
             break
     retained.reverse()
     return retained
+
+
+def truncate_text_to_token_budget(content: str, token_budget: int) -> str:
+    if token_budget <= 0 or not content:
+        return ""
+    character_budget = max(token_budget * 4, 1)
+    if len(content) <= character_budget:
+        return content
+    left_budget = character_budget // 2
+    right_budget = character_budget - left_budget
+    removed_tokens = approximate_token_count(content[left_budget:-right_budget])
+    marker = f"…{removed_tokens} tokens truncated…"
+    return f"{content[:left_budget]}{marker}{content[-right_budget:]}"
 
 
 def transcript_messages_after(
