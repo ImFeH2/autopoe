@@ -179,6 +179,10 @@ textarea {
   animation-delay: 280ms;
 }
 
+.flowent-context-refining-indicator {
+  animation: flowent-context-refining 1.2s ease-in-out infinite;
+}
+
 @keyframes flowent-message-enter {
   from {
     opacity: 0;
@@ -210,5 +214,14 @@ textarea {
   40% {
     opacity: 0.86;
     transform: translateY(-2px);
+  }
+}
+
+@keyframes flowent-context-refining {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
   }
 }

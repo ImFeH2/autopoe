@@ -477,6 +477,7 @@ function App() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [isResponding, setIsResponding] = useState(false);
+  const [isRefiningContext, setIsRefiningContext] = useState(false);
   const [writablePaths, setWritablePaths] = useState<WritablePath[]>([]);
   const [activeRunId, setActiveRunId] = useState("");
   const [responseError, setResponseError] = useState("");
@@ -1609,6 +1610,7 @@ function App() {
 
   const compactWorkspace = async () => {
     setResponseError("");
+    setIsRefiningContext(true);
 
     try {
       const response = await fetch("/api/workspace/compact", {
@@ -1628,6 +1630,8 @@ function App() {
           ? error.message
           : "Context could not be compacted.",
       );
+    } finally {
+      setIsRefiningContext(false);
     }
   };
 
@@ -1785,6 +1789,7 @@ function App() {
         <WorkspaceView
           draft={draft}
           errorMessage={responseError}
+          isRefiningContext={isRefiningContext}
           isResponding={isResponding}
           messages={messages}
           commands={workspaceCommands}

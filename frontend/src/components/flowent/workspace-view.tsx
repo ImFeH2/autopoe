@@ -33,6 +33,7 @@ export function WorkspaceView({
   commands,
   draft,
   errorMessage,
+  isRefiningContext,
   isResponding,
   messages,
   onCommand,
@@ -46,6 +47,7 @@ export function WorkspaceView({
   commands: WorkspaceCommand[];
   draft: string;
   errorMessage: string;
+  isRefiningContext: boolean;
   isResponding: boolean;
   messages: Message[];
   onCommand: (commandId: WorkspaceCommandId) => boolean;
@@ -71,6 +73,7 @@ export function WorkspaceView({
           commands={commands}
           draft={draft}
           errorMessage={errorMessage}
+          isRefiningContext={isRefiningContext}
           isSending={isResponding}
           messages={messages}
           onCommand={onCommand}
@@ -735,6 +738,7 @@ function ChatComposer({
   commands,
   draft,
   errorMessage,
+  isRefiningContext,
   isSending,
   messages,
   onCommand,
@@ -748,6 +752,7 @@ function ChatComposer({
   commands: WorkspaceCommand[];
   draft: string;
   errorMessage: string;
+  isRefiningContext: boolean;
   isSending: boolean;
   messages: Message[];
   onCommand: (commandId: WorkspaceCommandId) => boolean;
@@ -1248,7 +1253,10 @@ function ChatComposer({
               )}
             </Button>
           </div>
-          <ContextCapacityTray capacity={capacity} />
+          <ContextCapacityTray
+            capacity={capacity}
+            isRefining={isRefiningContext}
+          />
         </form>
       </div>
     </div>
@@ -1262,7 +1270,13 @@ type ContextCapacity = {
   tone: "critical" | "neutral" | "warning";
 };
 
-function ContextCapacityTray({ capacity }: { capacity: ContextCapacity }) {
+function ContextCapacityTray({
+  capacity,
+  isRefining,
+}: {
+  capacity: ContextCapacity;
+  isRefining: boolean;
+}) {
   const toneClassName =
     capacity.tone === "critical"
       ? "bg-red-500"
@@ -1277,14 +1291,26 @@ function ContextCapacityTray({ capacity }: { capacity: ContextCapacity }) {
         : "text-zinc-300";
 
   return (
-    <div className="flex min-h-9 items-center justify-between gap-3 border-t border-zinc-800/50 bg-zinc-900/40 px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors">
+    <div
+      aria-busy={isRefining}
+      aria-live="polite"
+      className="flex min-h-9 items-center justify-between gap-3 border-t border-zinc-800/50 bg-zinc-900/40 px-4 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors"
+    >
       <div className="flex min-w-0 items-center gap-2 text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
-        <Activity aria-hidden="true" className="size-3 shrink-0" />
+        <Activity
+          aria-hidden="true"
+          className={cn("size-3 shrink-0", isRefining && "animate-pulse")}
+        />
         <span className="hidden sm:inline">Context</span>
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <span className={cn("text-[10px] font-semibold", textClassName)}>
-          {capacity.percent}%
+        <span
+          className={cn(
+            "text-[10px] font-semibold",
+            isRefining ? "animate-pulse text-zinc-300" : textClassName,
+          )}
+        >
+          {isRefining ? "Refining..." : `${capacity.percent}%`}
         </span>
         <div
           aria-label="Context capacity status"
@@ -1297,9 +1323,11 @@ function ContextCapacityTray({ capacity }: { capacity: ContextCapacity }) {
           <div
             className={cn(
               "h-full rounded-full transition-all duration-500 ease-in-out",
+              isRefining &&
+                "flowent-context-refining-indicator w-1/3 opacity-80",
               toneClassName,
             )}
-            style={{ width: `${capacity.percent}%` }}
+            style={{ width: isRefining ? undefined : `${capacity.percent}%` }}
           />
         </div>
       </div>

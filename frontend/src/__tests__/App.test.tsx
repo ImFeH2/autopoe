@@ -1329,6 +1329,183 @@ describe("App", () => {
     expect(capacityTrack).toHaveClass("w-16", "sm:w-24");
   });
 
+  it("shows a refining state in the composer tray while Compact is running", async () => {
+    const user = userEvent.setup();
+    const compactRequest = deferred();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        await compactRequest.promise;
+        return new Response(
+          JSON.stringify({
+            message: {
+              author: "system",
+              content: "Context compacted",
+              id: "compact-message",
+              tools: [],
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    const composerForm = screen.getByRole("form", {
+      name: "Workspace composer",
+    });
+    expect(within(composerForm).getByText("Context")).toBeInTheDocument();
+    expect(within(composerForm).getByText("Refining...")).toHaveClass(
+      "animate-pulse",
+      "text-zinc-300",
+    );
+    expect(
+      within(composerForm).getByRole("progressbar", {
+        name: "Context capacity status",
+      }).firstElementChild,
+    ).toHaveClass("flowent-context-refining-indicator");
+
+    compactRequest.resolve();
+    await screen.findByText("Context compacted");
+  });
+
+  it("keeps the composer available while Compact is refining context", async () => {
+    const user = userEvent.setup();
+    const compactRequest = deferred();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        await compactRequest.promise;
+        return new Response(
+          JSON.stringify({
+            message: {
+              author: "system",
+              content: "Context compacted",
+              id: "compact-message",
+              tools: [],
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+    await screen.findByText("Refining...");
+
+    expect(composer).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Send message" }),
+    ).toBeInTheDocument();
+    await user.type(composer, "Keep writing");
+    expect(composer).toHaveValue("Keep writing");
+
+    compactRequest.resolve();
+    await screen.findByText("Context compacted");
+  });
+
+  it("restores the regular context capacity tray after Compact finishes", async () => {
+    const user = userEvent.setup();
+    const compactRequest = deferred();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        await compactRequest.promise;
+        return new Response(
+          JSON.stringify({
+            message: {
+              author: "system",
+              content: "Context compacted",
+              id: "compact-message",
+              tools: [],
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+    await screen.findByText("Refining...");
+
+    compactRequest.resolve();
+
+    await waitFor(() => {
+      expect(screen.queryByText("Refining...")).toBeNull();
+    });
+    const composerForm = screen.getByRole("form", {
+      name: "Workspace composer",
+    });
+    expect(within(composerForm).getByText("0%")).toBeInTheDocument();
+    expect(
+      within(composerForm).getByRole("progressbar", {
+        name: "Context capacity status",
+      }),
+    ).toHaveAttribute("aria-valuenow", "0");
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+  });
+
   it("enables the composer after content is drafted", async () => {
     const user = userEvent.setup();
     render(<App />);
