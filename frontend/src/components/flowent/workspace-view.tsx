@@ -1,4 +1,12 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Activity,
   ArrowUp,
@@ -179,6 +187,7 @@ function MessageList({
   return (
     <>
       <div
+        aria-label="Conversation messages"
         aria-live="polite"
         className={cn(
           "absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pt-12 max-[900px]:px-4",
@@ -224,7 +233,10 @@ function MessageList({
         ))}
         <div aria-hidden="true" ref={scrollMarkerRef} />
       </div>
-      <MessageShortcutRail messages={shortcutMessages} />
+      <MessageShortcutRail
+        messageListRef={listRef}
+        messages={shortcutMessages}
+      />
     </>
   );
 }
@@ -238,9 +250,89 @@ function conversationShortcutMessages(messages: Message[]) {
   );
 }
 
-function MessageShortcutRail({ messages }: { messages: Message[] }) {
+function MessageShortcutRail({
+  messageListRef,
+  messages,
+}: {
+  messageListRef: { current: HTMLDivElement | null };
+  messages: Message[];
+}) {
   const [hoveredMessageId, setHoveredMessageId] = useState("");
   const [isRailActive, setIsRailActive] = useState(false);
+  const [isRailFocused, setIsRailFocused] = useState(false);
+  const railRef = useRef<HTMLDivElement>(null);
+  const isShortcutSyncPausedRef = useRef(false);
+  const syncFrameRef = useRef<number | null>(null);
+  const syncTimeoutRef = useRef<number | null>(null);
+
+  const syncShortcutScroll = useCallback(() => {
+    const messageList = messageListRef.current;
+    const shortcutList = railRef.current;
+
+    if (!messageList || !shortcutList) {
+      return;
+    }
+
+    const messageScrollableDistance =
+      messageList.scrollHeight - messageList.clientHeight;
+    const shortcutScrollableDistance =
+      shortcutList.scrollHeight - shortcutList.clientHeight;
+
+    if (messageScrollableDistance <= 0 || shortcutScrollableDistance <= 0) {
+      shortcutList.scrollTop = 0;
+      return;
+    }
+
+    const scrollRatio = Math.min(
+      1,
+      Math.max(0, messageList.scrollTop / messageScrollableDistance),
+    );
+    shortcutList.scrollTop = scrollRatio * shortcutScrollableDistance;
+  }, [messageListRef]);
+
+  useEffect(() => {
+    const messageList = messageListRef.current;
+
+    if (!messageList) {
+      return;
+    }
+
+    const handleScroll = () => {
+      if (isShortcutSyncPausedRef.current) {
+        return;
+      }
+      syncShortcutScroll();
+    };
+
+    messageList.addEventListener("scroll", handleScroll, { passive: true });
+    syncShortcutScroll();
+
+    return () => {
+      messageList.removeEventListener("scroll", handleScroll);
+    };
+  }, [messages.length, messageListRef, syncShortcutScroll]);
+
+  useLayoutEffect(() => {
+    syncShortcutScroll();
+
+    if (isRailActive || isRailFocused) {
+      return;
+    }
+
+    syncFrameRef.current = window.requestAnimationFrame(syncShortcutScroll);
+    syncTimeoutRef.current = window.setTimeout(syncShortcutScroll, 220);
+
+    return () => {
+      if (syncFrameRef.current !== null) {
+        window.cancelAnimationFrame(syncFrameRef.current);
+        syncFrameRef.current = null;
+      }
+      if (syncTimeoutRef.current !== null) {
+        window.clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = null;
+      }
+    };
+  }, [isRailActive, isRailFocused, syncShortcutScroll]);
 
   if (messages.length === 0) {
     return null;
@@ -257,18 +349,40 @@ function MessageShortcutRail({ messages }: { messages: Message[] }) {
     <nav
       aria-label="Conversation shortcuts"
       className="group/shortcut-rail pointer-events-none fixed right-5 top-1/2 z-20 hidden -translate-y-1/2 items-center justify-end max-[1180px]:hidden min-[1181px]:flex"
-      onMouseEnter={() => setIsRailActive(true)}
+      onBlurCapture={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          return;
+        }
+        if (!isRailActive) {
+          isShortcutSyncPausedRef.current = false;
+        }
+        setIsRailFocused(false);
+      }}
+      onFocusCapture={() => {
+        isShortcutSyncPausedRef.current = true;
+        setIsRailFocused(true);
+      }}
+      onMouseEnter={() => {
+        isShortcutSyncPausedRef.current = true;
+        setIsRailActive(true);
+      }}
       onMouseLeave={() => {
         setHoveredMessageId("");
         setIsRailActive(false);
+        if (!isRailFocused) {
+          isShortcutSyncPausedRef.current = false;
+        }
       }}
     >
-      <div className="pointer-events-auto flowent-hidden-scrollbar flex max-h-[min(78vh,620px)] flex-col items-end gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-white/5 bg-black/20 p-2 shadow-[0_16px_44px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-colors duration-200 group-hover/shortcut-rail:bg-black/70">
+      <div
+        className="pointer-events-auto flowent-hidden-scrollbar flex max-h-[min(78vh,620px)] flex-col items-end gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-white/5 bg-black/20 p-2 shadow-[0_16px_44px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-colors duration-200 group-hover/shortcut-rail:bg-black/70"
+        ref={railRef}
+      >
         {messages.map((message) => {
           const isHovered = hoveredMessageId === message.id;
           const summary = messageShortcutSummary(message.content);
           const actor = message.author === "user" ? "You" : "Flowent";
-          const showSummary = isRailActive || isHovered;
+          const showSummary = isRailActive || isRailFocused || isHovered;
 
           return (
             <Button

@@ -1,4 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1074,6 +1080,25 @@ const mockInitialState = (
   });
 };
 
+const setScrollMetrics = (
+  element: Element,
+  metrics: { clientHeight: number; scrollHeight: number; scrollTop: number },
+) => {
+  Object.defineProperty(element, "clientHeight", {
+    configurable: true,
+    value: metrics.clientHeight,
+  });
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: metrics.scrollHeight,
+  });
+  Object.defineProperty(element, "scrollTop", {
+    configurable: true,
+    value: metrics.scrollTop,
+    writable: true,
+  });
+};
+
 const selectedProviderState = () => ({
   mcp_servers: [],
   messages: [],
@@ -1701,6 +1726,258 @@ describe("App", () => {
     );
   });
 
+  it("syncs the shortcut list near the middle of the conversation scroll", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 40 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Synchronized checkpoint ${index + 1}`,
+        id: `message-shortcut-sync-middle-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const messageList = await screen.findByLabelText("Conversation messages");
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    setScrollMetrics(messageList, {
+      clientHeight: 500,
+      scrollHeight: 2500,
+      scrollTop: 1000,
+    });
+    setScrollMetrics(shortcutList, {
+      clientHeight: 200,
+      scrollHeight: 600,
+      scrollTop: 0,
+    });
+
+    fireEvent.scroll(messageList);
+
+    expect(shortcutList.scrollTop).toBeCloseTo(200);
+  });
+
+  it("syncs the shortcut list near the bottom of the conversation scroll", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 40 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Bottom synchronized checkpoint ${index + 1}`,
+        id: `message-shortcut-sync-bottom-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const messageList = await screen.findByLabelText("Conversation messages");
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    setScrollMetrics(messageList, {
+      clientHeight: 500,
+      scrollHeight: 2500,
+      scrollTop: 2000,
+    });
+    setScrollMetrics(shortcutList, {
+      clientHeight: 200,
+      scrollHeight: 600,
+      scrollTop: 0,
+    });
+
+    fireEvent.scroll(messageList);
+
+    expect(shortcutList.scrollTop).toBeCloseTo(400);
+  });
+
+  it("pauses shortcut scroll sync while the rail is hovered", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 40 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Hover pause checkpoint ${index + 1}`,
+        id: `message-shortcut-hover-pause-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const messageList = await screen.findByLabelText("Conversation messages");
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    setScrollMetrics(messageList, {
+      clientHeight: 500,
+      scrollHeight: 2500,
+      scrollTop: 1000,
+    });
+    setScrollMetrics(shortcutList, {
+      clientHeight: 200,
+      scrollHeight: 600,
+      scrollTop: 120,
+    });
+
+    await user.hover(shortcuts);
+    await waitFor(() => {
+      expect(shortcutList.scrollTop).toBeCloseTo(200);
+    });
+    messageList.scrollTop = 1800;
+    fireEvent.scroll(messageList);
+
+    expect(shortcutList.scrollTop).toBeCloseTo(200);
+  });
+
+  it("resumes shortcut scroll sync after leaving the rail", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 40 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Resume sync checkpoint ${index + 1}`,
+        id: `message-shortcut-resume-sync-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const messageList = await screen.findByLabelText("Conversation messages");
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    setScrollMetrics(messageList, {
+      clientHeight: 500,
+      scrollHeight: 2500,
+      scrollTop: 1000,
+    });
+    setScrollMetrics(shortcutList, {
+      clientHeight: 200,
+      scrollHeight: 600,
+      scrollTop: 120,
+    });
+
+    await user.hover(shortcuts);
+    await waitFor(() => {
+      expect(shortcutList.scrollTop).toBeCloseTo(200);
+    });
+    messageList.scrollTop = 1500;
+    fireEvent.scroll(messageList);
+    expect(shortcutList.scrollTop).toBeCloseTo(200);
+
+    fireEvent.mouseLeave(shortcuts);
+
+    await waitFor(() => {
+      expect(shortcutList.scrollTop).toBeCloseTo(300);
+    });
+  });
+
+  it("pauses shortcut scroll sync while the rail has focus", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 40 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Focus pause checkpoint ${index + 1}`,
+        id: `message-shortcut-focus-pause-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const messageList = await screen.findByLabelText("Conversation messages");
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    setScrollMetrics(messageList, {
+      clientHeight: 500,
+      scrollHeight: 2500,
+      scrollTop: 1000,
+    });
+    setScrollMetrics(shortcutList, {
+      clientHeight: 200,
+      scrollHeight: 600,
+      scrollTop: 0,
+    });
+
+    const shortcut = within(shortcuts).getByRole("button", {
+      name: "Jump to You: Focus pause checkpoint 1",
+    });
+
+    await user.tab();
+    shortcut.focus();
+
+    await waitFor(() => {
+      expect(shortcutList.scrollTop).toBeCloseTo(200);
+    });
+
+    messageList.scrollTop = 1800;
+    fireEvent.scroll(messageList);
+
+    expect(shortcutList.scrollTop).toBeCloseTo(200);
+  });
+
+  it("leaves shortcut scroll position unchanged when the list does not need scrolling", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: Array.from({ length: 4 }, (_, index) => ({
+        author: index % 2 === 0 ? "user" : "assistant",
+        content: `Short shortcut checkpoint ${index + 1}`,
+        id: `message-shortcut-short-sync-${index + 1}`,
+      })),
+    });
+    render(<App />);
+
+    const messageList = await screen.findByLabelText("Conversation messages");
+    const shortcuts = await screen.findByRole("navigation", {
+      name: "Conversation shortcuts",
+    });
+    const shortcutList = shortcuts.firstElementChild;
+
+    if (!shortcutList) {
+      throw new Error("Conversation shortcut list was not rendered.");
+    }
+
+    setScrollMetrics(messageList, {
+      clientHeight: 500,
+      scrollHeight: 2500,
+      scrollTop: 1000,
+    });
+    setScrollMetrics(shortcutList, {
+      clientHeight: 600,
+      scrollHeight: 600,
+      scrollTop: 0,
+    });
+
+    fireEvent.scroll(messageList);
+
+    expect(shortcutList.scrollTop).toBe(0);
+  });
+
   it("keeps message summaries available inside the scrollable shortcut list", async () => {
     const user = userEvent.setup();
     mockInitialState({
@@ -1776,6 +2053,68 @@ describe("App", () => {
         behavior: "smooth",
         block: "start",
       });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("resyncs shortcuts near the selected message after a shortcut jump", async () => {
+    const user = userEvent.setup();
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      mockInitialState({
+        ...selectedProviderState(),
+        messages: Array.from({ length: 30 }, (_, index) => ({
+          author: index % 2 === 0 ? "user" : "assistant",
+          content: `Selected shortcut checkpoint ${index + 1}`,
+          id: `message-shortcut-selected-sync-${index + 1}`,
+        })),
+      });
+      render(<App />);
+
+      const messageList = await screen.findByLabelText("Conversation messages");
+      const shortcuts = await screen.findByRole("navigation", {
+        name: "Conversation shortcuts",
+      });
+      const shortcutList = shortcuts.firstElementChild;
+
+      if (!shortcutList) {
+        throw new Error("Conversation shortcut list was not rendered.");
+      }
+
+      setScrollMetrics(messageList, {
+        clientHeight: 500,
+        scrollHeight: 2500,
+        scrollTop: 0,
+      });
+      setScrollMetrics(shortcutList, {
+        clientHeight: 200,
+        scrollHeight: 600,
+        scrollTop: 0,
+      });
+
+      await user.hover(shortcuts);
+      await user.click(
+        within(shortcuts).getByRole("button", {
+          name: "Jump to Flowent: Selected shortcut checkpoint 20",
+        }),
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "start",
+      });
+
+      messageList.scrollTop = 1200;
+      fireEvent.scroll(messageList);
+      expect(shortcutList.scrollTop).toBe(0);
+
+      await user.unhover(shortcuts);
+
+      expect(shortcutList.scrollTop).toBeCloseTo(240);
     } finally {
       window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
