@@ -100,6 +100,7 @@ type ApiMessage = Message;
 type ApiState = {
   active_run_event_index?: number;
   active_run_id?: string | null;
+  is_compacting?: boolean;
   mcp_servers?: ApiMcpServer[];
   messages: ApiMessage[];
   providers: ApiProvider[];
@@ -555,6 +556,7 @@ function App() {
     activeRunIdRef.current = state.active_run_id ?? "";
     setActiveRunId(state.active_run_id ?? "");
     setIsResponding(Boolean(state.active_run_id));
+    setIsRefiningContext(Boolean(state.is_compacting));
   }, []);
 
   const refreshAppState = useCallback(async () => {
@@ -648,6 +650,20 @@ function App() {
       window.clearInterval(intervalId);
     };
   }, [hasStartingMcpServer]);
+
+  useEffect(() => {
+    if (!isRefiningContext) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshAppState().catch(() => undefined);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isRefiningContext, refreshAppState]);
 
   const loadProviderEditor = (provider: Provider) => {
     setProviderEditorId(provider.id);
@@ -1673,7 +1689,11 @@ function App() {
       if (result.usage_info) {
         setUsageInfo(result.usage_info);
       }
-      setMessages((currentMessages) => [...currentMessages, result.message]);
+      setMessages((currentMessages) =>
+        currentMessages.some((message) => message.id === result.message.id)
+          ? currentMessages
+          : [...currentMessages, result.message],
+      );
     } catch (error) {
       setResponseError(
         error instanceof Error

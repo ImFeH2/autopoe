@@ -464,6 +464,66 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
     assert state["usage_info"] == body["usage_info"]
 
 
+@pytest.mark.anyio
+async def test_workspace_state_exposes_manual_compact_progress(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    compact_started = asyncio.Event()
+    compact_can_finish = asyncio.Event()
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        compact_started.set()
+        await asyncio.wait_for(compact_can_finish.wait(), timeout=2)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Keep the launch checklist.",
+                        "role": "assistant",
+                    }
+                }
+            ]
+        }
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Draft a launch checklist.",
+                        "id": "message-1",
+                    },
+                    {
+                        "author": "assistant",
+                        "content": "Use provider setup first.",
+                        "id": "message-2",
+                    },
+                ]
+            },
+        )
+        compact_response_task = asyncio.create_task(
+            client.post("/api/workspace/compact")
+        )
+        await asyncio.wait_for(compact_started.wait(), timeout=2)
+        active_state = (await client.get("/api/state")).json()
+        compact_can_finish.set()
+        compact_response = await compact_response_task
+        finished_state = (await client.get("/api/state")).json()
+
+    assert active_state["is_compacting"] is True
+    assert compact_response.status_code == 200
+    assert finished_state["is_compacting"] is False
+    assert finished_state["messages"][-1]["content"] == "Context compacted"
+
+
 def test_workspace_response_uses_compacted_context_after_compact(
     tmp_path, monkeypatch
 ) -> None:

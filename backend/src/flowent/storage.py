@@ -197,6 +197,7 @@ class StoredState(BaseModel):
 
     active_run_event_index: int = 0
     active_run_id: str | None = None
+    is_compacting: bool = False
     mcp_servers: list[StoredMcpServer]
     messages: list[StoredMessage]
     providers: list[StoredProvider]
@@ -282,7 +283,7 @@ class StateStore:
             ]
             usage_row = connection.execute(
                 """
-                SELECT usage_info
+                SELECT is_compacting, usage_info
                 FROM workspace_context
                 WHERE id = 1
                 """
@@ -295,6 +296,7 @@ class StateStore:
 
         return StoredState(
             mcp_servers=mcp_servers,
+            is_compacting=bool(usage_row["is_compacting"]) if usage_row else False,
             messages=messages,
             providers=providers,
             settings=StoredSettings(
@@ -815,6 +817,31 @@ class StateStore:
             )
         return summary
 
+    def read_is_compacting(self) -> bool:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT is_compacting
+                FROM workspace_context
+                WHERE id = 1
+                """
+            ).fetchone()
+        return bool(row["is_compacting"]) if row else False
+
+    def save_is_compacting(self, is_compacting: bool) -> bool:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workspace_context (id, is_compacting)
+                VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    is_compacting = excluded.is_compacting,
+                    updated_at = unixepoch()
+                """,
+                (int(is_compacting),),
+            )
+        return is_compacting
+
     def read_active_compaction_checkpoint(
         self,
     ) -> StoredCompactionCheckpoint | None:
@@ -1119,6 +1146,7 @@ class StateStore:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 compacted_summary TEXT NOT NULL DEFAULT '',
                 active_compaction_id TEXT,
+                is_compacting INTEGER NOT NULL DEFAULT 0,
                 usage_info TEXT,
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
@@ -1207,4 +1235,9 @@ class StateStore:
         if "usage_info" not in workspace_context_columns:
             connection.execute(
                 "ALTER TABLE workspace_context ADD COLUMN usage_info TEXT"
+            )
+        if "is_compacting" not in workspace_context_columns:
+            connection.execute(
+                "ALTER TABLE workspace_context "
+                "ADD COLUMN is_compacting INTEGER NOT NULL DEFAULT 0"
             )

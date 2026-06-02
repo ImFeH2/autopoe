@@ -2572,6 +2572,90 @@ describe("App", () => {
     expect(screen.getByText("Context compacted")).toBeInTheDocument();
   });
 
+  it("restores a refining state from the loaded workspace state", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      is_compacting: true,
+      usage_info: contextUsageInfo(90_000, 120_000),
+    });
+    render(<App />);
+
+    const composerForm = await screen.findByRole("form", {
+      name: "Workspace composer",
+    });
+
+    expect(within(composerForm).getByText("Context")).toBeInTheDocument();
+    expect(within(composerForm).getByText("Refining...")).toHaveClass(
+      "animate-pulse",
+      "text-zinc-300",
+    );
+    expect(within(composerForm).queryByText("90k / 120k")).toBeNull();
+    expect(
+      within(composerForm).getByRole("progressbar", {
+        name: "Context capacity status",
+      }).firstElementChild,
+    ).toHaveClass("flowent-context-refining-indicator");
+  });
+
+  it("polls the workspace state until restored refining finishes", async () => {
+    const initialState = {
+      ...selectedProviderState(),
+      is_compacting: true,
+      usage_info: contextUsageInfo(90_000, 120_000),
+    };
+    const finishedState = {
+      ...selectedProviderState(),
+      is_compacting: false,
+      messages: [
+        {
+          author: "system",
+          content: "Context compacted",
+          id: "compact-message",
+          tools: [],
+        },
+      ],
+      usage_info: contextUsageInfo(12_000, 120_000),
+    };
+    let stateRequests = 0;
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        stateRequests += 1;
+        return new Response(
+          JSON.stringify(stateRequests === 1 ? initialState : finishedState),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({ version: "0.0.0-test" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Refining...")).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.queryByText("Refining...")).toBeNull();
+      },
+      { timeout: 2500 },
+    );
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+    expect(screen.getByText("12k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(stateRequests).toBeGreaterThanOrEqual(2);
+  });
+
   it("updates context usage from a compact response", async () => {
     const user = userEvent.setup();
     mockInitialState({

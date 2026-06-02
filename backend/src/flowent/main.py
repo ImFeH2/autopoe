@@ -1459,20 +1459,21 @@ def create_app(
                 status_code=409,
                 detail="Compact is unavailable while Flowent is responding.",
             )
-        logger.info("Workspace compact requested")
-        state = store.read_state()
-        connection = selected_connection(state)
-        checkpoint = store.read_active_compaction_checkpoint()
-        model_history = [
-            *runtime_context_messages(cwd, state.settings.agent_prompt),
-            *workspace_chat_messages(
-                state.messages,
-                store.read_compacted_context(),
-                checkpoint,
-            ),
-        ]
-
         try:
+            store.save_is_compacting(True)
+            logger.info("Workspace compact requested")
+            state = store.read_state()
+            connection = selected_connection(state)
+            checkpoint = store.read_active_compaction_checkpoint()
+            model_history = [
+                *runtime_context_messages(cwd, state.settings.agent_prompt),
+                *workspace_chat_messages(
+                    state.messages,
+                    store.read_compacted_context(),
+                    checkpoint,
+                ),
+            ]
+
             marker, _, usage_info = await save_context_checkpoint(
                 connection=connection,
                 marker_content=COMPACTED_CONTEXT_MARKER,
@@ -1481,6 +1482,7 @@ def create_app(
                 source_message_id=None,
                 trigger="manual",
             )
+            store.save_messages([*state.messages, marker])
         except HTTPException:
             raise
         except Exception as error:
@@ -1489,8 +1491,9 @@ def create_app(
                 status_code=500,
                 detail="Context could not be compacted.",
             ) from error
+        finally:
+            store.save_is_compacting(False)
 
-        store.save_messages([*state.messages, marker])
         logger.info("Workspace compact completed")
         return WorkspaceCompactResponse(message=marker, usage_info=usage_info)
 
