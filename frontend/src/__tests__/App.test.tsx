@@ -2656,6 +2656,80 @@ describe("App", () => {
     expect(stateRequests).toBeGreaterThanOrEqual(2);
   });
 
+  it("restores refining after the Compact request is cancelled", async () => {
+    const user = userEvent.setup();
+    const initialState = selectedProviderState();
+    const refiningState = {
+      ...selectedProviderState(),
+      is_compacting: true,
+      usage_info: contextUsageInfo(90_000, 120_000),
+    };
+    const finishedState = {
+      ...selectedProviderState(),
+      is_compacting: false,
+      messages: [
+        {
+          author: "system",
+          content: "Context compacted",
+          id: "compact-message",
+          tools: [],
+        },
+      ],
+      usage_info: contextUsageInfo(12_000, 120_000),
+    };
+    let stateRequests = 0;
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        stateRequests += 1;
+        const state =
+          stateRequests === 1
+            ? initialState
+            : stateRequests === 2
+              ? refiningState
+              : finishedState;
+        return new Response(JSON.stringify(state), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({ version: "0.0.0-test" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        const error = new Error("The operation was aborted.");
+        error.name = "AbortError";
+        throw error;
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Refining...")).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.queryByText("Refining...")).toBeNull();
+      },
+      { timeout: 2500 },
+    );
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+    expect(screen.getByText("12k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(stateRequests).toBeGreaterThanOrEqual(3);
+  });
+
   it("updates context usage from a compact response", async () => {
     const user = userEvent.setup();
     mockInitialState({

@@ -524,6 +524,115 @@ async def test_workspace_state_exposes_manual_compact_progress(
     assert finished_state["messages"][-1]["content"] == "Context compacted"
 
 
+@pytest.mark.anyio
+async def test_workspace_manual_compact_continues_after_request_cancel(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    compact_started = asyncio.Event()
+    compact_can_finish = asyncio.Event()
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        compact_started.set()
+        await asyncio.wait_for(compact_can_finish.wait(), timeout=2)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Keep compacting after reconnect.",
+                        "role": "assistant",
+                    }
+                }
+            ]
+        }
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Keep working if I refresh.",
+                        "id": "message-1",
+                    }
+                ]
+            },
+        )
+        compact_response_task = asyncio.create_task(
+            client.post("/api/workspace/compact")
+        )
+        await asyncio.wait_for(compact_started.wait(), timeout=2)
+        compact_response_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await compact_response_task
+        active_state = (await client.get("/api/state")).json()
+        compact_can_finish.set()
+
+        for _ in range(20):
+            finished_state = (await client.get("/api/state")).json()
+            if not finished_state["is_compacting"]:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("Workspace compact did not complete.")
+
+    assert active_state["is_compacting"] is True
+    assert finished_state["is_compacting"] is False
+    assert finished_state["messages"][-1]["content"] == "Context compacted"
+
+
+@pytest.mark.anyio
+async def test_workspace_manual_compact_failure_clears_progress(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    compact_started = asyncio.Event()
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        compact_started.set()
+        raise RuntimeError("provider stopped")
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Try compacting this.",
+                        "id": "message-1",
+                    }
+                ]
+            },
+        )
+        compact_response = await client.post("/api/workspace/compact")
+        await asyncio.wait_for(compact_started.wait(), timeout=2)
+        state = (await client.get("/api/state")).json()
+
+    assert compact_response.status_code == 500
+    assert compact_response.json()["detail"] == "Context could not be compacted."
+    assert state["is_compacting"] is False
+    assert state["messages"] == [
+        {
+            "author": "user",
+            "content": "Try compacting this.",
+            "id": "message-1",
+            "tools": [],
+        }
+    ]
+
+
 def test_workspace_response_uses_compacted_context_after_compact(
     tmp_path, monkeypatch
 ) -> None:

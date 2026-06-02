@@ -465,6 +465,12 @@ const latestUsageInfoFromMessages = (
   return null;
 };
 
+const isAbortError = (error: unknown) =>
+  typeof error === "object" &&
+  error !== null &&
+  "name" in error &&
+  error.name === "AbortError";
+
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
@@ -1694,13 +1700,17 @@ function App() {
           ? currentMessages
           : [...currentMessages, result.message],
       );
+      setIsRefiningContext(false);
     } catch (error) {
+      if (isAbortError(error)) {
+        void refreshAppState().catch(() => undefined);
+        return;
+      }
       setResponseError(
         error instanceof Error
           ? error.message
           : "Context could not be compacted.",
       );
-    } finally {
       setIsRefiningContext(false);
     }
   };

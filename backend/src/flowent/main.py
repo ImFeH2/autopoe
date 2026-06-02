@@ -3,7 +3,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -126,6 +126,11 @@ class WorkspaceCompactResponse(BaseModel):
 
     message: StoredMessage
     usage_info: TokenUsageInfo
+
+
+@dataclass
+class WorkspaceCompactTask:
+    task: asyncio.Task[tuple[StoredMessage, TokenUsageInfo]]
 
 
 class AboutResponse(BaseModel):
@@ -640,6 +645,7 @@ def create_app(
     telegram_bot_manager: TelegramBotManager | None = None
     workspace_runs: dict[str, WorkspaceRun] = {}
     active_workspace_run_id: str | None = None
+    active_compact_task: WorkspaceCompactTask | None = None
 
     static_dir = frontend_static_directory().resolve(strict=False)
     logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
@@ -1454,47 +1460,86 @@ def create_app(
 
     @app.post("/api/workspace/compact")
     async def compact_workspace() -> WorkspaceCompactResponse:
-        if active_workspace_run() is not None:
-            raise HTTPException(
-                status_code=409,
-                detail="Compact is unavailable while Flowent is responding.",
-            )
-        try:
-            store.save_is_compacting(True)
+        nonlocal active_compact_task
+
+        async def run_manual_compact(
+            *,
+            checkpoint: StoredCompactionCheckpoint | None,
+            connection: ProviderConnection,
+            state: StoredState,
+        ) -> tuple[StoredMessage, TokenUsageInfo]:
             logger.info("Workspace compact requested")
+            try:
+                model_history = [
+                    *runtime_context_messages(cwd, state.settings.agent_prompt),
+                    *workspace_chat_messages(
+                        state.messages,
+                        store.read_compacted_context(),
+                        checkpoint,
+                    ),
+                ]
+
+                marker, _, usage_info = await save_context_checkpoint(
+                    connection=connection,
+                    marker_content=COMPACTED_CONTEXT_MARKER,
+                    messages=state.messages,
+                    model_history=model_history,
+                    source_message_id=None,
+                    trigger="manual",
+                )
+                store.save_messages([*state.messages, marker])
+                logger.info("Workspace compact completed")
+                return marker, usage_info
+            except Exception:
+                logger.exception("Workspace compact failed")
+                raise
+            finally:
+                store.save_is_compacting(False)
+
+        def clear_active_compact_task(
+            task: asyncio.Task[tuple[StoredMessage, TokenUsageInfo]],
+        ) -> None:
+            nonlocal active_compact_task
+            if active_compact_task is not None and active_compact_task.task is task:
+                active_compact_task = None
+            with suppress(asyncio.CancelledError):
+                task.exception()
+
+        if active_compact_task is not None:
+            if not active_compact_task.task.done():
+                compact_task = active_compact_task.task
+            else:
+                active_compact_task = None
+
+        if active_compact_task is None:
+            if active_workspace_run() is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Compact is unavailable while Flowent is responding.",
+                )
             state = store.read_state()
             connection = selected_connection(state)
             checkpoint = store.read_active_compaction_checkpoint()
-            model_history = [
-                *runtime_context_messages(cwd, state.settings.agent_prompt),
-                *workspace_chat_messages(
-                    state.messages,
-                    store.read_compacted_context(),
-                    checkpoint,
-                ),
-            ]
-
-            marker, _, usage_info = await save_context_checkpoint(
-                connection=connection,
-                marker_content=COMPACTED_CONTEXT_MARKER,
-                messages=state.messages,
-                model_history=model_history,
-                source_message_id=None,
-                trigger="manual",
+            store.save_is_compacting(True)
+            compact_task = asyncio.create_task(
+                run_manual_compact(
+                    checkpoint=checkpoint,
+                    connection=connection,
+                    state=state,
+                )
             )
-            store.save_messages([*state.messages, marker])
+            compact_task.add_done_callback(clear_active_compact_task)
+            active_compact_task = WorkspaceCompactTask(task=compact_task)
+
+        try:
+            marker, usage_info = await asyncio.shield(compact_task)
         except HTTPException:
             raise
         except Exception as error:
-            logger.exception("Workspace compact failed")
             raise HTTPException(
                 status_code=500,
                 detail="Context could not be compacted.",
             ) from error
-        finally:
-            store.save_is_compacting(False)
-
-        logger.info("Workspace compact completed")
         return WorkspaceCompactResponse(message=marker, usage_info=usage_info)
 
     @app.post("/api/workspace/respond")
