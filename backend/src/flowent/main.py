@@ -121,13 +121,6 @@ class WorkspaceRunResponse(BaseModel):
     run_id: str
 
 
-class WorkspaceCompactResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    message: StoredMessage
-    usage_info: TokenUsageInfo
-
-
 @dataclass
 class WorkspaceCompactTask:
     task: asyncio.Task[tuple[StoredMessage, TokenUsageInfo]]
@@ -1458,8 +1451,8 @@ def create_app(
             run.task.cancel()
         return {"ok": True}
 
-    @app.post("/api/workspace/compact")
-    async def compact_workspace() -> WorkspaceCompactResponse:
+    @app.post("/api/workspace/compact", response_class=StreamingResponse)
+    async def compact_workspace() -> StreamingResponse:
         nonlocal active_compact_task
 
         async def run_manual_compact(
@@ -1531,16 +1524,28 @@ def create_app(
             compact_task.add_done_callback(clear_active_compact_task)
             active_compact_task = WorkspaceCompactTask(task=compact_task)
 
-        try:
-            marker, usage_info = await asyncio.shield(compact_task)
-        except HTTPException:
-            raise
-        except Exception as error:
-            raise HTTPException(
-                status_code=500,
-                detail="Context could not be compacted.",
-            ) from error
-        return WorkspaceCompactResponse(message=marker, usage_info=usage_info)
+        async def compact_workspace_stream() -> AsyncIterator[str]:
+            try:
+                marker, usage_info = await asyncio.shield(compact_task)
+            except Exception:
+                yield stream_event(
+                    "error",
+                    {"message": "Context could not be compacted."},
+                )
+                return
+
+            marker_data = marker.model_dump()
+            yield stream_event("usage", usage_event_data(usage_info))
+            yield stream_event(
+                "context_optimized",
+                {"message": marker_data, **usage_event_data(usage_info)},
+            )
+            yield stream_event("done", {"message": marker_data})
+
+        return StreamingResponse(
+            compact_workspace_stream(),
+            media_type="text/event-stream",
+        )
 
     @app.post("/api/workspace/respond")
     async def respond_to_workspace(

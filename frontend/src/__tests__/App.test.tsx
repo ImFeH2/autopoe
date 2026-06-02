@@ -201,6 +201,109 @@ const contextUsageInfo = (
   total_token_usage: contextUsage(totalTokens),
 });
 
+const compactStreamResponse = (
+  usageInfo?: TestContextUsageInfo,
+  id = "compact-message",
+) => {
+  const encoder = new TextEncoder();
+  const message = {
+    author: "system",
+    content: "Context compacted",
+    id,
+    tools: [],
+    usage_info: usageInfo,
+  };
+  const stream = new ReadableStream({
+    start(controller) {
+      if (usageInfo) {
+        controller.enqueue(
+          encoder.encode(
+            `event: usage\ndata: ${JSON.stringify({ usage_info: usageInfo })}\n\n`,
+          ),
+        );
+      }
+      controller.enqueue(
+        encoder.encode(
+          `event: context_optimized\ndata: ${JSON.stringify({
+            message,
+            usage_info: usageInfo,
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(`event: done\ndata: ${JSON.stringify({ message })}\n\n`),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
+const compactErrorStreamResponse = (message: string) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `event: error\ndata: ${JSON.stringify({ message })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
+const controlledCompactUsageStreamResponse = (
+  usageInfo: TestContextUsageInfo,
+  id = "compact-message",
+) => {
+  const encoder = new TextEncoder();
+  const release = deferred();
+  const message = {
+    author: "system",
+    content: "Context compacted",
+    id,
+    tools: [],
+    usage_info: usageInfo,
+  };
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `event: usage\ndata: ${JSON.stringify({ usage_info: usageInfo })}\n\n`,
+        ),
+      );
+      await release.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: context_optimized\ndata: ${JSON.stringify({
+            message,
+            usage_info: usageInfo,
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(`event: done\ndata: ${JSON.stringify({ message })}\n\n`),
+      );
+      controller.close();
+    },
+  });
+  return {
+    release: release.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
+};
+
 const assistantOptimizedContextStreamResponse = (
   content: string,
   id = "message-assistant",
@@ -1133,20 +1236,7 @@ const mockInitialState = (
     }
 
     if (input === "/api/workspace/compact" && init?.method === "POST") {
-      return new Response(
-        JSON.stringify({
-          message: {
-            author: "system",
-            content: "Context compacted",
-            id: "compact-message",
-            tools: [],
-          },
-        }),
-        {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        },
-      );
+      return compactStreamResponse();
     }
 
     if (input === "/api/workspace/respond" && init?.method === "POST") {
@@ -2406,20 +2496,7 @@ describe("App", () => {
       }
       if (input === "/api/workspace/compact" && init?.method === "POST") {
         await compactRequest.promise;
-        return new Response(
-          JSON.stringify({
-            message: {
-              author: "system",
-              content: "Context compacted",
-              id: "compact-message",
-              tools: [],
-            },
-          }),
-          {
-            headers: { "Content-Type": "application/json" },
-            status: 200,
-          },
-        );
+        return compactStreamResponse();
       }
       if (input === "/api/workspace/messages" && init?.method === "PUT") {
         return new Response(init.body, {
@@ -2472,20 +2549,7 @@ describe("App", () => {
       }
       if (input === "/api/workspace/compact" && init?.method === "POST") {
         await compactRequest.promise;
-        return new Response(
-          JSON.stringify({
-            message: {
-              author: "system",
-              content: "Context compacted",
-              id: "compact-message",
-              tools: [],
-            },
-          }),
-          {
-            headers: { "Content-Type": "application/json" },
-            status: 200,
-          },
-        );
+        return compactStreamResponse();
       }
       return new Response("{}", {
         headers: { "Content-Type": "application/json" },
@@ -2525,20 +2589,7 @@ describe("App", () => {
       }
       if (input === "/api/workspace/compact" && init?.method === "POST") {
         await compactRequest.promise;
-        return new Response(
-          JSON.stringify({
-            message: {
-              author: "system",
-              content: "Context compacted",
-              id: "compact-message",
-              tools: [],
-            },
-          }),
-          {
-            headers: { "Content-Type": "application/json" },
-            status: 200,
-          },
-        );
+        return compactStreamResponse();
       }
       return new Response("{}", {
         headers: { "Content-Type": "application/json" },
@@ -2730,7 +2781,7 @@ describe("App", () => {
     expect(stateRequests).toBeGreaterThanOrEqual(3);
   });
 
-  it("updates context usage from a compact response", async () => {
+  it("updates context usage from a compact stream", async () => {
     const user = userEvent.setup();
     mockInitialState({
       ...selectedProviderState(),
@@ -2751,22 +2802,7 @@ describe("App", () => {
       }
       if (input === "/api/workspace/compact" && init?.method === "POST") {
         const usageInfo = contextUsageInfo(12_000, 120_000);
-        return new Response(
-          JSON.stringify({
-            message: {
-              author: "system",
-              content: "Context compacted",
-              id: "compact-message",
-              tools: [],
-              usage_info: usageInfo,
-            },
-            usage_info: usageInfo,
-          }),
-          {
-            headers: { "Content-Type": "application/json" },
-            status: 200,
-          },
-        );
+        return compactStreamResponse(usageInfo);
       }
       return new Response("{}", {
         headers: { "Content-Type": "application/json" },
@@ -2785,6 +2821,59 @@ describe("App", () => {
     expect(await screen.findByText("12k / 120k")).toBeInTheDocument();
     expect(screen.getByText("10%")).toBeInTheDocument();
     expect(screen.queryByText("90k / 120k")).toBeNull();
+  });
+
+  it("updates context usage while the Compact stream is still running", async () => {
+    const user = userEvent.setup();
+    const compactStream = controlledCompactUsageStreamResponse(
+      contextUsageInfo(12_000, 120_000),
+    );
+    mockInitialState({
+      ...selectedProviderState(),
+      usage_info: contextUsageInfo(90_000, 120_000),
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            ...selectedProviderState(),
+            usage_info: contextUsageInfo(90_000, 120_000),
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/compact" && init?.method === "POST") {
+        return compactStream.response;
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    expect(await screen.findByText("90k / 120k")).toBeInTheDocument();
+
+    const composer = screen.getByRole("textbox", { name: "Message Flowent" });
+    await user.type(composer, "/compact");
+    await user.keyboard("{Enter}");
+
+    await screen.findByText("Refining...");
+    await waitFor(() => {
+      expect(
+        screen.getByRole("progressbar", {
+          name: "Context capacity status",
+        }),
+      ).toHaveAttribute("aria-valuenow", "10");
+    });
+    expect(screen.queryByText("Context compacted")).toBeNull();
+
+    compactStream.release();
+    await screen.findByText("Context compacted");
+    expect(screen.getByText("12k / 120k")).toBeInTheDocument();
   });
 
   it("updates context usage from automatic context optimization", async () => {
@@ -6928,13 +7017,7 @@ describe("App", () => {
         );
       }
       if (input === "/api/workspace/compact" && init?.method === "POST") {
-        return new Response(
-          JSON.stringify({ detail: "Context could not be compacted." }),
-          {
-            headers: { "Content-Type": "application/json" },
-            status: 500,
-          },
-        );
+        return compactErrorStreamResponse("Context could not be compacted.");
       }
       return new Response("{}", {
         headers: { "Content-Type": "application/json" },

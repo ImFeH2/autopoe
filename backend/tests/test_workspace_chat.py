@@ -112,6 +112,13 @@ def stream_events(content: str) -> list[dict[str, object]]:
     return events
 
 
+def stream_json_events(content: str) -> list[dict[str, object]]:
+    return [
+        {"event": event["event"], "data": json.loads(str(event["data"]))}
+        for event in stream_events(content)
+    ]
+
+
 def tool_call_chunk(
     name: str,
     arguments: str,
@@ -420,15 +427,25 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
     response = client.post("/api/workspace/compact")
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["message"] == {
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = stream_json_events(response.text)
+    assert [event["event"] for event in events] == [
+        "usage",
+        "context_optimized",
+        "done",
+    ]
+    usage_info = events[0]["data"]["usage_info"]
+    marker = events[1]["data"]["message"]
+    assert events[1]["data"]["usage_info"] == usage_info
+    assert events[2]["data"]["message"] == marker
+    assert marker == {
         "author": "system",
         "content": "Context compacted",
-        "id": body["message"]["id"],
+        "id": marker["id"],
         "tools": [],
-        "usage_info": body["usage_info"],
+        "usage_info": usage_info,
     }
-    assert body["usage_info"] == {
+    assert usage_info == {
         "last_token_usage": {
             "cached_input_tokens": 0,
             "input_tokens": 0,
@@ -460,8 +477,56 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
     assert "Use provider setup first." in captured_request["messages"][-1]["content"]
 
     state = client.get("/api/state").json()
-    assert state["messages"][-1] == body["message"]
-    assert state["usage_info"] == body["usage_info"]
+    assert state["messages"][-1] == marker
+    assert state["usage_info"] == usage_info
+
+
+def test_workspace_manual_compact_streams_marker_before_done(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Keep current launch context.",
+                        "role": "assistant",
+                    }
+                }
+            ]
+        }
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "user",
+                    "content": "Keep this launch context.",
+                    "id": "message-1",
+                }
+            ]
+        },
+    )
+
+    response = client.post("/api/workspace/compact")
+
+    assert response.status_code == 200
+    events = stream_json_events(response.text)
+    assert [event["event"] for event in events] == [
+        "usage",
+        "context_optimized",
+        "done",
+    ]
+    assert events[1]["data"]["message"]["content"] == "Context compacted"
+    assert events[2]["data"]["message"] == events[1]["data"]["message"]
 
 
 @pytest.mark.anyio
@@ -520,6 +585,8 @@ async def test_workspace_state_exposes_manual_compact_progress(
 
     assert active_state["is_compacting"] is True
     assert compact_response.status_code == 200
+    assert compact_response.headers["content-type"].startswith("text/event-stream")
+    assert stream_json_events(compact_response.text)[-1]["event"] == "done"
     assert finished_state["is_compacting"] is False
     assert finished_state["messages"][-1]["content"] == "Context compacted"
 
@@ -620,8 +687,15 @@ async def test_workspace_manual_compact_failure_clears_progress(
         await asyncio.wait_for(compact_started.wait(), timeout=2)
         state = (await client.get("/api/state")).json()
 
-    assert compact_response.status_code == 500
-    assert compact_response.json()["detail"] == "Context could not be compacted."
+    assert compact_response.status_code == 200
+    assert compact_response.headers["content-type"].startswith("text/event-stream")
+    events = stream_json_events(compact_response.text)
+    assert events == [
+        {
+            "event": "error",
+            "data": {"message": "Context could not be compacted."},
+        }
+    ]
     assert state["is_compacting"] is False
     assert state["messages"] == [
         {
@@ -2432,7 +2506,8 @@ def test_workspace_state_restores_compact_usage_after_restart(
     state = restarted_client.get("/api/state").json()
 
     assert compact_response.status_code == 200
-    assert state["usage_info"] == compact_response.json()["usage_info"]
+    events = stream_json_events(compact_response.text)
+    assert state["usage_info"] == events[0]["data"]["usage_info"]
     assert state["messages"][-1]["usage_info"] == state["usage_info"]
 
 

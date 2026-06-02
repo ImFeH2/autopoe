@@ -1678,6 +1678,16 @@ function App() {
     setResponseError("");
     setIsRefiningContext(true);
 
+    const appendCompactMessage = (message: ApiMessage) => {
+      setMessages((currentMessages) =>
+        currentMessages.some(
+          (currentMessage) => currentMessage.id === message.id,
+        )
+          ? currentMessages
+          : [...currentMessages, message],
+      );
+    };
+
     try {
       const response = await fetch("/api/workspace/compact", {
         headers: { "Content-Type": "application/json" },
@@ -1688,18 +1698,18 @@ function App() {
         throw new Error(await responseErrorFromApi(response));
       }
 
-      const result = (await response.json()) as {
-        message: ApiMessage;
-        usage_info?: ContextUsageInfo;
-      };
-      if (result.usage_info) {
-        setUsageInfo(result.usage_info);
-      }
-      setMessages((currentMessages) =>
-        currentMessages.some((message) => message.id === result.message.id)
-          ? currentMessages
-          : [...currentMessages, result.message],
-      );
+      await readWorkspaceStream(response, {
+        onContextOptimized: appendCompactMessage,
+        onDelta: () => undefined,
+        onDone: appendCompactMessage,
+        onError: (error) => setResponseError(error.message),
+        onOutputStart: () => undefined,
+        onStart: () => undefined,
+        onThinkingDelta: () => undefined,
+        onToolDone: () => undefined,
+        onToolStart: () => undefined,
+        onUsage: setUsageInfo,
+      });
       setIsRefiningContext(false);
     } catch (error) {
       if (isAbortError(error)) {
