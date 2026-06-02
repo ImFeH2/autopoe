@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
@@ -75,9 +76,30 @@ class ModelListCallable(Protocol):
 
 logger = logging.getLogger("flowent.llm")
 
+LLM_RETRY_LIMIT = 5
+LLM_RETRY_BASE_DELAY_SECONDS = 0.5
+
 
 class LLMStreamError(RuntimeError):
     pass
+
+
+async def wait_before_llm_retry(attempt_number: int) -> None:
+    await asyncio.sleep(LLM_RETRY_BASE_DELAY_SECONDS * attempt_number)
+
+
+async def request_litellm_completion(
+    completion: CompletionCallable,
+    request: Mapping[str, Any],
+) -> Any:
+    for attempt_number in range(LLM_RETRY_LIMIT + 1):
+        try:
+            return await completion(**request)
+        except Exception:
+            if attempt_number >= LLM_RETRY_LIMIT:
+                raise
+            await wait_before_llm_retry(attempt_number + 1)
+    raise RuntimeError("LLM request failed")
 
 
 MODEL_PREFIXES: dict[ProviderFormat, str] = {
@@ -361,7 +383,7 @@ async def complete_chat_with_usage(
     )
     request = build_litellm_request(connection, messages, tools=tools)
     record_litellm_request_diagnostic(connection, request)
-    response = await completion(**request)
+    response = await request_litellm_completion(completion, request)
     logger.log(TRACE_LEVEL, "LLM completion response=%r", response)
     choice = response["choices"][0]["message"]
     return ChatCompletionResult(
@@ -480,11 +502,20 @@ async def stream_chat_chunks(
     )
     request = build_litellm_request(connection, messages, stream=True, tools=tools)
     record_litellm_request_diagnostic(connection, request)
-    response = await completion(**request)
-    async for chunk in response:
-        raise_for_stream_failure(chunk)
-        logger.log(TRACE_LEVEL, "LLM stream chunk=%r", chunk)
-        yield chunk
+    for attempt_number in range(LLM_RETRY_LIMIT + 1):
+        yielded_chunk = False
+        try:
+            response = await completion(**request)
+            async for chunk in response:
+                raise_for_stream_failure(chunk)
+                logger.log(TRACE_LEVEL, "LLM stream chunk=%r", chunk)
+                yielded_chunk = True
+                yield chunk
+            return
+        except Exception:
+            if yielded_chunk or attempt_number >= LLM_RETRY_LIMIT:
+                raise
+            await wait_before_llm_retry(attempt_number + 1)
 
 
 async def stream_chat(

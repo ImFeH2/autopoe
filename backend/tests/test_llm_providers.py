@@ -266,6 +266,85 @@ async def test_complete_chat_uses_injected_litellm_completion() -> None:
 
 
 @pytest.mark.anyio
+async def test_complete_chat_retries_failed_completion_before_returning_answer(
+    monkeypatch,
+) -> None:
+    attempts = 0
+    retry_attempts: list[int] = []
+
+    async def fake_wait(attempt_number: int) -> None:
+        retry_attempts.append(attempt_number)
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("Temporary connection error")
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Here is the checklist.",
+                        "role": "assistant",
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr("flowent.llm.wait_before_llm_retry", fake_wait)
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="connection-responses",
+    )
+
+    answer = await complete_chat(
+        connection,
+        [ChatMessage(role="user", content="Create a checklist.")],
+        completion=fake_completion,
+    )
+
+    assert attempts == 2
+    assert retry_attempts == [1]
+    assert answer == ChatMessage(role="assistant", content="Here is the checklist.")
+
+
+@pytest.mark.anyio
+async def test_complete_chat_retries_five_times_before_raising_last_error(
+    monkeypatch,
+) -> None:
+    attempts = 0
+    retry_attempts: list[int] = []
+
+    async def fake_wait(attempt_number: int) -> None:
+        retry_attempts.append(attempt_number)
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError(f"Temporary connection error {attempts}")
+
+    monkeypatch.setattr("flowent.llm.wait_before_llm_retry", fake_wait)
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="connection-responses",
+    )
+
+    with pytest.raises(RuntimeError, match="Temporary connection error 6"):
+        await complete_chat(
+            connection,
+            [ChatMessage(role="user", content="Create a checklist.")],
+            completion=fake_completion,
+        )
+
+    assert attempts == 6
+    assert retry_attempts == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.anyio
 async def test_development_mode_writes_completion_request_diagnostic_file(
     tmp_path, monkeypatch
 ) -> None:
@@ -323,6 +402,54 @@ async def test_development_mode_writes_completion_request_diagnostic_file(
 
 
 @pytest.mark.anyio
+async def test_development_mode_writes_one_diagnostic_file_when_completion_retries(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DEBUG", "true")
+    attempts = 0
+
+    async def fake_wait(attempt_number: int) -> None:
+        pass
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("Temporary connection error")
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Here is the checklist.",
+                        "role": "assistant",
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr("flowent.llm.wait_before_llm_retry", fake_wait)
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="sk-request-secret",
+    )
+
+    answer = await complete_chat(
+        connection,
+        [ChatMessage(role="user", content="Create a checklist.")],
+        completion=fake_completion,
+    )
+
+    diagnostic = read_single_llm_request_diagnostic(tmp_path)
+
+    assert attempts == 2
+    assert answer == ChatMessage(role="assistant", content="Here is the checklist.")
+    assert diagnostic["stream"] is False
+
+
+@pytest.mark.anyio
 async def test_stream_chat_uses_litellm_streaming() -> None:
     captured_request: dict[str, object] = {}
 
@@ -355,6 +482,88 @@ async def test_stream_chat_uses_litellm_streaming() -> None:
     assert captured_request["stream_options"] == {"include_usage": True}
     assert captured_request["model"] == "openai/gpt-5.1"
     assert chunks == ["Here is ", "the checklist."]
+
+
+@pytest.mark.anyio
+async def test_stream_chat_retries_when_stream_fails_before_output(monkeypatch) -> None:
+    attempts = 0
+    retry_attempts: list[int] = []
+
+    async def fake_wait(attempt_number: int) -> None:
+        retry_attempts.append(attempt_number)
+
+    async def fake_completion(**request: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("Temporary connection error")
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Here is "}}]}
+            yield {"choices": [{"delta": {"content": "the checklist."}}]}
+
+        return chunks()
+
+    monkeypatch.setattr("flowent.llm.wait_before_llm_retry", fake_wait)
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="connection-responses",
+    )
+
+    chunks = [
+        chunk
+        async for chunk in stream_chat(
+            connection,
+            [ChatMessage(role="user", content="Create a checklist.")],
+            completion=fake_completion,
+        )
+    ]
+
+    assert attempts == 2
+    assert retry_attempts == [1]
+    assert chunks == ["Here is ", "the checklist."]
+
+
+@pytest.mark.anyio
+async def test_stream_chat_does_not_retry_after_output(monkeypatch) -> None:
+    attempts = 0
+    retry_attempts: list[int] = []
+
+    async def fake_wait(attempt_number: int) -> None:
+        retry_attempts.append(attempt_number)
+
+    async def fake_completion(**request: object) -> object:
+        nonlocal attempts
+        attempts += 1
+
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Partial answer."}}]}
+            raise RuntimeError("Stream closed")
+
+        return chunks()
+
+    monkeypatch.setattr("flowent.llm.wait_before_llm_retry", fake_wait)
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.1",
+        secret_reference="connection-responses",
+    )
+
+    with pytest.raises(RuntimeError, match="Stream closed"):
+        [
+            chunk
+            async for chunk in stream_chat(
+                connection,
+                [ChatMessage(role="user", content="Create a checklist.")],
+                completion=fake_completion,
+            )
+        ]
+
+    assert attempts == 1
+    assert retry_attempts == []
 
 
 @pytest.mark.anyio

@@ -885,7 +885,7 @@ async def test_agent_logs_model_call_failure_after_tool_result(
         ]
     rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
 
-    assert len(captured_requests) == 2
+    assert len(captured_requests) == 7
     assert "Agent model call failed" in rendered_logs
     assert "round=2" in rendered_logs
     assert "chunk_count=0" in rendered_logs
