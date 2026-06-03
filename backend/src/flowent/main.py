@@ -543,6 +543,39 @@ def usage_event_data(usage_info: TokenUsageInfo) -> dict[str, object]:
     return {"usage_info": usage_info.model_dump()}
 
 
+def usage_info_for_model(
+    usage_info: TokenUsageInfo | None,
+    model_name: str | None,
+) -> TokenUsageInfo | None:
+    if usage_info is None:
+        return None
+    return usage_info.model_copy(
+        update={"model_context_window": current_model_context_window(model_name)}
+    )
+
+
+def state_with_current_model_context_window(state: StoredState) -> StoredState:
+    selected_model = state.settings.selected_model
+    return state.model_copy(
+        update={
+            "messages": [
+                message.model_copy(
+                    update={
+                        "usage_info": usage_info_for_model(
+                            message.usage_info,
+                            selected_model,
+                        )
+                    }
+                )
+                if message.usage_info is not None
+                else message
+                for message in state.messages
+            ],
+            "usage_info": usage_info_for_model(state.usage_info, selected_model),
+        }
+    )
+
+
 def workspace_chat_messages(
     messages: list[StoredMessage],
     compacted_context: str = "",
@@ -922,7 +955,7 @@ def create_app(
 
     @app.get("/api/state")
     async def app_state() -> StoredState:
-        state = store.read_state()
+        state = state_with_current_model_context_window(store.read_state())
         active_run = (
             workspace_runs.get(active_workspace_run_id)
             if active_workspace_run_id

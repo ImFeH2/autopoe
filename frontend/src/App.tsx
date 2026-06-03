@@ -810,12 +810,17 @@ function App() {
     });
   };
 
+  const persistSettingsAndRefresh = async (settings: RuntimeSettings) => {
+    await persistSettings(settings);
+    await refreshAppState();
+  };
+
   const handleActiveProviderChange = (value: string) => {
     const nextProvider = providers.find((provider) => provider.id === value);
     if (!nextProvider) {
       setSelectedProviderId("");
       setSelectedModel("");
-      void persistSettings({
+      void persistSettingsAndRefresh({
         agentPrompt,
         reasoningEffort,
         selectedModel: "",
@@ -826,7 +831,7 @@ function App() {
 
     setSelectedProviderId(nextProvider.id);
     setSelectedModel("");
-    void persistSettings({
+    void persistSettingsAndRefresh({
       agentPrompt,
       reasoningEffort,
       selectedModel: "",
@@ -836,7 +841,7 @@ function App() {
 
   const handleActiveModelChange = (value: string) => {
     setSelectedModel(value);
-    void persistSettings({
+    void persistSettingsAndRefresh({
       agentPrompt,
       reasoningEffort,
       selectedModel: value,
