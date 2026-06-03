@@ -1898,9 +1898,6 @@ function App() {
           usageInfo={usageInfo}
           commands={workspaceCommands}
           skills={skills}
-          onClearMessages={() => {
-            void clearMessages();
-          }}
           onCommand={runWorkspaceCommand}
           onCommandError={handleWorkspaceCommandError}
           onDraftChange={setDraft}
