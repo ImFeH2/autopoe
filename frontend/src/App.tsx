@@ -443,6 +443,13 @@ const assistantGroupsFromMessage = (
   return groups;
 };
 
+const countAssistantOutputItems = (
+  groups: AssistantOutputGroup[],
+  type: AssistantOutputItem["type"],
+) =>
+  groups.flatMap((group) => group.items).filter((item) => item.type === type)
+    .length;
+
 const streamErrorFromMessage = (
   message: string,
   assistantId: string,
@@ -1232,7 +1239,10 @@ function App() {
           .flatMap((group) => group.items)
           .reverse()
           .find((item) => item.type === "text")?.id ?? "";
-      let assistantTextItemIndex = 0;
+      let assistantTextItemIndex = countAssistantOutputItems(
+        assistantGroups,
+        "text",
+      );
       let assistantIsStreamingThinking = false;
       let assistantIsStreamingText = false;
       let assistantTools: ToolItem[] = existingAssistant?.tools ?? [];
