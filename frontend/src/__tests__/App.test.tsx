@@ -2009,6 +2009,55 @@ describe("App", () => {
     expect(shortcutList.scrollTop).toBeCloseTo(200);
   });
 
+  it("keeps consecutive assistant replies as separate messages", async () => {
+    const user = userEvent.setup();
+    let replyCount = 0;
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        replyCount += 1;
+        return assistantStreamResponse(
+          replyCount === 1 ? "First answer." : "Second answer.",
+          `message-assistant-${replyCount}`,
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "First request");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await expectDocumentText("First answer.");
+    await user.type(composer, "Second request");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await expectDocumentText("Second answer.");
+
+    const messageIds = Array.from(
+      document.querySelectorAll<HTMLElement>(".flowent-message-row"),
+      (row) => row.id,
+    );
+    expect(new Set(messageIds).size).toBe(messageIds.length);
+    expect(screen.getAllByLabelText("Assistant response")).toHaveLength(2);
+  });
+
   it("syncs the shortcut list near the bottom of the conversation scroll", async () => {
     mockInitialState({
       ...selectedProviderState(),
@@ -3440,7 +3489,10 @@ describe("App", () => {
 
   it("returns to Send after Stop and sends the next drafted message", async () => {
     const user = userEvent.setup();
-    const firstStream = abortableAssistantStreamResponse("Partial response");
+    const firstStream = abortableAssistantStreamResponse(
+      "Partial response",
+      "message-assistant-first",
+    );
     let replyCount = 0;
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
@@ -3449,7 +3501,10 @@ describe("App", () => {
         if (replyCount === 1) {
           return firstStream.response(init.signal as AbortSignal | undefined);
         }
-        return assistantStreamResponse("Second answer.");
+        return assistantStreamResponse(
+          "Second answer.",
+          "message-assistant-second",
+        );
       }
       if (input === "/api/state") {
         return new Response(JSON.stringify(selectedProviderState()), {
@@ -4801,6 +4856,11 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Bot secret"), "bot-secret");
     await user.click(screen.getByRole("combobox", { name: "Enabled" }));
     await user.click(screen.getByRole("option", { name: "On" }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Enabled" }),
+      ).toHaveTextContent("On");
+    });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(window.fetch).toHaveBeenCalledWith(
@@ -4817,6 +4877,29 @@ describe("App", () => {
         method: "PUT",
       }),
     );
+  });
+
+  it("shows the selected Telegram Bot enabled value", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Channels" }));
+    await user.click(screen.getByRole("combobox", { name: "Enabled" }));
+    await user.click(screen.getByRole("option", { name: "On" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Enabled" }),
+      ).toHaveTextContent("On");
+    });
   });
 
   it("loads the persisted Telegram Bot when the app starts", async () => {
@@ -5100,6 +5183,11 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Name"), "Docs");
     await user.click(screen.getByRole("combobox", { name: "Type" }));
     await user.click(screen.getByRole("option", { name: "URL" }));
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Type" })).toHaveTextContent(
+        "URL",
+      );
+    });
     await user.type(screen.getByLabelText("URL"), "https://example.com/mcp");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -5116,6 +5204,22 @@ describe("App", () => {
       name: "Docs",
       type: "url",
       url: "https://example.com/mcp",
+    });
+  });
+
+  it("shows the selected MCP server type", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("combobox", { name: "Type" }));
+    await user.click(screen.getByRole("option", { name: "URL" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Type" })).toHaveTextContent(
+        "URL",
+      );
     });
   });
 
