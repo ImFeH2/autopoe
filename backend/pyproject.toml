@@ -1,13 +1,39 @@
 [project]
 name = "flowent"
 version = "0.2.0"
-description = "A workflow orchestration platform for multi-agent collaboration."
+description = "A workflow orchestration platform for multi-agent collaboration"
 readme = "README.md"
 authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
 ]
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.11"
 license = "Apache-2.0"
+keywords = [
+    "agent",
+    "agents",
+    "ai",
+    "ai-agents",
+    "assistant",
+    "automation",
+    "code-generation",
+    "llm",
+    "mcp",
+    "orchestration",
+    "sandbox",
+    "web-application",
+    "workflow",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
 dependencies = [
     "fastapi[standard]>=0.136.1",
     "litellm>=1.84.0",
@@ -37,14 +63,14 @@ requires = ["uv_build>=0.8.14,<0.9.0"]
 build-backend = "uv_build"
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "N", "RUF"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
