@@ -453,7 +453,7 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
             "reasoning_output_tokens": 0,
             "total_tokens": 103,
         },
-        "model_context_window": 120000,
+        "model_context_window": 272000,
         "total_token_usage": {
             "cached_input_tokens": 20,
             "input_tokens": 130,
@@ -887,7 +887,7 @@ def test_workspace_response_auto_compacts_before_next_message(
             "reasoning_output_tokens": 1,
             "total_tokens": 47,
         },
-        "model_context_window": 120000,
+        "model_context_window": 272000,
         "total_token_usage": {
             "cached_input_tokens": 7,
             "input_tokens": 244,

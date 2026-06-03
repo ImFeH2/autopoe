@@ -690,12 +690,12 @@ def create_app(
             usage_info = append_token_usage(
                 usage_info,
                 compact_result.summary_usage,
-                model_context_window=current_model_context_window(),
+                model_context_window=current_model_context_window(connection.model),
             )
         usage_info = recompute_context_usage(
             usage_info,
             compact_result.token_after,
-            model_context_window=current_model_context_window(),
+            model_context_window=current_model_context_window(connection.model),
         )
         store.save_usage_info(usage_info)
         marker = StoredMessage(
@@ -843,7 +843,9 @@ def create_app(
                     usage_info = append_token_usage(
                         store.read_usage_info(),
                         TokenUsage.model_validate(usage_data),
-                        model_context_window=current_model_context_window(),
+                        model_context_window=current_model_context_window(
+                            connection.model
+                        ),
                     )
                     store.save_usage_info(usage_info)
                     turn_usage_info = usage_info
@@ -870,7 +872,7 @@ def create_app(
                     model_visible_messages_for_usage(request_messages),
                     output_content=assistant_output.content,
                 ).total_tokens,
-                model_context_window=current_model_context_window(),
+                model_context_window=current_model_context_window(connection.model),
             )
             store.save_usage_info(final_usage_info)
 
@@ -1317,7 +1319,9 @@ def create_app(
                             usage_info = append_token_usage(
                                 store.read_usage_info(),
                                 TokenUsage.model_validate(usage_data),
-                                model_context_window=current_model_context_window(),
+                                model_context_window=current_model_context_window(
+                                    connection.model
+                                ),
                             )
                             store.save_usage_info(usage_info)
                             turn_usage_info = usage_info
@@ -1347,7 +1351,9 @@ def create_app(
                                         ),
                                         output_content=assistant_output.content,
                                     ).total_tokens,
-                                    model_context_window=current_model_context_window(),
+                                    model_context_window=current_model_context_window(
+                                        connection.model
+                                    ),
                                 )
                                 store.save_usage_info(final_usage_info)
                             if final_usage_info == response_usage_info:
