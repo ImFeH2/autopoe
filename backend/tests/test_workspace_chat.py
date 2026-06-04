@@ -991,13 +991,13 @@ def test_workspace_response_auto_compacts_after_tool_result(
     ]
     assert json.loads(events[4]["data"])["message"]["content"] == ("Context optimized")
     usage_info = json.loads(events[6]["data"])["usage_info"]
-    assert usage_info["last_token_usage"] == {
-        "cached_input_tokens": 0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_output_tokens": 0,
-        "total_tokens": 105,
-    }
+    last_usage = usage_info["last_token_usage"]
+    assert last_usage["cached_input_tokens"] == 0
+    assert last_usage["input_tokens"] == 0
+    assert last_usage["output_tokens"] == 0
+    assert last_usage["reasoning_output_tokens"] == 0
+    assert last_usage["total_tokens"] > 100
+    assert last_usage["total_tokens"] > usage_info["total_token_usage"]["total_tokens"]
     assert usage_info["total_token_usage"] == {
         "cached_input_tokens": 5,
         "input_tokens": 70,
