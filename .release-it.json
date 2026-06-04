@@ -6,9 +6,11 @@
     "requireUpstream": true,
     "commit": true,
     "commitMessage": "chore: release v${version}",
+    "commitArgs": ["--gpg-sign"],
     "tag": true,
     "tagName": "v${version}",
     "tagAnnotation": "Release v${version}",
+    "tagArgs": ["--sign"],
     "push": true
   },
   "github": {
