@@ -85,7 +85,7 @@ logger = logging.getLogger("flowent.main")
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
 COMPACTED_CONTEXT_MARKER = "Context compacted"
 OPTIMIZED_CONTEXT_MARKER = "Context optimized"
-DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 120_000
+DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_RATIO = 0.95
 AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET = 20_000
 APPROVAL_TRANSCRIPT_MESSAGE_LIMIT = 12
 APPROVAL_TRANSCRIPT_TEXT_LIMIT = 2_000
@@ -511,16 +511,22 @@ def is_context_marker(message: StoredMessage) -> bool:
     return message.content in {COMPACTED_CONTEXT_MARKER, OPTIMIZED_CONTEXT_MARKER}
 
 
-def auto_compact_token_limit() -> int:
+def auto_compact_token_limit(context_window: int) -> int:
     raw_limit = os.environ.get("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "")
+    if not raw_limit:
+        return max(0, int(context_window * DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_RATIO))
     try:
         return max(0, int(raw_limit))
     except ValueError:
-        return DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
+        return max(0, int(context_window * DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_RATIO))
 
 
-def should_auto_compact(messages: list[ChatMessage]) -> bool:
-    token_limit = auto_compact_token_limit()
+def should_auto_compact(
+    messages: list[ChatMessage],
+    *,
+    context_window: int,
+) -> bool:
+    token_limit = auto_compact_token_limit(context_window)
     if token_limit <= 0:
         return False
     return (
@@ -541,6 +547,23 @@ def model_visible_messages_for_usage(
 
 def usage_event_data(usage_info: TokenUsageInfo) -> dict[str, object]:
     return {"usage_info": usage_info.model_dump()}
+
+
+def update_context_usage_for_response(
+    usage_info: TokenUsageInfo | None,
+    *,
+    messages: Sequence[Mapping[str, object]],
+    output_content: str,
+    model_context_window: int,
+) -> TokenUsageInfo:
+    return recompute_context_usage(
+        usage_info,
+        estimated_token_usage_for_messages(
+            model_visible_messages_for_usage(messages),
+            output_content=output_content,
+        ).total_tokens,
+        model_context_window=model_context_window,
+    )
 
 
 def usage_info_for_model(
@@ -771,7 +794,10 @@ def create_app(
         model_history: list[ChatMessage],
         source_message_id: str | None = None,
     ) -> tuple[StoredMessage, list[dict[str, object]], TokenUsageInfo] | None:
-        if not should_auto_compact(model_history):
+        if not should_auto_compact(
+            model_history,
+            context_window=current_model_context_window(connection.model),
+        ):
             return None
         logger.info("Workspace auto compact requested")
         try:
@@ -819,6 +845,7 @@ def create_app(
         assistant_id = str(uuid4())
         assistant_output = AssistantOutputBuilder(assistant_id)
         turn_usage_info: TokenUsageInfo | None = None
+        model_context_window = current_model_context_window(connection.model)
 
         async def review_tool_approval(request: ApprovalReviewRequest):
             return await review_approval_request(
@@ -873,12 +900,15 @@ def create_app(
             if event.event == "usage":
                 usage_data = event.data.get("usage")
                 if isinstance(usage_data, dict):
-                    usage_info = append_token_usage(
-                        store.read_usage_info(),
-                        TokenUsage.model_validate(usage_data),
-                        model_context_window=current_model_context_window(
-                            connection.model
+                    usage_info = update_context_usage_for_response(
+                        append_token_usage(
+                            store.read_usage_info(),
+                            TokenUsage.model_validate(usage_data),
+                            model_context_window=model_context_window,
                         ),
+                        messages=request_messages,
+                        output_content=assistant_output.content,
+                        model_context_window=model_context_window,
                     )
                     store.save_usage_info(usage_info)
                     turn_usage_info = usage_info
@@ -899,13 +929,19 @@ def create_app(
 
         final_usage_info = turn_usage_info
         if final_usage_info is None:
-            final_usage_info = recompute_context_usage(
+            final_usage_info = update_context_usage_for_response(
                 store.read_usage_info(),
-                estimated_token_usage_for_messages(
-                    model_visible_messages_for_usage(request_messages),
-                    output_content=assistant_output.content,
-                ).total_tokens,
-                model_context_window=current_model_context_window(connection.model),
+                messages=request_messages,
+                output_content=assistant_output.content,
+                model_context_window=model_context_window,
+            )
+            store.save_usage_info(final_usage_info)
+        else:
+            final_usage_info = update_context_usage_for_response(
+                final_usage_info,
+                messages=request_messages,
+                output_content=assistant_output.content,
+                model_context_window=model_context_window,
             )
             store.save_usage_info(final_usage_info)
 
@@ -1164,6 +1200,7 @@ def create_app(
             try:
                 current_tool_id: str | None = None
                 turn_usage_info: TokenUsageInfo | None = None
+                model_context_window = current_model_context_window(connection.model)
                 current_request_messages = request_messages_for_content(
                     state,
                     next_messages,
@@ -1349,12 +1386,15 @@ def create_app(
                     if event.event == "usage":
                         usage_data = event.data.get("usage")
                         if isinstance(usage_data, dict):
-                            usage_info = append_token_usage(
-                                store.read_usage_info(),
-                                TokenUsage.model_validate(usage_data),
-                                model_context_window=current_model_context_window(
-                                    connection.model
+                            usage_info = update_context_usage_for_response(
+                                append_token_usage(
+                                    store.read_usage_info(),
+                                    TokenUsage.model_validate(usage_data),
+                                    model_context_window=model_context_window,
                                 ),
+                                messages=current_request_messages,
+                                output_content=assistant_output.content,
+                                model_context_window=model_context_window,
                             )
                             store.save_usage_info(usage_info)
                             turn_usage_info = usage_info
@@ -1376,23 +1416,31 @@ def create_app(
                             response_usage_info = store.read_usage_info()
                             final_usage_info = turn_usage_info
                             if final_usage_info is None:
-                                final_usage_info = recompute_context_usage(
+                                final_usage_info = update_context_usage_for_response(
                                     response_usage_info,
-                                    estimated_token_usage_for_messages(
-                                        model_visible_messages_for_usage(
-                                            current_request_messages
-                                        ),
-                                        output_content=assistant_output.content,
-                                    ).total_tokens,
-                                    model_context_window=current_model_context_window(
-                                        connection.model
-                                    ),
+                                    messages=current_request_messages,
+                                    output_content=assistant_output.content,
+                                    model_context_window=model_context_window,
                                 )
-                                store.save_usage_info(final_usage_info)
-                            if final_usage_info == response_usage_info:
-                                assistant_message = assistant_message.model_copy(
-                                    update={"usage_info": final_usage_info}
+                            else:
+                                final_usage_info = update_context_usage_for_response(
+                                    final_usage_info,
+                                    messages=current_request_messages,
+                                    output_content=assistant_output.content,
+                                    model_context_window=model_context_window,
                                 )
+                            store.save_usage_info(final_usage_info)
+                            final_message = StoredMessage(
+                                author="assistant",
+                                content=assistant_output.content,
+                                groups=assistant_output.groups,
+                                id=assistant_message.id,
+                                status="completed",
+                                thinking=assistant_output.thinking,
+                                tools=list(assistant_output.tools.values()),
+                                usage_info=final_usage_info,
+                            )
+                            event.data["message"] = final_message.model_dump()
                             persist_assistant("completed")
                     if event.event != "usage":
                         await append_run_event(run, event.event, event.data)

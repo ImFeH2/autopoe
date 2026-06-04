@@ -1473,6 +1473,10 @@ function App() {
             isStreamingText: false,
             usage_info: message.usage_info ?? latestUsageInfo,
           };
+          if (message.usage_info) {
+            latestUsageInfo = message.usage_info;
+            setUsageInfo(message.usage_info);
+          }
           setMessages([...nextMessages, assistantMessage]);
           activeRunIdRef.current = "";
           activeRunEventIndexRef.current = 0;

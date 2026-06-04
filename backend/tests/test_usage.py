@@ -1,3 +1,5 @@
+from flowent.llm import ChatMessage
+from flowent.main import should_auto_compact
 from flowent.usage import DEFAULT_MODEL_CONTEXT_WINDOW, model_context_window_for
 
 
@@ -15,3 +17,24 @@ def test_model_context_window_uses_longest_prefix_match() -> None:
 
 def test_model_context_window_falls_back_for_unknown_model() -> None:
     assert model_context_window_for("custom-model") == DEFAULT_MODEL_CONTEXT_WINDOW
+
+
+def test_auto_compact_uses_context_window_ratio_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", raising=False)
+    messages = [ChatMessage(role="user", content="A" * (120_000 * 4))]
+
+    assert not should_auto_compact(messages, context_window=400_000)
+
+
+def test_auto_compact_triggers_near_context_window_limit(monkeypatch) -> None:
+    monkeypatch.delenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", raising=False)
+    messages = [ChatMessage(role="user", content="A" * (380_000 * 4))]
+
+    assert should_auto_compact(messages, context_window=400_000)
+
+
+def test_auto_compact_env_limit_overrides_context_window_ratio(monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "120000")
+    messages = [ChatMessage(role="user", content="A" * (120_000 * 4))]
+
+    assert should_auto_compact(messages, context_window=400_000)

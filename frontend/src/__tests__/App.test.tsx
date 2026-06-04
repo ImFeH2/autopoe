@@ -3030,6 +3030,80 @@ describe("App", () => {
     expect(screen.queryByText("0 / 120k")).toBeNull();
   });
 
+  it("updates context usage from the completed assistant message", async () => {
+    const user = userEvent.setup();
+    const eventUsageInfo = contextUsageInfo(24_000, 60_000);
+    const doneUsageInfo = contextUsageInfo(26_000, 60_000);
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-done-usage");
+      }
+      if (
+        input === "/api/workspace/runs/run-done-usage/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `event: start\ndata: ${JSON.stringify({ id: "message-done-usage" })}\n\n`,
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                `event: usage\ndata: ${JSON.stringify({ usage_info: eventUsageInfo })}\n\n`,
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                `event: done\ndata: ${JSON.stringify({
+                  message: {
+                    author: "assistant",
+                    content: "Done with final usage.",
+                    id: "message-done-usage",
+                    usage_info: doneUsageInfo,
+                  },
+                })}\n\n`,
+              ),
+            );
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          headers: { "Content-Type": "text/event-stream" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = screen.getByRole("textbox", { name: "Message Flowent" });
+    await user.type(composer, "Measure final response");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await screen.findByText("Done with final usage.");
+    expect(await screen.findByText("26k / 60k")).toBeInTheDocument();
+    expect(screen.queryByText("24k / 60k")).toBeNull();
+  });
+
   it("enables the composer after content is drafted", async () => {
     const user = userEvent.setup();
     render(<App />);
