@@ -174,6 +174,14 @@ export type Message = {
   usage_info?: ContextUsageInfo | null;
 };
 
+export type MessageEditAction = "resend" | "save";
+
+export type MessageActionRequest = {
+  action: MessageEditAction;
+  content: string;
+  messageId: string;
+};
+
 export type WorkspaceCommandId = "clear" | "compact";
 
 export type WorkspaceCommand = {

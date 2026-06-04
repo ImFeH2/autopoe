@@ -20,6 +20,7 @@ import type {
   McpTool,
   Message,
   ContextUsageInfo,
+  MessageActionRequest,
   Provider,
   ReasoningEffort,
   RuntimeSettings,
@@ -506,6 +507,24 @@ const isAbortError = (error: unknown) =>
 
 const supportsWorkspaceRuns = (response: Response) =>
   response.status !== 404 && response.status !== 405;
+
+const trimmedConversationAfter = (messages: Message[], messageId: string) => {
+  const index = messages.findIndex((message) => message.id === messageId);
+  if (index < 0) {
+    return null;
+  }
+  return messages.slice(0, index);
+};
+
+const previousUserMessage = (messages: Message[], fromIndex: number) => {
+  for (let index = fromIndex; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.author === "user") {
+      return message;
+    }
+  }
+  return null;
+};
 
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
@@ -1152,6 +1171,21 @@ function App() {
       };
       setWritablePaths((result.writable_paths ?? []).map(writablePathFromApi));
     }
+  };
+
+  const saveWorkspaceMessages = async (nextMessages: Message[]) => {
+    const response = await fetch("/api/workspace/messages", {
+      body: JSON.stringify({ messages: nextMessages }),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    });
+
+    if (!response.ok) {
+      throw new Error("Conversation could not be updated.");
+    }
+
+    const result = (await response.json()) as { messages?: Message[] };
+    return Array.isArray(result.messages) ? result.messages : nextMessages;
   };
 
   const clearWorkspace = async () => {
@@ -1938,10 +1972,15 @@ function App() {
     setIsResponding(false);
   };
 
-  const sendMessage = async (submittedDraft = draft) => {
+  const sendMessage = async (
+    submittedDraft = draft,
+    baseMessages = messages,
+    options: { clearDraft?: boolean } = {},
+  ) => {
     if (submittedDraft.length === 0 || isResponding) {
       return;
     }
+    const shouldClearDraft = options.clearDraft ?? baseMessages === messages;
 
     const responseRun = responseRunRef.current + 1;
     const responseAbortController = new AbortController();
@@ -1950,7 +1989,7 @@ function App() {
     activeRunEventIndexRef.current = 0;
     const userContent = submittedDraft;
     const nextMessages: Message[] = [
-      ...messages,
+      ...baseMessages,
       {
         author: "user",
         content: userContent,
@@ -1960,7 +1999,9 @@ function App() {
     setResponseError("");
     setIsResponding(true);
     setMessages(nextMessages);
-    setDraft("");
+    if (shouldClearDraft) {
+      setDraft("");
+    }
 
     try {
       try {
@@ -1995,8 +2036,10 @@ function App() {
         return;
       }
       if (error instanceof Error && error.message === "Response in progress") {
-        setMessages(messages);
-        setDraft(userContent);
+        setMessages(baseMessages);
+        if (shouldClearDraft) {
+          setDraft(userContent);
+        }
       }
       setResponseError(
         error instanceof Error ? error.message : "Message could not be sent.",
@@ -2006,6 +2049,96 @@ function App() {
         responseAbortRef.current = null;
         setIsResponding(false);
       }
+    }
+  };
+
+  const retryMessage = async (messageId: string) => {
+    if (isResponding) {
+      return;
+    }
+
+    const messageIndex = messages.findIndex(
+      (message) => message.id === messageId,
+    );
+    if (messageIndex < 0) {
+      return;
+    }
+
+    const message = messages[messageIndex];
+    const userMessage =
+      message.author === "user"
+        ? message
+        : previousUserMessage(messages, messageIndex - 1);
+    if (!userMessage) {
+      return;
+    }
+
+    const baseMessages = trimmedConversationAfter(messages, userMessage.id);
+    if (!baseMessages) {
+      return;
+    }
+
+    const previousMessages = messages;
+    setMessages(baseMessages);
+    setResponseError("");
+
+    try {
+      await saveWorkspaceMessages(baseMessages);
+    } catch {
+      setMessages(previousMessages);
+      setResponseError("Conversation could not be updated.");
+      return;
+    }
+
+    await sendMessage(userMessage.content, baseMessages, { clearDraft: false });
+  };
+
+  const editMessage = async ({
+    action,
+    content,
+    messageId,
+  }: MessageActionRequest) => {
+    if (isResponding) {
+      return;
+    }
+
+    const messageIndex = messages.findIndex(
+      (message) => message.id === messageId,
+    );
+    if (messageIndex < 0 || messages[messageIndex].author !== "user") {
+      return;
+    }
+
+    const updatedMessage: Message = {
+      ...messages[messageIndex],
+      content,
+    };
+    const baseMessages =
+      action === "resend"
+        ? messages.slice(0, messageIndex)
+        : [
+            ...messages.slice(0, messageIndex),
+            updatedMessage,
+            ...messages.slice(messageIndex + 1),
+          ];
+    const nextMessages =
+      action === "resend" ? [...baseMessages, updatedMessage] : baseMessages;
+    const persistedMessages = action === "resend" ? baseMessages : nextMessages;
+    const previousMessages = messages;
+
+    setMessages(nextMessages);
+    setResponseError("");
+
+    try {
+      await saveWorkspaceMessages(persistedMessages);
+    } catch {
+      setMessages(previousMessages);
+      setResponseError("Conversation could not be updated.");
+      return;
+    }
+
+    if (action === "resend") {
+      await sendMessage(content, baseMessages, { clearDraft: false });
     }
   };
 
@@ -2057,6 +2190,12 @@ function App() {
           onCommand={runWorkspaceCommand}
           onCommandError={handleWorkspaceCommandError}
           onDraftChange={setDraft}
+          onEditMessage={(request) => {
+            void editMessage(request);
+          }}
+          onRetryMessage={(messageId) => {
+            void retryMessage(messageId);
+          }}
           onSendMessage={(content) => {
             void sendMessage(content);
           }}

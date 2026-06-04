@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -13,6 +14,11 @@ import {
   Check,
   ChevronRight,
   Circle,
+  Copy,
+  Pencil,
+  RotateCcw,
+  Save,
+  SendHorizontal,
   Search,
   Sparkles,
   Square,
@@ -23,6 +29,12 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import { stableScrollbarClassName } from "@/components/flowent/styles";
 import type {
@@ -30,6 +42,7 @@ import type {
   AssistantOutputItem,
   ContextUsageInfo,
   Message,
+  MessageActionRequest,
   Skill,
   ToolItem,
   WorkspaceCommand,
@@ -49,6 +62,8 @@ export function WorkspaceView({
   onCommand,
   onCommandError,
   onDraftChange,
+  onEditMessage,
+  onRetryMessage,
   onSendMessage,
   onStopResponse,
   skills,
@@ -64,6 +79,8 @@ export function WorkspaceView({
   onCommand: (commandId: WorkspaceCommandId) => boolean;
   onCommandError: (message: string) => void;
   onDraftChange: (value: string) => void;
+  onEditMessage: (request: MessageActionRequest) => void;
+  onRetryMessage: (messageId: string) => void;
   onSendMessage: (content: string) => void;
   onStopResponse: () => void;
   skills: Skill[];
@@ -72,30 +89,34 @@ export function WorkspaceView({
 
   return (
     <section className="h-full min-h-0 bg-black" aria-label="Workspace">
-      <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
-        <MessageList
-          composerOffset={composerOffset}
-          isResponding={isResponding}
-          messages={messages}
-        />
-        <ChatComposer
-          commands={commands}
-          contextWindowLimit={contextWindowLimit}
-          draft={draft}
-          errorMessage={errorMessage}
-          isRefiningContext={isRefiningContext}
-          isSending={isResponding}
-          messages={messages}
-          usageInfo={usageInfo}
-          onCommand={onCommand}
-          onCommandError={onCommandError}
-          onDraftChange={onDraftChange}
-          onSendMessage={onSendMessage}
-          onStopResponse={onStopResponse}
-          onOffsetChange={setComposerOffset}
-          skills={skills}
-        />
-      </div>
+      <TooltipProvider delayDuration={500}>
+        <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
+          <MessageList
+            composerOffset={composerOffset}
+            isResponding={isResponding}
+            messages={messages}
+            onEditMessage={onEditMessage}
+            onRetryMessage={onRetryMessage}
+          />
+          <ChatComposer
+            commands={commands}
+            contextWindowLimit={contextWindowLimit}
+            draft={draft}
+            errorMessage={errorMessage}
+            isRefiningContext={isRefiningContext}
+            isSending={isResponding}
+            messages={messages}
+            usageInfo={usageInfo}
+            onCommand={onCommand}
+            onCommandError={onCommandError}
+            onDraftChange={onDraftChange}
+            onSendMessage={onSendMessage}
+            onStopResponse={onStopResponse}
+            onOffsetChange={setComposerOffset}
+            skills={skills}
+          />
+        </div>
+      </TooltipProvider>
     </section>
   );
 }
@@ -104,10 +125,14 @@ function MessageList({
   composerOffset,
   isResponding,
   messages,
+  onEditMessage,
+  onRetryMessage,
 }: {
   composerOffset: number;
   isResponding: boolean;
   messages: Message[];
+  onEditMessage: (request: MessageActionRequest) => void;
+  onRetryMessage: (messageId: string) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const shouldFollowRef = useRef(true);
@@ -206,7 +231,10 @@ function MessageList({
                     message.id === streamingMessageId &&
                     message.isStreamingText !== true)
                 }
+                isResponding={isResponding}
                 message={message}
+                onEditMessage={onEditMessage}
+                onRetryMessage={onRetryMessage}
               />
             )}
           </Fragment>
@@ -445,47 +473,278 @@ function SystemMessage({ message }: { message: Message }) {
 
 function MessageRow({
   isPending,
+  isResponding,
   isStreaming,
   message,
+  onEditMessage,
+  onRetryMessage,
 }: {
   isPending: boolean;
+  isResponding: boolean;
   isStreaming: boolean;
   message: Message;
+  onEditMessage: (request: MessageActionRequest) => void;
+  onRetryMessage: (messageId: string) => void;
 }) {
+  const [isEditing, setIsEditing] = useState(false);
   const assistantGroups =
     message.author === "assistant" ? assistantOutputGroups(message) : [];
   const isWaiting = isPending && assistantGroups.length === 0;
   const shouldShowWaitingAfterOutput =
     isPending && assistantGroups.length > 0 && !isStreaming;
+  const isUserMessage = message.author === "user";
+  const isRetryUnavailable = isResponding || message.id === "assistant-pending";
+  const isEditUnavailable = isResponding || !isUserMessage;
 
   return (
     <article
       id={message.id}
       className={cn(
-        "flowent-message-row mx-auto flex w-full max-w-4xl scroll-mt-12 scroll-mb-40 py-3",
+        "flowent-message-row group/message mx-auto flex w-full max-w-4xl scroll-mt-12 scroll-mb-40 py-3",
         message.author === "user" ? "justify-end" : "justify-start",
       )}
     >
       <div
         className={cn(
-          "min-w-0 text-base leading-6 text-white",
+          "flex min-w-0 flex-col text-base leading-6 text-white",
           message.author === "user"
-            ? "flowent-user-message-bubble max-w-[70%] rounded-[22px] px-4 py-2.5"
+            ? "max-w-[70%] items-end"
             : "w-full max-w-full",
         )}
       >
-        {isWaiting ? (
-          <AssistantWaitingIndicator />
-        ) : (
-          <AssistantMessageContent
-            assistantGroups={assistantGroups}
-            isStreaming={isStreaming}
-            message={message}
-            showWaitingAfterOutput={shouldShowWaitingAfterOutput}
+        {isEditing ? (
+          <MessageInlineEditor
+            initialContent={message.content}
+            isResponding={isResponding}
+            onCancel={() => setIsEditing(false)}
+            onSave={(content) => {
+              onEditMessage({
+                action: "save",
+                content,
+                messageId: message.id,
+              });
+              setIsEditing(false);
+            }}
+            onSaveAndRetry={(content) => {
+              onEditMessage({
+                action: "resend",
+                content,
+                messageId: message.id,
+              });
+              setIsEditing(false);
+            }}
           />
+        ) : (
+          <>
+            <div
+              className={cn(
+                "min-w-0",
+                message.author === "user"
+                  ? "flowent-user-message-bubble rounded-[22px] px-4 py-2.5"
+                  : "w-full max-w-full",
+              )}
+            >
+              {isWaiting ? (
+                <AssistantWaitingIndicator />
+              ) : (
+                <AssistantMessageContent
+                  assistantGroups={assistantGroups}
+                  isStreaming={isStreaming}
+                  message={message}
+                  showWaitingAfterOutput={shouldShowWaitingAfterOutput}
+                />
+              )}
+            </div>
+            <MessageActionBar
+              canEdit={isUserMessage}
+              disableEdit={isEditUnavailable}
+              disableRetry={isRetryUnavailable}
+              message={message}
+              onEdit={() => setIsEditing(true)}
+              onRetry={() => onRetryMessage(message.id)}
+            />
+          </>
         )}
       </div>
     </article>
+  );
+}
+
+function MessageInlineEditor({
+  initialContent,
+  isResponding,
+  onCancel,
+  onSave,
+  onSaveAndRetry,
+}: {
+  initialContent: string;
+  isResponding: boolean;
+  onCancel: () => void;
+  onSave: (content: string) => void;
+  onSaveAndRetry: (content: string) => void;
+}) {
+  const [content, setContent] = useState(initialContent);
+  const isSaveUnavailable = content.length === 0;
+  const isResendUnavailable = isSaveUnavailable || isResponding;
+
+  return (
+    <div className="w-full min-w-[min(420px,70vw)] max-w-[min(720px,70vw)] rounded-[22px] border border-white/10 bg-input/30 p-2.5 shadow-[inset_0_0_1px_rgba(255,255,255,0.12)]">
+      <Textarea
+        aria-label="Edit message"
+        autoFocus
+        className="max-h-[240px] min-h-28 resize-none border-white/10 bg-black/30 px-3 py-2 text-base leading-6 text-white shadow-none focus-visible:border-white/20 focus-visible:ring-1 focus-visible:ring-white/20 dark:bg-black/30"
+        value={content}
+        onChange={(event) => setContent(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+            return;
+          }
+
+          if (
+            event.key === "Enter" &&
+            (event.metaKey || event.ctrlKey) &&
+            !isResendUnavailable
+          ) {
+            event.preventDefault();
+            onSaveAndRetry(content);
+          }
+        }}
+      />
+      <div className="mt-2 flex items-center justify-end gap-1">
+        <MessageIconButton label="Cancel" onClick={onCancel}>
+          <X aria-hidden="true" className="size-4" />
+        </MessageIconButton>
+        <MessageIconButton
+          disabled={isSaveUnavailable}
+          label="Save"
+          onClick={() => onSave(content)}
+        >
+          <Save aria-hidden="true" className="size-4" />
+        </MessageIconButton>
+        <MessageIconButton
+          disabled={isResendUnavailable}
+          label="Save and retry"
+          onClick={() => onSaveAndRetry(content)}
+        >
+          <SendHorizontal aria-hidden="true" className="size-4" />
+        </MessageIconButton>
+      </div>
+    </div>
+  );
+}
+
+function MessageActionBar({
+  canEdit,
+  disableEdit,
+  disableRetry,
+  message,
+  onEdit,
+  onRetry,
+}: {
+  canEdit: boolean;
+  disableEdit: boolean;
+  disableRetry: boolean;
+  message: Message;
+  onEdit: () => void;
+  onRetry: () => void;
+}) {
+  const [copyState, setCopyState] = useState<"copied" | "idle">("idle");
+  const copyTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const copyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopyState("copied");
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = window.setTimeout(() => {
+        setCopyState("idle");
+        copyTimeoutRef.current = null;
+      }, 1200);
+    } catch {
+      setCopyState("idle");
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 focus-within:opacity-100",
+        message.author === "user" ? "justify-end pr-1" : "justify-start pl-1",
+      )}
+    >
+      <MessageIconButton
+        label={copyState === "copied" ? "Copied" : "Copy"}
+        onClick={() => void copyMessage()}
+      >
+        {copyState === "copied" ? (
+          <Check aria-hidden="true" className="size-4 text-white" />
+        ) : (
+          <Copy aria-hidden="true" className="size-4" />
+        )}
+      </MessageIconButton>
+      {canEdit ? (
+        <MessageIconButton disabled={disableEdit} label="Edit" onClick={onEdit}>
+          <Pencil aria-hidden="true" className="size-4" />
+        </MessageIconButton>
+      ) : null}
+      <MessageIconButton
+        disabled={disableRetry}
+        label="Retry"
+        onClick={onRetry}
+      >
+        <RotateCcw aria-hidden="true" className="size-4" />
+      </MessageIconButton>
+    </div>
+  );
+}
+
+function MessageIconButton({
+  children,
+  className,
+  disabled,
+  label,
+  onClick,
+}: {
+  children: ReactNode;
+  className?: string;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={label}
+          className={cn(
+            "size-7 rounded-lg border-0 bg-transparent text-white/45 shadow-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/20 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:text-white/20 disabled:opacity-100 disabled:hover:bg-transparent",
+            className,
+          )}
+          disabled={disabled}
+          onClick={onClick}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
