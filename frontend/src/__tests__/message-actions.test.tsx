@@ -205,18 +205,60 @@ const latestWorkspaceMessagesRequest = () => {
   return JSON.parse(String(request[1]?.body)) as { messages: TestMessage[] };
 };
 
+const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+  navigator,
+  "clipboard",
+);
+const originalExecCommandDescriptor = Object.getOwnPropertyDescriptor(
+  document,
+  "execCommand",
+);
+
+const setClipboard = (
+  clipboard: { writeText: (text: string) => Promise<void> } | undefined,
+) => {
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: clipboard,
+  });
+};
+
+const setExecCommand = (execCommand: (command: string) => boolean) => {
+  Object.defineProperty(document, "execCommand", {
+    configurable: true,
+    value: execCommand,
+  });
+};
+
+const restoreCopyEnvironment = () => {
+  if (originalClipboardDescriptor) {
+    Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+  } else {
+    Reflect.deleteProperty(navigator, "clipboard");
+  }
+
+  if (originalExecCommandDescriptor) {
+    Object.defineProperty(
+      document,
+      "execCommand",
+      originalExecCommandDescriptor,
+    );
+  } else {
+    Reflect.deleteProperty(document, "execCommand");
+  }
+};
+
 describe("message actions", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
+    restoreCopyEnvironment();
   });
 
   it("copies message content from an icon action and shows success", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
+    setClipboard({ writeText });
     mockWorkspace([
       {
         author: "user",
@@ -237,6 +279,113 @@ describe("message actions", () => {
     });
     expect(copiedButton).toBeInTheDocument();
     expect(copiedButton.textContent).toBe("");
+  });
+
+  it("copies message content with a fallback action when clipboard access is unavailable", async () => {
+    const user = userEvent.setup();
+    const copiedValues: string[] = [];
+    const execCommand = vi.fn((command: string) => {
+      const activeElement = document.activeElement;
+      if (command === "copy" && activeElement instanceof HTMLTextAreaElement) {
+        copiedValues.push(activeElement.value);
+        return true;
+      }
+      return false;
+    });
+    setClipboard(undefined);
+    setExecCommand(execCommand);
+    mockWorkspace([
+      {
+        author: "user",
+        content: "Draft a launch checklist",
+        id: "message-user",
+      },
+    ]);
+    render(<App />);
+
+    const article = await messageArticle("Draft a launch checklist");
+    await user.click(within(article).getByRole("button", { name: "Copy" }));
+
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(copiedValues).toEqual(["Draft a launch checklist"]);
+    const copiedButton = within(article).getByRole("button", {
+      name: "Copied",
+    });
+    expect(copiedButton).toBeInTheDocument();
+    expect(copiedButton.textContent).toBe("");
+  });
+
+  it("shows failure feedback when clipboard and fallback copy actions fail", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockRejectedValue(new Error("Denied"));
+    const execCommand = vi.fn().mockReturnValue(false);
+    setClipboard({ writeText });
+    setExecCommand(execCommand);
+    mockWorkspace([
+      {
+        author: "user",
+        content: "Draft a launch checklist",
+        id: "message-user",
+      },
+    ]);
+    render(<App />);
+
+    const article = await messageArticle("Draft a launch checklist");
+    await user.click(within(article).getByRole("button", { name: "Copy" }));
+
+    expect(writeText).toHaveBeenCalledWith("Draft a launch checklist");
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    const failedButton = within(article).getByRole("button", {
+      name: "Copy failed",
+    });
+    expect(failedButton).toBeInTheDocument();
+    expect(failedButton.textContent).toBe("");
+  });
+
+  it("returns copy feedback to the default icon after a short delay", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const execCommand = vi.fn().mockReturnValue(false);
+    setClipboard({ writeText });
+    setExecCommand(execCommand);
+    mockWorkspace([
+      {
+        author: "user",
+        content: "Draft a launch checklist",
+        id: "message-user",
+      },
+    ]);
+    render(<App />);
+
+    const article = await messageArticle("Draft a launch checklist");
+    await user.click(within(article).getByRole("button", { name: "Copy" }));
+    expect(
+      within(article).getByRole("button", { name: "Copied" }),
+    ).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(
+          within(article).getByRole("button", { name: "Copy" }),
+        ).toBeInTheDocument();
+      },
+      { timeout: 2500 },
+    );
+
+    writeText.mockRejectedValue(new Error("Denied"));
+    await user.click(within(article).getByRole("button", { name: "Copy" }));
+    expect(
+      within(article).getByRole("button", { name: "Copy failed" }),
+    ).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(
+          within(article).getByRole("button", { name: "Copy" }),
+        ).toBeInTheDocument();
+      },
+      { timeout: 1800 },
+    );
   });
 
   it("edits a user message inline and saves the updated content", async () => {

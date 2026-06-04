@@ -650,7 +650,9 @@ function MessageActionBar({
   onEdit: () => void;
   onRetry: () => void;
 }) {
-  const [copyState, setCopyState] = useState<"copied" | "idle">("idle");
+  const [copyState, setCopyState] = useState<"copied" | "failed" | "idle">(
+    "idle",
+  );
   const copyTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -661,21 +663,31 @@ function MessageActionBar({
     };
   }, []);
 
-  const copyMessage = async () => {
-    try {
-      await navigator.clipboard.writeText(message.content);
-      setCopyState("copied");
-      if (copyTimeoutRef.current !== null) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-      copyTimeoutRef.current = window.setTimeout(() => {
+  const setTimedCopyState = (state: "copied" | "failed") => {
+    setCopyState(state);
+    if (copyTimeoutRef.current !== null) {
+      window.clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = window.setTimeout(
+      () => {
         setCopyState("idle");
         copyTimeoutRef.current = null;
-      }, 1200);
-    } catch {
-      setCopyState("idle");
-    }
+      },
+      state === "copied" ? 2000 : 1200,
+    );
   };
+
+  const copyMessage = async () => {
+    const didCopy = await copyText(message.content);
+    setTimedCopyState(didCopy ? "copied" : "failed");
+  };
+
+  const copyLabel =
+    copyState === "copied"
+      ? "Copied"
+      : copyState === "failed"
+        ? "Copy failed"
+        : "Copy";
 
   return (
     <div
@@ -684,12 +696,11 @@ function MessageActionBar({
         message.author === "user" ? "justify-end pr-1" : "justify-start pl-1",
       )}
     >
-      <MessageIconButton
-        label={copyState === "copied" ? "Copied" : "Copy"}
-        onClick={() => void copyMessage()}
-      >
+      <MessageIconButton label={copyLabel} onClick={() => void copyMessage()}>
         {copyState === "copied" ? (
           <Check aria-hidden="true" className="size-4 text-white" />
+        ) : copyState === "failed" ? (
+          <TriangleAlert aria-hidden="true" className="size-4 text-amber-300" />
         ) : (
           <Copy aria-hidden="true" className="size-4" />
         )}
@@ -708,6 +719,52 @@ function MessageActionBar({
       </MessageIconButton>
     </div>
   );
+}
+
+async function copyText(value: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    return fallbackCopyText(value);
+  }
+
+  return fallbackCopyText(value);
+}
+
+function fallbackCopyText(value: string) {
+  if (typeof document.execCommand !== "function") {
+    return false;
+  }
+
+  const previousFocus = document.activeElement;
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.left = "-9999px";
+  textarea.style.width = "1px";
+  textarea.style.height = "1px";
+  textarea.style.opacity = "0";
+
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  let didCopy = false;
+  try {
+    didCopy = document.execCommand("copy");
+  } finally {
+    textarea.remove();
+    if (previousFocus instanceof HTMLElement) {
+      previousFocus.focus({ preventScroll: true });
+    }
+  }
+
+  return didCopy;
 }
 
 function MessageIconButton({

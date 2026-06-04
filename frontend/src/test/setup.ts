@@ -20,6 +20,20 @@ if (!elementPrototype.scrollIntoView) {
   elementPrototype.scrollIntoView = () => undefined;
 }
 
+class ResizeObserverStub implements ResizeObserver {
+  constructor() {}
+
+  disconnect() {}
+
+  observe() {}
+
+  unobserve() {}
+}
+
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = ResizeObserverStub;
+}
+
 afterEach(() => {
   cleanup();
 });
