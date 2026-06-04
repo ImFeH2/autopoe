@@ -1490,7 +1490,7 @@ def test_workspace_clear_keeps_runtime_context_available(tmp_path, monkeypatch) 
     configure_provider(client)
 
     first_response = client.post("/api/workspace/respond", json={"content": "First."})
-    clear_response = client.put("/api/workspace/messages", json={"messages": []})
+    clear_response = client.post("/api/workspace/clear")
     second_response = client.post("/api/workspace/respond", json={"content": "Second."})
 
     assert first_response.status_code == 200
@@ -2380,10 +2380,7 @@ async def test_workspace_clear_removes_running_run_draft(tmp_path, monkeypatch) 
         )
         assert response.status_code == 200
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
-        clear_response = await client.put(
-            "/api/workspace/messages",
-            json={"messages": []},
-        )
+        clear_response = await client.post("/api/workspace/clear")
         await asyncio.sleep(0)
         state = (await client.get("/api/state")).json()
 

@@ -121,6 +121,14 @@ class WorkspaceRunResponse(BaseModel):
     run_id: str
 
 
+class WorkspaceClearResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    active_run_id: str | None = None
+    messages: list[StoredMessage]
+    usage_info: TokenUsageInfo | None = None
+
+
 @dataclass
 class WorkspaceCompactTask:
     task: asyncio.Task[tuple[StoredMessage, TokenUsageInfo]]
@@ -174,6 +182,7 @@ class WorkspaceRun:
     condition: asyncio.Condition
     discard_on_cancel: bool = False
     events: list[tuple[int, str, dict[str, object]]] = field(default_factory=list)
+    generation: int = 0
     id: str = field(default_factory=lambda: str(uuid4()))
     is_done: bool = False
     task: asyncio.Task[None] | None = None
@@ -183,8 +192,11 @@ class WorkspaceRun:
         return self.events[-1][0] if self.events else 0
 
 
-def stream_event(event: str, data: dict[str, object]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+def stream_event(
+    event: str, data: dict[str, object], event_id: int | None = None
+) -> str:
+    id_line = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{id_line}event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 def append_or_replace_message(
@@ -694,6 +706,7 @@ def create_app(
     telegram_bot_manager: TelegramBotManager | None = None
     workspace_runs: dict[str, WorkspaceRun] = {}
     active_workspace_run_id: str | None = None
+    workspace_generation = 0
     active_compact_task: WorkspaceCompactTask | None = None
 
     static_dir = frontend_static_directory().resolve(strict=False)
@@ -1132,14 +1145,23 @@ def create_app(
     async def save_workspace_messages(
         request: WorkspaceMessagesRequest,
     ) -> WorkspaceMessagesRequest:
+        return WorkspaceMessagesRequest(messages=store.save_messages(request.messages))
+
+    @app.post("/api/workspace/clear")
+    async def clear_workspace() -> WorkspaceClearResponse:
         nonlocal active_workspace_run_id
-        if not request.messages:
-            run = active_workspace_run()
-            if run is not None and run.task is not None and not run.task.done():
+        nonlocal workspace_generation
+        workspace_generation += 1
+        for run in workspace_runs.values():
+            run.is_done = True
+            if run.task is not None and not run.task.done():
                 run.discard_on_cancel = True
                 run.task.cancel()
-                active_workspace_run_id = None
-        return WorkspaceMessagesRequest(messages=store.save_messages(request.messages))
+            async with run.condition:
+                run.condition.notify_all()
+        active_workspace_run_id = None
+        messages = store.save_messages([])
+        return WorkspaceClearResponse(messages=messages)
 
     async def append_run_event(
         run: WorkspaceRun, event: str, data: dict[str, object]
@@ -1151,10 +1173,26 @@ def create_app(
     def active_workspace_run() -> WorkspaceRun | None:
         if active_workspace_run_id is None:
             return None
-        return workspace_runs.get(active_workspace_run_id)
+        run = workspace_runs.get(active_workspace_run_id)
+        if run is None or run.is_done:
+            return None
+        return run
+
+    def has_active_workspace_run() -> bool:
+        return any(
+            not run.is_done and run.task is not None and not run.task.done()
+            for run in workspace_runs.values()
+        )
 
     def create_workspace_run(content: str) -> WorkspaceRun:
         nonlocal active_workspace_run_id
+        if has_active_workspace_run():
+            active_run = active_workspace_run()
+            raise HTTPException(
+                status_code=409,
+                detail="Response in progress",
+                headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
+            )
         state = store.read_state()
         connection = selected_connection(state)
 
@@ -1165,7 +1203,10 @@ def create_app(
         )
         next_messages = [*state.messages, user_message]
         store.save_messages(next_messages)
-        run = WorkspaceRun(condition=asyncio.Condition())
+        run = WorkspaceRun(
+            condition=asyncio.Condition(),
+            generation=workspace_generation,
+        )
         workspace_runs[run.id] = run
         active_workspace_run_id = run.id
 
@@ -1180,8 +1221,13 @@ def create_app(
             )
             assistant_output = AssistantOutputBuilder(assistant_message.id)
 
+            def is_current_generation() -> bool:
+                return run.generation == workspace_generation
+
             def persist_assistant(status: str = "running") -> None:
                 nonlocal next_messages, assistant_message
+                if not is_current_generation() or run.discard_on_cancel:
+                    return
                 assistant_message = StoredMessage(
                     author="assistant",
                     content=assistant_output.content,
@@ -1269,6 +1315,8 @@ def create_app(
                     conversation: Sequence[Mapping[str, object]],
                 ) -> AgentContextUpdate | None:
                     nonlocal next_messages
+                    if not is_current_generation() or run.discard_on_cancel:
+                        return None
                     assistant_snapshot = StoredMessage(
                         author="assistant",
                         content=assistant_output.content,
@@ -1341,6 +1389,8 @@ def create_app(
                     messages=current_request_messages,
                     tool_runner=tool_runner,
                 ):
+                    if not is_current_generation() or run.discard_on_cancel:
+                        raise asyncio.CancelledError
                     if event.event == "start":
                         event_id = event.data.get("id")
                         if isinstance(event_id, str):
@@ -1500,7 +1550,7 @@ def create_app(
 
             for index, event, data in events:
                 next_event_index = index + 1
-                yield stream_event(event, data)
+                yield stream_event(event, data, event_id=index)
                 if event in {"done", "error"}:
                     return
 

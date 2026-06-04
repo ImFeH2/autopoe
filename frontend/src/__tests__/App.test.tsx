@@ -88,6 +88,46 @@ const assistantDeltaOnlyStreamResponse = (
   });
 };
 
+const assistantIndexedStreamResponse = (
+  content: string,
+  id = "message-assistant",
+  chunks: string[] = [content],
+  firstEventIndex = 1,
+) => {
+  const encoder = new TextEncoder();
+  let eventIndex = firstEventIndex;
+  const stream = new ReadableStream({
+    start(controller) {
+      const enqueue = (event: string, data: Record<string, unknown>) => {
+        controller.enqueue(
+          encoder.encode(
+            `id: ${eventIndex}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+          ),
+        );
+        eventIndex += 1;
+      };
+
+      enqueue("start", { id });
+      enqueue("output_start", { index: 1 });
+      for (const chunk of chunks) {
+        enqueue("delta", { content: chunk });
+      }
+      enqueue("done", {
+        message: {
+          author: "assistant",
+          content,
+          id,
+        },
+      });
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
 const runStartResponse = (runId = "run-1") =>
   new Response(JSON.stringify({ run_id: runId }), {
     headers: { "Content-Type": "application/json" },
@@ -1235,6 +1275,16 @@ const mockInitialState = (
       });
     }
 
+    if (input === "/api/workspace/clear" && init?.method === "POST") {
+      return new Response(
+        JSON.stringify({ active_run_id: null, messages: [], usage_info: null }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
     if (input === "/api/workspace/compact" && init?.method === "POST") {
       return compactStreamResponse();
     }
@@ -1410,6 +1460,12 @@ const fetchWasCalledWith = (path: string, method: string) =>
 const mockSelectedProviderWorkspaceResponse = (response: Response) => {
   mockInitialState(selectedProviderState());
   vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+    if (input === "/api/workspace/runs" && init?.method === "POST") {
+      return new Response(JSON.stringify({ detail: "Not found." }), {
+        headers: { "Content-Type": "application/json" },
+        status: 404,
+      });
+    }
     if (input === "/api/workspace/respond" && init?.method === "POST") {
       return response;
     }
@@ -3338,6 +3394,111 @@ describe("App", () => {
       expect.objectContaining({ method: "GET" }),
     );
     expect(document.body).not.toHaveTextContent("Load failed");
+  });
+
+  it("uses server event indexes when reconnecting a workspace run stream", async () => {
+    const user = userEvent.setup();
+    const droppedStream = new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(
+              `id: 1\nevent: context_optimized\ndata: ${JSON.stringify({
+                message: {
+                  author: "system",
+                  content: "Context optimized",
+                  id: "context-optimized",
+                  usage_info: contextUsageInfo(10_000, 120_000),
+                },
+                usage_info: contextUsageInfo(10_000, 120_000),
+              })}\n\n`,
+            ),
+          );
+          controller.error(new TypeError("Load failed"));
+        },
+      }),
+      {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      },
+    );
+    const runningState = {
+      ...selectedProviderState(),
+      active_run_event_index: 1,
+      active_run_id: "run-server-index",
+      messages: [
+        {
+          author: "user",
+          content: "Continue from there",
+          id: "message-user",
+        },
+        {
+          author: "system",
+          content: "Context optimized",
+          id: "context-optimized",
+          usage_info: contextUsageInfo(10_000, 120_000),
+        },
+      ],
+      usage_info: contextUsageInfo(10_000, 120_000),
+    };
+    let stateRequests = 0;
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-server-index");
+      }
+      if (
+        input === "/api/workspace/runs/run-server-index/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return droppedStream;
+      }
+      if (
+        input === "/api/workspace/runs/run-server-index/stream?after=1" &&
+        init?.method === "GET"
+      ) {
+        return assistantIndexedStreamResponse(
+          "Continued.",
+          "message-assistant",
+          ["Continued."],
+          2,
+        );
+      }
+      if (input === "/api/state") {
+        stateRequests += 1;
+        return new Response(
+          JSON.stringify(
+            stateRequests === 1 ? selectedProviderState() : runningState,
+          ),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Continue from there");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("Continued.");
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/runs/run-server-index/stream?after=1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(window.fetch).not.toHaveBeenCalledWith(
+      "/api/workspace/runs/run-server-index/stream?after=2",
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("shows the first assistant stream chunk before the request finishes", async () => {
@@ -6787,11 +6948,8 @@ describe("App", () => {
     expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
     expect(composer).toHaveValue("");
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/messages",
-      expect.objectContaining({
-        body: JSON.stringify({ messages: [] }),
-        method: "PUT",
-      }),
+      "/api/workspace/clear",
+      expect.objectContaining({ method: "POST" }),
     );
     expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
   });
@@ -6813,11 +6971,14 @@ describe("App", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/messages" && init?.method === "PUT") {
-        return new Response(init.body, {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
+      if (input === "/api/workspace/clear" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({ messages: [], usage_info: null }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
       }
       return new Response("{}", {
         headers: { "Content-Type": "application/json" },
@@ -6842,6 +7003,10 @@ describe("App", () => {
       expect(document.body).not.toHaveTextContent("First step");
       expect(document.body).not.toHaveTextContent("First step is ready.");
     });
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/clear",
+      expect.objectContaining({ method: "POST" }),
+    );
     expect(screen.getByText("Where should we begin?")).toBeInTheDocument();
   });
 

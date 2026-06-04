@@ -192,7 +192,12 @@ type WorkspaceStreamEvent =
       event: "error";
     };
 
+type WorkspaceStreamEventEnvelope = WorkspaceStreamEvent & {
+  eventIndex?: number;
+};
+
 type WorkspaceStreamHandlers = {
+  onEventIndex: (eventIndex: number) => void;
   onContextOptimized: (message: ApiMessage) => void;
   onDelta: (content: string) => void;
   onDone: (message: ApiMessage) => void;
@@ -477,6 +482,9 @@ const isAbortError = (error: unknown) =>
   error !== null &&
   "name" in error &&
   error.name === "AbortError";
+
+const supportsWorkspaceRuns = (response: Response) =>
+  response.status !== 404 && response.status !== 405;
 
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("workspace");
@@ -1108,12 +1116,17 @@ function App() {
     }
   };
 
-  const saveMessages = async (nextMessages: Message[]) => {
-    await fetch("/api/workspace/messages", {
-      body: JSON.stringify({ messages: nextMessages }),
+  const clearWorkspace = async () => {
+    const response = await fetch("/api/workspace/clear", {
       headers: { "Content-Type": "application/json" },
-      method: "PUT",
+      method: "POST",
     });
+
+    if (!response.ok) {
+      throw new Error("Conversation could not be cleared.");
+    }
+
+    return (await response.json()) as Partial<ApiState>;
   };
 
   const responseErrorFromApi = useCallback(async (response: Response) => {
@@ -1125,12 +1138,15 @@ function App() {
     } catch {
       return "Message could not be sent.";
     }
-    return "Message could not be sent.";
+    return response.status === 409
+      ? "Response in progress"
+      : "Message could not be sent.";
   }, []);
 
   const parseWorkspaceStreamEvent = useCallback(
-    (rawEvent: string): WorkspaceStreamEvent => {
+    (rawEvent: string): WorkspaceStreamEventEnvelope => {
       const lines = rawEvent.split("\n");
+      const id = lines.find((line) => line.startsWith("id: "))?.slice(4);
       const event = lines
         .find((line) => line.startsWith("event: "))
         ?.slice("event: ".length);
@@ -1142,10 +1158,12 @@ function App() {
         throw new Error("Message could not be sent.");
       }
 
+      const eventIndex = id ? Number(id) : undefined;
       return {
         data: JSON.parse(data) as WorkspaceStreamEvent["data"],
         event,
-      } as WorkspaceStreamEvent;
+        eventIndex: Number.isSafeInteger(eventIndex) ? eventIndex : undefined,
+      } as WorkspaceStreamEventEnvelope;
     },
     [],
   );
@@ -1172,6 +1190,9 @@ function App() {
           }
 
           const streamEvent = parseWorkspaceStreamEvent(rawEvent);
+          if (streamEvent.eventIndex !== undefined) {
+            handlers.onEventIndex(streamEvent.eventIndex);
+          }
           if (streamEvent.event === "start") {
             handlers.onStart(streamEvent.data.id);
           }
@@ -1260,7 +1281,6 @@ function App() {
         if (!isCurrentResponse()) {
           return;
         }
-        activeRunEventIndexRef.current += 1;
         nextMessages.push(message);
         if (assistantMessage) {
           setMessages([...nextMessages, assistantMessage]);
@@ -1423,14 +1443,12 @@ function App() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           appendAssistantText(content);
         },
         onDone: (message) => {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           assistantId = message.id;
           assistantContent = message.content;
           const messageThinking = message.thinking ?? "";
@@ -1487,7 +1505,6 @@ function App() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           appendAssistantError(
             error.id ? error : { ...error, id: `${assistantId}-error-1` },
           );
@@ -1496,7 +1513,6 @@ function App() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           createAssistantGroup(index);
           updateAssistantMessage();
         },
@@ -1504,7 +1520,6 @@ function App() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           assistantId = id;
           updateAssistantMessage();
         },
@@ -1512,14 +1527,12 @@ function App() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           appendAssistantThinking(content);
         },
         onToolDone: (tool) => {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           finishAssistantThinking();
           assistantTextItemId = "";
           assistantIsStreamingText = false;
@@ -1533,7 +1546,6 @@ function App() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           finishAssistantThinking();
           assistantTextItemId = "";
           assistantIsStreamingText = false;
@@ -1552,10 +1564,15 @@ function App() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current += 1;
           latestUsageInfo = nextUsageInfo;
           setUsageInfo(nextUsageInfo);
           updateAssistantMessage();
+        },
+        onEventIndex: (eventIndex) => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          activeRunEventIndexRef.current = eventIndex;
         },
       };
     },
@@ -1571,6 +1588,9 @@ function App() {
       });
 
       if (!response.ok) {
+        if (!supportsWorkspaceRuns(response)) {
+          throw new SyntaxError("Run was not returned.");
+        }
         throw new Error(await responseErrorFromApi(response));
       }
 
@@ -1718,6 +1738,7 @@ function App() {
       }
 
       await readWorkspaceStream(response, {
+        onEventIndex: () => undefined,
         onContextOptimized: appendCompactMessage,
         onDelta: () => undefined,
         onDone: appendCompactMessage,
@@ -1856,6 +1877,10 @@ function App() {
       ) {
         return;
       }
+      if (error instanceof Error && error.message === "Response in progress") {
+        setMessages(messages);
+        setDraft(userContent);
+      }
       setResponseError(
         error instanceof Error ? error.message : "Message could not be sent.",
       );
@@ -1883,7 +1908,11 @@ function App() {
     setIsResponding(false);
 
     try {
-      await saveMessages([]);
+      const clearedState = await clearWorkspace();
+      if (Array.isArray(clearedState.messages)) {
+        setMessages(clearedState.messages);
+      }
+      setUsageInfo(clearedState.usage_info ?? null);
     } catch {
       setMessages(previousMessages);
       setUsageInfo(previousUsageInfo);
