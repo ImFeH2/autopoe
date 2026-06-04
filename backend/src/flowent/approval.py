@@ -12,7 +12,7 @@ from flowent.llm import (
     ChatMessage,
     CompletionCallable,
     ProviderConnection,
-    complete_chat,
+    stream_chat,
 )
 
 logger = logging.getLogger("flowent.approval")
@@ -128,7 +128,8 @@ async def review_approval_request(
     completion: CompletionCallable | None = None,
 ) -> ApprovalReviewDecision:
     try:
-        message = await complete_chat(
+        content = ""
+        async for delta in stream_chat(
             connection,
             [
                 ChatMessage(role="system", content=APPROVAL_REVIEWER_PROMPT),
@@ -138,8 +139,9 @@ async def review_approval_request(
                 ),
             ],
             completion=completion,
-        )
-        return parse_review_decision(message.content)
+        ):
+            content += delta
+        return parse_review_decision(content)
     except Exception as error:
         logger.warning("Approval reviewer denied request after failure: %s", error)
         return ApprovalReviewDecision(

@@ -146,6 +146,14 @@ def tool_call_chunk(
     }
 
 
+def content_chunk(content: str) -> dict[str, object]:
+    return {"choices": [{"delta": {"content": content}}]}
+
+
+async def content_stream(content: str):
+    yield content_chunk(content)
+
+
 def content_index(messages: list[dict[str, object]], content: str) -> int:
     for index, message in enumerate(messages):
         if message["content"] == content:
@@ -2174,23 +2182,16 @@ async def test_workspace_persists_automatic_review_result_during_stream(
             review_payload.update(json.loads(messages[-1]["content"]))
             review_started.set()
             await asyncio.wait_for(finish_review.wait(), timeout=2)
-            return {
-                "choices": [
+            return content_stream(
+                json.dumps(
                     {
-                        "message": {
-                            "content": json.dumps(
-                                {
-                                    "risk_level": "high",
-                                    "risk_score": 85,
-                                    "rationale": "Outside the task scope.",
-                                    "evidence": [],
-                                }
-                            ),
-                            "role": "assistant",
-                        }
+                        "risk_level": "high",
+                        "risk_score": 85,
+                        "rationale": "Outside the task scope.",
+                        "evidence": [],
                     }
-                ]
-            }
+                )
+            )
 
         async def chunks() -> object:
             if request["messages"][-1]["role"] == "user":
@@ -2251,23 +2252,16 @@ async def test_workspace_review_request_includes_recent_transcript(
         messages = request["messages"]
         if messages[0]["content"].startswith("You are Flowent Approval Reviewer"):
             review_payload.update(json.loads(messages[-1]["content"]))
-            return {
-                "choices": [
+            return content_stream(
+                json.dumps(
                     {
-                        "message": {
-                            "content": json.dumps(
-                                {
-                                    "risk_level": "high",
-                                    "risk_score": 85,
-                                    "rationale": "No run is needed for this test.",
-                                    "evidence": [],
-                                }
-                            ),
-                            "role": "assistant",
-                        }
+                        "risk_level": "high",
+                        "risk_score": 85,
+                        "rationale": "No run is needed for this test.",
+                        "evidence": [],
                     }
-                ]
-            }
+                )
+            )
 
         async def chunks() -> object:
             if request["messages"][-1]["role"] == "user":
