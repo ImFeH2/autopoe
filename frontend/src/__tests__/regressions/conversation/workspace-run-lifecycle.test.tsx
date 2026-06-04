@@ -98,6 +98,28 @@ const assistantIndexedStreamResponse = (
   });
 };
 
+const assistantSnapshotStreamResponse = (
+  message: Record<string, unknown>,
+  firstEventIndex = 1,
+) => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(streamEvent("snapshot", { message }, firstEventIndex)),
+      );
+      controller.enqueue(
+        encoder.encode(streamEvent("done", { message }, firstEventIndex + 1)),
+      );
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+    status: 200,
+  });
+};
+
 const expectDocumentText = async (text: string) => {
   await waitFor(() => {
     expect(document.body).toHaveTextContent(text);
@@ -263,5 +285,213 @@ describe("workspace run lifecycle regressions", () => {
       "/api/workspace/runs/run-server-index/stream?after=2",
       expect.objectContaining({ method: "GET" }),
     );
+  });
+
+  it("renders tool progress and final text from a server snapshot without missed events", async () => {
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            ...selectedProviderState(),
+            active_run_event_index: 2,
+            active_run_id: "run-snapshot",
+            messages: [
+              {
+                author: "user",
+                content: "Read notes.",
+                id: "message-user",
+              },
+            ],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs/run-snapshot/stream?after=2") {
+        return assistantSnapshotStreamResponse(
+          {
+            author: "assistant",
+            content: "Done.",
+            groups: [
+              {
+                id: "message-assistant-group-1",
+                items: [
+                  {
+                    id: "tool-tool-1",
+                    tool: {
+                      arguments: { path: "notes.txt" },
+                      content: "Launch notes",
+                      id: "tool-1",
+                      name: "read_file",
+                      status: "success",
+                      title: "Read file",
+                    },
+                    type: "tool",
+                  },
+                  {
+                    content: "Done.",
+                    id: "message-assistant-text-1",
+                    type: "text",
+                  },
+                ],
+              },
+            ],
+            id: "message-assistant",
+            status: "completed",
+            tools: [
+              {
+                arguments: { path: "notes.txt" },
+                content: "Launch notes",
+                id: "tool-1",
+                name: "read_file",
+                status: "success",
+                title: "Read file",
+              },
+            ],
+          },
+          3,
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    await expectDocumentText("Read file");
+    await expectDocumentText("Done.");
+    expect(document.body).toHaveTextContent("Done");
+  });
+
+  it("uses the server snapshot when local streaming preview differs", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return new Response(JSON.stringify({ run_id: "run-snapshot" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs/run-snapshot/stream?after=0") {
+        const encoder = new TextEncoder();
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent("start", { id: "message-assistant" }, 1),
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(streamEvent("output_start", { index: 1 }, 2)),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent("delta", { content: "Local preview." }, 3),
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent(
+                    "snapshot",
+                    {
+                      message: {
+                        author: "assistant",
+                        content: "Server answer.",
+                        groups: [
+                          {
+                            id: "message-assistant-group-1",
+                            items: [
+                              {
+                                content: "Server answer.",
+                                id: "message-assistant-text-1",
+                                type: "text",
+                              },
+                            ],
+                          },
+                        ],
+                        id: "message-assistant",
+                        status: "running",
+                      },
+                    },
+                    4,
+                  ),
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent(
+                    "done",
+                    {
+                      message: {
+                        author: "assistant",
+                        content: "Server answer.",
+                        groups: [
+                          {
+                            id: "message-assistant-group-1",
+                            items: [
+                              {
+                                content: "Server answer.",
+                                id: "message-assistant-text-1",
+                                type: "text",
+                              },
+                            ],
+                          },
+                        ],
+                        id: "message-assistant",
+                        status: "completed",
+                      },
+                    },
+                    5,
+                  ),
+                ),
+              );
+              controller.close();
+            },
+          }),
+          {
+            headers: { "Content-Type": "text/event-stream" },
+            status: 200,
+          },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("Server answer.");
+    expect(document.body).not.toHaveTextContent("Local preview.");
   });
 });

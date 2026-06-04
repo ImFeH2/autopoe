@@ -53,79 +53,35 @@ const assistantStreamResponse = (
   });
 };
 
-const assistantDeltaOnlyStreamResponse = (
-  content: string,
-  id = "message-assistant",
-  chunks: string[] = [content],
+const controlledAssistantSnapshotStreamResponse = (
+  message: Record<string, unknown>,
+  firstEventIndex = 1,
 ) => {
   const encoder = new TextEncoder();
+  const release = deferred();
   const stream = new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) {
-        controller.enqueue(
-          encoder.encode(
-            `event: delta\ndata: ${JSON.stringify({ content: chunk })}\n\n`,
-          ),
-        );
-      }
+    async start(controller) {
       controller.enqueue(
         encoder.encode(
-          `event: done\ndata: ${JSON.stringify({
-            message: {
-              author: "assistant",
-              content,
-              id,
-            },
-          })}\n\n`,
+          `id: ${firstEventIndex}\nevent: snapshot\ndata: ${JSON.stringify({ message })}\n\n`,
+        ),
+      );
+      await release.promise;
+      controller.enqueue(
+        encoder.encode(
+          `id: ${firstEventIndex + 1}\nevent: done\ndata: ${JSON.stringify({ message })}\n\n`,
         ),
       );
       controller.close();
     },
   });
-  return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream" },
-    status: 200,
-  });
-};
-
-const assistantIndexedStreamResponse = (
-  content: string,
-  id = "message-assistant",
-  chunks: string[] = [content],
-  firstEventIndex = 1,
-) => {
-  const encoder = new TextEncoder();
-  let eventIndex = firstEventIndex;
-  const stream = new ReadableStream({
-    start(controller) {
-      const enqueue = (event: string, data: Record<string, unknown>) => {
-        controller.enqueue(
-          encoder.encode(
-            `id: ${eventIndex}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
-          ),
-        );
-        eventIndex += 1;
-      };
-
-      enqueue("start", { id });
-      enqueue("output_start", { index: 1 });
-      for (const chunk of chunks) {
-        enqueue("delta", { content: chunk });
-      }
-      enqueue("done", {
-        message: {
-          author: "assistant",
-          content,
-          id,
-        },
-      });
-      controller.close();
-    },
-  });
-  return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream" },
-    status: 200,
-  });
+  return {
+    finish: release.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
 };
 
 const runStartResponse = (runId = "run-1") =>
@@ -3260,6 +3216,24 @@ describe("App", () => {
 
   it("starts a workspace run and subscribes to its stream", async () => {
     const user = userEvent.setup();
+    const assistantSnapshot = controlledAssistantSnapshotStreamResponse({
+      author: "assistant",
+      content: "The plan is ready.",
+      groups: [
+        {
+          id: "message-assistant-group-1",
+          items: [
+            {
+              content: "The plan is ready.",
+              id: "message-assistant-text-1",
+              type: "text",
+            },
+          ],
+        },
+      ],
+      id: "message-assistant",
+      status: "running",
+    });
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
       if (input === "/api/workspace/runs" && init?.method === "POST") {
@@ -3269,7 +3243,7 @@ describe("App", () => {
         input === "/api/workspace/runs/run-checklist/stream?after=0" &&
         init?.method === "GET"
       ) {
-        return assistantStreamResponse("The plan is ready.");
+        return assistantSnapshot.response;
       }
       if (input === "/api/state") {
         return new Response(JSON.stringify(selectedProviderState()), {
@@ -3297,6 +3271,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await expectDocumentText("The plan is ready.");
+    assistantSnapshot.finish();
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workspace/runs",
       expect.objectContaining({
@@ -3312,6 +3287,27 @@ describe("App", () => {
 
   it("reloads state and reconnects when a workspace run stream drops", async () => {
     const user = userEvent.setup();
+    const assistantSnapshot = controlledAssistantSnapshotStreamResponse(
+      {
+        author: "assistant",
+        content: "Partial answer.",
+        groups: [
+          {
+            id: "message-assistant-group-1",
+            items: [
+              {
+                content: "Partial answer.",
+                id: "message-assistant-text-1",
+                type: "text",
+              },
+            ],
+          },
+        ],
+        id: "message-assistant",
+        status: "running",
+      },
+      3,
+    );
     const droppedStream = new Response(
       new ReadableStream({
         start(controller) {
@@ -3357,11 +3353,7 @@ describe("App", () => {
         input === "/api/workspace/runs/run-reconnect/stream?after=2" &&
         init?.method === "GET"
       ) {
-        return assistantDeltaOnlyStreamResponse(
-          "Partial answer.",
-          "message-assistant",
-          [" answer."],
-        );
+        return assistantSnapshot.response;
       }
       if (input === "/api/state") {
         stateRequests += 1;
@@ -3389,6 +3381,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await expectDocumentText("Partial answer.");
+    assistantSnapshot.finish();
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workspace/runs/run-reconnect/stream?after=2",
       expect.objectContaining({ method: "GET" }),
@@ -3398,6 +3391,27 @@ describe("App", () => {
 
   it("uses server event indexes when reconnecting a workspace run stream", async () => {
     const user = userEvent.setup();
+    const assistantSnapshot = controlledAssistantSnapshotStreamResponse(
+      {
+        author: "assistant",
+        content: "Continued from snapshot.",
+        groups: [
+          {
+            id: "message-assistant-group-1",
+            items: [
+              {
+                content: "Continued from snapshot.",
+                id: "message-assistant-text-1",
+                type: "text",
+              },
+            ],
+          },
+        ],
+        id: "message-assistant",
+        status: "running",
+      },
+      2,
+    );
     const droppedStream = new Response(
       new ReadableStream({
         start(controller) {
@@ -3458,12 +3472,7 @@ describe("App", () => {
         input === "/api/workspace/runs/run-server-index/stream?after=1" &&
         init?.method === "GET"
       ) {
-        return assistantIndexedStreamResponse(
-          "Continued.",
-          "message-assistant",
-          ["Continued."],
-          2,
-        );
+        return assistantSnapshot.response;
       }
       if (input === "/api/state") {
         stateRequests += 1;
@@ -3490,7 +3499,8 @@ describe("App", () => {
     await user.type(composer, "Continue from there");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await expectDocumentText("Continued.");
+    await expectDocumentText("Continued from snapshot.");
+    assistantSnapshot.finish();
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workspace/runs/run-server-index/stream?after=1",
       expect.objectContaining({ method: "GET" }),

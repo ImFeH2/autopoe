@@ -185,6 +185,7 @@ class WorkspaceRun:
     generation: int = 0
     id: str = field(default_factory=lambda: str(uuid4()))
     is_done: bool = False
+    latest_snapshot: StoredMessage | None = None
     task: asyncio.Task[None] | None = None
 
     @property
@@ -199,6 +200,10 @@ def stream_event(
     return f"{id_line}event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def stream_message_data(message: StoredMessage) -> dict[str, object]:
+    return {**message.model_dump(), "status": message.status}
+
+
 def append_or_replace_message(
     messages: list[StoredMessage], message: StoredMessage
 ) -> list[StoredMessage]:
@@ -206,6 +211,18 @@ def append_or_replace_message(
         *(current for current in messages if current.id != message.id),
         message,
     ]
+
+
+def run_snapshot_data_at(
+    run: WorkspaceRun, event_index: int
+) -> dict[str, object] | None:
+    for current_event_index, event, data in reversed(run.events):
+        if current_event_index > event_index or event != "snapshot":
+            continue
+        message = data.get("message")
+        if isinstance(message, dict):
+            return message
+    return None
 
 
 USER_VISIBLE_RUN_ERROR_TITLE = "Request failed"
@@ -1170,6 +1187,16 @@ def create_app(
             run.events.append((run.latest_event_index + 1, event, data))
             run.condition.notify_all()
 
+    async def append_run_snapshot(run: WorkspaceRun, message: StoredMessage) -> None:
+        if message.author != "assistant":
+            return
+        run.latest_snapshot = message
+        await append_run_event(
+            run,
+            "snapshot",
+            {"message": stream_message_data(message)},
+        )
+
     def active_workspace_run() -> WorkspaceRun | None:
         if active_workspace_run_id is None:
             return None
@@ -1224,10 +1251,10 @@ def create_app(
             def is_current_generation() -> bool:
                 return run.generation == workspace_generation
 
-            def persist_assistant(status: str = "running") -> None:
+            def persist_assistant(status: str = "running") -> StoredMessage | None:
                 nonlocal next_messages, assistant_message
                 if not is_current_generation() or run.discard_on_cancel:
-                    return
+                    return None
                 assistant_message = StoredMessage(
                     author="assistant",
                     content=assistant_output.content,
@@ -1242,6 +1269,7 @@ def create_app(
                     next_messages, assistant_message
                 )
                 store.upsert_message(assistant_message)
+                return assistant_message
 
             try:
                 current_tool_id: str | None = None
@@ -1391,6 +1419,9 @@ def create_app(
                 ):
                     if not is_current_generation() or run.discard_on_cancel:
                         raise asyncio.CancelledError
+                    run_event_data = event.data
+                    should_append_run_event = event.event != "usage"
+                    snapshot_after_event: StoredMessage | None = None
                     if event.event == "start":
                         event_id = event.data.get("id")
                         if isinstance(event_id, str):
@@ -1398,12 +1429,12 @@ def create_app(
                                 update={"id": event_id}
                             )
                             assistant_output.set_assistant_id(event_id)
-                            persist_assistant()
+                            snapshot_after_event = persist_assistant()
                     if event.event == "output_start":
                         index = event.data.get("index")
                         if isinstance(index, int):
                             assistant_output.start_group(index)
-                            persist_assistant()
+                            snapshot_after_event = persist_assistant()
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
                         if isinstance(tool, dict) and isinstance(tool.get("id"), str):
@@ -1411,7 +1442,7 @@ def create_app(
                             assistant_output.start_tool(
                                 StoredToolItem.model_validate(tool)
                             )
-                            persist_assistant()
+                            snapshot_after_event = persist_assistant()
                     if event.event in {"tool_done", "tool_error"}:
                         tool_id = event.data.get("id")
                         if (
@@ -1422,17 +1453,17 @@ def create_app(
                                 None if current_tool_id == tool_id else current_tool_id
                             )
                             assistant_output.update_tool(tool_id, event.data)
-                            persist_assistant()
+                            snapshot_after_event = persist_assistant()
                     if event.event == "delta":
                         assistant_output.append_text(
                             str(event.data.get("content") or "")
                         )
-                        persist_assistant()
+                        snapshot_after_event = persist_assistant()
                     if event.event == "thinking_delta":
                         assistant_output.append_thinking(
                             str(event.data.get("content") or "")
                         )
-                        persist_assistant()
+                        snapshot_after_event = persist_assistant()
                     if event.event == "usage":
                         usage_data = event.data.get("usage")
                         if isinstance(usage_data, dict):
@@ -1448,11 +1479,9 @@ def create_app(
                             )
                             store.save_usage_info(usage_info)
                             turn_usage_info = usage_info
-                            await append_run_event(
-                                run,
-                                "usage",
-                                usage_event_data(usage_info),
-                            )
+                            run_event_data = usage_event_data(usage_info)
+                            should_append_run_event = True
+                            snapshot_after_event = persist_assistant()
                     logger.log(
                         TRACE_LEVEL,
                         "Workspace stream event=%s data=%r",
@@ -1480,24 +1509,25 @@ def create_app(
                                     model_context_window=model_context_window,
                                 )
                             store.save_usage_info(final_usage_info)
-                            final_message = StoredMessage(
-                                author="assistant",
-                                content=assistant_output.content,
-                                groups=assistant_output.groups,
-                                id=assistant_message.id,
-                                status="completed",
-                                thinking=assistant_output.thinking,
-                                tools=list(assistant_output.tools.values()),
-                                usage_info=final_usage_info,
-                            )
-                            event.data["message"] = final_message.model_dump()
-                            persist_assistant("completed")
-                    if event.event != "usage":
-                        await append_run_event(run, event.event, event.data)
+                            snapshot_after_event = persist_assistant("completed")
+                            if snapshot_after_event is not None:
+                                run_event_data = {
+                                    "message": stream_message_data(snapshot_after_event)
+                                }
+                    if event.event == "done" and snapshot_after_event is not None:
+                        await append_run_snapshot(run, snapshot_after_event)
+                        await append_run_event(run, event.event, run_event_data)
+                    else:
+                        if should_append_run_event:
+                            await append_run_event(run, event.event, run_event_data)
+                        if snapshot_after_event is not None:
+                            await append_run_snapshot(run, snapshot_after_event)
             except asyncio.CancelledError:
                 logger.info("Workspace run stopped")
                 if not run.discard_on_cancel:
-                    persist_assistant("interrupted")
+                    interrupted_snapshot = persist_assistant("interrupted")
+                    if interrupted_snapshot is not None:
+                        await append_run_snapshot(run, interrupted_snapshot)
                     await append_run_event(
                         run,
                         "error",
@@ -1521,7 +1551,9 @@ def create_app(
                         str(error) or EMPTY_MODEL_RESPONSE_DETAIL,
                     )
                 )
-                persist_assistant("failed")
+                failed_snapshot = persist_assistant("failed")
+                if failed_snapshot is not None:
+                    await append_run_snapshot(run, failed_snapshot)
                 await append_run_event(run, "error", run_error_event_data(error_item))
             finally:
                 run.is_done = True
@@ -1534,9 +1566,16 @@ def create_app(
         return run
 
     async def workspace_run_stream(
-        run: WorkspaceRun, after: int = 0
+        run: WorkspaceRun, after: int = 0, include_snapshots: bool = True
     ) -> AsyncIterator[str]:
         next_event_index = after + 1
+        reconnect_snapshot = run_snapshot_data_at(run, after) if after > 0 else None
+        if include_snapshots and reconnect_snapshot is not None:
+            yield stream_event(
+                "snapshot",
+                {"message": reconnect_snapshot},
+                event_id=after,
+            )
         while True:
             async with run.condition:
 
@@ -1550,6 +1589,8 @@ def create_app(
 
             for index, event, data in events:
                 next_event_index = index + 1
+                if event == "snapshot" and not include_snapshots:
+                    continue
                 yield stream_event(event, data, event_id=index)
                 if event in {"done", "error"}:
                     return
@@ -1694,7 +1735,7 @@ def create_app(
         logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
         run = create_workspace_run(request.content)
         return StreamingResponse(
-            workspace_run_stream(run),
+            workspace_run_stream(run, include_snapshots=False),
             media_type="text/event-stream",
         )
 
