@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 
 export function WorkspaceView({
   commands,
+  contextWindowLimit,
   draft,
   errorMessage,
   isRefiningContext,
@@ -53,6 +54,7 @@ export function WorkspaceView({
   skills,
 }: {
   commands: WorkspaceCommand[];
+  contextWindowLimit: number | null;
   draft: string;
   errorMessage: string;
   isRefiningContext: boolean;
@@ -78,6 +80,7 @@ export function WorkspaceView({
         />
         <ChatComposer
           commands={commands}
+          contextWindowLimit={contextWindowLimit}
           draft={draft}
           errorMessage={errorMessage}
           isRefiningContext={isRefiningContext}
@@ -935,6 +938,7 @@ function AssistantWaitingIndicator() {
 
 function ChatComposer({
   commands,
+  contextWindowLimit,
   draft,
   errorMessage,
   isRefiningContext,
@@ -950,6 +954,7 @@ function ChatComposer({
   skills,
 }: {
   commands: WorkspaceCommand[];
+  contextWindowLimit: number | null;
   draft: string;
   errorMessage: string;
   isRefiningContext: boolean;
@@ -1027,8 +1032,14 @@ function ChatComposer({
   const isSendUnavailable = !showStopButton && !canSubmit;
   const isSendDisabled = isSendUnavailable && !handlesSoftKeyboardSubmit;
   const capacity = useMemo(
-    () => contextCapacityFromMessages(messages, draft, usageInfo),
-    [draft, messages, usageInfo],
+    () =>
+      contextCapacityFromMessages(
+        messages,
+        draft,
+        usageInfo,
+        contextWindowLimit,
+      ),
+    [contextWindowLimit, draft, messages, usageInfo],
   );
 
   useEffect(() => {
@@ -1550,6 +1561,7 @@ function contextCapacityFromMessages(
   messages: Message[],
   draft: string,
   usageInfo: ContextUsageInfo | null,
+  contextWindowLimit: number | null,
 ): ContextCapacity {
   const latestUsageIndex = latestUsageInfoMessageIndex(messages);
   const latestUsageInfo =
@@ -1571,7 +1583,9 @@ function contextCapacityFromMessages(
   );
   const total = Math.max(
     1,
-    latestUsageInfo?.model_context_window ?? CONTEXT_CAPACITY_LIMIT,
+    contextWindowLimit ??
+      latestUsageInfo?.model_context_window ??
+      CONTEXT_CAPACITY_LIMIT,
   );
   const percent = Math.min(100, Math.floor((used / total) * 100));
 

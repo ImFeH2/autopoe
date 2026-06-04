@@ -106,6 +106,7 @@ type ApiState = {
   providers: ApiProvider[];
   settings: {
     agent_prompt?: string;
+    context_window_limit?: number | null;
     reasoning_effort?: ReasoningEffort;
     selected_model: string;
     selected_provider_id: string;
@@ -122,6 +123,19 @@ type ApiAbout = {
 
 type WorkspaceRunResponse = {
   run_id: string;
+};
+
+const contextWindowFromLimit = (
+  usageInfo: ContextUsageInfo | null,
+  contextWindowLimit: number | null,
+) => {
+  if (usageInfo === null || contextWindowLimit === null) {
+    return usageInfo;
+  }
+  return {
+    ...usageInfo,
+    model_context_window: contextWindowLimit,
+  };
 };
 
 type WorkspaceStreamEvent =
@@ -499,6 +513,9 @@ function App() {
   const [agentPrompt, setAgentPrompt] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [contextWindowLimit, setContextWindowLimit] = useState<number | null>(
+    null,
+  );
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort>("default");
   const [appVersion, setAppVersion] = useState("");
@@ -564,7 +581,10 @@ function App() {
     setProviders(loadedProviders);
     setMessages(state.messages);
     setUsageInfo(
-      state.usage_info ?? latestUsageInfoFromMessages(state.messages),
+      contextWindowFromLimit(
+        state.usage_info ?? latestUsageInfoFromMessages(state.messages),
+        state.settings.context_window_limit ?? null,
+      ),
     );
     const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
     setMcpServers(loadedMcpServers);
@@ -577,6 +597,7 @@ function App() {
     setAgentPrompt(state.settings.agent_prompt ?? "");
     setSelectedProviderId(state.settings.selected_provider_id);
     setSelectedModel(state.settings.selected_model);
+    setContextWindowLimit(state.settings.context_window_limit ?? null);
     setReasoningEffort(state.settings.reasoning_effort ?? "default");
     setTelegramBot(telegramBotFromApi(state.telegram_bot));
     setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
@@ -816,6 +837,7 @@ function App() {
     await fetch("/api/settings", {
       body: JSON.stringify({
         agent_prompt: settings.agentPrompt,
+        context_window_limit: settings.contextWindowLimit,
         reasoning_effort: settings.reasoningEffort,
         selected_model: settings.selectedModel,
         selected_provider_id: settings.selectedProviderId,
@@ -837,6 +859,7 @@ function App() {
       setSelectedModel("");
       void persistSettingsAndRefresh({
         agentPrompt,
+        contextWindowLimit,
         reasoningEffort,
         selectedModel: "",
         selectedProviderId: "",
@@ -848,6 +871,7 @@ function App() {
     setSelectedModel("");
     void persistSettingsAndRefresh({
       agentPrompt,
+      contextWindowLimit,
       reasoningEffort,
       selectedModel: "",
       selectedProviderId: nextProvider.id,
@@ -858,6 +882,7 @@ function App() {
     setSelectedModel(value);
     void persistSettingsAndRefresh({
       agentPrompt,
+      contextWindowLimit,
       reasoningEffort,
       selectedModel: value,
       selectedProviderId,
@@ -868,6 +893,7 @@ function App() {
     setReasoningEffort(value);
     void persistSettings({
       agentPrompt,
+      contextWindowLimit,
       reasoningEffort: value,
       selectedModel,
       selectedProviderId,
@@ -876,10 +902,14 @@ function App() {
 
   const saveRuntimeSettings = (settings: RuntimeSettings) => {
     setAgentPrompt(settings.agentPrompt);
+    setContextWindowLimit(settings.contextWindowLimit);
+    setUsageInfo((currentUsageInfo) =>
+      contextWindowFromLimit(currentUsageInfo, settings.contextWindowLimit),
+    );
     setReasoningEffort(settings.reasoningEffort);
     setSelectedModel(settings.selectedModel);
     setSelectedProviderId(settings.selectedProviderId);
-    void persistSettings(settings);
+    void persistSettingsAndRefresh(settings);
   };
 
   const fetchProviderModels = async () => {
@@ -936,6 +966,7 @@ function App() {
       setSelectedModel("");
       void persistSettings({
         agentPrompt,
+        contextWindowLimit,
         reasoningEffort,
         selectedModel: "",
         selectedProviderId: savedProvider.id,
@@ -2014,6 +2045,7 @@ function App() {
     >
       <TabsContent value="workspace" className={viewPanelClassName}>
         <WorkspaceView
+          contextWindowLimit={contextWindowLimit}
           draft={draft}
           errorMessage={responseError}
           isRefiningContext={isRefiningContext}
@@ -2104,6 +2136,7 @@ function App() {
         <SettingsView
           agentPrompt={agentPrompt}
           appVersion={appVersion}
+          contextWindowLimit={contextWindowLimit}
           modelOptions={activeProvider?.models ?? []}
           onModelChange={handleActiveModelChange}
           onProviderChange={handleActiveProviderChange}

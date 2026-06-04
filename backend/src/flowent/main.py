@@ -597,17 +597,21 @@ def update_context_usage_for_response(
 
 def usage_info_for_model(
     usage_info: TokenUsageInfo | None,
-    model_name: str | None,
+    model_context_window: int,
 ) -> TokenUsageInfo | None:
     if usage_info is None:
         return None
-    return usage_info.model_copy(
-        update={"model_context_window": current_model_context_window(model_name)}
-    )
+    return usage_info.model_copy(update={"model_context_window": model_context_window})
+
+
+def context_window_for_settings(settings: StoredSettings) -> int:
+    if settings.context_window_limit is not None:
+        return settings.context_window_limit
+    return current_model_context_window(settings.selected_model)
 
 
 def state_with_current_model_context_window(state: StoredState) -> StoredState:
-    selected_model = state.settings.selected_model
+    model_context_window = context_window_for_settings(state.settings)
     return state.model_copy(
         update={
             "messages": [
@@ -615,7 +619,7 @@ def state_with_current_model_context_window(state: StoredState) -> StoredState:
                     update={
                         "usage_info": usage_info_for_model(
                             message.usage_info,
-                            selected_model,
+                            model_context_window,
                         )
                     }
                 )
@@ -623,7 +627,10 @@ def state_with_current_model_context_window(state: StoredState) -> StoredState:
                 else message
                 for message in state.messages
             ],
-            "usage_info": usage_info_for_model(state.usage_info, selected_model),
+            "usage_info": usage_info_for_model(
+                state.usage_info,
+                model_context_window,
+            ),
         }
     )
 
@@ -755,6 +762,7 @@ def create_app(
     async def save_context_checkpoint(
         *,
         connection: ProviderConnection,
+        context_window_limit: int,
         messages: list[StoredMessage],
         model_history: list[ChatMessage],
         marker_content: str,
@@ -776,12 +784,12 @@ def create_app(
             usage_info = append_token_usage(
                 usage_info,
                 compact_result.summary_usage,
-                model_context_window=current_model_context_window(connection.model),
+                model_context_window=context_window_limit,
             )
         usage_info = recompute_context_usage(
             usage_info,
             compact_result.token_after,
-            model_context_window=current_model_context_window(connection.model),
+            model_context_window=context_window_limit,
         )
         store.save_usage_info(usage_info)
         marker = StoredMessage(
@@ -820,19 +828,21 @@ def create_app(
     async def auto_compact_workspace_messages(
         *,
         connection: ProviderConnection,
+        context_window_limit: int,
         messages: list[StoredMessage],
         model_history: list[ChatMessage],
         source_message_id: str | None = None,
     ) -> tuple[StoredMessage, list[dict[str, object]], TokenUsageInfo] | None:
         if not should_auto_compact(
             model_history,
-            context_window=current_model_context_window(connection.model),
+            context_window=context_window_limit,
         ):
             return None
         logger.info("Workspace auto compact requested")
         try:
             return await save_context_checkpoint(
                 connection=connection,
+                context_window_limit=context_window_limit,
                 marker_content=OPTIMIZED_CONTEXT_MARKER,
                 messages=messages,
                 model_history=model_history,
@@ -846,6 +856,7 @@ def create_app(
     async def run_workspace_turn(content: str) -> StoredMessage:
         state = store.read_state()
         connection = selected_connection(state)
+        context_window_limit = context_window_for_settings(state.settings)
         user_message = StoredMessage(
             author="user",
             content=content,
@@ -863,6 +874,7 @@ def create_app(
         ]
         auto_compaction = await auto_compact_workspace_messages(
             connection=connection,
+            context_window_limit=context_window_limit,
             messages=state.messages,
             model_history=model_history,
             source_message_id=None,
@@ -875,7 +887,6 @@ def create_app(
         assistant_id = str(uuid4())
         assistant_output = AssistantOutputBuilder(assistant_id)
         turn_usage_info: TokenUsageInfo | None = None
-        model_context_window = current_model_context_window(connection.model)
 
         async def review_tool_approval(request: ApprovalReviewRequest):
             return await review_approval_request(
@@ -934,11 +945,11 @@ def create_app(
                         append_token_usage(
                             store.read_usage_info(),
                             TokenUsage.model_validate(usage_data),
-                            model_context_window=model_context_window,
+                            model_context_window=context_window_limit,
                         ),
                         messages=request_messages,
                         output_content=assistant_output.content,
-                        model_context_window=model_context_window,
+                        model_context_window=context_window_limit,
                     )
                     store.save_usage_info(usage_info)
                     turn_usage_info = usage_info
@@ -963,17 +974,16 @@ def create_app(
                 store.read_usage_info(),
                 messages=request_messages,
                 output_content=assistant_output.content,
-                model_context_window=model_context_window,
+                model_context_window=context_window_limit,
             )
-            store.save_usage_info(final_usage_info)
         else:
             final_usage_info = update_context_usage_for_response(
                 final_usage_info,
                 messages=request_messages,
                 output_content=assistant_output.content,
-                model_context_window=model_context_window,
+                model_context_window=context_window_limit,
             )
-            store.save_usage_info(final_usage_info)
+        store.save_usage_info(final_usage_info)
 
         assistant_message = StoredMessage(
             author="assistant",
@@ -1222,6 +1232,7 @@ def create_app(
             )
         state = store.read_state()
         connection = selected_connection(state)
+        context_window_limit = context_window_for_settings(state.settings)
 
         user_message = StoredMessage(
             author="user",
@@ -1274,7 +1285,6 @@ def create_app(
             try:
                 current_tool_id: str | None = None
                 turn_usage_info: TokenUsageInfo | None = None
-                model_context_window = current_model_context_window(connection.model)
                 current_request_messages = request_messages_for_content(
                     state,
                     next_messages,
@@ -1287,6 +1297,7 @@ def create_app(
                 )
                 auto_compaction = await auto_compact_workspace_messages(
                     connection=connection,
+                    context_window_limit=context_window_limit,
                     messages=state.messages,
                     model_history=[
                         ChatMessage.model_validate(message)
@@ -1380,6 +1391,7 @@ def create_app(
                             )
                     auto_result = await auto_compact_workspace_messages(
                         connection=connection,
+                        context_window_limit=context_window_limit,
                         messages=next_messages,
                         model_history=model_history,
                         source_message_id=assistant_snapshot.id,
@@ -1471,11 +1483,11 @@ def create_app(
                                 append_token_usage(
                                     store.read_usage_info(),
                                     TokenUsage.model_validate(usage_data),
-                                    model_context_window=model_context_window,
+                                    model_context_window=context_window_limit,
                                 ),
                                 messages=current_request_messages,
                                 output_content=assistant_output.content,
-                                model_context_window=model_context_window,
+                                model_context_window=context_window_limit,
                             )
                             store.save_usage_info(usage_info)
                             turn_usage_info = usage_info
@@ -1499,14 +1511,14 @@ def create_app(
                                     response_usage_info,
                                     messages=current_request_messages,
                                     output_content=assistant_output.content,
-                                    model_context_window=model_context_window,
+                                    model_context_window=context_window_limit,
                                 )
                             else:
                                 final_usage_info = update_context_usage_for_response(
                                     final_usage_info,
                                     messages=current_request_messages,
                                     output_content=assistant_output.content,
-                                    model_context_window=model_context_window,
+                                    model_context_window=context_window_limit,
                                 )
                             store.save_usage_info(final_usage_info)
                             snapshot_after_event = persist_assistant("completed")
@@ -1637,6 +1649,7 @@ def create_app(
             *,
             checkpoint: StoredCompactionCheckpoint | None,
             connection: ProviderConnection,
+            context_window_limit: int,
             state: StoredState,
         ) -> tuple[StoredMessage, TokenUsageInfo]:
             logger.info("Workspace compact requested")
@@ -1652,6 +1665,7 @@ def create_app(
 
                 marker, _, usage_info = await save_context_checkpoint(
                     connection=connection,
+                    context_window_limit=context_window_limit,
                     marker_content=COMPACTED_CONTEXT_MARKER,
                     messages=state.messages,
                     model_history=model_history,
@@ -1690,12 +1704,14 @@ def create_app(
                 )
             state = store.read_state()
             connection = selected_connection(state)
+            context_window_limit = context_window_for_settings(state.settings)
             checkpoint = store.read_active_compaction_checkpoint()
             store.save_is_compacting(True)
             compact_task = asyncio.create_task(
                 run_manual_compact(
                     checkpoint=checkpoint,
                     connection=connection,
+                    context_window_limit=context_window_limit,
                     state=state,
                 )
             )

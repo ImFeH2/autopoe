@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -16,6 +17,7 @@ import {
   dataRowClassName,
   dataRowLabelClassName,
   emptyStateClassName,
+  fieldInputClassName,
   fieldLabelClassName,
   fieldTriggerClassName,
   formActionsClassName,
@@ -36,9 +38,12 @@ const reasoningOptions: Array<{ label: string; value: ReasoningEffort }> = [
   { label: "XHigh", value: "xhigh" },
 ];
 
+type ContextLimitMode = "auto" | "manual";
+
 export function SettingsView({
   agentPrompt,
   appVersion,
+  contextWindowLimit,
   modelOptions,
   onModelChange,
   onProviderChange,
@@ -51,6 +56,7 @@ export function SettingsView({
 }: {
   agentPrompt: string;
   appVersion: string;
+  contextWindowLimit: number | null;
   modelOptions: string[];
   onModelChange: (value: string) => void;
   onProviderChange: (value: string) => void;
@@ -62,15 +68,39 @@ export function SettingsView({
   selectedProviderId: string;
 }) {
   const [agentPromptDraft, setAgentPromptDraft] = useState(agentPrompt);
+  const [contextLimitMode, setContextLimitMode] = useState<ContextLimitMode>(
+    contextWindowLimit === null ? "auto" : "manual",
+  );
+  const [contextLimitDraft, setContextLimitDraft] = useState(
+    contextWindowLimit === null ? "" : String(contextWindowLimit),
+  );
 
   useEffect(() => {
     setAgentPromptDraft(agentPrompt);
   }, [agentPrompt]);
 
+  useEffect(() => {
+    setContextLimitMode(contextWindowLimit === null ? "auto" : "manual");
+    setContextLimitDraft(
+      contextWindowLimit === null ? "" : String(contextWindowLimit),
+    );
+  }, [contextWindowLimit]);
+
+  const trimmedContextLimitDraft = contextLimitDraft.trim();
+  const manualContextLimit = Number(trimmedContextLimitDraft);
+  const isManualContextLimitValid =
+    contextLimitMode === "auto" ||
+    (/^\d+$/.test(trimmedContextLimitDraft) && manualContextLimit > 0);
+
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isManualContextLimitValid) {
+      return;
+    }
     onRuntimeSettingsSave({
       agentPrompt: agentPromptDraft,
+      contextWindowLimit:
+        contextLimitMode === "manual" ? manualContextLimit : null,
       reasoningEffort,
       selectedModel,
       selectedProviderId,
@@ -114,6 +144,13 @@ export function SettingsView({
                 onReasoningEffortChange={onReasoningEffortChange}
                 reasoningEffort={reasoningEffort}
               />
+              <RuntimeContextLimitField
+                contextLimitDraft={contextLimitDraft}
+                contextLimitMode={contextLimitMode}
+                isValid={isManualContextLimitValid}
+                onContextLimitDraftChange={setContextLimitDraft}
+                onContextLimitModeChange={setContextLimitMode}
+              />
             </div>
           </div>
         </section>
@@ -138,7 +175,9 @@ export function SettingsView({
         </section>
 
         <div className={cn(formActionsClassName, "mt-0")}>
-          <Button type="submit">Save</Button>
+          <Button type="submit" disabled={!isManualContextLimitValid}>
+            Save
+          </Button>
         </div>
       </form>
       {appVersion ? (
@@ -147,6 +186,75 @@ export function SettingsView({
         </p>
       ) : null}
     </section>
+  );
+}
+
+function RuntimeContextLimitField({
+  contextLimitDraft,
+  contextLimitMode,
+  isValid,
+  onContextLimitDraftChange,
+  onContextLimitModeChange,
+}: {
+  contextLimitDraft: string;
+  contextLimitMode: ContextLimitMode;
+  isValid: boolean;
+  onContextLimitDraftChange: (value: string) => void;
+  onContextLimitModeChange: (value: ContextLimitMode) => void;
+}) {
+  const errorId = "context-limit-error";
+  const showError = contextLimitMode === "manual" && !isValid;
+
+  return (
+    <div className={dataRowClassName}>
+      <Label
+        className={cn(fieldLabelClassName, dataRowLabelClassName)}
+        htmlFor="context-limit-mode"
+      >
+        Context window
+      </Label>
+      <div className="grid gap-1.5">
+        <div className="flex min-w-0 gap-2 max-[640px]:flex-col">
+          <Select
+            value={contextLimitMode}
+            onValueChange={(value) =>
+              onContextLimitModeChange(value as ContextLimitMode)
+            }
+          >
+            <SelectTrigger
+              className={cn(fieldTriggerClassName, "w-36 max-[640px]:w-full")}
+              id="context-limit-mode"
+              aria-label="Context window"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Auto</SelectItem>
+              <SelectItem value="manual">Manual</SelectItem>
+            </SelectContent>
+          </Select>
+          {contextLimitMode === "manual" ? (
+            <Input
+              aria-describedby={showError ? errorId : undefined}
+              aria-invalid={showError}
+              aria-label="Context size"
+              className={fieldInputClassName}
+              inputMode="numeric"
+              placeholder="e.g. 128000"
+              value={contextLimitDraft}
+              onChange={(event) =>
+                onContextLimitDraftChange(event.target.value)
+              }
+            />
+          ) : null}
+        </div>
+        {showError ? (
+          <p className="m-0 text-xs leading-4 text-red-400" id={errorId}>
+            Enter a positive integer
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

@@ -3,7 +3,7 @@ import sqlite3
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 from flowent.llm import ChatMessage, ProviderFormat, ReasoningEffort
 from flowent.paths import data_directory
@@ -92,6 +92,7 @@ class StoredSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_prompt: str = Field(default="", exclude_if=lambda value: value == "")
+    context_window_limit: PositiveInt | None = None
     reasoning_effort: ReasoningEffort = ReasoningEffort.DEFAULT
     selected_model: str
     selected_provider_id: str
@@ -249,7 +250,7 @@ class StateStore:
             ]
             settings_row = connection.execute(
                 """
-                SELECT selected_provider_id, selected_model, reasoning_effort, agent_prompt
+                SELECT selected_provider_id, selected_model, reasoning_effort, agent_prompt, context_window_limit
                 FROM settings
                 WHERE id = 1
                 """
@@ -301,6 +302,9 @@ class StateStore:
             providers=providers,
             settings=StoredSettings(
                 agent_prompt=settings_row["agent_prompt"] if settings_row else "",
+                context_window_limit=settings_row["context_window_limit"]
+                if settings_row
+                else None,
                 reasoning_effort=settings_row["reasoning_effort"]
                 if settings_row
                 else ReasoningEffort.DEFAULT,
@@ -603,14 +607,16 @@ class StateStore:
                     selected_provider_id,
                     selected_model,
                     reasoning_effort,
-                    agent_prompt
+                    agent_prompt,
+                    context_window_limit
                 )
-                VALUES (1, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     selected_provider_id = excluded.selected_provider_id,
                     selected_model = excluded.selected_model,
                     reasoning_effort = excluded.reasoning_effort,
                     agent_prompt = excluded.agent_prompt,
+                    context_window_limit = excluded.context_window_limit,
                     updated_at = unixepoch()
                 """,
                 (
@@ -618,6 +624,7 @@ class StateStore:
                     settings.selected_model,
                     settings.reasoning_effort.value,
                     settings.agent_prompt,
+                    settings.context_window_limit,
                 ),
             )
         return settings
@@ -1130,6 +1137,7 @@ class StateStore:
                 selected_model TEXT NOT NULL DEFAULT '',
                 reasoning_effort TEXT NOT NULL DEFAULT 'default',
                 agent_prompt TEXT NOT NULL DEFAULT '',
+                context_window_limit INTEGER,
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             );
 
@@ -1223,6 +1231,10 @@ class StateStore:
         if "agent_prompt" not in settings_columns:
             connection.execute(
                 "ALTER TABLE settings ADD COLUMN agent_prompt TEXT NOT NULL DEFAULT ''"
+            )
+        if "context_window_limit" not in settings_columns:
+            connection.execute(
+                "ALTER TABLE settings ADD COLUMN context_window_limit INTEGER"
             )
         workspace_context_columns = {
             row["name"]

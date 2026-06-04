@@ -5872,6 +5872,7 @@ describe("App", () => {
       expect.objectContaining({
         body: JSON.stringify({
           agent_prompt: "",
+          context_window_limit: null,
           reasoning_effort: "xhigh",
           selected_model: "gpt-5.1",
           selected_provider_id: "provider-openai",
@@ -5908,6 +5909,7 @@ describe("App", () => {
       expect.objectContaining({
         body: JSON.stringify({
           agent_prompt: "Always inspect files before editing.",
+          context_window_limit: null,
           reasoning_effort: "default",
           selected_model: "gpt-5.1",
           selected_provider_id: "provider-openai",

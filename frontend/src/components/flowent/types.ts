@@ -185,6 +185,7 @@ export type WorkspaceCommand = {
 
 export type RuntimeSettings = {
   agentPrompt: string;
+  contextWindowLimit: number | null;
   reasoningEffort: ReasoningEffort;
   selectedModel: string;
   selectedProviderId: string;
