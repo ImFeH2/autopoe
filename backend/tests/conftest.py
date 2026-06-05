@@ -24,6 +24,17 @@ def sandbox_available(monkeypatch):
 
 
 @pytest.fixture
+def make_executable_file():
+    def make(path: Path, content: str = "#!/bin/sh\nexit 0\n") -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        return path
+
+    return make
+
+
+@pytest.fixture
 def fake_litellm_responses_transformer(monkeypatch):
     transformation_module = types.ModuleType(
         "litellm.completion_extras.litellm_responses_transformation.transformation"

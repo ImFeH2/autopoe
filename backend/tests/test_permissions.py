@@ -11,6 +11,11 @@ from flowent.storage import StateStore
 from flowent.tools import ToolContext
 
 
+class UserRecord:
+    def __init__(self, pw_shell: str) -> None:
+        self.pw_shell = pw_shell
+
+
 def test_app_state_persists_writable_paths_across_app_instances(
     tmp_path, monkeypatch
 ) -> None:
@@ -340,6 +345,65 @@ async def test_sandbox_denied_shell_command_is_reviewed_and_retried_without_sand
     assert "Read-only file system" in reviews[0].tool_result
     assert result.data["approval"]["action"] == "sandbox_failure"
     assert result.data["approval"]["decision"] == "approved"
+
+
+@pytest.mark.anyio
+async def test_sandbox_retry_uses_default_shell(
+    tmp_path, monkeypatch, make_executable_file
+) -> None:
+    shell = make_executable_file(tmp_path / "user-shell")
+    calls: list[tuple[str, list[str], dict[str, str] | None]] = []
+
+    async def fake_run_async(self, command, **kwargs):
+        calls.append(("sandbox", command, kwargs.get("env")))
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=1,
+            stderr="failed to write file: Read-only file system\n",
+            stdout="",
+        )
+
+    async def fake_run_unsandboxed_async(self, command, **kwargs):
+        calls.append(("unsandboxed", command, kwargs.get("env")))
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="created",
+        )
+
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        return ApprovalReviewDecision(
+            decision="approved", reason="Retry is consistent with the task."
+        )
+
+    monkeypatch.setenv("SHELL", str(shell))
+    monkeypatch.setattr("pwd.getpwuid", lambda _uid: UserRecord(str(shell)))
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+    monkeypatch.setattr(
+        SandboxRunner,
+        "run_unsandboxed_async",
+        fake_run_unsandboxed_async,
+        raising=False,
+    )
+
+    result = await run_tool_with_path_permissions(
+        "shell_command",
+        {"command": "touch output.txt"},
+        ToolContext(cwd=tmp_path / "work"),
+        review_approval=approve,
+        writable_paths=[],
+    )
+
+    assert result.ok
+    assert calls == [
+        ("sandbox", [str(shell), "-c", "touch output.txt"], {"SHELL": str(shell)}),
+        (
+            "unsandboxed",
+            [str(shell), "-c", "touch output.txt"],
+            {"SHELL": str(shell)},
+        ),
+    ]
 
 
 @pytest.mark.anyio

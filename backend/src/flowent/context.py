@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from flowent.llm import ChatMessage
+from flowent.shell import shell_invocation_description
 from flowent.tools import tool_specs
 
 DEFAULT_PROJECT_INSTRUCTIONS_MAX_BYTES = 32768
@@ -108,6 +109,7 @@ def environment_context_message(cwd: Path) -> ChatMessage:
         content=(
             "<environment_context>\n"
             f"  <cwd>{cwd.resolve(strict=False)}</cwd>\n"
+            f"  <shell>{shell_invocation_description()}</shell>\n"
             "  <filesystem>workspace-write</filesystem>\n"
             "  <network>enabled</network>\n"
             "  <tools>\n"

@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 
 from flowent.patch import affected_paths
 from flowent.sandbox import SandboxError, SandboxRunner
+from flowent.shell import shell_invocation
 
 
 class ToolResult(BaseModel):
@@ -380,8 +381,9 @@ def tool_failure_content(result: object) -> str:
 def shell_command(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     command = str(arguments["command"])
     timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
+    invocation = shell_invocation(command)
     result = SandboxRunner(cwd=context.cwd).run(
-        ["/bin/sh", "-c", command], timeout_seconds=timeout_seconds
+        invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
     )
     ok = result.exit_code == 0
     content = result.stdout or result.stderr
@@ -403,8 +405,9 @@ async def shell_command_async(
 ) -> ToolResult:
     command = str(arguments["command"])
     timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
+    invocation = shell_invocation(command)
     result = await SandboxRunner(cwd=context.cwd).run_async(
-        ["/bin/sh", "-c", command], timeout_seconds=timeout_seconds
+        invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
     )
     ok = result.exit_code == 0
     content = result.stdout or result.stderr

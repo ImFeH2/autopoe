@@ -12,6 +12,7 @@ from flowent.approval import (
 )
 from flowent.patch import affected_paths
 from flowent.sandbox import SandboxError, SandboxRunner, path_is_within
+from flowent.shell import shell_invocation
 from flowent.tools import (
     ToolContext,
     ToolResult,
@@ -290,10 +291,11 @@ async def shell_command_with_writable_paths(
 ) -> ToolResult:
     command = str(arguments["command"])
     timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
+    invocation = shell_invocation(command)
     result = await SandboxRunner(
         cwd=context.cwd,
         writable_roots=writable_paths,
-    ).run_async(["/bin/sh", "-c", command], timeout_seconds=timeout_seconds)
+    ).run_async(invocation.args, env=invocation.env, timeout_seconds=timeout_seconds)
     ok = result.exit_code == 0
     content = result.stdout or result.stderr
     return ToolResult(
@@ -355,8 +357,9 @@ async def shell_command_without_sandbox(
 ) -> ToolResult:
     command = str(arguments["command"])
     timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
+    invocation = shell_invocation(command)
     result = await SandboxRunner(cwd=context.cwd).run_unsandboxed_async(
-        ["/bin/sh", "-c", command], timeout_seconds=timeout_seconds
+        invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
     )
     ok = result.exit_code == 0
     content = result.stdout or result.stderr

@@ -11,8 +11,13 @@ from fastapi.testclient import TestClient
 from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT, run_agent_stream
 from flowent.llm import ProviderConnection, ProviderFormat
 from flowent.main import create_app
-from flowent.sandbox import SandboxCommand, SandboxRunner
+from flowent.sandbox import CommandResult, SandboxCommand, SandboxRunner
 from flowent.tools import ToolContext, ToolResult, run_tool
+
+
+class UserRecord:
+    def __init__(self, pw_shell: str) -> None:
+        self.pw_shell = pw_shell
 
 
 def stream_events(content: str) -> list[dict[str, object]]:
@@ -226,6 +231,138 @@ def test_shell_command_has_network_by_default(tmp_path) -> None:
 
     assert result.ok
     assert "network-ready" in result.content
+
+
+def test_shell_command_uses_executable_default_shell(
+    tmp_path, monkeypatch, make_executable_file
+) -> None:
+    shell = make_executable_file(tmp_path / "user-shell")
+    captured: dict[str, object] = {}
+
+    def fake_run(self, command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="ok",
+        )
+
+    monkeypatch.setenv("SHELL", str(shell))
+    monkeypatch.setattr("pwd.getpwuid", lambda _uid: UserRecord(str(shell)))
+    monkeypatch.setattr(SandboxRunner, "run", fake_run)
+
+    result = run_tool(
+        "shell_command",
+        {"command": "echo ok"},
+        ToolContext(cwd=tmp_path),
+    )
+
+    assert result.ok
+    assert captured["command"] == [str(shell), "-c", "echo ok"]
+    assert captured["env"] == {"SHELL": str(shell)}
+
+
+def test_shell_command_prefers_user_record_shell_over_environment_shell(
+    tmp_path, monkeypatch, make_executable_file
+) -> None:
+    user_shell = make_executable_file(tmp_path / "user-shell")
+    environment_shell = make_executable_file(tmp_path / "environment-shell")
+    captured: dict[str, object] = {}
+
+    def fake_run(self, command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="ok",
+        )
+
+    monkeypatch.setenv("SHELL", str(environment_shell))
+    monkeypatch.setattr("pwd.getpwuid", lambda _uid: UserRecord(str(user_shell)))
+    monkeypatch.setattr(SandboxRunner, "run", fake_run)
+
+    result = run_tool(
+        "shell_command",
+        {"command": "echo ok"},
+        ToolContext(cwd=tmp_path),
+    )
+
+    assert result.ok
+    assert captured["command"] == [str(user_shell), "-c", "echo ok"]
+    assert captured["env"] == {"SHELL": str(user_shell)}
+
+
+def test_shell_command_falls_back_to_bash_when_default_shell_is_unavailable(
+    tmp_path, monkeypatch, make_executable_file
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bash = make_executable_file(bin_dir / "bash")
+    captured: dict[str, object] = {}
+
+    def fake_run(self, command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="ok",
+        )
+
+    monkeypatch.setenv("SHELL", str(tmp_path / "missing-shell"))
+    monkeypatch.setattr(
+        "pwd.getpwuid", lambda _uid: UserRecord(str(tmp_path / "missing-shell"))
+    )
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(SandboxRunner, "run", fake_run)
+
+    result = run_tool(
+        "shell_command",
+        {"command": "echo ok"},
+        ToolContext(cwd=tmp_path),
+    )
+
+    assert result.ok
+    assert captured["command"] == [str(bash), "-c", "echo ok"]
+    assert captured["env"] == {"SHELL": str(bash)}
+
+
+def test_shell_command_falls_back_to_sh_when_bash_is_unavailable(
+    tmp_path, monkeypatch, make_executable_file
+) -> None:
+    bin_dir = tmp_path / "bin"
+    shell = make_executable_file(bin_dir / "sh")
+    captured: dict[str, object] = {}
+
+    def fake_run(self, command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="",
+            stdout="ok",
+        )
+
+    monkeypatch.delenv("SHELL", raising=False)
+    monkeypatch.setattr("pwd.getpwuid", lambda _uid: UserRecord(""))
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr("flowent.shell.FALLBACK_SHELL_PATHS", {"bash": [], "sh": []})
+    monkeypatch.setattr(SandboxRunner, "run", fake_run)
+
+    result = run_tool(
+        "shell_command",
+        {"command": "echo ok"},
+        ToolContext(cwd=tmp_path),
+    )
+
+    assert result.ok
+    assert captured["command"] == [str(shell), "-c", "echo ok"]
+    assert captured["env"] == {"SHELL": str(shell)}
 
 
 def test_sandbox_command_keeps_proc_mount_when_preflight_succeeds(
