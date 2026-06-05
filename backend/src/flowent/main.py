@@ -2,11 +2,11 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
@@ -1007,6 +1007,58 @@ def create_app(
         telegram_transport=telegram_transport,
     )
 
+    async def gather_shutdown_tasks(
+        label: str, tasks: Sequence[asyncio.Task[Any]]
+    ) -> None:
+        if not tasks:
+            return
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if result is None or isinstance(result, asyncio.CancelledError):
+                continue
+            if isinstance(result, BaseException):
+                logger.error(
+                    "%s cleanup task failed",
+                    label,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
+
+    async def stop_workspace_runs_for_shutdown() -> None:
+        tasks: list[asyncio.Task[None]] = []
+        for run in workspace_runs.values():
+            if run.task is None or run.task.done():
+                continue
+            run.task.cancel()
+            tasks.append(run.task)
+        await gather_shutdown_tasks("Workspace run", tasks)
+
+    async def stop_workspace_compact_for_shutdown() -> None:
+        nonlocal active_compact_task
+        if active_compact_task is None:
+            store.save_is_compacting(False)
+            return
+        task = active_compact_task.task
+        active_compact_task = None
+        if not task.done():
+            task.cancel()
+        await gather_shutdown_tasks("Workspace compact", [task])
+        store.save_is_compacting(False)
+
+    async def run_shutdown_step(label: str, cleanup: Awaitable[object]) -> None:
+        try:
+            await cleanup
+        except Exception:
+            logger.exception("%s cleanup failed during shutdown", label)
+
+    async def graceful_shutdown() -> None:
+        await run_shutdown_step("Workspace run", stop_workspace_runs_for_shutdown())
+        await run_shutdown_step(
+            "Workspace compact", stop_workspace_compact_for_shutdown()
+        )
+        if telegram_bot_manager is not None:
+            await run_shutdown_step("Telegram", telegram_bot_manager.stop_all())
+        await run_shutdown_step("MCP", mcp_manager.stop_all())
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mcp_manager = mcp_manager
@@ -1017,9 +1069,7 @@ def create_app(
         try:
             yield
         finally:
-            if telegram_bot_manager is not None:
-                await telegram_bot_manager.stop_all()
-            await mcp_manager.stop_all()
+            await graceful_shutdown()
 
     app = FastAPI(title="Flowent", lifespan=lifespan)
     app.state.mcp_manager = mcp_manager
