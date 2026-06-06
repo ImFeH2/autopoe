@@ -308,3 +308,138 @@ async def test_workspace_run_reconnect_sends_current_snapshot_before_later_event
     assert events[0]["data"]["message"]["content"] == "Partial "
     assert events[1]["event"] == "delta"
     assert events[1]["data"]["content"] == "answer."
+
+
+@pytest.mark.anyio
+async def test_workspace_run_stream_does_not_snapshot_every_text_delta(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr("flowent.main.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60)
+    chunks = [f"chunk-{index} " for index in range(8)]
+
+    async def fake_completion(**request: object) -> object:
+        async def stream_chunks() -> object:
+            for chunk in chunks:
+                yield {"choices": [{"delta": {"content": chunk}}]}
+
+        return stream_chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Stream efficiently."},
+        )
+        run_id = response.json()["run_id"]
+        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+
+    assert response.status_code == 200
+    events = stream_events(stream_response.text)
+    deltas = [event for event in events if event["event"] == "delta"]
+    snapshots = [event for event in events if event["event"] == "snapshot"]
+    assert [event["data"]["content"] for event in deltas] == chunks
+    assert len(snapshots) <= 3
+    assert snapshots[-1]["data"]["message"]["content"] == "".join(chunks)
+
+
+@pytest.mark.anyio
+async def test_workspace_run_persists_text_progress_with_throttle(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr("flowent.main.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60)
+    from flowent.storage import StateStore
+
+    chunks = [f"part-{index} " for index in range(12)]
+    persisted_assistant_messages: list[dict[str, object]] = []
+    original_upsert_message = StateStore.upsert_message
+
+    def track_upsert_message(self, message):
+        if message.author == "assistant":
+            persisted_assistant_messages.append(
+                {**message.model_dump(), "status": message.status}
+            )
+        return original_upsert_message(self, message)
+
+    monkeypatch.setattr(StateStore, "upsert_message", track_upsert_message)
+
+    async def fake_completion(**request: object) -> object:
+        async def stream_chunks() -> object:
+            for chunk in chunks:
+                yield {"choices": [{"delta": {"content": chunk}}]}
+
+        return stream_chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Save progress efficiently."},
+        )
+        run_id = response.json()["run_id"]
+        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+
+    running_text_persists = [
+        message
+        for message in persisted_assistant_messages
+        if message.get("status") == "running" and message.get("content")
+    ]
+    assert response.status_code == 200
+    assert stream_response.status_code == 200
+    assert len(running_text_persists) <= 1
+    assert persisted_assistant_messages[-1]["status"] == "completed"
+    assert persisted_assistant_messages[-1]["content"] == "".join(chunks)
+
+
+@pytest.mark.anyio
+async def test_workspace_run_reconnect_snapshot_includes_unsaved_text_deltas(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr("flowent.main.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60)
+    first_two_chunks_sent = asyncio.Event()
+    finish_response = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "First "}}]}
+            yield {"choices": [{"delta": {"content": "second "}}]}
+            first_two_chunks_sent.set()
+            await asyncio.wait_for(finish_response.wait(), timeout=2)
+            yield {"choices": [{"delta": {"content": "third."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Reconnect to current content."},
+        )
+        run_id = response.json()["run_id"]
+        await asyncio.wait_for(first_two_chunks_sent.wait(), timeout=2)
+        state = (await client.get("/api/state")).json()
+        finish_response.set()
+        stream_response = await client.get(
+            f"/api/workspace/runs/{run_id}/stream?after={state['active_run_event_index']}"
+        )
+
+    assert response.status_code == 200
+    events = stream_events(stream_response.text)
+    assert events[0]["event"] == "snapshot"
+    assert events[0]["data"]["message"]["content"] == "First second "
+    assert events[1]["event"] == "delta"
+    assert events[1]["data"]["content"] == "third."

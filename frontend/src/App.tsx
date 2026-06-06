@@ -1375,22 +1375,59 @@ function App() {
       let assistantIsStreamingText = false;
       let assistantTools: ToolItem[] = existingAssistant?.tools ?? [];
       let latestUsageInfo = usageInfoRef.current;
+      let pendingAssistantUpdateFrame: number | null = null;
       const nextMessages = existingAssistant
         ? baseMessages.slice(0, -1)
         : baseMessages;
       const isCurrentResponse = () => responseRunRef.current === responseRun;
+      const setAssistantMessages = () => {
+        const nextState = assistantMessage
+          ? [...nextMessages, assistantMessage]
+          : [...nextMessages];
+        messagesRef.current = nextState;
+        setMessages(nextState);
+      };
+      const cancelPendingAssistantUpdate = () => {
+        if (pendingAssistantUpdateFrame === null) {
+          return;
+        }
+        window.cancelAnimationFrame(pendingAssistantUpdateFrame);
+        pendingAssistantUpdateFrame = null;
+      };
+      const flushAssistantUpdate = () => {
+        cancelPendingAssistantUpdate();
+        setAssistantMessages();
+      };
+      const scheduleAssistantUpdate = () => {
+        if (!isCurrentResponse()) {
+          return;
+        }
+        if (pendingAssistantUpdateFrame !== null) {
+          return;
+        }
+        pendingAssistantUpdateFrame = window.requestAnimationFrame(() => {
+          pendingAssistantUpdateFrame = null;
+          if (!isCurrentResponse()) {
+            return;
+          }
+          setAssistantMessages();
+        });
+      };
       const appendSystemMessage = (message: ApiMessage) => {
         if (!isCurrentResponse()) {
           return;
         }
+        flushAssistantUpdate();
         nextMessages.push(message);
         if (assistantMessage) {
-          setMessages([...nextMessages, assistantMessage]);
+          setAssistantMessages();
           return;
         }
-        setMessages([...nextMessages]);
+        setAssistantMessages();
       };
-      const updateAssistantMessage = () => {
+      const updateAssistantMessage = (
+        options: { immediate?: boolean } = {},
+      ) => {
         if (!assistantId || !isCurrentResponse()) {
           return;
         }
@@ -1405,7 +1442,11 @@ function App() {
           isStreamingText: assistantIsStreamingText,
           usage_info: latestUsageInfo,
         };
-        setMessages([...nextMessages, assistantMessage]);
+        if (options.immediate) {
+          flushAssistantUpdate();
+          return;
+        }
+        scheduleAssistantUpdate();
       };
       const finishAssistantThinking = () => {
         if (!assistantIsStreamingThinking) {
@@ -1595,7 +1636,7 @@ function App() {
           tools: assistantTools,
           usage_info: latestUsageInfo,
         };
-        setMessages([...nextMessages, assistantMessage]);
+        flushAssistantUpdate();
       };
       const hasAssistantOutputSnapshot = (message: ApiMessage) =>
         Boolean(
@@ -1656,7 +1697,7 @@ function App() {
           tools: assistantTools,
           usage_info: message.usage_info ?? latestUsageInfo,
         };
-        setMessages([...nextMessages, assistantMessage]);
+        flushAssistantUpdate();
       };
 
       return {
@@ -1672,6 +1713,7 @@ function App() {
             return;
           }
           finishAssistantFromLegacyDone(message);
+          cancelPendingAssistantUpdate();
           activeRunIdRef.current = "";
           activeRunEventIndexRef.current = 0;
           setActiveRunId("");
@@ -1743,7 +1785,7 @@ function App() {
           }
           latestUsageInfo = nextUsageInfo;
           setTrackedUsageInfo(nextUsageInfo);
-          updateAssistantMessage();
+          updateAssistantMessage({ immediate: true });
         },
         onEventIndex: (eventIndex) => {
           if (!isCurrentResponse()) {

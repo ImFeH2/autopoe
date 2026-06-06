@@ -611,4 +611,193 @@ describe("workspace run lifecycle regressions", () => {
     await expectDocumentText("Server answer.");
     expect(document.body).not.toHaveTextContent("Local preview.");
   });
+
+  it("renders rapid delta events without waiting for a final snapshot", async () => {
+    const user = userEvent.setup();
+    const streamEvents = [
+      streamEvent("start", { id: "message-assistant" }, 1),
+      streamEvent("output_start", { index: 1 }, 2),
+      streamEvent("delta", { content: "First " }, 3),
+      streamEvent("delta", { content: "second " }, 4),
+      streamEvent("delta", { content: "third." }, 5),
+    ];
+    const encoder = new TextEncoder();
+    let releaseSnapshot!: () => void;
+    const waitForSnapshot = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return new Response(JSON.stringify({ run_id: "run-delta" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs/run-delta/stream?after=0") {
+        return new Response(
+          new ReadableStream({
+            async start(controller) {
+              for (const event of streamEvents) {
+                controller.enqueue(encoder.encode(event));
+              }
+              await waitForSnapshot;
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent(
+                    "snapshot",
+                    {
+                      message: {
+                        author: "assistant",
+                        content: "First second third.",
+                        id: "message-assistant",
+                        status: "completed",
+                      },
+                    },
+                    6,
+                  ),
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent(
+                    "done",
+                    {
+                      message: {
+                        author: "assistant",
+                        content: "First second third.",
+                        id: "message-assistant",
+                        status: "completed",
+                      },
+                    },
+                    7,
+                  ),
+                ),
+              );
+              controller.close();
+            },
+          }),
+          {
+            headers: { "Content-Type": "text/event-stream" },
+            status: 200,
+          },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft live output");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await expectDocumentText("First second third.");
+    releaseSnapshot();
+  });
+
+  it("keeps one stream connection when a snapshot updates usage", async () => {
+    const usageInfo = contextUsageInfo(1_000);
+    const encoder = new TextEncoder();
+    let releaseStream!: () => void;
+    const waitForRelease = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            ...selectedProviderState(),
+            active_run_event_index: 0,
+            active_run_id: "run-usage-snapshot",
+            messages: [
+              {
+                author: "user",
+                content: "Continue with usage.",
+                id: "message-user",
+              },
+            ],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs/run-usage-snapshot/stream?after=0") {
+        return new Response(
+          new ReadableStream({
+            async start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent(
+                    "snapshot",
+                    {
+                      message: {
+                        author: "assistant",
+                        content: "Streaming with usage.",
+                        id: "message-assistant",
+                        status: "running",
+                        usage_info: usageInfo,
+                      },
+                    },
+                    1,
+                  ),
+                ),
+              );
+              await waitForRelease;
+              controller.close();
+            },
+          }),
+          {
+            headers: { "Content-Type": "text/event-stream" },
+            status: 200,
+          },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    await expectDocumentText("Streaming with usage.");
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workspace/runs/run-usage-snapshot/stream?after=0",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(window.fetch).not.toHaveBeenCalledWith(
+      "/api/workspace/runs/run-usage-snapshot/stream?after=1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    releaseStream();
+  });
 });

@@ -1,7 +1,9 @@
 import asyncio
+import copy
 import json
 import logging
 import os
+import time
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -89,6 +91,7 @@ DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_RATIO = 0.95
 AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET = 20_000
 APPROVAL_TRANSCRIPT_MESSAGE_LIMIT = 12
 APPROVAL_TRANSCRIPT_TEXT_LIMIT = 2_000
+WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS = 0.5
 
 
 class ProviderModelsRequest(BaseModel):
@@ -216,13 +219,126 @@ def append_or_replace_message(
 def run_snapshot_data_at(
     run: WorkspaceRun, event_index: int
 ) -> dict[str, object] | None:
-    for current_event_index, event, data in reversed(run.events):
-        if current_event_index > event_index or event != "snapshot":
+    snapshot_event_index = 0
+    snapshot: dict[str, object] | None = None
+    for current_event_index, event, data in run.events:
+        if current_event_index > event_index:
+            break
+        if event != "snapshot":
+            if event == "start" and snapshot is None:
+                assistant_id = data.get("id")
+                if isinstance(assistant_id, str):
+                    snapshot_event_index = current_event_index
+                    snapshot = {
+                        "author": "assistant",
+                        "content": "",
+                        "groups": [],
+                        "id": assistant_id,
+                        "status": "running",
+                        "tools": [],
+                    }
             continue
         message = data.get("message")
         if isinstance(message, dict):
-            return message
-    return None
+            snapshot_event_index = current_event_index
+            snapshot = copy.deepcopy(message)
+    if snapshot is None:
+        return None
+    for current_event_index, event, data in run.events:
+        if current_event_index <= snapshot_event_index:
+            continue
+        if current_event_index > event_index:
+            break
+        apply_stream_event_to_snapshot(snapshot, event, data)
+    return snapshot
+
+
+def apply_stream_event_to_snapshot(
+    snapshot: dict[str, object], event: str, data: dict[str, object]
+) -> None:
+    if event == "output_start":
+        index = data.get("index")
+        if isinstance(index, int):
+            append_snapshot_group(snapshot, index)
+    if event == "delta":
+        append_snapshot_text(snapshot, str(data.get("content") or ""))
+    if event == "thinking_delta":
+        append_snapshot_thinking(snapshot, str(data.get("content") or ""))
+
+
+def snapshot_groups(snapshot: dict[str, object]) -> list[dict[str, object]]:
+    groups = snapshot.get("groups")
+    if not isinstance(groups, list):
+        groups = []
+        snapshot["groups"] = groups
+    return groups
+
+
+def append_snapshot_group(
+    snapshot: dict[str, object], index: int | None = None
+) -> None:
+    groups = snapshot_groups(snapshot)
+    assistant_id = str(snapshot.get("id") or "assistant")
+    group_index = index if index is not None else len(groups) + 1
+    group_id = f"{assistant_id}-group-{group_index}"
+    if groups and groups[-1].get("id") == group_id:
+        return
+    groups.append({"id": group_id, "items": []})
+
+
+def append_snapshot_text(snapshot: dict[str, object], content: str) -> None:
+    if not content:
+        return
+    snapshot["content"] = f"{snapshot.get('content') or ''}{content}"
+    append_snapshot_item_content(snapshot, content, "text")
+
+
+def append_snapshot_thinking(snapshot: dict[str, object], content: str) -> None:
+    if not content:
+        return
+    snapshot["thinking"] = f"{snapshot.get('thinking') or ''}{content}"
+    append_snapshot_item_content(snapshot, content, "thinking")
+
+
+def append_snapshot_item_content(
+    snapshot: dict[str, object], content: str, item_type: Literal["text", "thinking"]
+) -> None:
+    groups = snapshot_groups(snapshot)
+    if not groups:
+        append_snapshot_group(snapshot)
+    group = groups[-1]
+    items = group.get("items")
+    if not isinstance(items, list):
+        items = []
+        group["items"] = items
+    item = next(
+        (
+            current
+            for current in reversed(items)
+            if isinstance(current, dict) and current.get("type") == item_type
+        ),
+        None,
+    )
+    if item is None:
+        assistant_id = str(snapshot.get("id") or "assistant")
+        snapshot_item_count = 0
+        for current_group in groups:
+            current_items = current_group.get("items")
+            if not isinstance(current_items, list):
+                continue
+            snapshot_item_count += sum(
+                1
+                for current_item in current_items
+                if isinstance(current_item, dict)
+                and current_item.get("type") == item_type
+            )
+        item = {
+            "content": "",
+            "id": f"{assistant_id}-{item_type}-{snapshot_item_count + 1}",
+            "type": item_type,
+        }
+        items.append(item)
+    item["content"] = f"{item.get('content') or ''}{content}"
 
 
 USER_VISIBLE_RUN_ERROR_TITLE = "Request failed"
@@ -1308,11 +1424,14 @@ def create_app(
                 status="running",
             )
             assistant_output = AssistantOutputBuilder(assistant_message.id)
+            last_progress_flush_at = 0.0
 
             def is_current_generation() -> bool:
                 return run.generation == workspace_generation
 
-            def persist_assistant(status: str = "running") -> StoredMessage | None:
+            def update_assistant_message(
+                status: str = "running", *, persist: bool
+            ) -> StoredMessage | None:
                 nonlocal next_messages, assistant_message
                 if not is_current_generation() or run.discard_on_cancel:
                     return None
@@ -1329,8 +1448,32 @@ def create_app(
                 next_messages = append_or_replace_message(
                     next_messages, assistant_message
                 )
-                store.upsert_message(assistant_message)
+                if persist:
+                    store.upsert_message(assistant_message)
                 return assistant_message
+
+            def persist_assistant(status: str = "running") -> StoredMessage | None:
+                nonlocal last_progress_flush_at
+                message = update_assistant_message(status, persist=True)
+                if status == "running" and message is not None:
+                    last_progress_flush_at = time.monotonic()
+                return message
+
+            def refresh_assistant(status: str = "running") -> StoredMessage | None:
+                return update_assistant_message(status, persist=False)
+
+            def persist_assistant_progress() -> StoredMessage | None:
+                nonlocal last_progress_flush_at
+                now = time.monotonic()
+                if (
+                    last_progress_flush_at > 0
+                    and now - last_progress_flush_at
+                    < WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS
+                ):
+                    refresh_assistant()
+                    return None
+                last_progress_flush_at = now
+                return update_assistant_message("running", persist=True)
 
             try:
                 current_tool_id: str | None = None
@@ -1520,12 +1663,12 @@ def create_app(
                         assistant_output.append_text(
                             str(event.data.get("content") or "")
                         )
-                        snapshot_after_event = persist_assistant()
+                        snapshot_after_event = persist_assistant_progress()
                     if event.event == "thinking_delta":
                         assistant_output.append_thinking(
                             str(event.data.get("content") or "")
                         )
-                        snapshot_after_event = persist_assistant()
+                        snapshot_after_event = persist_assistant_progress()
                     if event.event == "usage":
                         usage_data = event.data.get("usage")
                         if isinstance(usage_data, dict):
