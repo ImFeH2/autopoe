@@ -207,6 +207,51 @@ def test_build_litellm_request_includes_selected_reasoning_effort() -> None:
     assert request["reasoning_effort"] == "xhigh"
 
 
+def test_build_litellm_request_uses_responses_prefix_for_openai_responses() -> None:
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="gpt-5.5",
+        secret_reference="connection-responses",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["model"] == "openai/responses/gpt-5.5"
+
+
+def test_build_litellm_request_keeps_openai_provider_on_chat_completion_model() -> None:
+    connection = ProviderConnection(
+        name="OpenAI",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.5",
+        secret_reference="connection-openai",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["model"] == "openai/gpt-5.5"
+
+
+def test_build_litellm_request_does_not_duplicate_responses_prefix() -> None:
+    connection = ProviderConnection(
+        name="Responses",
+        provider=ProviderFormat.OPENAI_RESPONSES,
+        model="openai/responses/gpt-5.5",
+        secret_reference="connection-responses",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["model"] == "openai/responses/gpt-5.5"
+
+
 def test_chunk_delta_reasoning_reads_litellm_reasoning_fields() -> None:
     assert (
         chunk_delta_reasoning(
@@ -261,7 +306,7 @@ async def test_complete_chat_uses_injected_litellm_completion() -> None:
         completion=fake_completion,
     )
 
-    assert captured_request["model"] == "openai/gpt-5.1"
+    assert captured_request["model"] == "openai/responses/gpt-5.1"
     assert answer == ChatMessage(role="assistant", content="Here is the checklist.")
 
 
@@ -391,7 +436,7 @@ async def test_development_mode_writes_completion_request_diagnostic_file(
 
     assert diagnostic == {
         "base_url": None,
-        "litellm_model": "openai/gpt-5.1",
+        "litellm_model": "openai/responses/gpt-5.1",
         "messages": [{"content": "Create a checklist.", "role": "user"}],
         "model": "gpt-5.1",
         "provider": "openai_responses",
@@ -480,7 +525,7 @@ async def test_stream_chat_uses_litellm_streaming() -> None:
 
     assert captured_request["stream"] is True
     assert captured_request["stream_options"] == {"include_usage": True}
-    assert captured_request["model"] == "openai/gpt-5.1"
+    assert captured_request["model"] == "openai/responses/gpt-5.1"
     assert chunks == ["Here is ", "the checklist."]
 
 

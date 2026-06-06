@@ -108,6 +108,7 @@ MODEL_PREFIXES: dict[ProviderFormat, str] = {
     ProviderFormat.ANTHROPIC: "anthropic",
     ProviderFormat.GEMINI: "gemini",
 }
+OPENAI_RESPONSES_MODEL_PREFIX = "responses/"
 _litellm_stream_error_patch_installed = False
 
 PROVIDER_API_VERSIONS: dict[ProviderFormat, str] = {
@@ -121,7 +122,10 @@ VERSION_PATH_SEGMENT = re.compile(r"^v\d+(?:[a-z]+)?$", re.IGNORECASE)
 
 
 def provider_model_name(connection: ProviderConnection) -> str:
-    return f"{MODEL_PREFIXES[connection.provider]}/{connection.model}"
+    model = normalize_provider_model_name(connection.provider, connection.model)
+    if connection.provider == ProviderFormat.OPENAI_RESPONSES:
+        model = f"{OPENAI_RESPONSES_MODEL_PREFIX}{model}"
+    return f"{MODEL_PREFIXES[connection.provider]}/{model}"
 
 
 def provider_litellm_name(provider: ProviderFormat) -> str:
@@ -164,9 +168,10 @@ def normalize_provider_base_url(
 
 def normalize_provider_model_name(provider: ProviderFormat, model: str) -> str:
     prefix = f"{provider_litellm_name(provider)}/"
-    if model.startswith(prefix):
-        return model.removeprefix(prefix)
-    return model
+    normalized_model = model.removeprefix(prefix) if model.startswith(prefix) else model
+    if provider == ProviderFormat.OPENAI_RESPONSES:
+        return normalized_model.removeprefix(OPENAI_RESPONSES_MODEL_PREFIX)
+    return normalized_model
 
 
 def stream_failure_message(chunk: Any) -> str:

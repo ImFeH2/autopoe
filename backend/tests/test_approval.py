@@ -12,11 +12,14 @@ from flowent.approval import (
 from flowent.llm import ProviderConnection, ProviderFormat
 
 
-def provider_connection() -> ProviderConnection:
+def provider_connection(
+    provider: ProviderFormat = ProviderFormat.OPENAI,
+    model: str = "model",
+) -> ProviderConnection:
     return ProviderConnection(
-        model="model",
+        model=model,
         name="Provider",
-        provider=ProviderFormat.OPENAI,
+        provider=provider,
         secret_reference="secret",
     )
 
@@ -120,6 +123,46 @@ async def test_review_approval_request_uses_streaming_completion(tmp_path) -> No
     assert decision.decision == "approved"
     assert captured_request["stream"] is True
     assert captured_request["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.anyio
+async def test_review_approval_request_uses_responses_api_model_for_openai_responses(
+    tmp_path,
+) -> None:
+    captured_request: dict[str, object] = {}
+
+    async def fake_completion(**request: object) -> object:
+        captured_request.update(request)
+        return reviewer_stream(
+            json.dumps(
+                {
+                    "risk_level": "low",
+                    "risk_score": 10,
+                    "rationale": "The action is narrowly scoped.",
+                    "evidence": [],
+                }
+            )
+        )
+
+    decision = await review_approval_request(
+        provider_connection(
+            provider=ProviderFormat.OPENAI_RESPONSES,
+            model="gpt-5.5",
+        ),
+        ApprovalReviewRequest(
+            action="sandbox_failure",
+            arguments={"command": "pnpm --dir frontend test"},
+            cwd=tmp_path,
+            tool_name="shell_command",
+            tool_result="Read-only file system",
+        ),
+        completion=fake_completion,
+    )
+
+    assert decision.decision == "approved"
+    assert captured_request["model"] == "openai/responses/gpt-5.5"
+    assert captured_request["stream"] is True
+    assert "tools" not in captured_request
 
 
 @pytest.mark.anyio
