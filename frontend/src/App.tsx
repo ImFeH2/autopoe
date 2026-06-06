@@ -540,6 +540,7 @@ function App() {
   const [appVersion, setAppVersion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [usageInfo, setUsageInfo] = useState<ContextUsageInfo | null>(null);
+  const usageInfoRef = useRef<ContextUsageInfo | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -591,41 +592,67 @@ function App() {
     [mcpServers],
   );
 
+  const setTrackedUsageInfo = useCallback(
+    (
+      nextUsageInfo:
+        | ContextUsageInfo
+        | null
+        | ((
+            currentUsageInfo: ContextUsageInfo | null,
+          ) => ContextUsageInfo | null),
+    ) => {
+      if (typeof nextUsageInfo !== "function") {
+        usageInfoRef.current = nextUsageInfo;
+        setUsageInfo(nextUsageInfo);
+        return;
+      }
+      setUsageInfo((currentUsageInfo) => {
+        const resolvedUsageInfo = nextUsageInfo(currentUsageInfo);
+        usageInfoRef.current = resolvedUsageInfo;
+        return resolvedUsageInfo;
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
-  const applyLoadedState = useCallback((state: ApiState) => {
-    const loadedProviders = state.providers.map(providerFromApi);
-    setProviders(loadedProviders);
-    setMessages(state.messages);
-    setUsageInfo(
-      contextWindowFromLimit(
-        state.usage_info ?? latestUsageInfoFromMessages(state.messages),
-        state.settings.context_window_limit ?? null,
-      ),
-    );
-    const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
-    setMcpServers(loadedMcpServers);
-    if (loadedMcpServers[0]) {
-      setMcpEditorId(loadedMcpServers[0].id);
-      setMcpDraft(loadedMcpServers[0]);
-    }
-    setSkills(state.skills ?? []);
-    setActiveSkillId((state.skills ?? [])[0]?.id ?? "");
-    setAgentPrompt(state.settings.agent_prompt ?? "");
-    setSelectedProviderId(state.settings.selected_provider_id);
-    setSelectedModel(state.settings.selected_model);
-    setContextWindowLimit(state.settings.context_window_limit ?? null);
-    setReasoningEffort(state.settings.reasoning_effort ?? "default");
-    setTelegramBot(telegramBotFromApi(state.telegram_bot));
-    setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
-    activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
-    activeRunIdRef.current = state.active_run_id ?? "";
-    setActiveRunId(state.active_run_id ?? "");
-    setIsResponding(Boolean(state.active_run_id));
-    setIsRefiningContext(Boolean(state.is_compacting));
-  }, []);
+  const applyLoadedState = useCallback(
+    (state: ApiState) => {
+      const loadedProviders = state.providers.map(providerFromApi);
+      setProviders(loadedProviders);
+      setMessages(state.messages);
+      setTrackedUsageInfo(
+        contextWindowFromLimit(
+          state.usage_info ?? latestUsageInfoFromMessages(state.messages),
+          state.settings.context_window_limit ?? null,
+        ),
+      );
+      const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
+      setMcpServers(loadedMcpServers);
+      if (loadedMcpServers[0]) {
+        setMcpEditorId(loadedMcpServers[0].id);
+        setMcpDraft(loadedMcpServers[0]);
+      }
+      setSkills(state.skills ?? []);
+      setActiveSkillId((state.skills ?? [])[0]?.id ?? "");
+      setAgentPrompt(state.settings.agent_prompt ?? "");
+      setSelectedProviderId(state.settings.selected_provider_id);
+      setSelectedModel(state.settings.selected_model);
+      setContextWindowLimit(state.settings.context_window_limit ?? null);
+      setReasoningEffort(state.settings.reasoning_effort ?? "default");
+      setTelegramBot(telegramBotFromApi(state.telegram_bot));
+      setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
+      activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
+      activeRunIdRef.current = state.active_run_id ?? "";
+      setActiveRunId(state.active_run_id ?? "");
+      setIsResponding(Boolean(state.active_run_id));
+      setIsRefiningContext(Boolean(state.is_compacting));
+    },
+    [setTrackedUsageInfo],
+  );
 
   const refreshAppState = useCallback(async () => {
     const response = await fetch("/api/state");
@@ -922,7 +949,7 @@ function App() {
   const saveRuntimeSettings = (settings: RuntimeSettings) => {
     setAgentPrompt(settings.agentPrompt);
     setContextWindowLimit(settings.contextWindowLimit);
-    setUsageInfo((currentUsageInfo) =>
+    setTrackedUsageInfo((currentUsageInfo) =>
       contextWindowFromLimit(currentUsageInfo, settings.contextWindowLimit),
     );
     setReasoningEffort(settings.reasoningEffort);
@@ -1347,7 +1374,7 @@ function App() {
       let assistantIsStreamingThinking = false;
       let assistantIsStreamingText = false;
       let assistantTools: ToolItem[] = existingAssistant?.tools ?? [];
-      let latestUsageInfo = usageInfo;
+      let latestUsageInfo = usageInfoRef.current;
       const nextMessages = existingAssistant
         ? baseMessages.slice(0, -1)
         : baseMessages;
@@ -1536,7 +1563,7 @@ function App() {
         assistantTools = message.tools ?? [];
         latestUsageInfo = message.usage_info ?? latestUsageInfo;
         if (message.usage_info) {
-          setUsageInfo(message.usage_info);
+          setTrackedUsageInfo(message.usage_info);
         }
         assistantTextItemId = lastAssistantItemId("text");
         assistantThinkingItemId = lastAssistantItemId("thinking");
@@ -1715,7 +1742,7 @@ function App() {
             return;
           }
           latestUsageInfo = nextUsageInfo;
-          setUsageInfo(nextUsageInfo);
+          setTrackedUsageInfo(nextUsageInfo);
           updateAssistantMessage();
         },
         onEventIndex: (eventIndex) => {
@@ -1726,7 +1753,7 @@ function App() {
         },
       };
     },
-    [usageInfo],
+    [setTrackedUsageInfo],
   );
 
   const requestWorkspaceRun = useCallback(
@@ -1899,7 +1926,7 @@ function App() {
         onThinkingDelta: () => undefined,
         onToolDone: () => undefined,
         onToolStart: () => undefined,
-        onUsage: setUsageInfo,
+        onUsage: setTrackedUsageInfo,
       });
       setIsRefiningContext(false);
     } catch (error) {
@@ -2152,7 +2179,7 @@ function App() {
     activeRunEventIndexRef.current = 0;
     responseRunRef.current += 1;
     setMessages([]);
-    setUsageInfo(null);
+    setTrackedUsageInfo(null);
     setResponseError("");
     setActiveRunId("");
     setIsResponding(false);
@@ -2162,10 +2189,10 @@ function App() {
       if (Array.isArray(clearedState.messages)) {
         setMessages(clearedState.messages);
       }
-      setUsageInfo(clearedState.usage_info ?? null);
+      setTrackedUsageInfo(clearedState.usage_info ?? null);
     } catch {
       setMessages(previousMessages);
-      setUsageInfo(previousUsageInfo);
+      setTrackedUsageInfo(previousUsageInfo);
       setResponseError("Conversation could not be cleared.");
     }
   };

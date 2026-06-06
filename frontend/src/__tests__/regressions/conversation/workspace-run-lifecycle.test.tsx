@@ -55,6 +55,37 @@ const streamEvent = (
   eventIndex: number,
 ) => `id: ${eventIndex}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+};
+
+const heldStreamResponse = (events: string[], onCancel?: () => void) => {
+  const encoder = new TextEncoder();
+  const hold = deferred();
+  const stream = new ReadableStream({
+    async start(controller) {
+      for (const event of events) {
+        controller.enqueue(encoder.encode(event));
+      }
+      await hold.promise;
+      controller.close();
+    },
+    cancel: onCancel,
+  });
+
+  return {
+    finish: hold.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
+};
+
 const assistantIndexedStreamResponse = (
   content: string,
   id = "message-assistant",
@@ -285,6 +316,92 @@ describe("workspace run lifecycle regressions", () => {
       "/api/workspace/runs/run-server-index/stream?after=2",
       expect.objectContaining({ method: "GET" }),
     );
+  });
+
+  it("keeps a resumed stream open when a snapshot updates usage", async () => {
+    const usageInfo = contextUsageInfo(24_000);
+    const resumedStream = heldStreamResponse([
+      streamEvent(
+        "snapshot",
+        {
+          message: {
+            author: "assistant",
+            content: "Resumed answer.",
+            groups: [
+              {
+                id: "message-assistant-group-1",
+                items: [
+                  {
+                    content: "Resumed answer.",
+                    id: "message-assistant-text-1",
+                    type: "text",
+                  },
+                ],
+              },
+            ],
+            id: "message-assistant",
+            status: "running",
+            usage_info: usageInfo,
+          },
+        },
+        6,
+      ),
+    ]);
+    const repeatedStream = heldStreamResponse([]);
+    const streamRequests: string[] = [];
+
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            ...selectedProviderState(),
+            active_run_event_index: 6,
+            active_run_id: "run-usage-snapshot",
+            messages: [
+              {
+                author: "user",
+                content: "Continue the answer.",
+                id: "message-user",
+              },
+            ],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        typeof input === "string" &&
+        input === "/api/workspace/runs/run-usage-snapshot/stream?after=6"
+      ) {
+        streamRequests.push(input);
+        return streamRequests.length === 1
+          ? resumedStream.response
+          : repeatedStream.response;
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    await expectDocumentText("Resumed answer.");
+    await screen.findByText("24k / 120k");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(streamRequests).toHaveLength(1);
+
+    resumedStream.finish();
+    repeatedStream.finish();
   });
 
   it("renders tool progress and final text from a server snapshot without missed events", async () => {
