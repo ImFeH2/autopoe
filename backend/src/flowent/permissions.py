@@ -348,7 +348,11 @@ def tool_failure_text(result: ToolResult) -> str:
     stderr = str(result.data.get("stderr", "") or "").strip()
     stdout = str(result.data.get("stdout", "") or "").strip()
     content = result.content.strip()
-    return "\n".join(part for part in [stderr, stdout, content] if part)
+    parts: list[str] = []
+    for part in [stderr, stdout, content]:
+        if part and part not in parts:
+            parts.append(part)
+    return "\n".join(parts)
 
 
 async def shell_command_without_sandbox(

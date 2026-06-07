@@ -1118,12 +1118,16 @@ type ToolApprovalData = {
   action?: string;
   decision?: string;
   reason?: string;
+  toolResult?: string;
   toolName?: string;
   writePaths?: string[];
 };
 
 function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
   const decision = approval.decision === "denied" ? "Denied" : "Approved";
+  const firstFailureOutput = approval.toolResult?.trim()
+    ? approval.toolResult
+    : null;
 
   return (
     <div className="min-w-0">
@@ -1134,6 +1138,16 @@ function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
         <div className="font-medium text-white">{decision}</div>
         {approval.reason ? (
           <div className="break-words text-white/60">{approval.reason}</div>
+        ) : null}
+        {firstFailureOutput ? (
+          <div className="mt-1.5 border-t border-white/5 pt-1.5">
+            <div className="mb-0.5 text-[10px] font-medium leading-4 text-white/40">
+              FAILURE
+            </div>
+            <div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-white/50">
+              {firstFailureOutput}
+            </div>
+          </div>
         ) : null}
         {approval.writePaths?.length ? (
           <div className="grid gap-0.5 font-mono text-[11px] leading-4 text-white/50">
@@ -1211,6 +1225,8 @@ function toolApprovalData(
     action: typeof value.action === "string" ? value.action : undefined,
     decision: typeof value.decision === "string" ? value.decision : undefined,
     reason: typeof value.reason === "string" ? value.reason : undefined,
+    toolResult:
+      typeof value.tool_result === "string" ? value.tool_result : undefined,
     toolName: typeof value.tool_name === "string" ? value.tool_name : undefined,
     writePaths: Array.isArray(value.write_paths)
       ? value.write_paths.filter(

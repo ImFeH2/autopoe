@@ -4478,9 +4478,90 @@ describe("App", () => {
     expect(screen.getByText("Approved")).toBeInTheDocument();
     expect(screen.getByText("Needed for cache writes.")).toBeInTheDocument();
     expect(screen.getByText("/workspace/.cache/pnpm")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("FAILURE");
     const resultBlock = screen.getByText("RESULT").parentElement;
     expect(resultBlock).toHaveTextContent('"command": "pnpm install"');
     expect(resultBlock).not.toHaveTextContent("Needed for cache writes.");
+  });
+
+  it("shows first sandbox failure output after a reviewed retry succeeds", async () => {
+    const user = userEvent.setup();
+    const firstFailureOutput =
+      "mkdir: cannot create directory '/root/.local/state/fnm_multishells': Read-only file system";
+    const toolStream = controlledToolTimelineResponse(
+      {
+        arguments: { command: "pnpm test" },
+        data: {
+          approval: {
+            action: "sandbox_failure",
+            decision: "approved",
+            reason: "Retry matches the current task.",
+            tool_name: "shell_command",
+            tool_result: firstFailureOutput,
+            write_paths: [],
+          },
+          command: "pnpm test",
+          exit_code: 0,
+          stderr: "",
+          stdout: "all tests passed",
+        },
+        id: "tool-1",
+        name: "shell_command",
+        output: "all tests passed",
+        title: "Ran pnpm test",
+      },
+      "Tests passed.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        return runStartResponse("run-sandbox-review");
+      }
+      if (
+        input === "/api/workspace/runs/run-sandbox-review/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return toolStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Run tests");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Ran pnpm test/ }),
+    );
+    toolStream.completeTool();
+
+    expect(await screen.findByText("REVIEW")).toBeInTheDocument();
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+    expect(
+      screen.getByText("Retry matches the current task."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("FAILURE")).toBeInTheDocument();
+    expect(screen.getByText(firstFailureOutput)).toBeInTheDocument();
+    const resultBlock = screen.getByText("RESULT").parentElement;
+    expect(resultBlock).toHaveTextContent('"stdout": "all tests passed"');
+    expect(resultBlock).not.toHaveTextContent(firstFailureOutput);
   });
 
   it("restores automatic review details from loaded tool data", async () => {
@@ -4508,6 +4589,7 @@ describe("App", () => {
                   decision: "denied",
                   reason: "Outside the task scope.",
                   tool_name: "shell_command",
+                  tool_result: "failed to write file: Read-only file system",
                   write_paths: [],
                 },
                 command: "pnpm install",
@@ -4560,8 +4642,81 @@ describe("App", () => {
     expect(screen.getByText("REVIEW")).toBeInTheDocument();
     expect(screen.getByText("Denied")).toBeInTheDocument();
     expect(screen.getByText("Outside the task scope.")).toBeInTheDocument();
+    expect(screen.getByText("FAILURE")).toBeInTheDocument();
+    expect(
+      screen.getByText("failed to write file: Read-only file system"),
+    ).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
     expect(resultBlock).toHaveTextContent('"stderr": "Read-only file system"');
+  });
+
+  it("shows multiline sandbox failure output in review details", async () => {
+    const user = userEvent.setup();
+    const firstFailureOutput =
+      "mkdir: cannot create directory '/root/.local/state/fnm_multishells': Permission denied\n" +
+      "touch: cannot touch '/root/.local/state/fnm_multishells/123': Read-only file system";
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            arguments: { command: "pnpm lint" },
+            data: {
+              approval: {
+                action: "sandbox_failure",
+                decision: "denied",
+                reason: "Path access was not approved.",
+                tool_name: "shell_command",
+                tool_result: firstFailureOutput,
+                write_paths: [],
+              },
+              command: "pnpm lint",
+              exit_code: 1,
+              stderr: "Read-only file system",
+              stdout: "",
+            },
+            id: "tool-1",
+            name: "shell_command",
+            output: "Path access was not approved.",
+            status: "failed",
+            title: "Ran pnpm lint",
+          },
+          "Lint could not run.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Run lint");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("REVIEW")).toBeInTheDocument();
+    const outputBlock = screen.getByText("FAILURE").parentElement;
+    expect(outputBlock).toHaveTextContent(
+      "mkdir: cannot create directory '/root/.local/state/fnm_multishells': Permission denied",
+    );
+    expect(outputBlock).toHaveTextContent(
+      "touch: cannot touch '/root/.local/state/fnm_multishells/123': Read-only file system",
+    );
   });
 
   it("shows successful tool details after the tool row is opened", async () => {

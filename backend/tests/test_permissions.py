@@ -345,6 +345,10 @@ async def test_sandbox_denied_shell_command_is_reviewed_and_retried_without_sand
     assert "Read-only file system" in reviews[0].tool_result
     assert result.data["approval"]["action"] == "sandbox_failure"
     assert result.data["approval"]["decision"] == "approved"
+    assert (
+        result.data["approval"]["tool_result"]
+        == "failed to write file: Read-only file system"
+    )
 
 
 @pytest.mark.anyio
@@ -453,6 +457,53 @@ async def test_sandbox_denied_shell_command_is_not_retried_when_reviewer_denies(
     assert calls == ["sandbox"]
     assert "Too broad." in result.content
     assert result.data["approval"]["decision"] == "denied"
+    assert (
+        result.data["approval"]["tool_result"]
+        == "failed to write file: Read-only file system"
+    )
+
+
+@pytest.mark.anyio
+async def test_sandbox_denied_shell_command_preserves_failure_output_when_review_fails(
+    tmp_path, monkeypatch
+) -> None:
+    calls: list[str] = []
+
+    async def fake_run_async(self, command, **kwargs):
+        calls.append("sandbox")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=1,
+            stderr="mkdir: cannot create directory '/root/.local/state': Permission denied\n",
+            stdout="",
+        )
+
+    async def deny_after_review_failure(
+        request: ApprovalReviewRequest,
+    ) -> ApprovalReviewDecision:
+        return ApprovalReviewDecision(
+            decision="denied",
+            reason="Approval reviewer failed: network unavailable",
+        )
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+
+    result = await run_tool_with_path_permissions(
+        "shell_command",
+        {"command": "pnpm test"},
+        ToolContext(cwd=tmp_path / "work"),
+        review_approval=deny_after_review_failure,
+        writable_paths=[],
+    )
+
+    assert not result.ok
+    assert calls == ["sandbox"]
+    assert result.data["approval"]["decision"] == "denied"
+    assert "network unavailable" in result.data["approval"]["reason"]
+    assert (
+        result.data["approval"]["tool_result"]
+        == "mkdir: cannot create directory '/root/.local/state': Permission denied"
+    )
 
 
 @pytest.mark.anyio
