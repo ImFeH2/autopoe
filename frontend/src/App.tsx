@@ -1268,6 +1268,31 @@ function App() {
     }
   };
 
+  const addWritablePath = async (path: string) => {
+    const response = await fetch("/api/permissions/writable-paths", {
+      body: JSON.stringify({ path }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      throw new Error("Directory could not be added.");
+    }
+
+    const result = (await response.json()) as ApiWritablePath;
+    setWritablePaths((currentWritablePaths) => {
+      const savedWritablePath = writablePathFromApi(result);
+      if (
+        currentWritablePaths.some(
+          (writablePath) => writablePath.path === savedWritablePath.path,
+        )
+      ) {
+        return currentWritablePaths;
+      }
+      return [...currentWritablePaths, savedWritablePath];
+    });
+  };
+
   const saveWorkspaceMessages = async (nextMessages: Message[]) => {
     const response = await fetch("/api/workspace/messages", {
       body: JSON.stringify({ messages: nextMessages }),
@@ -2384,6 +2409,7 @@ function App() {
       </TabsContent>
       <TabsContent value="permissions" className={viewPanelClassName}>
         <PermissionsView
+          onAddWritablePath={addWritablePath}
           onRemoveWritablePath={(path) => {
             void removeWritablePath(path);
           }}

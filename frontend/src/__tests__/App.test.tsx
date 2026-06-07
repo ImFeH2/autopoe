@@ -1060,6 +1060,33 @@ const mockInitialState = (
       );
     }
 
+    if (
+      input === "/api/permissions/writable-paths" &&
+      init?.method === "POST"
+    ) {
+      const request = JSON.parse(String(init.body)) as { path: string };
+      const writablePaths = (
+        "writable_paths" in state ? state.writable_paths : []
+      ) as TestWritablePath[];
+      return new Response(
+        JSON.stringify({
+          created_at: 1710000010,
+          path: request.path,
+          writable_paths: [
+            ...writablePaths,
+            {
+              created_at: 1710000010,
+              path: request.path,
+            },
+          ],
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
     if (input === "/api/telegram-bot/approve" && init?.method === "POST") {
       const request = JSON.parse(String(init.body)) as { chat_id: string };
       const telegramBot = (
@@ -5581,6 +5608,109 @@ describe("App", () => {
       }),
     );
     expect(screen.getByText("No paths")).toBeInTheDocument();
+  });
+
+  it("adds a writable path from Permissions", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Permissions" }));
+    await user.type(
+      screen.getByLabelText("Directory path"),
+      "/workspace/.cache/pnpm",
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("/workspace/.cache/pnpm")).toBeInTheDocument();
+    });
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/permissions/writable-paths",
+      expect.objectContaining({
+        body: JSON.stringify({ path: "/workspace/.cache/pnpm" }),
+        method: "POST",
+      }),
+    );
+    expect(screen.getByLabelText("Directory path")).toHaveValue("");
+    expect(screen.queryByText("No paths")).not.toBeInTheDocument();
+  });
+
+  it("blocks duplicate writable paths from Permissions", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      writable_paths: [
+        {
+          created_at: 1710000000,
+          path: "/workspace/.cache/pnpm",
+        },
+      ],
+    });
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Permissions" }));
+    await user.type(
+      screen.getByLabelText("Directory path"),
+      " /workspace/.cache/pnpm ",
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(screen.getByText("Path already exists")).toBeInTheDocument();
+    expect(window.fetch).not.toHaveBeenCalledWith(
+      "/api/permissions/writable-paths",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("keeps Add disabled when the writable path input is empty", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Permissions" }));
+
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Directory path"), "   ");
+
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(window.fetch).not.toHaveBeenCalledWith(
+      "/api/permissions/writable-paths",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("shows an error when a writable path cannot be added", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+
+      if (
+        input === "/api/permissions/writable-paths" &&
+        init?.method === "POST"
+      ) {
+        return new Response(null, { status: 500 });
+      }
+
+      return new Response(null, { status: 404 });
+    });
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "Permissions" }));
+    await user.type(screen.getByLabelText("Directory path"), "/tmp/cache");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(
+      await screen.findByText("Directory could not be added."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("/tmp/cache")).not.toBeInTheDocument();
   });
 
   it("saves the global Telegram Bot from Channels", async () => {

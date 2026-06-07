@@ -1,9 +1,13 @@
-import { ShieldCheck, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Plus, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   dashedPanelClassName,
   emptyStateClassName,
+  fieldInputClassName,
+  fieldLabelClassName,
   mutedTextClassName,
   sectionTitleClassName,
   stableScrollbarClassName,
@@ -13,12 +17,41 @@ import type { WritablePath } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
 export function PermissionsView({
+  onAddWritablePath,
   onRemoveWritablePath,
   writablePaths,
 }: {
+  onAddWritablePath: (path: string) => Promise<void>;
   onRemoveWritablePath: (path: string) => void;
   writablePaths: WritablePath[];
 }) {
+  const [directoryPath, setDirectoryPath] = useState("");
+  const [addError, setAddError] = useState("");
+  const trimmedDirectoryPath = directoryPath.trim();
+
+  const addWritablePath = async () => {
+    if (!trimmedDirectoryPath) {
+      return;
+    }
+
+    if (
+      writablePaths.some(
+        (writablePath) => writablePath.path === trimmedDirectoryPath,
+      )
+    ) {
+      setAddError("Path already exists");
+      return;
+    }
+
+    try {
+      await onAddWritablePath(trimmedDirectoryPath);
+      setDirectoryPath("");
+      setAddError("");
+    } catch {
+      setAddError("Directory could not be added.");
+    }
+  };
+
   return (
     <section
       aria-label="Permissions"
@@ -29,6 +62,47 @@ export function PermissionsView({
     >
       <section className="grid max-w-4xl gap-3">
         <h3 className={sectionTitleClassName}>Writable paths</h3>
+        <form
+          aria-label="Add directory"
+          className="grid gap-1.5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void addWritablePath();
+          }}
+        >
+          <label className={fieldLabelClassName} htmlFor="writable-path-input">
+            Directory path
+          </label>
+          <div className="flex gap-2 max-[640px]:flex-col">
+            <Input
+              aria-invalid={addError ? true : undefined}
+              className={cn(fieldInputClassName, "flex-1")}
+              id="writable-path-input"
+              onChange={(event) => {
+                setDirectoryPath(event.target.value);
+                setAddError("");
+              }}
+              placeholder="Enter a directory path"
+              type="text"
+              value={directoryPath}
+            />
+            <Button
+              className={cn(subtleButtonClassName, "shrink-0")}
+              disabled={!trimmedDirectoryPath}
+              size="sm"
+              type="submit"
+              variant="outline"
+            >
+              <Plus aria-hidden="true" />
+              Add
+            </Button>
+          </div>
+          {addError ? (
+            <p className="m-0 text-xs leading-[1.4] text-destructive">
+              {addError}
+            </p>
+          ) : null}
+        </form>
         {writablePaths.length === 0 ? (
           <p className={emptyStateClassName}>No paths</p>
         ) : (
