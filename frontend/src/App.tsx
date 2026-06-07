@@ -1059,22 +1059,36 @@ function App() {
     });
 
     if (response.ok) {
-      setProviders((currentProviders) =>
-        currentProviders.filter(
-          (provider) => provider.id !== removedProviderId,
-        ),
+      const removedIndex = providers.findIndex(
+        (provider) => provider.id === removedProviderId,
       );
-      openNewProviderEditor();
+      const remainingProviders = providers.filter(
+        (provider) => provider.id !== removedProviderId,
+      );
+
+      setProviders(remainingProviders);
+
+      const nextProvider =
+        remainingProviders[removedIndex] ||
+        remainingProviders[removedIndex - 1];
+
+      if (nextProvider) {
+        loadProviderEditor(nextProvider);
+      } else {
+        openNewProviderEditor();
+      }
 
       if (selectedProviderId === removedProviderId) {
-        setSelectedProviderId("");
-        setSelectedModel("");
+        const nextId = nextProvider?.id ?? "";
+        const nextModel = nextProvider?.models[0] ?? "";
+        setSelectedProviderId(nextId);
+        setSelectedModel(nextModel);
         void persistSettings({
           agentPrompt,
           contextWindowLimit,
           reasoningEffort,
-          selectedModel: "",
-          selectedProviderId: "",
+          selectedModel: nextModel,
+          selectedProviderId: nextId,
         });
       }
     }

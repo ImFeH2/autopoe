@@ -607,16 +607,59 @@ class StateStore:
                 WHERE id = 1
                 """
             ).fetchone()
+            provider_rows = connection.execute(
+                """
+                SELECT id
+                FROM providers
+                ORDER BY created_at, id
+                """
+            ).fetchall()
+            removed_index = next(
+                (
+                    index
+                    for index, provider_row in enumerate(provider_rows)
+                    if provider_row["id"] == provider_id
+                ),
+                -1,
+            )
+            remaining_provider_ids = [
+                provider_row["id"]
+                for provider_row in provider_rows
+                if provider_row["id"] != provider_id
+            ]
             connection.execute("DELETE FROM providers WHERE id = ?", (provider_id,))
             if settings_row and settings_row["selected_provider_id"] == provider_id:
+                next_provider_id = ""
+                if removed_index >= 0:
+                    next_provider_id = (
+                        remaining_provider_ids[removed_index]
+                        if removed_index < len(remaining_provider_ids)
+                        else remaining_provider_ids[removed_index - 1]
+                        if remaining_provider_ids
+                        else ""
+                    )
+                next_model = ""
+                if next_provider_id:
+                    model_row = connection.execute(
+                        """
+                        SELECT model
+                        FROM provider_models
+                        WHERE provider_id = ?
+                        ORDER BY position, model
+                        LIMIT 1
+                        """,
+                        (next_provider_id,),
+                    ).fetchone()
+                    next_model = model_row["model"] if model_row else ""
                 connection.execute(
                     """
                     UPDATE settings
-                    SET selected_provider_id = '',
-                        selected_model = '',
+                    SET selected_provider_id = ?,
+                        selected_model = ?,
                         updated_at = unixepoch()
                     WHERE id = 1
-                    """
+                    """,
+                    (next_provider_id, next_model),
                 )
 
     def save_settings(self, settings: StoredSettings) -> StoredSettings:

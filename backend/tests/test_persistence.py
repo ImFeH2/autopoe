@@ -39,7 +39,116 @@ def test_app_state_persists_providers_across_app_instances(
     ]
 
 
-def test_delete_provider_persists_and_clears_active_selection(
+def test_delete_provider_selects_nearest_active_selection(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-local",
+            "base_url": "https://api.example.test/v1",
+            "id": "provider-openai",
+            "models": ["gpt-5.1"],
+            "name": "OpenAI",
+            "type": "openai",
+        },
+    )
+    client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-anthropic",
+            "base_url": "",
+            "id": "provider-anthropic",
+            "models": ["claude-sonnet-4-5", "claude-haiku-4-5"],
+            "name": "Anthropic",
+            "type": "anthropic",
+        },
+    )
+    client.put(
+        "/api/settings",
+        json={
+            "agent_prompt": "Respond with careful implementation plans.",
+            "context_window_limit": 96_000,
+            "reasoning_effort": "xhigh",
+            "selected_model": "gpt-5.1",
+            "selected_provider_id": "provider-openai",
+        },
+    )
+
+    response = client.delete("/api/providers/provider-openai")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    restarted_client = TestClient(create_app(serve_frontend=False))
+    state_response = restarted_client.get("/api/state")
+
+    assert state_response.status_code == 200
+    state = state_response.json()
+    assert [provider["id"] for provider in state["providers"]] == ["provider-anthropic"]
+    assert state["settings"] == {
+        "agent_prompt": "Respond with careful implementation plans.",
+        "context_window_limit": 96_000,
+        "reasoning_effort": "xhigh",
+        "selected_model": "claude-sonnet-4-5",
+        "selected_provider_id": "provider-anthropic",
+    }
+
+
+def test_delete_provider_selects_previous_active_selection_when_removed_provider_is_last(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-openai",
+            "base_url": "https://api.example.test/v1",
+            "id": "provider-openai",
+            "models": ["gpt-5.1"],
+            "name": "OpenAI",
+            "type": "openai",
+        },
+    )
+    client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-anthropic",
+            "base_url": "",
+            "id": "provider-anthropic",
+            "models": ["claude-sonnet-4-5"],
+            "name": "Anthropic",
+            "type": "anthropic",
+        },
+    )
+    client.put(
+        "/api/settings",
+        json={
+            "agent_prompt": "Respond with careful implementation plans.",
+            "context_window_limit": 96_000,
+            "reasoning_effort": "xhigh",
+            "selected_model": "claude-sonnet-4-5",
+            "selected_provider_id": "provider-anthropic",
+        },
+    )
+
+    response = client.delete("/api/providers/provider-anthropic")
+
+    assert response.status_code == 200
+    state = client.get("/api/state").json()
+    assert [provider["id"] for provider in state["providers"]] == ["provider-openai"]
+    assert state["settings"] == {
+        "agent_prompt": "Respond with careful implementation plans.",
+        "context_window_limit": 96_000,
+        "reasoning_effort": "xhigh",
+        "selected_model": "gpt-5.1",
+        "selected_provider_id": "provider-openai",
+    }
+
+
+def test_delete_provider_clears_active_selection_when_no_providers_remain(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
@@ -69,12 +178,7 @@ def test_delete_provider_persists_and_clears_active_selection(
     response = client.delete("/api/providers/provider-openai")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
-    restarted_client = TestClient(create_app(serve_frontend=False))
-    state_response = restarted_client.get("/api/state")
-
-    assert state_response.status_code == 200
-    state = state_response.json()
+    state = client.get("/api/state").json()
     assert state["providers"] == []
     assert state["settings"] == {
         "agent_prompt": "Respond with careful implementation plans.",
@@ -83,6 +187,53 @@ def test_delete_provider_persists_and_clears_active_selection(
         "selected_model": "",
         "selected_provider_id": "",
     }
+
+
+def test_delete_provider_selects_nearest_active_provider_without_model(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-local",
+            "base_url": "https://api.example.test/v1",
+            "id": "provider-openai",
+            "models": ["gpt-5.1"],
+            "name": "OpenAI",
+            "type": "openai",
+        },
+    )
+    client.post(
+        "/api/providers",
+        json={
+            "api_key": "sk-anthropic",
+            "base_url": "",
+            "id": "provider-anthropic",
+            "models": [],
+            "name": "Anthropic",
+            "type": "anthropic",
+        },
+    )
+    client.put(
+        "/api/settings",
+        json={
+            "agent_prompt": "",
+            "context_window_limit": None,
+            "reasoning_effort": "default",
+            "selected_model": "gpt-5.1",
+            "selected_provider_id": "provider-openai",
+        },
+    )
+
+    response = client.delete("/api/providers/provider-openai")
+
+    assert response.status_code == 200
+    state = client.get("/api/state").json()
+    assert [provider["id"] for provider in state["providers"]] == ["provider-anthropic"]
+    assert state["settings"]["selected_provider_id"] == "provider-anthropic"
+    assert state["settings"]["selected_model"] == ""
 
 
 def test_delete_provider_keeps_other_active_selection(tmp_path, monkeypatch) -> None:
