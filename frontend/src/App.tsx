@@ -1047,6 +1047,39 @@ function App() {
     });
   };
 
+  const removeProvider = async () => {
+    if (isCreatingProvider) {
+      return;
+    }
+
+    const removedProviderId = providerDraft.id;
+    const response = await fetch(`/api/providers/${removedProviderId}`, {
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+
+    if (response.ok) {
+      setProviders((currentProviders) =>
+        currentProviders.filter(
+          (provider) => provider.id !== removedProviderId,
+        ),
+      );
+      openNewProviderEditor();
+
+      if (selectedProviderId === removedProviderId) {
+        setSelectedProviderId("");
+        setSelectedModel("");
+        void persistSettings({
+          agentPrompt,
+          contextWindowLimit,
+          reasoningEffort,
+          selectedModel: "",
+          selectedProviderId: "",
+        });
+      }
+    }
+  };
+
   const saveTelegramBot = async () => {
     const response = await fetch("/api/telegram-bot", {
       body: JSON.stringify(telegramBotToApi(telegramBot)),
@@ -2321,6 +2354,7 @@ function App() {
           onFetchModels={fetchProviderModels}
           onNewProvider={openNewProviderEditor}
           onProviderSelect={loadProviderEditor}
+          onRemoveProvider={removeProvider}
           onSaveProvider={saveProvider}
           onUpdateProvider={updateProviderDraft}
           providers={providers}

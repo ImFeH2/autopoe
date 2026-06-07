@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,7 @@ export function ProvidersView({
   onFetchModels,
   onNewProvider,
   onProviderSelect,
+  onRemoveProvider,
   onSaveProvider,
   onUpdateProvider,
   providers,
@@ -48,6 +49,7 @@ export function ProvidersView({
   onFetchModels: () => void;
   onNewProvider: () => void;
   onProviderSelect: (provider: Provider) => void;
+  onRemoveProvider: () => void;
   onSaveProvider: () => void;
   onUpdateProvider: (updates: Partial<Provider>) => void;
   providers: Provider[];
@@ -66,7 +68,9 @@ export function ProvidersView({
           activeProvider={activeProvider}
           fetchError={fetchError}
           isFetchingModels={isFetchingModels}
+          isCreatingProvider={isCreatingProvider}
           onFetchModels={onFetchModels}
+          onRemoveProvider={onRemoveProvider}
           onSaveProvider={onSaveProvider}
           onUpdateProvider={onUpdateProvider}
         />
@@ -145,14 +149,18 @@ function ProviderDetails({
   activeProvider,
   fetchError,
   isFetchingModels,
+  isCreatingProvider,
   onFetchModels,
+  onRemoveProvider,
   onSaveProvider,
   onUpdateProvider,
 }: {
   activeProvider: Provider;
   fetchError: string;
   isFetchingModels: boolean;
+  isCreatingProvider: boolean;
   onFetchModels: () => void;
+  onRemoveProvider: () => void;
   onSaveProvider: () => void;
   onUpdateProvider: (updates: Partial<Provider>) => void;
 }) {
@@ -196,6 +204,17 @@ function ProviderDetails({
         >
           {isFetchingModels ? "Fetching" : "Fetch"}
         </Button>
+        {!isCreatingProvider ? (
+          <Button
+            className={subtleButtonClassName}
+            onClick={onRemoveProvider}
+            type="button"
+            variant="outline"
+          >
+            <Trash2 aria-hidden="true" />
+            Remove
+          </Button>
+        ) : null}
         <Button type="submit">Save</Button>
       </div>
     </form>

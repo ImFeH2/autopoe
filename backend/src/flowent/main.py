@@ -1238,6 +1238,11 @@ def create_app(
     async def save_provider(provider: StoredProvider) -> StoredProvider:
         return store.save_provider(provider)
 
+    @app.delete("/api/providers/{provider_id}")
+    async def delete_provider(provider_id: str) -> dict[str, bool]:
+        store.delete_provider(provider_id)
+        return {"ok": True}
+
     @app.put("/api/mcp/servers")
     async def save_mcp_server(server: StoredMcpServer) -> StoredMcpServer:
         saved_server = store.save_mcp_server(server)

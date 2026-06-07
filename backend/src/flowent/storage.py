@@ -598,6 +598,27 @@ class StateStore:
             )
         return provider
 
+    def delete_provider(self, provider_id: str) -> None:
+        with self.connect() as connection:
+            settings_row = connection.execute(
+                """
+                SELECT selected_provider_id
+                FROM settings
+                WHERE id = 1
+                """
+            ).fetchone()
+            connection.execute("DELETE FROM providers WHERE id = ?", (provider_id,))
+            if settings_row and settings_row["selected_provider_id"] == provider_id:
+                connection.execute(
+                    """
+                    UPDATE settings
+                    SET selected_provider_id = '',
+                        selected_model = '',
+                        updated_at = unixepoch()
+                    WHERE id = 1
+                    """
+                )
+
     def save_settings(self, settings: StoredSettings) -> StoredSettings:
         with self.connect() as connection:
             connection.execute(

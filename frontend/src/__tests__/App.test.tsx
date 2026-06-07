@@ -166,6 +166,15 @@ type TestWritablePath = {
   path: string;
 };
 
+type TestProvider = {
+  api_key: string;
+  base_url: string;
+  id: string;
+  models: string[];
+  name: string;
+  type: "anthropic" | "gemini" | "openai" | "openai_responses";
+};
+
 type TestContextUsage = {
   cached_input_tokens: number;
   input_tokens: number;
@@ -1212,6 +1221,17 @@ const mockInitialState = (
 
     if (input === "/api/providers" && init?.method === "POST") {
       return new Response(init.body, {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/providers/") &&
+      init?.method === "DELETE"
+    ) {
+      return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
         status: 200,
       });
@@ -5184,6 +5204,115 @@ describe("App", () => {
     );
 
     expect(screen.getByRole("button", { name: "OpenAI" })).toBeInTheDocument();
+  });
+
+  it("removes a saved provider and returns to a new provider form", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [],
+      providers: [
+        {
+          api_key: "sk-local",
+          base_url: "https://api.example.test/v1",
+          id: "provider-openai",
+          models: ["gpt-5.1"],
+          name: "OpenAI",
+          type: "openai",
+        },
+        {
+          api_key: "sk-anthropic",
+          base_url: "",
+          id: "provider-anthropic",
+          models: ["claude-sonnet-4-5"],
+          name: "Anthropic",
+          type: "anthropic",
+        },
+      ] satisfies TestProvider[],
+      settings: {
+        reasoning_effort: "default",
+        selected_model: "claude-sonnet-4-5",
+        selected_provider_id: "provider-anthropic",
+      },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Providers" }));
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "OpenAI" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "Anthropic" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Provider name" })).toHaveValue(
+      "",
+    );
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/providers/provider-openai",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(window.fetch).not.toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({
+        body: JSON.stringify({
+          agent_prompt: "",
+          context_window_limit: null,
+          reasoning_effort: "default",
+          selected_model: "",
+          selected_provider_id: "",
+        }),
+        method: "PUT",
+      }),
+    );
+  });
+
+  it("clears the Settings provider and model when the active provider is removed", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Providers" }));
+    await user.click(screen.getByRole("button", { name: "OpenAI" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No providers")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("textbox", { name: "Provider name" })).toHaveValue(
+      "",
+    );
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+    expect(
+      screen.getByRole("combobox", { name: "Provider" }),
+    ).toHaveTextContent("No providers");
+    expect(screen.getByRole("combobox", { name: "Provider" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
+      "No models",
+    );
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeDisabled();
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/providers/provider-openai",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({
+        body: JSON.stringify({
+          agent_prompt: "",
+          context_window_limit: null,
+          reasoning_effort: "default",
+          selected_model: "",
+          selected_provider_id: "",
+        }),
+        method: "PUT",
+      }),
+    );
   });
 
   it("loads persisted Settings selection when the app starts", async () => {
