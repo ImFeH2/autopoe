@@ -489,9 +489,14 @@ function MessageRow({
   const [isEditing, setIsEditing] = useState(false);
   const assistantGroups =
     message.author === "assistant" ? assistantOutputGroups(message) : [];
+  const latestAssistantItem = assistantGroups.at(-1)?.items.at(-1);
   const isWaiting = isPending && assistantGroups.length === 0;
   const shouldShowWaitingAfterOutput =
-    isPending && assistantGroups.length > 0 && !isStreaming;
+    isPending &&
+    assistantGroups.length > 0 &&
+    !isStreaming &&
+    (latestAssistantItem?.type !== "tool" ||
+      latestAssistantItem.tool.status !== "waiting");
   const isUserMessage = message.author === "user";
   const isRetryUnavailable = isResponding || message.id === "assistant-pending";
   const isEditUnavailable = isResponding || !isUserMessage;
