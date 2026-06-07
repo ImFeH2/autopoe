@@ -7,6 +7,7 @@ import os
 import re
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, Protocol
 
@@ -119,54 +120,138 @@ def expand_mcp_config(config: dict[str, object]) -> dict[str, object]:
     return expanded if isinstance(expanded, dict) else {}
 
 
+@dataclass
+class _McpConnection:
+    close_event: asyncio.Event
+    ready: asyncio.Future[list[dict[str, object]]]
+    owner_task: asyncio.Task[None] | None = None
+    session: Any = None
+
+
 class DefaultMcpTransport:
     def __init__(self) -> None:
-        self._sessions: dict[str, Any] = {}
-        self._stacks: dict[str, AsyncExitStack] = {}
+        self._connections: dict[str, _McpConnection] = {}
 
     async def connect(self, server: StoredMcpServer) -> list[dict[str, object]]:
+        await self.disconnect(server.id)
+        loop = asyncio.get_running_loop()
+        connection = _McpConnection(
+            close_event=asyncio.Event(),
+            ready=loop.create_future(),
+        )
+        connection.owner_task = asyncio.create_task(
+            self._run_connection(server, connection)
+        )
+        self._connections[server.id] = connection
+        try:
+            return await asyncio.shield(connection.ready)
+        except asyncio.CancelledError:
+            await self._close_connection(
+                server.id,
+                connection,
+                cancel_owner=True,
+                suppress_errors=True,
+            )
+            raise
+        except Exception:
+            await self._close_connection(
+                server.id,
+                connection,
+                cancel_owner=False,
+                suppress_errors=True,
+            )
+            raise
+
+    async def _run_connection(
+        self,
+        server: StoredMcpServer,
+        connection: _McpConnection,
+    ) -> None:
         from mcp import ClientSession
         from mcp.client.stdio import stdio_client
 
-        await self.disconnect(server.id)
         stack = AsyncExitStack()
-        config = expand_mcp_config(server.config)
-        if server.type == "url":
-            http_module = import_module("mcp.client.streamable_http")
-            http_headers = self._streamable_http_headers(config) or None
-            if hasattr(http_module, "streamablehttp_client"):
-                read_stream, write_stream, _ = await stack.enter_async_context(
-                    http_module.streamablehttp_client(
-                        server.url or str(config.get("url") or ""),
-                        headers=http_headers,
-                    )
-                )
-            else:
-                import httpx
+        try:
+            async with stack:
+                config = expand_mcp_config(server.config)
+                if server.type == "url":
+                    http_module = import_module("mcp.client.streamable_http")
+                    http_headers = self._streamable_http_headers(config) or None
+                    if hasattr(http_module, "streamablehttp_client"):
+                        read_stream, write_stream, _ = await stack.enter_async_context(
+                            http_module.streamablehttp_client(
+                                server.url or str(config.get("url") or ""),
+                                headers=http_headers,
+                            )
+                        )
+                    else:
+                        import httpx
 
-                http_client = await stack.enter_async_context(
-                    httpx.AsyncClient(headers=http_headers)
-                )
-                read_stream, write_stream, _ = await stack.enter_async_context(
-                    http_module.streamable_http_client(
-                        server.url or str(config.get("url") or ""),
-                        http_client=http_client,
+                        http_client = await stack.enter_async_context(
+                            httpx.AsyncClient(headers=http_headers)
+                        )
+                        read_stream, write_stream, _ = await stack.enter_async_context(
+                            http_module.streamable_http_client(
+                                server.url or str(config.get("url") or ""),
+                                http_client=http_client,
+                            )
+                        )
+                else:
+                    read_stream, write_stream = await stack.enter_async_context(
+                        stdio_client(
+                            self._stdio_parameters(server, config),
+                        )
                     )
+                session = await stack.enter_async_context(
+                    ClientSession(read_stream, write_stream)
                 )
-        else:
-            read_stream, write_stream = await stack.enter_async_context(
-                stdio_client(
-                    self._stdio_parameters(server, config),
-                )
-            )
-        session = await stack.enter_async_context(
-            ClientSession(read_stream, write_stream)
-        )
-        await session.initialize()
-        result = await session.list_tools()
-        self._sessions[server.id] = session
-        self._stacks[server.id] = stack
-        return [self._model_dump(tool) for tool in result.tools]
+                await session.initialize()
+                result = await session.list_tools()
+                connection.session = session
+                if not connection.ready.done():
+                    connection.ready.set_result(
+                        [self._model_dump(tool) for tool in result.tools]
+                    )
+                await connection.close_event.wait()
+        except asyncio.CancelledError:
+            if not connection.ready.done():
+                connection.ready.cancel()
+            raise
+        except Exception as error:
+            if not connection.ready.done():
+                connection.ready.set_exception(error)
+            raise
+        finally:
+            connection.session = None
+
+    async def _close_connection(
+        self,
+        server_id: str,
+        connection: _McpConnection,
+        *,
+        cancel_owner: bool,
+        suppress_errors: bool = False,
+    ) -> None:
+        if self._connections.get(server_id) is connection:
+            self._connections.pop(server_id, None)
+        connection.session = None
+        owner_task = connection.owner_task
+        if owner_task is None:
+            return
+        if not owner_task.done():
+            if cancel_owner:
+                owner_task.cancel()
+            else:
+                connection.close_event.set()
+        try:
+            await asyncio.shield(owner_task)
+        except asyncio.CancelledError:
+            if cancel_owner or suppress_errors:
+                return
+            raise
+        except Exception:
+            if not suppress_errors:
+                raise
 
     def _streamable_http_headers(self, config: dict[str, object]) -> dict[str, str]:
         headers: dict[str, str] = {}
@@ -238,10 +323,13 @@ class DefaultMcpTransport:
         )
 
     async def disconnect(self, server_id: str) -> None:
-        stack = self._stacks.pop(server_id, None)
-        self._sessions.pop(server_id, None)
-        if stack is not None:
-            await stack.aclose()
+        connection = self._connections.pop(server_id, None)
+        if connection is not None:
+            await self._close_connection(
+                server_id,
+                connection,
+                cancel_owner=not connection.ready.done(),
+            )
 
     async def call_tool(
         self,
@@ -249,7 +337,8 @@ class DefaultMcpTransport:
         tool_name: str,
         arguments: dict[str, object],
     ) -> dict[str, object]:
-        session = self._sessions.get(server_id)
+        connection = self._connections.get(server_id)
+        session = connection.session if connection is not None else None
         if session is None:
             raise RuntimeError("Server is not connected.")
         result = await session.call_tool(tool_name, arguments=arguments)
