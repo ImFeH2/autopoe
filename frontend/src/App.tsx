@@ -477,6 +477,20 @@ const countAssistantOutputItems = (
   groups.flatMap((group) => group.items).filter((item) => item.type === type)
     .length;
 
+const latestAssistantOutputItem = (groups: AssistantOutputGroup[]) => {
+  for (let groupIndex = groups.length - 1; groupIndex >= 0; groupIndex -= 1) {
+    const items = groups[groupIndex]?.items ?? [];
+    for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+      const item = items[itemIndex];
+      if (item) {
+        return item;
+      }
+    }
+  }
+
+  return null;
+};
+
 const streamErrorFromMessage = (
   message: string,
   assistantId: string,
@@ -1616,7 +1630,9 @@ function App() {
           assistantGroups,
           "thinking",
         );
-        assistantIsStreamingText = streaming && assistantContent.length > 0;
+        assistantIsStreamingText =
+          streaming &&
+          latestAssistantOutputItem(assistantGroups)?.type === "text";
         assistantIsStreamingThinking =
           streaming && assistantThinking.length > 0;
         assistantGroups = assistantGroups.map((group) => ({
