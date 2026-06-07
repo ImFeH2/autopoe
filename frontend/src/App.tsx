@@ -154,6 +154,12 @@ type WorkspaceStreamEvent =
     }
   | {
       data: {
+        index: number;
+      };
+      event: "output_done";
+    }
+  | {
+      data: {
         content: string;
       };
       event: "delta";
@@ -223,6 +229,7 @@ type WorkspaceStreamHandlers = {
   onDelta: (content: string) => void;
   onDone: (message: ApiMessage) => void;
   onError: (error: Extract<AssistantOutputItem, { type: "error" }>) => void;
+  onOutputDone: () => void;
   onOutputStart: (index: number) => void;
   onSnapshot: (message: ApiMessage) => void;
   onStart: (id: string) => void;
@@ -1312,6 +1319,9 @@ function App() {
           if (streamEvent.event === "output_start") {
             handlers.onOutputStart(streamEvent.data.index);
           }
+          if (streamEvent.event === "output_done") {
+            handlers.onOutputDone();
+          }
           if (streamEvent.event === "delta") {
             handlers.onDelta(streamEvent.data.content);
           }
@@ -1501,6 +1511,8 @@ function App() {
         );
       };
       const appendAssistantThinking = (content: string) => {
+        assistantTextItemId = "";
+        assistantIsStreamingText = false;
         if (!assistantThinkingItemId) {
           assistantThinkingItemIndex += 1;
           assistantThinkingItemId = `${assistantId}-thinking-${assistantThinkingItemIndex}`;
@@ -1631,10 +1643,13 @@ function App() {
           "thinking",
         );
         assistantIsStreamingText =
+          message.active_output === "text" &&
           streaming &&
           latestAssistantOutputItem(assistantGroups)?.type === "text";
         assistantIsStreamingThinking =
-          streaming && assistantThinking.length > 0;
+          message.active_output === "thinking" &&
+          streaming &&
+          assistantThinking.length > 0;
         assistantGroups = assistantGroups.map((group) => ({
           ...group,
           items: group.items.map((item) =>
@@ -1742,6 +1757,15 @@ function App() {
           appendAssistantError(
             error.id ? error : { ...error, id: `${assistantId}-error-1` },
           );
+        },
+        onOutputDone: () => {
+          if (!isCurrentResponse()) {
+            return;
+          }
+          finishAssistantThinking();
+          assistantTextItemId = "";
+          assistantIsStreamingText = false;
+          updateAssistantMessage({ immediate: true });
         },
         onOutputStart: (index) => {
           if (!isCurrentResponse()) {
@@ -1978,6 +2002,7 @@ function App() {
         onDelta: () => undefined,
         onDone: appendCompactMessage,
         onError: (error) => setResponseError(error.message),
+        onOutputDone: () => undefined,
         onOutputStart: () => undefined,
         onSnapshot: () => undefined,
         onStart: () => undefined,

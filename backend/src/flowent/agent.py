@@ -240,6 +240,7 @@ async def run_agent_stream(
             round_number,
             tool_calls,
         )
+        yield AgentStreamEvent(event="output_done", data={"index": round_number})
         if not tool_calls:
             if not final_content and not final_thinking:
                 raise RuntimeError(EMPTY_MODEL_RESPONSE_ERROR)

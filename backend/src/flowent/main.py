@@ -183,6 +183,7 @@ class WritablePathListResponse(BaseModel):
 @dataclass
 class WorkspaceRun:
     condition: asyncio.Condition
+    active_output: Literal["text", "thinking"] | None = None
     discard_on_cancel: bool = False
     events: list[tuple[int, str, dict[str, object]]] = field(default_factory=list)
     generation: int = 0
@@ -203,8 +204,13 @@ def stream_event(
     return f"{id_line}event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def stream_message_data(message: StoredMessage) -> dict[str, object]:
-    return {**message.model_dump(), "status": message.status}
+def stream_message_data(
+    message: StoredMessage, active_output: Literal["text", "thinking"] | None = None
+) -> dict[str, object]:
+    data = {**message.model_dump(), "status": message.status}
+    if active_output is not None:
+        data["active_output"] = active_output
+    return data
 
 
 def append_or_replace_message(
@@ -257,6 +263,7 @@ def apply_stream_event_to_snapshot(
     snapshot: dict[str, object], event: str, data: dict[str, object]
 ) -> None:
     if event == "output_start":
+        snapshot.pop("active_output", None)
         index = data.get("index")
         if isinstance(index, int):
             append_snapshot_group(snapshot, index)
@@ -264,6 +271,8 @@ def apply_stream_event_to_snapshot(
         append_snapshot_text(snapshot, str(data.get("content") or ""))
     if event == "thinking_delta":
         append_snapshot_thinking(snapshot, str(data.get("content") or ""))
+    if event == "output_done":
+        snapshot.pop("active_output", None)
 
 
 def snapshot_groups(snapshot: dict[str, object]) -> list[dict[str, object]]:
@@ -289,6 +298,7 @@ def append_snapshot_group(
 def append_snapshot_text(snapshot: dict[str, object], content: str) -> None:
     if not content:
         return
+    snapshot["active_output"] = "text"
     snapshot["content"] = f"{snapshot.get('content') or ''}{content}"
     append_snapshot_item_content(snapshot, content, "text")
 
@@ -296,6 +306,7 @@ def append_snapshot_text(snapshot: dict[str, object], content: str) -> None:
 def append_snapshot_thinking(snapshot: dict[str, object], content: str) -> None:
     if not content:
         return
+    snapshot["active_output"] = "thinking"
     snapshot["thinking"] = f"{snapshot.get('thinking') or ''}{content}"
     append_snapshot_item_content(snapshot, content, "thinking")
 
@@ -1370,7 +1381,7 @@ def create_app(
         await append_run_event(
             run,
             "snapshot",
-            {"message": stream_message_data(message)},
+            {"message": stream_message_data(message, run.active_output)},
         )
 
     def active_workspace_run() -> WorkspaceRun | None:
@@ -1638,11 +1649,15 @@ def create_app(
                     if event.event == "output_start":
                         index = event.data.get("index")
                         if isinstance(index, int):
+                            run.active_output = None
                             assistant_output.start_group(index)
                             snapshot_after_event = persist_assistant()
+                    if event.event == "output_done":
+                        run.active_output = None
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
                         if isinstance(tool, dict) and isinstance(tool.get("id"), str):
+                            run.active_output = None
                             current_tool_id = tool["id"]
                             assistant_output.start_tool(
                                 StoredToolItem.model_validate(tool)
@@ -1660,11 +1675,13 @@ def create_app(
                             assistant_output.update_tool(tool_id, event.data)
                             snapshot_after_event = persist_assistant()
                     if event.event == "delta":
+                        run.active_output = "text"
                         assistant_output.append_text(
                             str(event.data.get("content") or "")
                         )
                         snapshot_after_event = persist_assistant_progress()
                     if event.event == "thinking_delta":
+                        run.active_output = "thinking"
                         assistant_output.append_thinking(
                             str(event.data.get("content") or "")
                         )
@@ -1696,6 +1713,7 @@ def create_app(
                     if event.event == "done":
                         message = event.data.get("message")
                         if isinstance(message, dict):
+                            run.active_output = None
                             assistant_output.apply_done_message(message)
                             response_usage_info = store.read_usage_info()
                             final_usage_info = turn_usage_info

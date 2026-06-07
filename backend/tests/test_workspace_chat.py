@@ -352,8 +352,9 @@ def test_workspace_response_streams_selected_provider_model_and_history(
         "event": "delta",
         "data": '{"content": "the launch checklist."}',
     }
-    assert '"author": "assistant"' in str(events[4]["data"])
-    assert '"content": "Here is the launch checklist."' in str(events[4]["data"])
+    assert events[4] == {"event": "output_done", "data": '{"index": 1}'}
+    assert '"author": "assistant"' in str(events[5]["data"])
+    assert '"content": "Here is the launch checklist."' in str(events[5]["data"])
     assert captured_request["api_base"] == "https://api.example.test/v1"
     assert captured_request["api_key"] == "sk-local"
     assert captured_request["messages"][0] == {
@@ -989,16 +990,18 @@ def test_workspace_response_auto_compacts_after_tool_result(
     assert [event["event"] for event in events] == [
         "start",
         "output_start",
+        "output_done",
         "tool_start",
         "tool_done",
         "context_optimized",
         "output_start",
         "usage",
         "delta",
+        "output_done",
         "done",
     ]
-    assert json.loads(events[4]["data"])["message"]["content"] == ("Context optimized")
-    usage_info = json.loads(events[6]["data"])["usage_info"]
+    assert json.loads(events[5]["data"])["message"]["content"] == ("Context optimized")
+    usage_info = json.loads(events[7]["data"])["usage_info"]
     last_usage = usage_info["last_token_usage"]
     assert last_usage["cached_input_tokens"] == 0
     assert last_usage["input_tokens"] == 0

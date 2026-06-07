@@ -162,6 +162,7 @@ export type ContextUsageInfo = {
 
 export type Message = {
   author: "assistant" | "system" | "user";
+  active_output?: "text" | "thinking" | null;
   content: string;
   groups?: AssistantOutputGroup[];
   id: string;

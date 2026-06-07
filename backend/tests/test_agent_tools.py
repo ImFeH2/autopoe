@@ -124,18 +124,20 @@ def test_workspace_response_streams_tool_process_and_final_text(
     assert [event["event"] for event in events] == [
         "start",
         "output_start",
+        "output_done",
         "tool_start",
         "tool_done",
         "output_start",
         "delta",
+        "output_done",
         "done",
     ]
     assert events[1]["data"] == {"index": 1}
-    assert events[2]["data"]["tool"]["status"] == "running"
-    assert events[3]["data"]["status"] == "success"
-    assert events[4]["data"] == {"index": 2}
-    assert events[5]["data"] == {"content": "Read the notes."}
-    assert events[6]["data"]["message"]["content"] == "Read the notes."
+    assert events[3]["data"]["tool"]["status"] == "running"
+    assert events[4]["data"]["status"] == "success"
+    assert events[5]["data"] == {"index": 2}
+    assert events[6]["data"] == {"content": "Read the notes."}
+    assert events[8]["data"]["message"]["content"] == "Read the notes."
     assert len(captured_requests) == 2
     assert captured_requests[0]["messages"][0] == {
         "role": "system",
@@ -699,6 +701,7 @@ async def test_agent_stream_stops_after_cancelled_tool(tmp_path) -> None:
     await stream.__anext__()
     await stream.__anext__()
     await stream.__anext__()
+    await stream.__anext__()
     next_event = asyncio.create_task(stream.__anext__())
     await asyncio.sleep(0)
     next_event.cancel()
@@ -924,13 +927,16 @@ def test_agent_continues_until_final_text_after_multiple_tool_rounds(
     assert [event["event"] for event in events] == [
         "start",
         "output_start",
+        "output_done",
         "tool_start",
         "tool_done",
         "output_start",
+        "output_done",
         "tool_start",
         "tool_done",
         "output_start",
         "delta",
+        "output_done",
         "done",
     ]
     assert len(captured_requests) == 3
@@ -1106,6 +1112,7 @@ def test_agent_finishes_without_tools(tmp_path, monkeypatch) -> None:
         "start",
         "output_start",
         "delta",
+        "output_done",
         "done",
     ]
     assert len(captured_requests) == 1
@@ -1142,6 +1149,7 @@ def test_agent_streams_and_persists_thinking(tmp_path, monkeypatch) -> None:
         "thinking_delta",
         "thinking_delta",
         "delta",
+        "output_done",
         "done",
     ]
     assert events[2]["data"] == {"content": "Checking context."}
@@ -1244,7 +1252,9 @@ async def test_approval_denial_result_is_sent_to_agent(tmp_path) -> None:
     assert "must not work around" in str(
         captured_requests[1]["messages"][-1]["content"]
     )
-    assert events[-2].data["content"] == "I need explicit approval for that risk."
+    assert next(
+        event.data["content"] for event in events if event.event == "delta"
+    ) == ("I need explicit approval for that risk.")
     assert events[-1].data["message"]["content"] == (
         "I need explicit approval for that risk."
     )

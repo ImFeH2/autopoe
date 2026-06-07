@@ -36,6 +36,36 @@ const eventStreamResponse = (events: string[]) => {
   };
 };
 
+const stagedEventStreamResponse = (stages: string[][]) => {
+  const encoder = new TextEncoder();
+  const releases = stages.slice(1).map(() => deferred());
+  const hold = deferred();
+  const stream = new ReadableStream({
+    async start(controller) {
+      for (const event of stages[0] ?? []) {
+        controller.enqueue(encoder.encode(event));
+      }
+      for (const [stageIndex, stage] of stages.slice(1).entries()) {
+        await releases[stageIndex].promise;
+        for (const event of stage) {
+          controller.enqueue(encoder.encode(event));
+        }
+      }
+      await hold.promise;
+      controller.close();
+    },
+  });
+
+  return {
+    finish: hold.resolve,
+    releaseStage: (stage: number) => releases[stage - 1]?.resolve(),
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
+};
+
 const streamEvent = (event: string, data: Record<string, unknown>) =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
@@ -351,5 +381,75 @@ describe("streaming cursor regressions", () => {
 
     expect(screen.getAllByTestId("response-cursor")).toHaveLength(1);
     expect(cursor.closest("p")).toHaveTextContent("I found the issue.");
+  });
+
+  it("removes the cursor when the current model output ends before the run finishes", async () => {
+    const stream = stagedEventStreamResponse([
+      [
+        streamEvent("start", { id: "message-assistant" }),
+        streamEvent("output_start", { index: 1 }),
+        streamEvent("delta", { content: "I will check the files first." }),
+      ],
+      [streamEvent("output_done", { index: 1 })],
+      [streamEvent("output_start", { index: 2 })],
+    ]);
+    const state = {
+      ...selectedProviderState(),
+      active_run_event_index: 0,
+      active_run_id: "run-1",
+      messages: [
+        {
+          author: "user",
+          content: "Check the files.",
+          id: "message-user",
+        },
+      ],
+    };
+
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(state), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        typeof input === "string" &&
+        input === "/api/workspace/runs/run-1/stream?after=0"
+      ) {
+        return stream.response;
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    await screen.findByText("I will check the files first.");
+    await waitFor(() => {
+      expect(screen.getByTestId("response-cursor")).toBeInTheDocument();
+    });
+
+    stream.releaseStage(1);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("response-cursor")).not.toBeInTheDocument();
+    });
+
+    stream.releaseStage(2);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("response-cursor")).not.toBeInTheDocument();
+    });
+
+    stream.finish();
   });
 });

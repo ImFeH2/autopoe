@@ -443,3 +443,62 @@ async def test_workspace_run_reconnect_snapshot_includes_unsaved_text_deltas(
     assert events[0]["data"]["message"]["content"] == "First second "
     assert events[1]["event"] == "delta"
     assert events[1]["data"]["content"] == "third."
+
+
+@pytest.mark.anyio
+async def test_workspace_run_stream_marks_each_model_output_done_before_tools(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "notes.txt").write_text("Launch notes")
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            if request["messages"][-1]["role"] == "user":
+                yield {"choices": [{"delta": {"content": "I will read notes."}}]}
+                yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
+                return
+            yield {"choices": [{"delta": {"content": "I read the notes."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Read notes."},
+        )
+        run_id = response.json()["run_id"]
+        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+
+    assert response.status_code == 200
+    events = stream_events(stream_response.text)
+    event_names = [event["event"] for event in events]
+    assert event_names == [
+        "start",
+        "snapshot",
+        "output_start",
+        "snapshot",
+        "delta",
+        "output_done",
+        "tool_start",
+        "snapshot",
+        "tool_done",
+        "snapshot",
+        "output_start",
+        "snapshot",
+        "delta",
+        "output_done",
+        "snapshot",
+        "done",
+    ]
+    assert event_names.index("output_done") < event_names.index("tool_start")
+    assert event_names.index("tool_done") < event_names.index("output_start", 8)
+    assert (
+        events[-2]["data"]["message"]["content"]
+        == "I will read notes.I read the notes."
+    )

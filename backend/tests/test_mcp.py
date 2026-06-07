@@ -685,11 +685,12 @@ async def test_mcp_tool_call_is_forwarded_and_result_returns_to_agent(
         "tool_call_id": "call-1",
     }
     events = stream_events(response.text)
-    assert events[2]["event"] == "tool_start"
-    assert events[2]["data"]["tool"]["title"] == "Calling Files.read_file"
-    assert events[3]["event"] == "tool_done"
-    assert events[3]["data"]["data"]["server"] == "Files"
-    assert events[3]["data"]["data"]["tool"] == "read_file"
+    assert events[2]["event"] == "output_done"
+    assert events[3]["event"] == "tool_start"
+    assert events[3]["data"]["tool"]["title"] == "Calling Files.read_file"
+    assert events[4]["event"] == "tool_done"
+    assert events[4]["data"]["data"]["server"] == "Files"
+    assert events[4]["data"]["data"]["tool"] == "read_file"
 
 
 @pytest.mark.anyio
@@ -741,9 +742,10 @@ async def test_mcp_tool_call_failure_is_reported_in_workspace(
 
     assert response.status_code == 200
     events = stream_events(response.text)
-    assert events[3]["event"] == "tool_error"
-    assert events[3]["data"]["status"] == "failed"
-    assert events[3]["data"]["content"] == "Permission denied"
+    assert events[2]["event"] == "output_done"
+    assert events[4]["event"] == "tool_error"
+    assert events[4]["data"]["status"] == "failed"
+    assert events[4]["data"]["content"] == "Permission denied"
 
 
 @pytest.mark.anyio
