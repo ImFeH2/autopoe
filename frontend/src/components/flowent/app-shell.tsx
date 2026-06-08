@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   KeyRound,
@@ -15,15 +15,54 @@ import { navigationLabelClassName } from "@/components/flowent/styles";
 import type { ViewId } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
-const navigationItems = [
-  { id: "workspace", label: "Workspace", icon: MessageSquare },
-  { id: "providers", label: "Providers", icon: KeyRound },
-  { id: "mcp", label: "MCP", icon: Plug },
-  { id: "skills", label: "Skills", icon: Sparkles },
-  { id: "channels", label: "Channels", icon: Radio },
-  { id: "permissions", label: "Permissions", icon: ShieldCheck },
-  { id: "settings", label: "Settings", icon: Settings },
-] satisfies Array<{ id: ViewId; label: string; icon: LucideIcon }>;
+type NavigationItem = {
+  icon: LucideIcon;
+  id: ViewId;
+  label: string;
+};
+
+const workspaceNavigationItem = {
+  icon: MessageSquare,
+  id: "workspace",
+  label: "Workspace",
+} satisfies NavigationItem;
+
+const navigationGroups = [
+  {
+    label: "Tools",
+    items: [
+      { id: "skills", label: "Skills", icon: Sparkles },
+      { id: "mcp", label: "MCP", icon: Plug },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [
+      { id: "providers", label: "Providers", icon: KeyRound },
+      { id: "channels", label: "Channels", icon: Radio },
+      { id: "permissions", label: "Permissions", icon: ShieldCheck },
+      { id: "settings", label: "Settings", icon: Settings },
+    ],
+  },
+] satisfies Array<{ label: string; items: NavigationItem[] }>;
+
+function NavigationTrigger({ item }: { item: NavigationItem }) {
+  const Icon = item.icon;
+
+  return (
+    <TabsTrigger
+      value={item.id}
+      className={cn(
+        "flowent-navigation-item cursor-pointer justify-start gap-1.5 rounded-[10px] border border-transparent bg-transparent px-2.5 py-1.5 text-white shadow-none transition-colors duration-100 hover:bg-[#171717] data-[state=active]:bg-[#2f2f2f] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden [&_svg]:text-current",
+        navigationLabelClassName,
+        "dark:hover:bg-[#171717] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#2f2f2f] dark:data-[state=active]:text-white",
+      )}
+    >
+      <Icon aria-hidden="true" />
+      <span className="flowent-navigation-text">{item.label}</span>
+    </TabsTrigger>
+  );
+}
 
 export function AppShell({
   activeProviderName,
@@ -57,26 +96,23 @@ export function AppShell({
 
         <nav aria-label="Primary navigation">
           <TabsList
-            className="mt-6 -mx-[14px] flex w-auto flex-none flex-col items-stretch gap-0 p-0 max-[900px]:mt-3 max-[900px]:mx-0 max-[900px]:flex-row"
+            className="mt-6 -mx-[14px] flex w-auto flex-none flex-col items-stretch gap-0 p-0 max-[900px]:mt-3 max-[900px]:mx-0 max-[900px]:flex-row max-[560px]:justify-start max-[560px]:overflow-x-auto"
             variant="line"
           >
-            {navigationItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <TabsTrigger
-                  key={item.id}
-                  value={item.id}
-                  className={cn(
-                    "flowent-navigation-item cursor-pointer justify-start gap-1.5 rounded-[10px] border border-transparent bg-transparent px-2.5 py-1.5 text-white shadow-none transition-colors duration-100 hover:bg-[#171717] data-[state=active]:bg-[#2f2f2f] max-[900px]:justify-center max-[560px]:min-w-0 max-[560px]:flex-1 max-[560px]:px-1.5 max-[560px]:[&_svg]:hidden [&_svg]:text-current",
-                    navigationLabelClassName,
-                    "dark:hover:bg-[#171717] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#2f2f2f] dark:data-[state=active]:text-white",
-                  )}
+            <NavigationTrigger item={workspaceNavigationItem} />
+            {navigationGroups.map((group) => (
+              <Fragment key={group.label}>
+                <div
+                  aria-hidden="true"
+                  className="mt-5 mb-1 px-2.5 text-[11px] leading-4 font-medium text-white/45 max-[900px]:hidden"
                 >
-                  <Icon aria-hidden="true" />
-                  <span className="flowent-navigation-text">{item.label}</span>
-                </TabsTrigger>
-              );
-            })}
+                  {group.label}
+                </div>
+                {group.items.map((item) => (
+                  <NavigationTrigger key={item.id} item={item} />
+                ))}
+              </Fragment>
+            ))}
           </TabsList>
         </nav>
 
