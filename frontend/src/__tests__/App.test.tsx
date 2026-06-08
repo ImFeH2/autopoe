@@ -1756,6 +1756,37 @@ describe("App", () => {
     expect(screen.getAllByText("success").length).toBeGreaterThan(0);
   });
 
+  it("focuses the composer when tabbing from navigation into the Workspace", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Review the launch plan.",
+          id: "message-focus-user",
+        },
+        {
+          author: "assistant",
+          content: "The launch plan is ready.",
+          id: "message-focus-assistant",
+        },
+      ],
+    });
+    render(<App />);
+
+    await screen.findByText("Review the launch plan.");
+    const workspaceTab = screen.getByRole("tab", { name: "Workspace" });
+    const composer = screen.getByRole("textbox", {
+      name: "Message Flowent",
+    });
+
+    workspaceTab.focus();
+    await user.tab();
+
+    expect(composer).toHaveFocus();
+  });
+
   it("shows context capacity in the composer tray", () => {
     render(<App />);
 
@@ -8090,6 +8121,21 @@ describe("App", () => {
     expect(composer).toHaveValue("/clear");
   });
 
+  it("keeps focus in the composer when command completion uses Tab", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/cl");
+    await user.keyboard("{Tab}");
+
+    expect(composer).toHaveFocus();
+    expect(composer).toHaveValue("/clear");
+  });
+
   it("closes the command menu with Escape and keeps the draft", async () => {
     const user = userEvent.setup();
     mockInitialState(selectedProviderState());
@@ -8670,6 +8716,24 @@ describe("App", () => {
     await user.type(composer, "$");
     await user.click(screen.getByRole("option", { name: /\$project-review/ }));
 
+    expect(composer).toHaveValue("$project-review ");
+  });
+
+  it("keeps focus in the composer when skill completion uses Tab", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      skills: [projectSkill()],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "$");
+    await user.keyboard("{Tab}");
+
+    expect(composer).toHaveFocus();
     expect(composer).toHaveValue("$project-review ");
   });
 

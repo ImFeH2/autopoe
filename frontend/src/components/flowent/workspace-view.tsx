@@ -93,13 +93,6 @@ export function WorkspaceView({
     <section className="h-full min-h-0 bg-black" aria-label="Workspace">
       <TooltipProvider delayDuration={500}>
         <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
-          <MessageList
-            composerOffset={composerOffset}
-            isResponding={isResponding}
-            messages={messages}
-            onEditMessage={onEditMessage}
-            onRetryMessage={onRetryMessage}
-          />
           <ChatComposer
             commands={commands}
             contextWindowLimit={contextWindowLimit}
@@ -117,6 +110,13 @@ export function WorkspaceView({
             onStopResponse={onStopResponse}
             onOffsetChange={setComposerOffset}
             skills={skills}
+          />
+          <MessageList
+            composerOffset={composerOffset}
+            isResponding={isResponding}
+            messages={messages}
+            onEditMessage={onEditMessage}
+            onRetryMessage={onRetryMessage}
           />
         </div>
       </TooltipProvider>
@@ -1953,13 +1953,16 @@ function ChatComposer({
         ) : null}
         <form
           aria-label="Workspace composer"
-          className="overflow-clip rounded-[14px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"
+          className="flex flex-col-reverse overflow-clip rounded-[14px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"
           onSubmit={(event) => {
             event.preventDefault();
             handleSubmit();
           }}
         >
-          <PlanTray isHidden={showCommandMenu || showSkillMenu} plan={plan} />
+          <ContextCapacityTray
+            capacity={capacity}
+            isRefining={isRefiningContext}
+          />
           <div className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 bg-[#212121] p-2.5">
             <Textarea
               aria-label="Message Flowent"
@@ -2080,10 +2083,7 @@ function ChatComposer({
               )}
             </Button>
           </div>
-          <ContextCapacityTray
-            capacity={capacity}
-            isRefining={isRefiningContext}
-          />
+          <PlanTray isHidden={showCommandMenu || showSkillMenu} plan={plan} />
         </form>
       </div>
     </div>

@@ -2612,7 +2612,11 @@ function App() {
       onWorkflowSelect={openWorkflow}
       workflows={workflows}
     >
-      <TabsContent value="workspace" className={viewPanelClassName}>
+      <TabsContent
+        value="workspace"
+        className={viewPanelClassName}
+        tabIndex={-1}
+      >
         <WorkspaceView
           contextWindowLimit={contextWindowLimit}
           draft={draft}
