@@ -22,6 +22,14 @@ class UserRecord:
         self.pw_shell = pw_shell
 
 
+def sandbox_bind_pairs(args: list[str]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for index, arg in enumerate(args[:-2]):
+        if arg == "--bind":
+            pairs.append((args[index + 1], args[index + 2]))
+    return pairs
+
+
 def stream_events(content: str) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
     for raw_event in content.strip().split("\n\n"):
@@ -404,6 +412,59 @@ def test_sandbox_command_binds_writable_socket_path(tmp_path, monkeypatch) -> No
     bind_index = command.args.index(str(socket_path))
     assert command.args[bind_index - 1] == "--bind"
     assert command.args[bind_index + 1] == str(socket_path)
+
+
+def test_sandbox_command_does_not_create_missing_writable_root(
+    tmp_path, monkeypatch
+) -> None:
+    missing_path = tmp_path / "external" / "note.txt"
+    runner = SandboxRunner(cwd=tmp_path, writable_roots=[missing_path])
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
+
+    runner.build_command(["/bin/true"])
+
+    assert not missing_path.exists()
+    assert not missing_path.parent.exists()
+
+
+def test_sandbox_command_omits_missing_writable_root_bind(
+    tmp_path, monkeypatch
+) -> None:
+    missing_path = tmp_path / "external" / "note.txt"
+    runner = SandboxRunner(cwd=tmp_path, writable_roots=[missing_path])
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
+
+    command = runner.build_command(["/bin/true"])
+
+    assert (str(missing_path), str(missing_path)) not in sandbox_bind_pairs(
+        command.args
+    )
+
+
+def test_sandbox_command_binds_existing_writable_directory(
+    tmp_path, monkeypatch
+) -> None:
+    writable_directory = tmp_path / "external"
+    writable_directory.mkdir()
+    runner = SandboxRunner(cwd=tmp_path, writable_roots=[writable_directory])
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
+
+    command = runner.build_command(["/bin/true"])
+
+    assert (str(writable_directory), str(writable_directory)) in sandbox_bind_pairs(
+        command.args
+    )
+
+
+def test_sandbox_command_binds_existing_writable_file(tmp_path, monkeypatch) -> None:
+    writable_file = tmp_path / "external.txt"
+    writable_file.write_text("existing")
+    runner = SandboxRunner(cwd=tmp_path, writable_roots=[writable_file])
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
+
+    command = runner.build_command(["/bin/true"])
+
+    assert (str(writable_file), str(writable_file)) in sandbox_bind_pairs(command.args)
 
 
 def test_sandbox_proc_preflight_does_not_hide_non_proc_errors(

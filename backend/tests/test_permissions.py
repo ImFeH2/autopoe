@@ -1,3 +1,4 @@
+import shlex
 from pathlib import Path
 
 import pytest
@@ -289,6 +290,61 @@ async def test_multiple_declared_write_paths_request_each_missing_path(
     assert result.ok
     assert len(reviews) == 1
     assert reviews[0].write_paths == [first, second]
+
+
+@pytest.mark.anyio
+async def test_declared_missing_write_path_is_not_precreated_by_sandbox(
+    tmp_path, monkeypatch
+) -> None:
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    missing_path = tmp_path / "external" / "note.txt"
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text(
+        "#!/bin/sh\n"
+        'echo "cannot create requested path: Read-only file system" >&2\n'
+        "exit 1\n"
+    )
+    bwrap.chmod(0o700)
+    reviews: list[ApprovalReviewRequest] = []
+
+    async def approve_declared_path_only(
+        request: ApprovalReviewRequest,
+    ) -> ApprovalReviewDecision:
+        reviews.append(request)
+        if request.action == "additional_permissions":
+            return ApprovalReviewDecision(
+                decision="approved", reason="Allow the declared path only."
+            )
+        return ApprovalReviewDecision(decision="denied", reason="Needs user choice.")
+
+    monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: str(bwrap))
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
+
+    result = await run_tool_with_path_permissions(
+        "shell_command",
+        {
+            "additional_permissions": {"file_system": {"write": [str(missing_path)]}},
+            "command": f"printf note > {shlex.quote(str(missing_path))}",
+            "sandbox_permissions": "with_additional_permissions",
+        },
+        ToolContext(cwd=work_dir),
+        review_approval=approve_declared_path_only,
+        writable_paths=[],
+    )
+
+    assert not result.ok
+    assert not missing_path.exists()
+    assert not missing_path.parent.exists()
+    assert [request.action for request in reviews] == [
+        "additional_permissions",
+        "sandbox_failure",
+    ]
+    assert result.data["approval"]["decision"] == "denied"
+    assert (
+        result.data["approval"]["tool_result"]
+        == "cannot create requested path: Read-only file system"
+    )
 
 
 @pytest.mark.anyio
