@@ -1,5 +1,4 @@
-from flowent.state import (
-    StateStore,
+from flowent.state.models import (
     StoredAssistantOutputGroup,
     StoredCompactionCheckpoint,
     StoredErrorOutputItem,
@@ -24,6 +23,7 @@ from flowent.state import (
     StoredWorkflowNodePosition,
     StoredWritablePath,
 )
+from flowent.state.store import StateStore
 
 __all__ = [
     "StateStore",

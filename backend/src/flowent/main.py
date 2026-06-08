@@ -1,12 +1,10 @@
 import asyncio
-import copy
-import json
 import logging
 import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -14,33 +12,43 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict
 
 from flowent._version import __version__
 from flowent.agent import AgentContextUpdate, run_agent_stream
+from flowent.api_models import (
+    AboutResponse,
+    McpImportPreviewRequest,
+    McpImportRequest,
+    ProviderModelsRequest,
+    ProviderModelsResponse,
+    SkillSettingsRequest,
+    TelegramSessionApproveRequest,
+    WorkspaceClearResponse,
+    WorkspaceMessagesRequest,
+    WorkspaceRespondRequest,
+    WorkspaceRunResponse,
+    WritablePathListResponse,
+    WritablePathRequest,
+)
 from flowent.approval import (
     ApprovalReviewRequest,
-    ApprovalTranscriptEntry,
     review_approval_request,
 )
 from flowent.channels import TelegramBotManager, TelegramTransport
 from flowent.compact import (
     CompactInput,
     LocalSummaryCompactProvider,
-    transcript_messages_after,
 )
 from flowent.context import runtime_context_messages
 from flowent.llm import (
     ChatMessage,
     CompletionCallable,
     ProviderConnection,
-    ProviderFormat,
     list_provider_models,
 )
 from flowent.logging import (
     TRACE_LEVEL,
     ensure_logging_configured,
-    redact_diagnostic_value,
 )
 from flowent.mcp import McpManager, McpTransport
 from flowent.mcp_import import McpImportDiscovery, discover_imported_mcp_servers
@@ -54,9 +62,7 @@ from flowent.skills import (
 )
 from flowent.storage import (
     StateStore,
-    StoredAssistantOutputGroup,
     StoredCompactionCheckpoint,
-    StoredErrorOutputItem,
     StoredMcpServer,
     StoredMessage,
     StoredProvider,
@@ -65,10 +71,7 @@ from flowent.storage import (
     StoredState,
     StoredTelegramBot,
     StoredTelegramSession,
-    StoredTextOutputItem,
-    StoredThinkingOutputItem,
     StoredToolItem,
-    StoredToolOutputItem,
     StoredWorkflow,
     StoredWritablePath,
 )
@@ -77,8 +80,6 @@ from flowent.usage import (
     TokenUsage,
     TokenUsageInfo,
     append_token_usage,
-    current_model_context_window,
-    estimated_token_usage_for_messages,
     recompute_context_usage,
 )
 from flowent.workflows import (
@@ -87,535 +88,42 @@ from flowent.workflows import (
     validate_workflow,
     workflow_requires_connection,
 )
+from flowent.workspace.context import (
+    COMPACTED_CONTEXT_MARKER,
+    OPTIMIZED_CONTEXT_MARKER,
+    context_window_for_settings,
+    should_auto_compact,
+    state_with_current_model_context_window,
+    update_context_usage_for_response,
+    usage_event_data,
+    workspace_chat_messages,
+)
+from flowent.workspace.events import (
+    WorkspaceRun,
+    append_or_replace_message,
+    run_snapshot_data_at,
+    stream_event,
+    stream_message_data,
+)
+from flowent.workspace.output import (
+    EMPTY_MODEL_RESPONSE_DETAIL,
+    AssistantOutputBuilder,
+    approval_transcript,
+    run_error_event_data,
+    run_error_output_item,
+)
 
 logger = logging.getLogger("flowent.main")
 
 
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
-COMPACTED_CONTEXT_MARKER = "Context compacted"
-OPTIMIZED_CONTEXT_MARKER = "Context optimized"
-DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_RATIO = 0.95
 AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET = 20_000
-APPROVAL_TRANSCRIPT_MESSAGE_LIMIT = 12
-APPROVAL_TRANSCRIPT_TEXT_LIMIT = 2_000
 WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS = 0.5
-
-
-class ProviderModelsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    provider: ProviderFormat
-    secret_reference: str
-    base_url: str | None = None
-
-
-class ProviderModelsResponse(BaseModel):
-    models: list[str]
-
-
-class WorkspaceMessagesRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    messages: list[StoredMessage]
-
-
-class WorkspaceRespondRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    content: str
-
-
-class WorkspaceRunResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: str
-
-
-class WorkspaceClearResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    active_run_id: str | None = None
-    messages: list[StoredMessage]
-    usage_info: TokenUsageInfo | None = None
 
 
 @dataclass
 class WorkspaceCompactTask:
     task: asyncio.Task[tuple[StoredMessage, TokenUsageInfo]]
-
-
-class AboutResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    version: str
-
-
-class TelegramSessionApproveRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    chat_id: str
-
-
-class SkillSettingsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool
-
-
-class McpImportRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    server_id: str
-    source: Literal["claude_code", "codex"]
-
-
-class McpImportPreviewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    source: Literal["claude_code", "codex"]
-
-
-class WritablePathRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    path: str
-
-
-class WritablePathListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    writable_paths: list[StoredWritablePath]
-
-
-@dataclass
-class WorkspaceRun:
-    condition: asyncio.Condition
-    active_output: Literal["text", "thinking"] | None = None
-    discard_on_cancel: bool = False
-    events: list[tuple[int, str, dict[str, object]]] = field(default_factory=list)
-    generation: int = 0
-    id: str = field(default_factory=lambda: str(uuid4()))
-    is_done: bool = False
-    latest_snapshot: StoredMessage | None = None
-    task: asyncio.Task[None] | None = None
-
-    @property
-    def latest_event_index(self) -> int:
-        return self.events[-1][0] if self.events else 0
-
-
-def stream_event(
-    event: str, data: dict[str, object], event_id: int | None = None
-) -> str:
-    id_line = f"id: {event_id}\n" if event_id is not None else ""
-    return f"{id_line}event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
-def stream_message_data(
-    message: StoredMessage, active_output: Literal["text", "thinking"] | None = None
-) -> dict[str, object]:
-    data = {**message.model_dump(), "status": message.status}
-    if active_output is not None:
-        data["active_output"] = active_output
-    return data
-
-
-def append_or_replace_message(
-    messages: list[StoredMessage], message: StoredMessage
-) -> list[StoredMessage]:
-    return [
-        *(current for current in messages if current.id != message.id),
-        message,
-    ]
-
-
-def run_snapshot_data_at(
-    run: WorkspaceRun, event_index: int
-) -> dict[str, object] | None:
-    snapshot_event_index = 0
-    snapshot: dict[str, object] | None = None
-    for current_event_index, event, data in run.events:
-        if current_event_index > event_index:
-            break
-        if event != "snapshot":
-            if event == "start" and snapshot is None:
-                assistant_id = data.get("id")
-                if isinstance(assistant_id, str):
-                    snapshot_event_index = current_event_index
-                    snapshot = {
-                        "author": "assistant",
-                        "content": "",
-                        "groups": [],
-                        "id": assistant_id,
-                        "status": "running",
-                        "tools": [],
-                    }
-            continue
-        message = data.get("message")
-        if isinstance(message, dict):
-            snapshot_event_index = current_event_index
-            snapshot = copy.deepcopy(message)
-    if snapshot is None:
-        return None
-    for current_event_index, event, data in run.events:
-        if current_event_index <= snapshot_event_index:
-            continue
-        if current_event_index > event_index:
-            break
-        apply_stream_event_to_snapshot(snapshot, event, data)
-    return snapshot
-
-
-def apply_stream_event_to_snapshot(
-    snapshot: dict[str, object], event: str, data: dict[str, object]
-) -> None:
-    if event == "output_start":
-        snapshot.pop("active_output", None)
-        index = data.get("index")
-        if isinstance(index, int):
-            append_snapshot_group(snapshot, index)
-    if event == "delta":
-        append_snapshot_text(snapshot, str(data.get("content") or ""))
-    if event == "thinking_delta":
-        append_snapshot_thinking(snapshot, str(data.get("content") or ""))
-    if event == "output_done":
-        snapshot.pop("active_output", None)
-
-
-def snapshot_groups(snapshot: dict[str, object]) -> list[dict[str, object]]:
-    groups = snapshot.get("groups")
-    if not isinstance(groups, list):
-        groups = []
-        snapshot["groups"] = groups
-    return groups
-
-
-def append_snapshot_group(
-    snapshot: dict[str, object], index: int | None = None
-) -> None:
-    groups = snapshot_groups(snapshot)
-    assistant_id = str(snapshot.get("id") or "assistant")
-    group_index = index if index is not None else len(groups) + 1
-    group_id = f"{assistant_id}-group-{group_index}"
-    if groups and groups[-1].get("id") == group_id:
-        return
-    groups.append({"id": group_id, "items": []})
-
-
-def append_snapshot_text(snapshot: dict[str, object], content: str) -> None:
-    if not content:
-        return
-    snapshot["active_output"] = "text"
-    snapshot["content"] = f"{snapshot.get('content') or ''}{content}"
-    append_snapshot_item_content(snapshot, content, "text")
-
-
-def append_snapshot_thinking(snapshot: dict[str, object], content: str) -> None:
-    if not content:
-        return
-    snapshot["active_output"] = "thinking"
-    snapshot["thinking"] = f"{snapshot.get('thinking') or ''}{content}"
-    append_snapshot_item_content(snapshot, content, "thinking")
-
-
-def append_snapshot_item_content(
-    snapshot: dict[str, object], content: str, item_type: Literal["text", "thinking"]
-) -> None:
-    groups = snapshot_groups(snapshot)
-    if not groups:
-        append_snapshot_group(snapshot)
-    group = groups[-1]
-    items = group.get("items")
-    if not isinstance(items, list):
-        items = []
-        group["items"] = items
-    item = next(
-        (
-            current
-            for current in reversed(items)
-            if isinstance(current, dict) and current.get("type") == item_type
-        ),
-        None,
-    )
-    if item is None:
-        assistant_id = str(snapshot.get("id") or "assistant")
-        snapshot_item_count = 0
-        for current_group in groups:
-            current_items = current_group.get("items")
-            if not isinstance(current_items, list):
-                continue
-            snapshot_item_count += sum(
-                1
-                for current_item in current_items
-                if isinstance(current_item, dict)
-                and current_item.get("type") == item_type
-            )
-        item = {
-            "content": "",
-            "id": f"{assistant_id}-{item_type}-{snapshot_item_count + 1}",
-            "type": item_type,
-        }
-        items.append(item)
-    item["content"] = f"{item.get('content') or ''}{content}"
-
-
-USER_VISIBLE_RUN_ERROR_TITLE = "Request failed"
-USER_VISIBLE_RUN_ERROR_MESSAGE = "Check the model connection settings and try again."
-USER_VISIBLE_CONTEXT_OPTIMIZATION_ERROR_MESSAGE = "Context could not be optimized."
-EMPTY_MODEL_RESPONSE_DETAIL = "The model did not return a response."
-
-
-def user_visible_run_error_message(detail: str) -> str:
-    if detail.strip() == USER_VISIBLE_CONTEXT_OPTIMIZATION_ERROR_MESSAGE:
-        return USER_VISIBLE_CONTEXT_OPTIMIZATION_ERROR_MESSAGE
-    return USER_VISIBLE_RUN_ERROR_MESSAGE
-
-
-def run_error_output_item(
-    assistant_id: str,
-    detail: str,
-    index: int = 1,
-) -> StoredErrorOutputItem:
-    redacted_detail = redact_diagnostic_value(detail.strip())
-    message = user_visible_run_error_message(redacted_detail)
-    return StoredErrorOutputItem(
-        detail="" if redacted_detail == message else redacted_detail,
-        id=f"{assistant_id}-error-{index}",
-        message=message,
-        title=USER_VISIBLE_RUN_ERROR_TITLE,
-        type="error",
-    )
-
-
-def run_error_event_data(error: StoredErrorOutputItem) -> dict[str, object]:
-    return {
-        "error": error.model_dump(exclude_none=True),
-        "message": error.message,
-    }
-
-
-def message_error_items(message: StoredMessage) -> list[StoredErrorOutputItem]:
-    return [
-        item for group in message.groups for item in group.items if item.type == "error"
-    ]
-
-
-def error_context_summary(error: StoredErrorOutputItem) -> str:
-    parts = [f"Previous response failed: {error.title}.", error.message]
-    if error.detail and error.detail != error.message:
-        parts.append(f"Detail: {error.detail}")
-    return " ".join(part.strip() for part in parts if part.strip())
-
-
-def approval_transcript_text(content: str | None) -> str:
-    text = (content or "").strip()
-    if len(text) <= APPROVAL_TRANSCRIPT_TEXT_LIMIT:
-        return text
-    return f"{text[:APPROVAL_TRANSCRIPT_TEXT_LIMIT]}\n[truncated]"
-
-
-def approval_transcript(
-    messages: Sequence[StoredMessage],
-) -> list[ApprovalTranscriptEntry]:
-    entries: list[ApprovalTranscriptEntry] = []
-    for message in messages[-APPROVAL_TRANSCRIPT_MESSAGE_LIMIT:]:
-        if message.author in ("user", "assistant"):
-            role: Literal["user", "assistant"] = (
-                "user" if message.author == "user" else "assistant"
-            )
-            content = approval_transcript_text(message.content)
-            if content:
-                entries.append(ApprovalTranscriptEntry(role=role, content=content))
-            for tool in message.tools:
-                tool_content = approval_transcript_text(tool.content)
-                if tool_content:
-                    entries.append(
-                        ApprovalTranscriptEntry(
-                            role="tool",
-                            content=tool_content,
-                            name=tool.name,
-                        )
-                    )
-    return entries
-
-
-class AssistantOutputBuilder:
-    def __init__(self, assistant_id: str = "") -> None:
-        self.assistant_id = assistant_id
-        self.content = ""
-        self.groups: list[StoredAssistantOutputGroup] = []
-        self.text_item_index = 0
-        self.text_item_id = ""
-        self.thinking = ""
-        self.thinking_item_index = 0
-        self.thinking_item_id = ""
-        self.error_item_index = 0
-        self.tools: dict[str, StoredToolItem] = {}
-
-    def set_assistant_id(self, assistant_id: str) -> None:
-        self.assistant_id = assistant_id
-
-    def start_group(self, index: int) -> None:
-        group_id = f"{self.assistant_id or 'assistant'}-group-{index}"
-        if self.groups and self.groups[-1].id == group_id:
-            return
-        self.text_item_id = ""
-        self.thinking_item_id = ""
-        self.groups.append(StoredAssistantOutputGroup(id=group_id, items=[]))
-
-    def append_text(self, content: str) -> None:
-        if not content:
-            return
-        self._ensure_group()
-        if not self.text_item_id:
-            self.text_item_index += 1
-            self.text_item_id = f"{self.assistant_id}-text-{self.text_item_index}"
-            self._append_current_item(
-                StoredTextOutputItem(content="", id=self.text_item_id, type="text")
-            )
-        self.content += content
-        self.groups[-1] = self.groups[-1].model_copy(
-            update={
-                "items": [
-                    item.model_copy(update={"content": item.content + content})
-                    if item.type == "text" and item.id == self.text_item_id
-                    else item
-                    for item in self.groups[-1].items
-                ]
-            }
-        )
-
-    def append_thinking(self, content: str) -> None:
-        if not content:
-            return
-        self._ensure_group()
-        if not self.thinking_item_id:
-            self.thinking_item_index += 1
-            self.thinking_item_id = (
-                f"{self.assistant_id}-thinking-{self.thinking_item_index}"
-            )
-            self._append_current_item(
-                StoredThinkingOutputItem(
-                    content="", id=self.thinking_item_id, type="thinking"
-                )
-            )
-        self.thinking += content
-        self.groups[-1] = self.groups[-1].model_copy(
-            update={
-                "items": [
-                    item.model_copy(update={"content": item.content + content})
-                    if item.type == "thinking" and item.id == self.thinking_item_id
-                    else item
-                    for item in self.groups[-1].items
-                ]
-            }
-        )
-
-    def start_tool(self, tool: StoredToolItem) -> None:
-        self._ensure_group()
-        self.text_item_id = ""
-        self.thinking_item_id = ""
-        self.tools[tool.id] = tool
-        self._append_current_item(
-            StoredToolOutputItem(id=f"tool-{tool.id}", tool=tool, type="tool")
-        )
-
-    def update_tool(self, tool_id: str, data: dict[str, object]) -> None:
-        current_tool = self.tools.get(tool_id)
-        if current_tool is None:
-            return
-        updated_tool = StoredToolItem.model_validate(
-            {**current_tool.model_dump(exclude_none=True), **data}
-        )
-        self.tools[tool_id] = updated_tool
-        self.groups = [
-            group.model_copy(
-                update={
-                    "items": [
-                        item.model_copy(update={"tool": updated_tool})
-                        if item.type == "tool" and item.tool.id == tool_id
-                        else item
-                        for item in group.items
-                    ]
-                }
-            )
-            for group in self.groups
-        ]
-
-    def append_error(self, error: StoredErrorOutputItem) -> StoredErrorOutputItem:
-        self.error_item_index += 1
-        if not error.id:
-            error = error.model_copy(
-                update={"id": f"{self.assistant_id}-error-{self.error_item_index}"}
-            )
-        error_group_id = f"{self.assistant_id}-errors"
-        if self.groups and self.groups[-1].id == error_group_id:
-            self.groups[-1] = self.groups[-1].model_copy(
-                update={"items": [*self.groups[-1].items, error]}
-            )
-        else:
-            self.groups.append(
-                StoredAssistantOutputGroup(id=error_group_id, items=[error])
-            )
-        return error
-
-    def has_output(self) -> bool:
-        return any(group.items for group in self.groups)
-
-    def apply_done_message(self, message: dict[str, object]) -> None:
-        final_content = str(message.get("content") or self.content)
-        final_thinking = str(message.get("thinking") or self.thinking)
-        self._append_missing_done_text(final_content)
-        self._append_missing_done_thinking(final_thinking)
-        self.content = final_content
-        self.thinking = final_thinking
-
-    def _append_missing_done_text(self, final_content: str) -> None:
-        streamed_text = "".join(
-            item.content
-            for group in self.groups
-            for item in group.items
-            if item.type == "text"
-        )
-        if not final_content or streamed_text == final_content:
-            return
-        missing_text = (
-            final_content[len(streamed_text) :]
-            if final_content.startswith(streamed_text)
-            else final_content
-        )
-        self.append_text(missing_text)
-
-    def _append_missing_done_thinking(self, final_thinking: str) -> None:
-        streamed_thinking = "".join(
-            item.content
-            for group in self.groups
-            for item in group.items
-            if item.type == "thinking"
-        )
-        if not final_thinking or streamed_thinking == final_thinking:
-            return
-        missing_thinking = (
-            final_thinking[len(streamed_thinking) :]
-            if final_thinking.startswith(streamed_thinking)
-            else final_thinking
-        )
-        self.append_thinking(missing_thinking)
-
-    def _ensure_group(self) -> None:
-        if not self.groups:
-            self.start_group(1)
-
-    def _append_current_item(
-        self,
-        item: StoredTextOutputItem
-        | StoredThinkingOutputItem
-        | StoredErrorOutputItem
-        | StoredToolOutputItem,
-    ) -> None:
-        self.groups[-1] = self.groups[-1].model_copy(
-            update={"items": [*self.groups[-1].items, item]}
-        )
 
 
 def frontend_static_directory() -> Path:
@@ -660,183 +168,6 @@ def selected_connection(state: StoredState) -> ProviderConnection:
         reasoning_effort=state.settings.reasoning_effort,
         secret_reference=provider.api_key,
     )
-
-
-def latest_compacted_context_index(messages: list[StoredMessage]) -> int | None:
-    for index in range(len(messages) - 1, -1, -1):
-        message = messages[index]
-        if message.author == "system" and is_context_marker(message):
-            return index
-    return None
-
-
-def is_context_marker(message: StoredMessage) -> bool:
-    return message.content in {COMPACTED_CONTEXT_MARKER, OPTIMIZED_CONTEXT_MARKER}
-
-
-def auto_compact_token_limit(context_window: int) -> int:
-    raw_limit = os.environ.get("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "")
-    if not raw_limit:
-        return max(0, int(context_window * DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_RATIO))
-    try:
-        return max(0, int(raw_limit))
-    except ValueError:
-        return max(0, int(context_window * DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_RATIO))
-
-
-def should_auto_compact(
-    messages: list[ChatMessage],
-    *,
-    context_window: int,
-) -> bool:
-    token_limit = auto_compact_token_limit(context_window)
-    if token_limit <= 0:
-        return False
-    return (
-        sum(max(1, (len(message.content) + 3) // 4) for message in messages)
-        >= token_limit
-    )
-
-
-def model_visible_messages_for_usage(
-    messages: Sequence[Mapping[str, object]],
-) -> list[dict[str, object]]:
-    return [
-        dict(message)
-        for message in messages
-        if message.get("role") in {"system", "user", "assistant", "tool"}
-    ]
-
-
-def usage_event_data(usage_info: TokenUsageInfo) -> dict[str, object]:
-    return {"usage_info": usage_info.model_dump()}
-
-
-def update_context_usage_for_response(
-    usage_info: TokenUsageInfo | None,
-    *,
-    messages: Sequence[Mapping[str, object]],
-    output_content: str,
-    model_context_window: int,
-) -> TokenUsageInfo:
-    return recompute_context_usage(
-        usage_info,
-        estimated_token_usage_for_messages(
-            model_visible_messages_for_usage(messages),
-            output_content=output_content,
-        ).total_tokens,
-        model_context_window=model_context_window,
-    )
-
-
-def usage_info_for_model(
-    usage_info: TokenUsageInfo | None,
-    model_context_window: int,
-) -> TokenUsageInfo | None:
-    if usage_info is None:
-        return None
-    return usage_info.model_copy(update={"model_context_window": model_context_window})
-
-
-def context_window_for_settings(settings: StoredSettings) -> int:
-    if settings.context_window_limit is not None:
-        return settings.context_window_limit
-    return current_model_context_window(settings.selected_model)
-
-
-def state_with_current_model_context_window(state: StoredState) -> StoredState:
-    model_context_window = context_window_for_settings(state.settings)
-    return state.model_copy(
-        update={
-            "messages": [
-                message.model_copy(
-                    update={
-                        "usage_info": usage_info_for_model(
-                            message.usage_info,
-                            model_context_window,
-                        )
-                    }
-                )
-                if message.usage_info is not None
-                else message
-                for message in state.messages
-            ],
-            "usage_info": usage_info_for_model(
-                state.usage_info,
-                model_context_window,
-            ),
-        }
-    )
-
-
-def workspace_chat_messages(
-    messages: list[StoredMessage],
-    compacted_context: str = "",
-    checkpoint: StoredCompactionCheckpoint | None = None,
-) -> list[ChatMessage]:
-    chat_messages: list[ChatMessage] = []
-
-    if checkpoint is not None:
-        chat_messages.extend(checkpoint.replacement_history)
-        visible_messages = transcript_messages_after(
-            messages,
-            checkpoint.source_message_id,
-        )
-        for message in visible_messages:
-            if message.author == "system" and is_context_marker(message):
-                continue
-            if message.author not in ("user", "assistant"):
-                raise HTTPException(
-                    status_code=400, detail="Message history is invalid."
-                )
-            if message.author == "assistant":
-                errors = message_error_items(message)
-                if errors:
-                    chat_messages.extend(
-                        ChatMessage(
-                            role="assistant", content=error_context_summary(error)
-                        )
-                        for error in errors
-                    )
-                    continue
-            checkpoint_role: Literal["user", "assistant"] = (
-                "user" if message.author == "user" else "assistant"
-            )
-            chat_messages.append(
-                ChatMessage(role=checkpoint_role, content=message.content)
-            )
-        return chat_messages
-
-    marker_index = latest_compacted_context_index(messages)
-    visible_messages = messages
-
-    if compacted_context and marker_index is not None:
-        chat_messages.extend(
-            [
-                ChatMessage(role="user", content=COMPACTED_CONTEXT_MARKER),
-                ChatMessage(role="assistant", content=compacted_context),
-            ]
-        )
-        visible_messages = messages[marker_index + 1 :]
-
-    for message in visible_messages:
-        if message.author == "system" and is_context_marker(message):
-            continue
-        if message.author not in ("user", "assistant"):
-            raise HTTPException(status_code=400, detail="Message history is invalid.")
-        if message.author == "assistant":
-            errors = message_error_items(message)
-            if errors:
-                chat_messages.extend(
-                    ChatMessage(role="assistant", content=error_context_summary(error))
-                    for error in errors
-                )
-                continue
-        role: Literal["user", "assistant"] = (
-            "user" if message.author == "user" else "assistant"
-        )
-        chat_messages.append(ChatMessage(role=role, content=message.content))
-    return chat_messages
 
 
 def normalized_request_path(path: str, cwd: Path) -> Path:
