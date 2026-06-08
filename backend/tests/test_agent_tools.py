@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import shlex
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -222,12 +224,14 @@ def test_shell_command_cannot_write_outside_workdir_and_tmp(tmp_path) -> None:
     assert not outside.exists()
 
 
-def test_shell_command_has_network_by_default(tmp_path) -> None:
+def test_shell_command_has_network_by_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr("pwd.getpwuid", lambda _uid: UserRecord("/bin/sh"))
+    script = "import socket; socket.socket().close(); print('network-ready')"
+
     result = run_tool(
         "shell_command",
-        {
-            "command": "python - <<'PY'\nimport socket\ns=socket.socket()\nprint('network-ready')\nPY"
-        },
+        {"command": f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"},
         ToolContext(cwd=tmp_path),
     )
 

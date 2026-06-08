@@ -175,17 +175,13 @@ def normalize_provider_model_name(provider: ProviderFormat, model: str) -> str:
 
 
 def stream_failure_message(chunk: Any) -> str:
-    if isinstance(chunk, BaseModel):
-        chunk = chunk.model_dump()
-    if not isinstance(chunk, Mapping):
-        return ""
-
-    event_type = getattr(chunk.get("type"), "value", chunk.get("type"))
+    event_type = value_at(chunk, "type", "")
+    event_type = getattr(event_type, "value", event_type)
     event_type = str(event_type or "")
     if event_type == "error":
-        error = chunk.get("error", {})
+        error = value_at(chunk, "error", {})
     elif event_type == "response.failed":
-        response = chunk.get("response", {})
+        response = value_at(chunk, "response", {})
         error = value_at(response, "error", {})
     else:
         return ""

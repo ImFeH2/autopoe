@@ -194,6 +194,12 @@ class ConsoleNoiseFilter(logging.Filter):
         return record.levelno > logging.DEBUG or record.name.startswith("flowent")
 
 
+class ConsoleHandler(logging.StreamHandler):
+    def emit(self, record: logging.LogRecord) -> None:
+        self.setStream(sys.stderr if record.levelno >= logging.WARNING else sys.stdout)
+        super().emit(record)
+
+
 def configure_logging(*, directory: Path | None = None) -> Path:
     global _configured_log_file, _configured_log_process_id
 
@@ -218,7 +224,7 @@ def configure_logging(*, directory: Path | None = None) -> Path:
         )
     )
 
-    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler = ConsoleHandler()
     console_handler.setLevel(console_log_level())
     console_handler.setFormatter(
         RedactingFormatter("%(levelname)s %(name)s: %(message)s")
