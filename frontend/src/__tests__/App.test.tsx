@@ -10,6 +10,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 
+class TestResizeObserver {
+  disconnect() {}
+  observe() {}
+  unobserve() {}
+}
+
+globalThis.ResizeObserver =
+  globalThis.ResizeObserver ??
+  (TestResizeObserver as unknown as typeof ResizeObserver);
+
 const assistantStreamResponse = (
   content: string,
   id = "message-assistant",
@@ -164,6 +174,51 @@ type TestSkill = {
 type TestWritablePath = {
   created_at: number;
   path: string;
+};
+
+type TestWorkflowNode = {
+  data: Record<string, unknown>;
+  description: string;
+  id: string;
+  name: string;
+  position: {
+    x: number;
+    y: number;
+  };
+  type: "agent" | "input" | "merge" | "output";
+};
+
+type TestWorkflowEdge = {
+  id: string;
+  label: string;
+  source: string;
+  source_handle: string;
+  target: string;
+  target_handle: string;
+};
+
+type TestWorkflow = {
+  created_at: number;
+  definition: {
+    edges: TestWorkflowEdge[];
+    nodes: TestWorkflowNode[];
+    version: number;
+  };
+  id: string;
+  name: string;
+  updated_at: number;
+};
+
+type TestWorkflowRunResult = {
+  node_results: Array<{
+    error: string;
+    id: string;
+    output: string;
+    status: "failed" | "pending" | "running" | "success";
+  }>;
+  outputs: Record<string, string>;
+  status: "failed" | "success";
+  workflow_id: string;
 };
 
 type TestProvider = {
@@ -1253,6 +1308,70 @@ const mockInitialState = (
       });
     }
 
+    if (input === "/api/workflows" && init?.method === "PUT") {
+      const request = JSON.parse(String(init.body)) as TestWorkflow;
+      const savedWorkflow: TestWorkflow = {
+        ...request,
+        created_at: request.created_at || 1710000020,
+        updated_at: 1710000030,
+      };
+      state.workflows = [
+        savedWorkflow,
+        ...((state.workflows as TestWorkflow[] | undefined) ?? []).filter(
+          (workflow) => workflow.id !== savedWorkflow.id,
+        ),
+      ];
+      return new Response(JSON.stringify(savedWorkflow), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/workflows/") &&
+      input.endsWith("/run") &&
+      init?.method === "POST"
+    ) {
+      const workflowId = input
+        .replace("/api/workflows/", "")
+        .replace("/run", "");
+      const result: TestWorkflowRunResult = {
+        node_results: [
+          {
+            error: "",
+            id: "input",
+            output: "launch checklist",
+            status: "success",
+          },
+          {
+            error: "",
+            id: "output",
+            output: "Ready to ship.",
+            status: "success",
+          },
+        ],
+        outputs: { final_result: "Ready to ship." },
+        status: "success",
+        workflow_id: workflowId,
+      };
+      return new Response(JSON.stringify(result), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/workflows/") &&
+      init?.method === "DELETE"
+    ) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
     if (
       typeof input === "string" &&
       input.startsWith("/api/providers/") &&
@@ -1342,6 +1461,45 @@ const selectedProviderState = () => ({
   },
   skills: [],
   telegram_bot: emptyTelegramBotState(),
+});
+
+const savedWorkflow = (updates: Partial<TestWorkflow> = {}): TestWorkflow => ({
+  created_at: 1710000020,
+  definition: {
+    edges: [
+      {
+        id: "edge-input-output",
+        label: "",
+        source: "input",
+        source_handle: "out",
+        target: "output",
+        target_handle: "in",
+      },
+    ],
+    nodes: [
+      {
+        data: { default_value: "launch checklist", input_type: "text" },
+        description: "",
+        id: "input",
+        name: "Input",
+        position: { x: 0, y: 0 },
+        type: "input",
+      },
+      {
+        data: { output_key: "final_result", transform: "" },
+        description: "",
+        id: "output",
+        name: "Output",
+        position: { x: 260, y: 0 },
+        type: "output",
+      },
+    ],
+    version: 1,
+  },
+  id: "workflow-1",
+  name: "Launch Workflow",
+  updated_at: 1710000030,
+  ...updates,
 });
 
 const emptyTelegramBotState = (): TestTelegramBot => ({
@@ -1523,6 +1681,79 @@ describe("App", () => {
         "Start with the provider setup and a first workspace flow.",
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it("opens a new workflow from the top Workflows item", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [],
+    });
+    render(<App />);
+
+    expect(screen.getByText("Workflow")).toBeInTheDocument();
+    expect(screen.getByText("No workflow yet.")).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("tab", { name: "Workflows" }));
+
+    expect(screen.getByDisplayValue("Untitled Workflow")).toBeInTheDocument();
+    expect(screen.queryByText("My Workflows")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Drag nodes from the palette to start building your workflow.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("saves edited workflow node properties", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Launch Workflow/ }),
+    );
+    const inputNodeLabel = screen
+      .getAllByText("Input")
+      .find((element) => element.closest(".react-flow__node"));
+    expect(inputNodeLabel).toBeTruthy();
+    fireEvent.click(inputNodeLabel!);
+    await user.clear(screen.getByLabelText("Default Value"));
+    await user.type(screen.getByLabelText("Default Value"), "release plan");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(window.fetch).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({
+          body: expect.stringContaining('"default_value":"release plan"'),
+          method: "PUT",
+        }),
+      );
+    });
+  });
+
+  it("runs a saved workflow and shows node results", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Launch Workflow/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(await screen.findByText("Ready to ship.")).toBeInTheDocument();
+    expect(fetchWasCalledWith("/api/workflows/workflow-1/run", "POST")).toBe(
+      true,
+    );
+    expect(screen.getAllByText("success").length).toBeGreaterThan(0);
   });
 
   it("shows context capacity in the composer tray", () => {

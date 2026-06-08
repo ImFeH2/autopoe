@@ -1,5 +1,6 @@
 export type ViewId =
   | "workspace"
+  | "workflows"
   | "providers"
   | "channels"
   | "mcp"
@@ -198,4 +199,57 @@ export type RuntimeSettings = {
   reasoningEffort: ReasoningEffort;
   selectedModel: string;
   selectedProviderId: string;
+};
+
+export type WorkflowNodeType = "input" | "agent" | "merge" | "output";
+
+export type WorkflowNodePosition = {
+  x: number;
+  y: number;
+};
+
+export type WorkflowNode = {
+  data: Record<string, unknown>;
+  description: string;
+  id: string;
+  name: string;
+  position: WorkflowNodePosition;
+  type: WorkflowNodeType;
+};
+
+export type WorkflowEdge = {
+  id: string;
+  label: string;
+  source: string;
+  sourceHandle: string;
+  target: string;
+  targetHandle: string;
+};
+
+export type WorkflowDefinition = {
+  edges: WorkflowEdge[];
+  nodes: WorkflowNode[];
+  version: number;
+};
+
+export type Workflow = {
+  createdAt: number;
+  definition: WorkflowDefinition;
+  id: string;
+  name: string;
+  updatedAt: number;
+};
+
+export type WorkflowNodeRunResult = {
+  error: string;
+  id: string;
+  output: string;
+  status: "failed" | "pending" | "running" | "success";
+};
+
+export type WorkflowRunResult = {
+  nodeResults: WorkflowNodeRunResult[];
+  outputs: Record<string, string>;
+  status: "failed" | "success";
+  workflowId: string;
 };

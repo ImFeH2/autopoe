@@ -3,16 +3,20 @@ import type { LucideIcon } from "lucide-react";
 import {
   KeyRound,
   MessageSquare,
+  Play,
   Plug,
+  PlusCircle,
   Radio,
   ShieldCheck,
   Settings,
   Sparkles,
+  Workflow as WorkflowIcon,
 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { navigationLabelClassName } from "@/components/flowent/styles";
-import type { ViewId } from "@/components/flowent/types";
+import type { ViewId, Workflow } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
 type NavigationItem = {
@@ -25,6 +29,12 @@ const workspaceNavigationItem = {
   icon: MessageSquare,
   id: "workspace",
   label: "Workspace",
+} satisfies NavigationItem;
+
+const workflowsNavigationItem = {
+  icon: PlusCircle,
+  id: "workflows",
+  label: "Workflows",
 } satisfies NavigationItem;
 
 const navigationGroups = [
@@ -46,16 +56,27 @@ const navigationGroups = [
   },
 ] satisfies Array<{ label: string; items: NavigationItem[] }>;
 
-function NavigationTrigger({ item }: { item: NavigationItem }) {
+function NavigationTrigger({
+  item,
+  onClick,
+  suppressActiveStyle = false,
+}: {
+  item: NavigationItem;
+  onClick?: () => void;
+  suppressActiveStyle?: boolean;
+}) {
   const Icon = item.icon;
 
   return (
     <TabsTrigger
       value={item.id}
+      onClick={onClick}
       className={cn(
         "flowent-navigation-item cursor-pointer justify-start gap-1.5 rounded-[10px] border border-transparent bg-transparent px-2.5 py-1.5 text-white shadow-none transition-colors duration-100 hover:bg-[#171717] data-[state=active]:bg-[#2f2f2f] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden [&_svg]:text-current",
         navigationLabelClassName,
         "dark:hover:bg-[#171717] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#2f2f2f] dark:data-[state=active]:text-white",
+        suppressActiveStyle &&
+          "data-[state=active]:!bg-transparent data-[state=active]:!text-white dark:data-[state=active]:!bg-transparent",
       )}
     >
       <Icon aria-hidden="true" />
@@ -64,16 +85,53 @@ function NavigationTrigger({ item }: { item: NavigationItem }) {
   );
 }
 
+function WorkflowNavigationItem({
+  isActive,
+  onSelect,
+  workflow,
+}: {
+  isActive: boolean;
+  onSelect: (workflowId: string) => void;
+  workflow: Workflow;
+}) {
+  return (
+    <Button
+      className={cn(
+        "flowent-navigation-item w-full cursor-pointer justify-start gap-1.5 rounded-[10px] border border-transparent bg-transparent px-2.5 py-1.5 text-white shadow-none transition-colors duration-100 hover:bg-[#171717] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden [&_svg]:text-current",
+        navigationLabelClassName,
+        isActive && "bg-[#2f2f2f]",
+      )}
+      onClick={() => onSelect(workflow.id)}
+      title={workflow.name}
+      type="button"
+      variant="ghost"
+    >
+      <Play aria-hidden="true" />
+      <span className="flowent-navigation-text min-w-0 truncate">
+        {workflow.name}
+      </span>
+    </Button>
+  );
+}
+
 export function AppShell({
   activeProviderName,
   activeView,
+  activeWorkflowId,
   children,
+  onNewWorkflow,
   onViewChange,
+  onWorkflowSelect,
+  workflows,
 }: {
   activeProviderName?: string;
   activeView: ViewId;
+  activeWorkflowId?: string;
   children: ReactNode;
+  onNewWorkflow: () => void;
   onViewChange: (value: ViewId) => void;
+  onWorkflowSelect: (workflowId: string) => void;
+  workflows: Workflow[];
 }) {
   return (
     <Tabs
@@ -100,6 +158,13 @@ export function AppShell({
             variant="line"
           >
             <NavigationTrigger item={workspaceNavigationItem} />
+            <NavigationTrigger
+              item={workflowsNavigationItem}
+              onClick={onNewWorkflow}
+              suppressActiveStyle={
+                activeView === "workflows" && Boolean(activeWorkflowId)
+              }
+            />
             {navigationGroups.map((group) => (
               <Fragment key={group.label}>
                 <div
@@ -113,6 +178,30 @@ export function AppShell({
                 ))}
               </Fragment>
             ))}
+            <div
+              aria-hidden="true"
+              className="mt-5 mb-1 flex items-center gap-1.5 px-2.5 text-[11px] leading-4 font-medium text-white/45 max-[900px]:hidden"
+            >
+              <WorkflowIcon className="size-3.5" aria-hidden="true" />
+              Workflow
+            </div>
+            {workflows.length === 0 ? (
+              <div className="flowent-navigation-item flex w-full items-center px-2.5 text-[11px] leading-4 font-medium text-white/35 max-[900px]:hidden">
+                <span>No workflow yet.</span>
+              </div>
+            ) : (
+              workflows.map((workflow) => (
+                <WorkflowNavigationItem
+                  isActive={
+                    activeView === "workflows" &&
+                    activeWorkflowId === workflow.id
+                  }
+                  key={workflow.id}
+                  onSelect={onWorkflowSelect}
+                  workflow={workflow}
+                />
+              ))
+            )}
           </TabsList>
         </nav>
 

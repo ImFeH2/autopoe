@@ -192,6 +192,40 @@ textarea {
   display: none;
 }
 
+.flowent-workflow-canvas {
+  background: #000;
+}
+
+.flowent-workflow-canvas .react-flow__pane {
+  cursor: grab;
+}
+
+.flowent-workflow-canvas .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.flowent-workflow-canvas .react-flow__edge-path {
+  stroke: rgba(255, 255, 255, 0.36);
+  stroke-width: 1.4;
+}
+
+.flowent-workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #7c82ff;
+}
+
+.flowent-workflow-canvas .react-flow__connection-path {
+  stroke: #7c82ff;
+  stroke-width: 1.4;
+}
+
+.flowent-workflow-canvas .react-flow__handle {
+  opacity: 0.92;
+}
+
+.flowent-workflow-canvas .react-flow__node {
+  font-family: var(--font-sans);
+}
+
 @keyframes flowent-message-enter {
   from {
     opacity: 0;

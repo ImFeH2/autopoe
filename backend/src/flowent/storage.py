@@ -77,6 +77,55 @@ class StoredWritablePath(BaseModel):
     path: str
 
 
+class StoredWorkflowNodePosition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = 0
+    y: float = 0
+
+
+class StoredWorkflowNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: dict[str, object] = Field(default_factory=dict)
+    description: str = ""
+    id: str
+    name: str
+    position: StoredWorkflowNodePosition = Field(
+        default_factory=StoredWorkflowNodePosition
+    )
+    type: Literal["input", "agent", "merge", "output"]
+
+
+class StoredWorkflowEdge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str = ""
+    source: str
+    source_handle: str = ""
+    target: str
+    target_handle: str = ""
+
+
+class StoredWorkflowDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edges: list[StoredWorkflowEdge] = Field(default_factory=list)
+    nodes: list[StoredWorkflowNode] = Field(default_factory=list)
+    version: int = 1
+
+
+class StoredWorkflow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: int = 0
+    definition: StoredWorkflowDefinition
+    id: str
+    name: str
+    updated_at: int = 0
+
+
 class StoredProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -209,6 +258,7 @@ class StoredState(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     writable_paths: list[StoredWritablePath] = Field(default_factory=list)
+    workflows: list[StoredWorkflow] = Field(default_factory=list)
 
 
 class StateStore:
@@ -231,6 +281,7 @@ class StateStore:
             mcp_servers = self._read_mcp_servers(connection)
             telegram_bot = self._read_telegram_bot(connection)
             writable_paths = self._read_writable_paths(connection)
+            workflows = self._read_workflows(connection)
             providers = [
                 StoredProvider(
                     api_key=row["api_key"],
@@ -317,6 +368,7 @@ class StateStore:
             telegram_bot=telegram_bot,
             usage_info=usage_info,
             writable_paths=writable_paths,
+            workflows=workflows,
         )
 
     def read_writable_paths(self) -> list[StoredWritablePath]:
@@ -351,6 +403,45 @@ class StateStore:
                 "DELETE FROM writable_paths WHERE path = ?", (normalized_path,)
             )
             return self._read_writable_paths(connection)
+
+    def read_workflows(self) -> list[StoredWorkflow]:
+        with self.connect() as connection:
+            return self._read_workflows(connection)
+
+    def save_workflow(self, workflow: StoredWorkflow) -> StoredWorkflow:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workflows (
+                    id,
+                    name,
+                    definition
+                )
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    definition = excluded.definition,
+                    updated_at = unixepoch()
+                """,
+                (
+                    workflow.id,
+                    workflow.name,
+                    workflow.definition.model_dump_json(),
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT id, name, definition, created_at, updated_at
+                FROM workflows
+                WHERE id = ?
+                """,
+                (workflow.id,),
+            ).fetchone()
+        return self._workflow_from_row(row)
+
+    def delete_workflow(self, workflow_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
 
     def read_skill_enabled(self) -> dict[str, bool]:
         with self.connect() as connection:
@@ -1135,9 +1226,40 @@ class StateStore:
             )
         ]
 
+    def _workflow_from_row(self, row: sqlite3.Row) -> StoredWorkflow:
+        return StoredWorkflow(
+            created_at=row["created_at"],
+            definition=StoredWorkflowDefinition.model_validate(
+                json.loads(row["definition"] or "{}")
+            ),
+            id=row["id"],
+            name=row["name"],
+            updated_at=row["updated_at"],
+        )
+
+    def _read_workflows(self, connection: sqlite3.Connection) -> list[StoredWorkflow]:
+        return [
+            self._workflow_from_row(row)
+            for row in connection.execute(
+                """
+                SELECT id, name, definition, created_at, updated_at
+                FROM workflows
+                ORDER BY updated_at DESC, name, id
+                """
+            )
+        ]
+
     def _migrate(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
             """
+            CREATE TABLE IF NOT EXISTS workflows (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                definition TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
             CREATE TABLE IF NOT EXISTS mcp_servers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,

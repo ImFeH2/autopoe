@@ -29,10 +29,17 @@ import type {
   TelegramSession,
   ToolItem,
   ViewId,
+  Workflow,
+  WorkflowDefinition,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowNodeRunResult,
+  WorkflowRunResult,
   WritablePath,
   WorkspaceCommand,
   WorkspaceCommandId,
 } from "@/components/flowent/types";
+import { WorkflowsView } from "@/components/flowent/workflows-view";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
 import { createClientId } from "@/lib/utils";
@@ -96,6 +103,55 @@ type ApiWritablePath = {
   path: string;
 };
 
+type ApiWorkflowNode = {
+  data: Record<string, unknown>;
+  description: string;
+  id: string;
+  name: string;
+  position: {
+    x: number;
+    y: number;
+  };
+  type: WorkflowNode["type"];
+};
+
+type ApiWorkflowEdge = {
+  id: string;
+  label: string;
+  source: string;
+  source_handle: string;
+  target: string;
+  target_handle: string;
+};
+
+type ApiWorkflowDefinition = {
+  edges: ApiWorkflowEdge[];
+  nodes: ApiWorkflowNode[];
+  version: number;
+};
+
+type ApiWorkflow = {
+  created_at: number;
+  definition: ApiWorkflowDefinition;
+  id: string;
+  name: string;
+  updated_at: number;
+};
+
+type ApiWorkflowNodeRunResult = {
+  error: string;
+  id: string;
+  output: string;
+  status: WorkflowNodeRunResult["status"];
+};
+
+type ApiWorkflowRunResult = {
+  node_results: ApiWorkflowNodeRunResult[];
+  outputs: Record<string, string>;
+  status: WorkflowRunResult["status"];
+  workflow_id: string;
+};
+
 type ApiMessage = Message;
 
 type ApiState = {
@@ -116,6 +172,7 @@ type ApiState = {
   telegram_bot?: ApiTelegramBot;
   usage_info?: ContextUsageInfo | null;
   writable_paths?: ApiWritablePath[];
+  workflows?: ApiWorkflow[];
 };
 
 type ApiAbout = {
@@ -310,6 +367,88 @@ const telegramBotToApi = (telegramBot: TelegramBot): ApiTelegramBot => ({
 const writablePathFromApi = (writablePath: ApiWritablePath): WritablePath => ({
   createdAt: writablePath.created_at,
   path: writablePath.path,
+});
+
+const workflowNodeFromApi = (node: ApiWorkflowNode): WorkflowNode => ({
+  data: node.data ?? {},
+  description: node.description ?? "",
+  id: node.id,
+  name: node.name,
+  position: node.position ?? { x: 0, y: 0 },
+  type: node.type,
+});
+
+const workflowNodeToApi = (node: WorkflowNode): ApiWorkflowNode => ({
+  data: node.data,
+  description: node.description,
+  id: node.id,
+  name: node.name,
+  position: node.position,
+  type: node.type,
+});
+
+const workflowEdgeFromApi = (edge: ApiWorkflowEdge): WorkflowEdge => ({
+  id: edge.id,
+  label: edge.label ?? "",
+  source: edge.source,
+  sourceHandle: edge.source_handle ?? "",
+  target: edge.target,
+  targetHandle: edge.target_handle ?? "",
+});
+
+const workflowEdgeToApi = (edge: WorkflowEdge): ApiWorkflowEdge => ({
+  id: edge.id,
+  label: edge.label,
+  source: edge.source,
+  source_handle: edge.sourceHandle,
+  target: edge.target,
+  target_handle: edge.targetHandle,
+});
+
+const workflowDefinitionFromApi = (
+  definition: ApiWorkflowDefinition,
+): WorkflowDefinition => ({
+  edges: (definition.edges ?? []).map(workflowEdgeFromApi),
+  nodes: (definition.nodes ?? []).map(workflowNodeFromApi),
+  version: definition.version ?? 1,
+});
+
+const workflowDefinitionToApi = (
+  definition: WorkflowDefinition,
+): ApiWorkflowDefinition => ({
+  edges: definition.edges.map(workflowEdgeToApi),
+  nodes: definition.nodes.map(workflowNodeToApi),
+  version: definition.version,
+});
+
+const workflowFromApi = (workflow: ApiWorkflow): Workflow => ({
+  createdAt: workflow.created_at,
+  definition: workflowDefinitionFromApi(workflow.definition),
+  id: workflow.id,
+  name: workflow.name,
+  updatedAt: workflow.updated_at,
+});
+
+const workflowToApi = (workflow: Workflow): ApiWorkflow => ({
+  created_at: workflow.createdAt,
+  definition: workflowDefinitionToApi(workflow.definition),
+  id: workflow.id,
+  name: workflow.name,
+  updated_at: workflow.updatedAt,
+});
+
+const workflowRunResultFromApi = (
+  result: ApiWorkflowRunResult,
+): WorkflowRunResult => ({
+  nodeResults: result.node_results.map((nodeResult) => ({
+    error: nodeResult.error,
+    id: nodeResult.id,
+    output: nodeResult.output,
+    status: nodeResult.status,
+  })),
+  outputs: result.outputs,
+  status: result.status,
+  workflowId: result.workflow_id,
 });
 
 const mcpCommandLine = (server: Pick<McpServer, "args" | "command">) =>
@@ -597,6 +736,12 @@ function App() {
   const messagesRef = useRef<Message[]>([]);
   const responseRunRef = useRef(0);
   const [streamReconnectKey, setStreamReconnectKey] = useState(0);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [workflowRunResult, setWorkflowRunResult] =
+    useState<WorkflowRunResult | null>(null);
+  const [runningWorkflowId, setRunningWorkflowId] = useState("");
+  const [activeWorkflowId, setActiveWorkflowId] = useState("");
+  const [newWorkflowKey, setNewWorkflowKey] = useState(0);
 
   const activeProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId),
@@ -611,6 +756,11 @@ function App() {
   const hasStartingMcpServer = useMemo(
     () => mcpServers.some((server) => server.status === "starting"),
     [mcpServers],
+  );
+  const activeWorkflow = useMemo(
+    () =>
+      workflows.find((workflow) => workflow.id === activeWorkflowId) ?? null,
+    [activeWorkflowId, workflows],
   );
 
   const setTrackedUsageInfo = useCallback(
@@ -666,6 +816,7 @@ function App() {
       setReasoningEffort(state.settings.reasoning_effort ?? "default");
       setTelegramBot(telegramBotFromApi(state.telegram_bot));
       setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
+      setWorkflows((state.workflows ?? []).map(workflowFromApi));
       activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
       activeRunIdRef.current = state.active_run_id ?? "";
       setActiveRunId(state.active_run_id ?? "");
@@ -2352,11 +2503,114 @@ function App() {
     }
   };
 
+  const openNewWorkflow = () => {
+    setActiveWorkflowId("");
+    setWorkflowRunResult(null);
+    setNewWorkflowKey((currentKey) => currentKey + 1);
+    setActiveView("workflows");
+  };
+
+  const openWorkflow = (workflowId: string) => {
+    setActiveWorkflowId(workflowId);
+    setActiveView("workflows");
+  };
+
+  const closeWorkflowEditor = () => {
+    setActiveView("workspace");
+  };
+
+  const saveWorkflow = async (workflow: Workflow) => {
+    const response = await fetch("/api/workflows", {
+      body: JSON.stringify(workflowToApi(workflow)),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const savedWorkflow = workflowFromApi(
+      (await response.json()) as ApiWorkflow,
+    );
+    setWorkflows((currentWorkflows) => {
+      if (
+        currentWorkflows.some(
+          (currentWorkflow) => currentWorkflow.id === savedWorkflow.id,
+        )
+      ) {
+        return currentWorkflows.map((currentWorkflow) =>
+          currentWorkflow.id === savedWorkflow.id
+            ? savedWorkflow
+            : currentWorkflow,
+        );
+      }
+      return [savedWorkflow, ...currentWorkflows];
+    });
+    setActiveWorkflowId(savedWorkflow.id);
+    return savedWorkflow;
+  };
+
+  const deleteWorkflow = async (workflowId: string) => {
+    const response = await fetch(
+      `/api/workflows/${encodeURIComponent(workflowId)}`,
+      {
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+      },
+    );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    setWorkflows((currentWorkflows) =>
+      currentWorkflows.filter((workflow) => workflow.id !== workflowId),
+    );
+    if (workflowRunResult?.workflowId === workflowId) {
+      setWorkflowRunResult(null);
+    }
+    if (activeWorkflowId === workflowId) {
+      setActiveWorkflowId("");
+    }
+    return true;
+  };
+
+  const runWorkflow = async (workflowId: string) => {
+    setRunningWorkflowId(workflowId);
+    setWorkflowRunResult(null);
+    try {
+      const response = await fetch(
+        `/api/workflows/${encodeURIComponent(workflowId)}/run`,
+        {
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const result = workflowRunResultFromApi(
+        (await response.json()) as ApiWorkflowRunResult,
+      );
+      setWorkflowRunResult(result);
+      return result;
+    } finally {
+      setRunningWorkflowId("");
+    }
+  };
+
   return (
     <AppShell
       activeProviderName={activeProvider?.name}
       activeView={activeView}
+      activeWorkflowId={activeWorkflowId}
+      onNewWorkflow={openNewWorkflow}
       onViewChange={setActiveView}
+      onWorkflowSelect={openWorkflow}
+      workflows={workflows}
     >
       <TabsContent value="workspace" className={viewPanelClassName}>
         <WorkspaceView
@@ -2382,6 +2636,19 @@ function App() {
             void sendMessage(content);
           }}
           onStopResponse={stopResponse}
+        />
+      </TabsContent>
+      <TabsContent value="workflows" className={viewPanelClassName}>
+        <WorkflowsView
+          activeWorkflow={activeWorkflow}
+          isRunningWorkflow={Boolean(runningWorkflowId)}
+          newWorkflowKey={newWorkflowKey}
+          onCloseEditor={closeWorkflowEditor}
+          onDeleteWorkflow={deleteWorkflow}
+          onRunWorkflow={runWorkflow}
+          onSaveWorkflow={saveWorkflow}
+          runningWorkflowId={runningWorkflowId}
+          workflowRunResult={workflowRunResult}
         />
       </TabsContent>
       <TabsContent value="providers" className={viewPanelClassName}>
