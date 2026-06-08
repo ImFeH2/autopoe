@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -1486,11 +1487,18 @@ function ChatComposer({
   const softKeyboardSubmitRef = useRef(() => {});
   const handlesSoftKeyboardSubmitRef = useRef(false);
   const preserveCommandMenuDismissalRef = useRef(false);
+  const preserveHistoryNavigationRef = useRef(false);
   const preserveSkillMenuDismissalRef = useRef(false);
+  const historyIndexRef = useRef<number | null>(null);
+  const historyStagedDraftRef = useRef("");
   const [isCommandMenuDismissed, setIsCommandMenuDismissed] = useState(false);
   const [isSkillMenuDismissed, setIsSkillMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedSkillIndex, setSelectedSkillIndex] = useState(0);
+  const promptHistory = useMemo(
+    () => promptHistoryFromMessages(messages),
+    [messages],
+  );
   const firstLine = draft.split("\n")[0] ?? "";
   const commandName = firstLine.startsWith("/") ? firstLine.slice(1) : "";
   const isCommandDraft =
@@ -1571,6 +1579,16 @@ function ChatComposer({
 
     setIsSkillMenuDismissed(false);
     setSelectedSkillIndex(0);
+  }, [draft]);
+
+  useEffect(() => {
+    if (preserveHistoryNavigationRef.current) {
+      preserveHistoryNavigationRef.current = false;
+      return;
+    }
+
+    historyIndexRef.current = null;
+    historyStagedDraftRef.current = "";
   }, [draft]);
 
   useEffect(() => {
@@ -1703,6 +1721,80 @@ function ChatComposer({
     preserveSkillMenuDismissalRef.current = true;
     onDraftChange(nextDraft);
     setIsSkillMenuDismissed(true);
+  };
+
+  const setDraftFromPromptHistory = (value: string) => {
+    preserveHistoryNavigationRef.current = true;
+    onDraftChange(value);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        return;
+      }
+      textarea.focus();
+      textarea.setSelectionRange(value.length, value.length);
+    });
+  };
+
+  const navigatePromptHistory = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      promptHistory.length === 0 ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return false;
+    }
+
+    const textarea = event.currentTarget;
+
+    if (event.key === "ArrowUp") {
+      if (!isCaretOnFirstLine(textarea)) {
+        return false;
+      }
+
+      event.preventDefault();
+      const currentIndex = historyIndexRef.current;
+      const nextIndex =
+        currentIndex === null
+          ? promptHistory.length - 1
+          : Math.max(currentIndex - 1, 0);
+
+      if (currentIndex === null) {
+        historyStagedDraftRef.current = textarea.value;
+      }
+      historyIndexRef.current = nextIndex;
+      setDraftFromPromptHistory(promptHistory[nextIndex]);
+      return true;
+    }
+
+    if (event.key !== "ArrowDown") {
+      return false;
+    }
+
+    if (!isCaretOnLastLine(textarea)) {
+      return false;
+    }
+
+    const currentIndex = historyIndexRef.current;
+    if (currentIndex === null) {
+      return false;
+    }
+
+    event.preventDefault();
+    const nextIndex = currentIndex + 1;
+    if (nextIndex >= promptHistory.length) {
+      historyIndexRef.current = null;
+      setDraftFromPromptHistory(historyStagedDraftRef.current);
+      historyStagedDraftRef.current = "";
+      return true;
+    }
+
+    historyIndexRef.current = nextIndex;
+    setDraftFromPromptHistory(promptHistory[nextIndex]);
+    return true;
   };
 
   const handleSubmit = () => {
@@ -1942,6 +2034,7 @@ function ChatComposer({
                 }
 
                 if (
+                  navigatePromptHistory(event) ||
                   event.key !== "Enter" ||
                   event.shiftKey ||
                   event.nativeEvent.isComposing
@@ -1985,6 +2078,30 @@ function ChatComposer({
       </div>
     </div>
   );
+}
+
+function promptHistoryFromMessages(messages: Message[]) {
+  const history: string[] = [];
+
+  for (const message of messages) {
+    if (message.author !== "user" || message.content.trim().length === 0) {
+      continue;
+    }
+    if (history.at(-1) === message.content) {
+      continue;
+    }
+    history.push(message.content);
+  }
+
+  return history;
+}
+
+function isCaretOnFirstLine(textarea: HTMLTextAreaElement) {
+  return !textarea.value.slice(0, textarea.selectionStart).includes("\n");
+}
+
+function isCaretOnLastLine(textarea: HTMLTextAreaElement) {
+  return !textarea.value.slice(textarea.selectionEnd).includes("\n");
 }
 
 const CONTEXT_CAPACITY_LIMIT = 120_000;

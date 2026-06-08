@@ -3160,6 +3160,199 @@ describe("App", () => {
     await expectDocumentText("Here is the checklist.");
   });
 
+  it("navigates sent prompt history with Up and Down", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "First request",
+          id: "message-1",
+        },
+        {
+          author: "assistant",
+          content: "First answer.",
+          id: "message-2",
+        },
+        {
+          author: "user",
+          content: "Second request",
+          id: "message-3",
+        },
+      ],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.click(composer);
+    await user.keyboard("{ArrowUp}");
+    expect(composer).toHaveValue("Second request");
+
+    await user.keyboard("{ArrowUp}");
+    expect(composer).toHaveValue("First request");
+
+    await user.keyboard("{ArrowDown}");
+    expect(composer).toHaveValue("Second request");
+
+    await user.keyboard("{ArrowDown}");
+    expect(composer).toHaveValue("");
+  });
+
+  it("restores the unsent composer draft after leaving prompt history", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Earlier request",
+          id: "message-1",
+        },
+        {
+          author: "user",
+          content: "Latest request",
+          id: "message-2",
+        },
+      ],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Unsent draft");
+    await user.keyboard("{ArrowUp}");
+    expect(composer).toHaveValue("Latest request");
+
+    await user.keyboard("{ArrowDown}");
+    expect(composer).toHaveValue("Unsent draft");
+  });
+
+  it("keeps command menu navigation ahead of prompt history", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Earlier request",
+          id: "message-1",
+        },
+      ],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "/");
+    await user.keyboard("{ArrowDown}");
+
+    expect(composer).toHaveValue("/");
+    expect(screen.getByRole("option", { name: /\/compact/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("keeps skill menu navigation ahead of prompt history", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Earlier request",
+          id: "message-1",
+        },
+      ],
+      skills: [
+        projectSkill(),
+        projectSkill({
+          description: "Plan project work.",
+          id: "skill-project-plan",
+          name: "Project Plan",
+          slug: "project-plan",
+        }),
+      ],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "$");
+    await user.keyboard("{ArrowDown}");
+
+    expect(composer).toHaveValue("$");
+    expect(
+      screen.getByRole("option", { name: /\$project-plan/ }),
+    ).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps multiline drafts unchanged when Up is pressed below the first line", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "Earlier request",
+          id: "message-1",
+        },
+      ],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Line one");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.type(composer, "Line two");
+    await user.keyboard("{ArrowUp}");
+
+    expect(composer).toHaveValue("Line one\nLine two");
+  });
+
+  it("skips consecutive duplicate prompts in prompt history", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "user",
+          content: "First request",
+          id: "message-1",
+        },
+        {
+          author: "user",
+          content: "Repeat request",
+          id: "message-2",
+        },
+        {
+          author: "user",
+          content: "Repeat request",
+          id: "message-3",
+        },
+      ],
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.click(composer);
+    await user.keyboard("{ArrowUp}");
+    expect(composer).toHaveValue("Repeat request");
+
+    await user.keyboard("{ArrowUp}");
+    expect(composer).toHaveValue("First request");
+  });
+
   it("scrolls to the bottom after a message is sent", async () => {
     const user = userEvent.setup();
     const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
