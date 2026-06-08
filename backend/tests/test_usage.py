@@ -1,6 +1,6 @@
 from flowent.llm import ChatMessage
-from flowent.main import should_auto_compact
 from flowent.usage import DEFAULT_MODEL_CONTEXT_WINDOW, model_context_window_for
+from flowent.workspace.context import should_auto_compact
 
 
 def test_model_context_window_uses_exact_model_match() -> None:

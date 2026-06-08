@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
     import uvicorn
 
     uvicorn.run(
-        "flowent.main:app",
+        "flowent.app:app",
         host=args.host,
         port=args.port,
     )

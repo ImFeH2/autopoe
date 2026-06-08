@@ -316,7 +316,9 @@ async def test_workspace_run_stream_does_not_snapshot_every_text_delta(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setattr("flowent.main.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(
+        "flowent.workspace.runtime.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60
+    )
     chunks = [f"chunk-{index} " for index in range(8)]
 
     async def fake_completion(**request: object) -> object:
@@ -353,7 +355,9 @@ async def test_workspace_run_persists_text_progress_with_throttle(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setattr("flowent.main.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(
+        "flowent.workspace.runtime.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60
+    )
     from flowent.storage import StateStore
 
     chunks = [f"part-{index} " for index in range(12)]
@@ -406,7 +410,9 @@ async def test_workspace_run_reconnect_snapshot_includes_unsaved_text_deltas(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setattr("flowent.main.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(
+        "flowent.workspace.runtime.WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS", 60
+    )
     first_two_chunks_sent = asyncio.Event()
     finish_response = asyncio.Event()
 

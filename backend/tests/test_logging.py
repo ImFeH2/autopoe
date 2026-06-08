@@ -133,13 +133,15 @@ def test_diagnostic_sanitizer_removes_secret_fields_and_values() -> None:
     assert "sk-tool-secret" not in rendered
 
 
-def test_direct_main_app_import_creates_data_log_file(tmp_path, monkeypatch) -> None:
+def test_direct_app_import_creates_data_log_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    sys.modules.pop("flowent.app", None)
     sys.modules.pop("flowent.main", None)
 
     try:
-        __import__("flowent.main")
+        __import__("flowent.app")
     finally:
+        sys.modules.pop("flowent.app", None)
         sys.modules.pop("flowent.main", None)
 
     files = sorted((tmp_path / "logs").glob("flowent-*.log"))

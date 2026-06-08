@@ -33,6 +33,13 @@ def test_create_app_starts_when_bubblewrap_fallback_is_available(monkeypatch) ->
     assert app.title == "Flowent"
 
 
+def test_legacy_main_module_exports_create_app() -> None:
+    from flowent.app import create_app as canonical_create_app
+    from flowent.main import create_app as legacy_create_app
+
+    assert legacy_create_app is canonical_create_app
+
+
 def test_doctor_reports_missing_sandbox(monkeypatch, capsys) -> None:
     monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: None)
 
@@ -78,7 +85,7 @@ def test_main_sets_workdir_for_server_start(tmp_path, monkeypatch) -> None:
     )
 
     assert os.environ["FLOWENT_WORKDIR"] == str(workdir.resolve(strict=False))
-    assert calls == [("flowent.main:app", {"host": "127.0.0.1", "port": 6899})]
+    assert calls == [("flowent.app:app", {"host": "127.0.0.1", "port": 6899})]
 
 
 def test_main_uses_default_host_when_environment_is_not_set(
@@ -97,7 +104,7 @@ def test_main_uses_default_host_when_environment_is_not_set(
 
     main(["--workdir", str(workdir), "--port", "6899"])
 
-    assert calls == [("flowent.main:app", {"host": "127.0.0.1", "port": 6899})]
+    assert calls == [("flowent.app:app", {"host": "127.0.0.1", "port": 6899})]
 
 
 def test_main_reads_host_from_environment(tmp_path, monkeypatch) -> None:
@@ -114,7 +121,7 @@ def test_main_reads_host_from_environment(tmp_path, monkeypatch) -> None:
 
     main(["--workdir", str(workdir), "--port", "6899"])
 
-    assert calls == [("flowent.main:app", {"host": "0.0.0.0", "port": 6899})]
+    assert calls == [("flowent.app:app", {"host": "0.0.0.0", "port": 6899})]
 
 
 def test_main_prefers_host_argument_over_environment(tmp_path, monkeypatch) -> None:
@@ -131,7 +138,7 @@ def test_main_prefers_host_argument_over_environment(tmp_path, monkeypatch) -> N
 
     main(["--workdir", str(workdir), "--host", "127.0.0.1", "--port", "6899"])
 
-    assert calls == [("flowent.main:app", {"host": "127.0.0.1", "port": 6899})]
+    assert calls == [("flowent.app:app", {"host": "127.0.0.1", "port": 6899})]
 
 
 def test_main_rejects_missing_workdir(tmp_path, capsys) -> None:
