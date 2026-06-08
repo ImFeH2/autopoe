@@ -1335,7 +1335,7 @@ function normalizePlanStatus(status: unknown): PlanItemStatus {
   return "pending";
 }
 
-function PlanPreview({
+function PlanTray({
   isHidden,
   plan,
 }: {
@@ -1360,10 +1360,10 @@ function PlanPreview({
   const summary = `Plan · ${completedCount}/${plan.items.length} done`;
 
   return (
-    <div className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] shadow-[0_16px_44px_rgba(0,0,0,0.42)]">
+    <div className="border-b border-zinc-800/50 bg-zinc-900/40 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]">
       <Button
         aria-expanded={isOpen}
-        className="h-9 w-full justify-start gap-2 rounded-none border-0 bg-transparent px-3 text-sm font-medium text-white shadow-none hover:bg-input/40 hover:text-white"
+        className="h-9 w-full justify-start gap-2 rounded-none border-0 bg-transparent px-3 text-xs font-medium text-zinc-300 shadow-none hover:bg-input/40 hover:text-white sm:text-sm"
         onClick={() => setIsOpen((current) => !current)}
         type="button"
         variant="ghost"
@@ -1380,7 +1380,7 @@ function PlanPreview({
       {isOpen ? (
         <ol
           aria-label="Plan tasks"
-          className="grid max-h-[30vh] gap-1 overflow-auto border-t border-white/10 p-1.5"
+          className="grid max-h-[150px] gap-1 overflow-auto border-t border-zinc-800/50 bg-zinc-950/50 p-1.5 sm:max-h-[25vh]"
         >
           {plan.items.map((item, index) => (
             <li
@@ -1951,7 +1951,6 @@ function ChatComposer({
             {errorMessage}
           </p>
         ) : null}
-        <PlanPreview isHidden={showCommandMenu || showSkillMenu} plan={plan} />
         <form
           aria-label="Workspace composer"
           className="overflow-clip rounded-[14px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"
@@ -1960,6 +1959,7 @@ function ChatComposer({
             handleSubmit();
           }}
         >
+          <PlanTray isHidden={showCommandMenu || showSkillMenu} plan={plan} />
           <div className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 bg-[#212121] p-2.5">
             <Textarea
               aria-label="Message Flowent"

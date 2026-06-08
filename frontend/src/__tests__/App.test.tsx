@@ -5297,12 +5297,20 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Updating plan")).toBeInTheDocument();
-    const planToggle = await screen.findByRole("button", {
+    const composerForm = screen.getByRole("form", {
+      name: "Workspace composer",
+    });
+    const planToggle = await within(composerForm).findByRole("button", {
       name: "Plan · 1/3 done",
     });
+    expect(planToggle.closest("form")).toBe(composerForm);
+    expect(planToggle).toHaveAttribute("aria-expanded", "false");
     await user.click(planToggle);
+    expect(planToggle).toHaveAttribute("aria-expanded", "true");
 
-    const planTasks = screen.getByRole("list", { name: "Plan tasks" });
+    const planTasks = within(composerForm).getByRole("list", {
+      name: "Plan tasks",
+    });
     expect(within(planTasks).getByText("Inspect warnings")).toBeInTheDocument();
     expect(
       within(planTasks).getByText("Apply focused fixes"),
