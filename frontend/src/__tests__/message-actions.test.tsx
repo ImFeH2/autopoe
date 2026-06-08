@@ -166,6 +166,48 @@ const mockWorkspace = (
         status: 200,
       });
     }
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/workspace/messages/") &&
+      input.endsWith("/edit") &&
+      init?.method === "POST"
+    ) {
+      const messageId = decodeURIComponent(
+        input.slice("/api/workspace/messages/".length).replace(/\/edit$/, ""),
+      );
+      const request = JSON.parse(String(init.body)) as {
+        action: "resend" | "save";
+        content: string;
+      };
+      const messageIndex = messages.findIndex(
+        (message) => message.id === messageId,
+      );
+      const updatedMessage = {
+        ...messages[messageIndex],
+        content: request.content,
+      };
+      const nextMessages =
+        request.action === "resend"
+          ? [...messages.slice(0, messageIndex), updatedMessage]
+          : [
+              ...messages.slice(0, messageIndex),
+              updatedMessage,
+              ...messages.slice(messageIndex + 1),
+            ];
+      return new Response(
+        JSON.stringify({
+          messages: nextMessages,
+          run_id: request.action === "resend" ? "run-edit" : null,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+    if (input === "/api/workspace/runs/run-edit/stream?after=0") {
+      return response;
+    }
     if (input === "/api/workspace/runs" && init?.method === "POST") {
       return new Response(JSON.stringify({ detail: "Not found." }), {
         headers: { "Content-Type": "application/json" },
@@ -191,19 +233,31 @@ const messageArticle = async (text: string) => {
   return article;
 };
 
-const latestWorkspaceMessagesRequest = () => {
+const latestWorkspaceMessageEditRequest = (messageId: string) => {
   const request = vi
     .mocked(window.fetch)
     .mock.calls.filter(
       ([input, init]) =>
-        input === "/api/workspace/messages" && init?.method === "PUT",
+        input === `/api/workspace/messages/${messageId}/edit` &&
+        init?.method === "POST",
     )
     .at(-1);
   if (!request) {
-    throw new Error("Workspace messages request not found.");
+    throw new Error("Workspace message edit request not found.");
   }
-  return JSON.parse(String(request[1]?.body)) as { messages: TestMessage[] };
+  return JSON.parse(String(request[1]?.body)) as {
+    action: "resend" | "save";
+    content: string;
+  };
 };
+
+const workspaceMessagesWereUploaded = () =>
+  vi
+    .mocked(window.fetch)
+    .mock.calls.some(
+      ([input, init]) =>
+        input === "/api/workspace/messages" && init?.method === "PUT",
+    );
 
 const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
   navigator,
@@ -415,18 +469,11 @@ describe("message actions", () => {
 
     expect(screen.getByText("Update the launch checklist")).toBeInTheDocument();
     expect(screen.queryByText("Draft a launch checklist")).toBeNull();
-    expect(latestWorkspaceMessagesRequest().messages).toEqual([
-      {
-        author: "user",
-        content: "Update the launch checklist",
-        id: "message-user",
-      },
-      {
-        author: "assistant",
-        content: "Old checklist.",
-        id: "message-assistant",
-      },
-    ]);
+    expect(latestWorkspaceMessageEditRequest("message-user")).toEqual({
+      action: "save",
+      content: "Update the launch checklist",
+    });
+    expect(workspaceMessagesWereUploaded()).toBe(false);
   });
 
   it("retries a user message and replaces later replies", async () => {
@@ -459,14 +506,15 @@ describe("message actions", () => {
     expect(await screen.findByText("Fresh checklist.")).toBeInTheDocument();
     expect(screen.queryByText("Old checklist.")).toBeNull();
     expect(screen.queryByText("Keep this later note")).toBeNull();
-    expect(window.fetch).toHaveBeenCalledWith(
+    expect(latestWorkspaceMessageEditRequest("message-user")).toEqual({
+      action: "resend",
+      content: "Draft a launch checklist",
+    });
+    expect(workspaceMessagesWereUploaded()).toBe(false);
+    expect(window.fetch).not.toHaveBeenCalledWith(
       "/api/workspace/respond",
-      expect.objectContaining({
-        body: JSON.stringify({ content: "Draft a launch checklist" }),
-        method: "POST",
-      }),
+      expect.anything(),
     );
-    expect(latestWorkspaceMessagesRequest().messages).toEqual([]);
   });
 
   it("retries an assistant reply from the previous user message", async () => {
@@ -493,14 +541,15 @@ describe("message actions", () => {
 
     expect(await screen.findByText("Fresh answer.")).toBeInTheDocument();
     expect(screen.queryByText("Old checklist.")).toBeNull();
-    expect(window.fetch).toHaveBeenCalledWith(
+    expect(latestWorkspaceMessageEditRequest("message-user")).toEqual({
+      action: "resend",
+      content: "Draft a launch checklist",
+    });
+    expect(workspaceMessagesWereUploaded()).toBe(false);
+    expect(window.fetch).not.toHaveBeenCalledWith(
       "/api/workspace/respond",
-      expect.objectContaining({
-        body: JSON.stringify({ content: "Draft a launch checklist" }),
-        method: "POST",
-      }),
+      expect.anything(),
     );
-    expect(latestWorkspaceMessagesRequest().messages).toEqual([]);
   });
 
   it("keeps edit and retry disabled while Flowent is responding", async () => {

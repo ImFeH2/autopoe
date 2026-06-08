@@ -193,6 +193,11 @@ type WorkspaceRunResponse = {
   run_id: string;
 };
 
+type WorkspaceMessageEditResponse = {
+  messages: ApiMessage[];
+  run_id?: string | null;
+};
+
 const contextWindowFromLimit = (
   usageInfo: ContextUsageInfo | null,
   contextWindowLimit: number | null,
@@ -692,14 +697,6 @@ const isAbortError = (error: unknown) =>
 
 const supportsWorkspaceRuns = (response: Response) =>
   response.status !== 404 && response.status !== 405;
-
-const trimmedConversationAfter = (messages: Message[], messageId: string) => {
-  const index = messages.findIndex((message) => message.id === messageId);
-  if (index < 0) {
-    return null;
-  }
-  return messages.slice(0, index);
-};
 
 const previousUserMessage = (messages: Message[], fromIndex: number) => {
   for (let index = fromIndex; index >= 0; index -= 1) {
@@ -1469,21 +1466,6 @@ function App() {
     });
   };
 
-  const saveWorkspaceMessages = async (nextMessages: Message[]) => {
-    const response = await fetch("/api/workspace/messages", {
-      body: JSON.stringify({ messages: nextMessages }),
-      headers: { "Content-Type": "application/json" },
-      method: "PUT",
-    });
-
-    if (!response.ok) {
-      throw new Error("Conversation could not be updated.");
-    }
-
-    const result = (await response.json()) as { messages?: Message[] };
-    return Array.isArray(result.messages) ? result.messages : nextMessages;
-  };
-
   const clearWorkspace = async () => {
     const response = await fetch("/api/workspace/clear", {
       headers: { "Content-Type": "application/json" },
@@ -1510,6 +1492,47 @@ function App() {
       ? "Response in progress"
       : "Message could not be sent.";
   }, []);
+
+  const editWorkspaceMessage = async ({
+    action,
+    content,
+    messageId,
+  }: MessageActionRequest) => {
+    const response = await fetch(
+      `/api/workspace/messages/${encodeURIComponent(messageId)}/edit`,
+      {
+        body: JSON.stringify({ action, content }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const result = (await response.json()) as { detail?: unknown };
+        if (typeof result.detail === "string") {
+          detail = result.detail;
+        }
+      } catch {
+        detail = "";
+      }
+      if (detail) {
+        throw new Error(detail);
+      }
+      throw new Error(
+        response.status === 409
+          ? "Response in progress"
+          : "Message could not be updated.",
+      );
+    }
+
+    const result = (await response.json()) as WorkspaceMessageEditResponse;
+    if (!Array.isArray(result.messages)) {
+      throw new Error("Message could not be updated.");
+    }
+    return result;
+  };
 
   const parseWorkspaceStreamEvent = useCallback(
     (rawEvent: string): WorkspaceStreamEventEnvelope => {
@@ -2410,6 +2433,15 @@ function App() {
     }
   };
 
+  const startEditedRun = (runId: string, nextMessages: Message[]) => {
+    responseRunRef.current += 1;
+    activeRunIdRef.current = runId;
+    activeRunEventIndexRef.current = 0;
+    setMessages(nextMessages);
+    setActiveRunId(runId);
+    setIsResponding(true);
+  };
+
   const retryMessage = async (messageId: string) => {
     if (isResponding) {
       return;
@@ -2431,24 +2463,29 @@ function App() {
       return;
     }
 
-    const baseMessages = trimmedConversationAfter(messages, userMessage.id);
-    if (!baseMessages) {
-      return;
-    }
-
     const previousMessages = messages;
-    setMessages(baseMessages);
     setResponseError("");
+    setIsResponding(true);
 
     try {
-      await saveWorkspaceMessages(baseMessages);
-    } catch {
+      const result = await editWorkspaceMessage({
+        action: "resend",
+        content: userMessage.content,
+        messageId: userMessage.id,
+      });
+      if (!result.run_id) {
+        throw new Error("Message could not be sent.");
+      }
+      startEditedRun(result.run_id, result.messages);
+    } catch (error) {
       setMessages(previousMessages);
-      setResponseError("Conversation could not be updated.");
-      return;
+      setIsResponding(false);
+      setResponseError(
+        error instanceof Error
+          ? error.message
+          : "Message could not be updated.",
+      );
     }
-
-    await sendMessage(userMessage.content, baseMessages, { clearDraft: false });
   };
 
   const editMessage = async ({
@@ -2467,36 +2504,32 @@ function App() {
       return;
     }
 
-    const updatedMessage: Message = {
-      ...messages[messageIndex],
-      content,
-    };
-    const baseMessages =
-      action === "resend"
-        ? messages.slice(0, messageIndex)
-        : [
-            ...messages.slice(0, messageIndex),
-            updatedMessage,
-            ...messages.slice(messageIndex + 1),
-          ];
-    const nextMessages =
-      action === "resend" ? [...baseMessages, updatedMessage] : baseMessages;
-    const persistedMessages = action === "resend" ? baseMessages : nextMessages;
     const previousMessages = messages;
-
-    setMessages(nextMessages);
     setResponseError("");
-
-    try {
-      await saveWorkspaceMessages(persistedMessages);
-    } catch {
-      setMessages(previousMessages);
-      setResponseError("Conversation could not be updated.");
-      return;
+    if (action === "resend") {
+      setIsResponding(true);
     }
 
-    if (action === "resend") {
-      await sendMessage(content, baseMessages, { clearDraft: false });
+    try {
+      const result = await editWorkspaceMessage({ action, content, messageId });
+      if (action === "resend") {
+        if (!result.run_id) {
+          throw new Error("Message could not be sent.");
+        }
+        startEditedRun(result.run_id, result.messages);
+        return;
+      }
+      setMessages(result.messages);
+    } catch (error) {
+      setMessages(previousMessages);
+      if (action === "resend") {
+        setIsResponding(false);
+      }
+      setResponseError(
+        error instanceof Error
+          ? error.message
+          : "Message could not be updated.",
+      );
     }
   };
 

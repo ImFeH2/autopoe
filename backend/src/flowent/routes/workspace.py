@@ -5,6 +5,8 @@ from fastapi.responses import StreamingResponse
 
 from flowent.api_models import (
     WorkspaceClearResponse,
+    WorkspaceMessageEditRequest,
+    WorkspaceMessageEditResponse,
     WorkspaceMessagesRequest,
     WorkspaceRespondRequest,
     WorkspaceRunResponse,
@@ -27,6 +29,28 @@ def register_workspace_routes(
         request: WorkspaceMessagesRequest,
     ) -> WorkspaceMessagesRequest:
         return WorkspaceMessagesRequest(messages=store.save_messages(request.messages))
+
+    @app.post("/api/workspace/messages/{message_id}/edit")
+    async def edit_workspace_message(
+        message_id: str,
+        request: WorkspaceMessageEditRequest,
+    ) -> WorkspaceMessageEditResponse:
+        logger.info(
+            "Workspace message edit requested action=%s message_id=%s content_length=%s",
+            request.action,
+            message_id,
+            len(request.content),
+        )
+        logger.log(TRACE_LEVEL, "Workspace edited user content=%r", request.content)
+        messages, run = runtime.edit_message(
+            message_id,
+            action=request.action,
+            content=request.content,
+        )
+        return WorkspaceMessageEditResponse(
+            messages=messages,
+            run_id=run.id if run else None,
+        )
 
     @app.post("/api/workspace/clear")
     async def clear_workspace() -> WorkspaceClearResponse:

@@ -25,6 +25,20 @@ class WorkspaceMessagesRequest(BaseModel):
     messages: list[StoredMessage]
 
 
+class WorkspaceMessageEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["resend", "save"]
+    content: str
+
+
+class WorkspaceMessageEditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[StoredMessage]
+    run_id: str | None = None
+
+
 class WorkspaceRespondRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

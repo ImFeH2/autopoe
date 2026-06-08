@@ -452,9 +452,6 @@ class WorkspaceRuntime:
                 headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
             )
         state = self.store.read_state()
-        connection = selected_connection(state)
-        context_window_limit = context_window_for_settings(state.settings)
-
         user_message = StoredMessage(
             author="user",
             content=content,
@@ -462,6 +459,74 @@ class WorkspaceRuntime:
         )
         next_messages = [*state.messages, user_message]
         self.store.save_messages(next_messages)
+        return self._create_run_from_messages(
+            content=content,
+            next_messages=next_messages,
+            state=state,
+            user_message=user_message,
+        )
+
+    def edit_message(
+        self,
+        message_id: str,
+        *,
+        action: Literal["resend", "save"],
+        content: str,
+    ) -> tuple[list[StoredMessage], WorkspaceRun | None]:
+        if self.has_active_run():
+            active_run = self.active_run()
+            raise HTTPException(
+                status_code=409,
+                detail="Response in progress",
+                headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
+            )
+        state = self.store.read_state()
+        message_index = next(
+            (
+                index
+                for index, message in enumerate(state.messages)
+                if message.id == message_id
+            ),
+            -1,
+        )
+        if message_index < 0:
+            raise HTTPException(status_code=404, detail="Message not found.")
+        message = state.messages[message_index]
+        if message.author != "user":
+            raise HTTPException(
+                status_code=400, detail="Only user messages can be edited."
+            )
+
+        updated_message = message.model_copy(update={"content": content})
+        if action == "save":
+            next_messages = [
+                *state.messages[:message_index],
+                updated_message,
+                *state.messages[message_index + 1 :],
+            ]
+            return self.store.save_messages(next_messages), None
+
+        previous_messages = state.messages[:message_index]
+        next_messages = [*previous_messages, updated_message]
+        self.store.save_messages(next_messages)
+        run = self._create_run_from_messages(
+            content=content,
+            next_messages=next_messages,
+            state=state.model_copy(update={"messages": previous_messages}),
+            user_message=updated_message,
+        )
+        return next_messages, run
+
+    def _create_run_from_messages(
+        self,
+        *,
+        content: str,
+        next_messages: list[StoredMessage],
+        state: StoredState,
+        user_message: StoredMessage,
+    ) -> WorkspaceRun:
+        connection = selected_connection(state)
+        context_window_limit = context_window_for_settings(state.settings)
         run = WorkspaceRun(
             condition=asyncio.Condition(),
             generation=self.generation,
