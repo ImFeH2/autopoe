@@ -1046,7 +1046,7 @@ function ThinkingProcessItem({
 }
 
 function ToolProcessItem({ tool }: { tool: ToolItem }) {
-  const [isOpen, setIsOpen] = useState(tool.status === "failed");
+  const [isOpen, setIsOpen] = useState(false);
   const statusLabel =
     tool.status === "waiting"
       ? "Waiting"
@@ -1055,12 +1055,6 @@ function ToolProcessItem({ tool }: { tool: ToolItem }) {
         : tool.status === "success"
           ? "Done"
           : "Failed";
-
-  useEffect(() => {
-    if (tool.status === "failed") {
-      setIsOpen(true);
-    }
-  }, [tool.status]);
 
   return (
     <div className="max-w-full text-base leading-5 text-white">

@@ -806,7 +806,7 @@ const controlledToolTimelineResponse = (
             content: output ?? "tool output",
             data,
             id: tool.id,
-            status: "success",
+            status: tool.status ?? "success",
             title: tool.title,
           })}\n\n`,
         ),
@@ -4565,6 +4565,7 @@ describe("App", () => {
   });
 
   it("restores automatic review details from loaded tool data", async () => {
+    const user = userEvent.setup();
     const runningState = {
       ...selectedProviderState(),
       active_run_event_index: 4,
@@ -4636,9 +4637,15 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByRole("button", { name: /Ran pnpm install/ }),
-    ).toBeInTheDocument();
+    const toolDetails = await screen.findByRole("button", {
+      name: /Ran pnpm install/,
+    });
+    expect(toolDetails).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("REVIEW")).not.toBeInTheDocument();
+    expect(screen.queryByText("FAILURE")).not.toBeInTheDocument();
+
+    await user.click(toolDetails);
+
     expect(screen.getByText("REVIEW")).toBeInTheDocument();
     expect(screen.getByText("Denied")).toBeInTheDocument();
     expect(screen.getByText("Outside the task scope.")).toBeInTheDocument();
@@ -4709,7 +4716,17 @@ describe("App", () => {
     await user.type(composer, "Run lint");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByText("REVIEW")).toBeInTheDocument();
+    const toolDetails = await screen.findByRole("button", {
+      name: /Ran pnpm lint/,
+    });
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(toolDetails).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("REVIEW")).not.toBeInTheDocument();
+    expect(screen.queryByText("FAILURE")).not.toBeInTheDocument();
+
+    await user.click(toolDetails);
+
+    expect(screen.getByText("REVIEW")).toBeInTheDocument();
     const outputBlock = screen.getByText("FAILURE").parentElement;
     expect(outputBlock).toHaveTextContent(
       "mkdir: cannot create directory '/root/.local/state/fnm_multishells': Permission denied",
@@ -4817,11 +4834,78 @@ describe("App", () => {
     await user.type(composer, "Read the file");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
+    const toolDetails = await screen.findByRole("button", {
+      name: /Reading missing\.txt/,
+    });
     expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(toolDetails).toHaveAttribute("aria-expanded", "false");
+    expect(document.body).not.toHaveTextContent("RESULT");
+    expect(document.body).not.toHaveTextContent("File not found");
+
+    await user.click(toolDetails);
+
     const resultBlock = screen.getByText("RESULT").parentElement;
     expect(resultBlock).toHaveTextContent('"content": "File not found"');
     expect(resultBlock).toHaveTextContent('"path": "missing.txt"');
     await expectDocumentText("I could not read it.");
+  });
+
+  it("lets users collapse failed tool details after opening them", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            data: { path: "missing.txt" },
+            id: "tool-1",
+            name: "read_file",
+            output: "File not found",
+            status: "failed",
+            title: "Reading missing.txt",
+          },
+          "I could not read it.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the file");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Reading missing\.txt/,
+    });
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+
+    await user.click(toolDetails);
+
+    expect(toolDetails).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("RESULT")).toBeInTheDocument();
+
+    await user.click(toolDetails);
+
+    expect(toolDetails).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
   });
 
   it("shows shell command output and structured fields inside the tool result", async () => {
@@ -6632,7 +6716,16 @@ describe("App", () => {
     await user.type(composer, "Read with MCP");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
+    const toolDetails = await screen.findByRole("button", {
+      name: /Calling Files\.read_file/,
+    });
     expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(toolDetails).toHaveAttribute("aria-expanded", "false");
+    expect(document.body).not.toHaveTextContent("RESULT");
+    expect(document.body).not.toHaveTextContent("Permission denied");
+
+    await user.click(toolDetails);
+
     const resultBlock = screen.getByText("RESULT").parentElement;
     expect(resultBlock).toHaveTextContent("Permission denied");
     await expectDocumentText("Could not use MCP.");
@@ -6926,6 +7019,63 @@ describe("App", () => {
 
     expect(await screen.findByText("Done")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("The notes are ready.");
+  });
+
+  it("keeps a tool collapsed when it changes from running to failed", async () => {
+    const user = userEvent.setup();
+    const assistantStream = controlledToolTimelineResponse(
+      {
+        data: { path: "missing.txt" },
+        id: "tool-1",
+        name: "read_file",
+        output: "File not found",
+        status: "failed",
+        title: "Reading missing.txt",
+      },
+      "I could not read it.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Read the file");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Reading missing\.txt/,
+    });
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(toolDetails).toHaveAttribute("aria-expanded", "false");
+
+    assistantStream.completeTool();
+
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(toolDetails).toHaveAttribute("aria-expanded", "false");
+    expect(document.body).not.toHaveTextContent("RESULT");
+    expect(document.body).not.toHaveTextContent("File not found");
   });
 
   it("keeps the thinking indicator visible while a tool is running", async () => {
