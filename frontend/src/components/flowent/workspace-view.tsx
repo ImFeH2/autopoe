@@ -86,6 +86,7 @@ export function WorkspaceView({
   skills: Skill[];
 }) {
   const [composerOffset, setComposerOffset] = useState(112);
+  const plan = useMemo(() => latestPlanFromMessages(messages), [messages]);
 
   return (
     <section className="h-full min-h-0 bg-black" aria-label="Workspace">
@@ -106,6 +107,7 @@ export function WorkspaceView({
             isRefiningContext={isRefiningContext}
             isSending={isResponding}
             messages={messages}
+            plan={plan}
             usageInfo={usageInfo}
             onCommand={onCommand}
             onCommandError={onCommandError}
@@ -1243,6 +1245,192 @@ function ToolProcessIcon({ tool }: { tool: ToolItem }) {
   return <Circle aria-hidden="true" className={className} />;
 }
 
+type PlanItemStatus = "completed" | "in_progress" | "pending";
+
+type WorkspacePlanItem = {
+  status: PlanItemStatus;
+  step: string;
+};
+
+type WorkspacePlan = {
+  items: WorkspacePlanItem[];
+};
+
+function latestPlanFromMessages(messages: Message[]): WorkspacePlan | null {
+  for (
+    let messageIndex = messages.length - 1;
+    messageIndex >= 0;
+    messageIndex -= 1
+  ) {
+    const message = messages[messageIndex];
+    if (message?.author !== "assistant") {
+      continue;
+    }
+
+    const tools = message.tools ?? [];
+    for (let toolIndex = tools.length - 1; toolIndex >= 0; toolIndex -= 1) {
+      const tool = tools[toolIndex];
+      if (tool.name !== "update_plan") {
+        continue;
+      }
+
+      const items =
+        planItemsFromToolPayload(tool.data) ??
+        planItemsFromToolPayload(tool.arguments);
+      if (items?.length) {
+        return { items };
+      }
+    }
+  }
+
+  return null;
+}
+
+function planItemsFromToolPayload(
+  payload: Record<string, unknown> | null | undefined,
+) {
+  const rawItems = payload?.items;
+  if (!Array.isArray(rawItems)) {
+    return null;
+  }
+
+  return rawItems.flatMap((item): WorkspacePlanItem[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return [];
+    }
+    const value = item as Record<string, unknown>;
+    const step = typeof value.step === "string" ? value.step.trim() : "";
+    if (!step) {
+      return [];
+    }
+    return [
+      {
+        status: normalizePlanStatus(value.status),
+        step,
+      },
+    ];
+  });
+}
+
+function normalizePlanStatus(status: unknown): PlanItemStatus {
+  if (
+    status === "completed" ||
+    status === "in_progress" ||
+    status === "pending"
+  ) {
+    return status;
+  }
+
+  return "pending";
+}
+
+function PlanPreview({
+  isHidden,
+  plan,
+}: {
+  isHidden: boolean;
+  plan: WorkspacePlan | null;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    if (isHidden) {
+      setIsOpen(false);
+    }
+  }, [isHidden]);
+
+  if (!plan || isHidden) {
+    return null;
+  }
+
+  const completedCount = plan.items.filter(
+    (item) => item.status === "completed",
+  ).length;
+  const summary = `Plan · ${completedCount}/${plan.items.length} done`;
+
+  return (
+    <div className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] shadow-[0_16px_44px_rgba(0,0,0,0.42)]">
+      <Button
+        aria-expanded={isOpen}
+        className="h-9 w-full justify-start gap-2 rounded-none border-0 bg-transparent px-3 text-sm font-medium text-white shadow-none hover:bg-input/40 hover:text-white"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+        variant="ghost"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={cn(
+            "size-3.5 shrink-0 text-white/55 transition-transform",
+            isOpen && "rotate-90",
+          )}
+        />
+        <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
+      </Button>
+      {isOpen ? (
+        <ol
+          aria-label="Plan tasks"
+          className="grid max-h-[30vh] gap-1 overflow-auto border-t border-white/10 p-1.5"
+        >
+          {plan.items.map((item, index) => (
+            <li
+              className={cn(
+                "grid min-w-0 grid-cols-[1.25rem_auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg px-2 py-1.5 text-sm leading-5",
+                item.status === "in_progress"
+                  ? "bg-input/30 text-white"
+                  : item.status === "completed"
+                    ? "text-white/55"
+                    : "text-white/75",
+              )}
+              key={`${index}-${item.step}`}
+            >
+              <span className="text-right text-xs leading-5 text-white/35">
+                {index + 1}
+              </span>
+              <PlanStatusIcon status={item.status} />
+              <span className="min-w-0 break-words">{item.step}</span>
+              <span className="shrink-0 text-xs leading-5 text-white/45">
+                {planStatusLabel(item.status)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
+function PlanStatusIcon({ status }: { status: PlanItemStatus }) {
+  const className = "mt-0.5 size-3.5 shrink-0";
+
+  if (status === "completed") {
+    return (
+      <Check aria-hidden="true" className={cn(className, "text-white/65")} />
+    );
+  }
+  if (status === "in_progress") {
+    return (
+      <Activity
+        aria-hidden="true"
+        className={cn(className, "animate-pulse text-white")}
+      />
+    );
+  }
+
+  return (
+    <Circle aria-hidden="true" className={cn(className, "text-white/40")} />
+  );
+}
+
+function planStatusLabel(status: PlanItemStatus) {
+  if (status === "completed") {
+    return "Done";
+  }
+  if (status === "in_progress") {
+    return "Doing";
+  }
+  return "Pending";
+}
+
 function AssistantWaitingIndicator() {
   return (
     <div
@@ -1265,6 +1453,7 @@ function ChatComposer({
   isRefiningContext,
   isSending,
   messages,
+  plan,
   usageInfo,
   onCommand,
   onCommandError,
@@ -1281,6 +1470,7 @@ function ChatComposer({
   isRefiningContext: boolean;
   isSending: boolean;
   messages: Message[];
+  plan: WorkspacePlan | null;
   usageInfo: ContextUsageInfo | null;
   onCommand: (commandId: WorkspaceCommandId) => boolean;
   onCommandError: (message: string) => void;
@@ -1659,6 +1849,7 @@ function ChatComposer({
             {errorMessage}
           </p>
         ) : null}
+        <PlanPreview isHidden={showCommandMenu || showSkillMenu} plan={plan} />
         <form
           aria-label="Workspace composer"
           className="overflow-clip rounded-[28px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"

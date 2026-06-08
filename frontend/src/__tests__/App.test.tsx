@@ -4546,7 +4546,18 @@ describe("App", () => {
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
       if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantToolStreamResponse(
-          { id: "tool-1", name: "update_plan", title: "Updating plan" },
+          {
+            data: {
+              items: [
+                { status: "completed", step: "Inspect warnings" },
+                { status: "in_progress", step: "Apply focused fixes" },
+                { status: "pending", step: "Verify the result" },
+              ],
+            },
+            id: "tool-1",
+            name: "update_plan",
+            title: "Updating plan",
+          },
           "Plan updated.",
         );
       }
@@ -4576,6 +4587,20 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Updating plan")).toBeInTheDocument();
+    const planToggle = await screen.findByRole("button", {
+      name: "Plan · 1/3 done",
+    });
+    await user.click(planToggle);
+
+    const planTasks = screen.getByRole("list", { name: "Plan tasks" });
+    expect(within(planTasks).getByText("Inspect warnings")).toBeInTheDocument();
+    expect(
+      within(planTasks).getByText("Apply focused fixes"),
+    ).toBeInTheDocument();
+    expect(
+      within(planTasks).getByText("Verify the result"),
+    ).toBeInTheDocument();
+    expect(within(planTasks).getByText("Doing")).toBeInTheDocument();
     await expectDocumentText("Plan updated.");
   });
 
