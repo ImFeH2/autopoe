@@ -1954,7 +1954,7 @@ function ChatComposer({
         <PlanPreview isHidden={showCommandMenu || showSkillMenu} plan={plan} />
         <form
           aria-label="Workspace composer"
-          className="overflow-clip rounded-[28px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"
+          className="overflow-clip rounded-[14px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"
           onSubmit={(event) => {
             event.preventDefault();
             handleSubmit();
