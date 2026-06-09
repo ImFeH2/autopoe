@@ -1,4 +1,6 @@
 import asyncio
+import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -26,6 +28,7 @@ class FakeMcpProbe:
     initialize_can_finish: dict[str, asyncio.Event] = field(default_factory=dict)
     initialize_started: dict[str, asyncio.Event] = field(default_factory=dict)
     list_tools_errors: dict[str, str] = field(default_factory=dict)
+    stderr_by_server: dict[str, str] = field(default_factory=dict)
 
     def event_for(
         self, events: dict[str, asyncio.Event], server_id: str
@@ -56,6 +59,8 @@ def install_fake_mcp(monkeypatch: pytest.MonkeyPatch) -> FakeMcpProbe:
     @asynccontextmanager
     async def stdio_client(
         parameters: Any,
+        *,
+        errlog: Any = None,
     ) -> AsyncIterator[tuple[FakeStream, FakeStream]]:
         server_id = parameters.command
         entered_task = asyncio.current_task()
@@ -64,6 +69,14 @@ def install_fake_mcp(monkeypatch: pytest.MonkeyPatch) -> FakeMcpProbe:
         try:
             yield FakeStream(server_id), FakeStream(server_id)
         finally:
+            stderr = probe.stderr_by_server.get(server_id)
+            stderr_target = errlog if errlog is not None else sys.stderr
+            if stderr is not None:
+                try:
+                    os.write(stderr_target.fileno(), stderr.encode())
+                except (AttributeError, OSError, ValueError):
+                    stderr_target.write(stderr)
+                    stderr_target.flush()
             exited_task = asyncio.current_task()
             probe.exited_tasks[server_id] = exited_task
             probe.event_for(probe.exited_events, server_id).set()
@@ -133,6 +146,50 @@ async def test_stdio_connection_disconnect_closes_transport_in_owner_task(
 
     assert tools[0]["name"] == "read_file"
     assert probe.exited_tasks[server.id] is probe.entered_tasks[server.id]
+
+
+@pytest.mark.anyio
+async def test_stdio_connection_shutdown_suppresses_keyboard_interrupt_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    probe = install_fake_mcp(monkeypatch)
+    probe.stderr_by_server["mcp-files"] = (
+        "Traceback (most recent call last):\n"
+        '  File "/server.py", line 12, in <module>\n'
+        "    run()\n"
+        "KeyboardInterrupt\n"
+    )
+    transport = DefaultMcpTransport()
+    server = mcp_server("mcp-files")
+
+    await asyncio.wait_for(asyncio.create_task(transport.connect(server)), timeout=2)
+    await transport.disconnect(server.id)
+
+    assert "KeyboardInterrupt" not in capsys.readouterr().err
+
+
+@pytest.mark.anyio
+async def test_stdio_connection_shutdown_keeps_unexpected_stderr_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    probe = install_fake_mcp(monkeypatch)
+    probe.stderr_by_server["mcp-files"] = (
+        "Traceback (most recent call last):\n"
+        '  File "/server.py", line 12, in <module>\n'
+        "    run()\n"
+        "RuntimeError: Shutdown failed\n"
+    )
+    transport = DefaultMcpTransport()
+    server = mcp_server("mcp-files")
+
+    await asyncio.wait_for(asyncio.create_task(transport.connect(server)), timeout=2)
+    await transport.disconnect(server.id)
+
+    stderr = capsys.readouterr().err
+    assert "Traceback (most recent call last)" in stderr
+    assert "RuntimeError: Shutdown failed" in stderr
 
 
 @pytest.mark.anyio

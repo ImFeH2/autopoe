@@ -5,17 +5,23 @@ import json
 import logging
 import os
 import re
+import sys
 from collections.abc import Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Protocol
+from typing import Any, Protocol, TextIO, cast
 
 from flowent.storage import StateStore, StoredMcpServer, StoredMcpTool
 from flowent.tools import ToolResult
 
 logger = logging.getLogger("flowent.mcp")
 MCP_CONNECT_TIMEOUT_SECONDS = 10
+PYTHON_TRACEBACK_START = "Traceback (most recent call last):"
+PYTHON_TRACEBACK_TERMINAL_PATTERN = re.compile(
+    r"^(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Interrupt|Warning)|"
+    r"BaseExceptionGroup|ExceptionGroup)(?::|$)"
+)
 
 
 class McpTransport(Protocol):
@@ -128,6 +134,96 @@ class _McpConnection:
     session: Any = None
 
 
+class _McpStdioErrorFilter:
+    def __init__(self, target: TextIO) -> None:
+        self.target = target
+        self.line_buffer = ""
+        self.traceback_lines: list[str] | None = None
+
+    def feed(self, text: str) -> None:
+        self.line_buffer += text
+        while "\n" in self.line_buffer:
+            line, self.line_buffer = self.line_buffer.split("\n", 1)
+            self.feed_line(f"{line}\n")
+
+    def finish(self) -> None:
+        if self.line_buffer:
+            self.feed_line(self.line_buffer)
+            self.line_buffer = ""
+        if self.traceback_lines is not None:
+            self.write("".join(self.traceback_lines))
+            self.traceback_lines = None
+
+    def feed_line(self, line: str) -> None:
+        stripped_line = line.rstrip("\r\n")
+        if self.traceback_lines is not None:
+            self.traceback_lines.append(line)
+            if stripped_line == "KeyboardInterrupt":
+                self.traceback_lines = None
+                return
+            if PYTHON_TRACEBACK_TERMINAL_PATTERN.match(stripped_line):
+                self.write("".join(self.traceback_lines))
+                self.traceback_lines = None
+            return
+        if stripped_line == PYTHON_TRACEBACK_START:
+            self.traceback_lines = [line]
+            return
+        self.write(line)
+
+    def write(self, text: str) -> None:
+        self.target.write(text)
+        self.target.flush()
+
+
+class _McpStdioErrorLog:
+    def __init__(self, target: TextIO | None = None) -> None:
+        self.target = target or sys.stderr
+        self.filter = _McpStdioErrorFilter(self.target)
+        self.read_fd, write_fd = os.pipe()
+        self.write_file = os.fdopen(write_fd, "wb", buffering=0)
+        self.drain_task: asyncio.Task[None] | None = None
+
+    async def __aenter__(self) -> _McpStdioErrorLog:
+        self.drain_task = asyncio.create_task(self.drain())
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object,
+    ) -> None:
+        self.close_write_file()
+        if self.drain_task is not None:
+            await asyncio.gather(self.drain_task, return_exceptions=True)
+        else:
+            self.close_read_fd()
+
+    def fileno(self) -> int:
+        return self.write_file.fileno()
+
+    async def drain(self) -> None:
+        try:
+            while True:
+                chunk = await asyncio.to_thread(os.read, self.read_fd, 4096)
+                if not chunk:
+                    break
+                self.filter.feed(chunk.decode("utf-8", errors="replace"))
+        except OSError:
+            pass
+        finally:
+            self.filter.finish()
+            self.close_read_fd()
+
+    def close_write_file(self) -> None:
+        with suppress(OSError, ValueError):
+            self.write_file.close()
+
+    def close_read_fd(self) -> None:
+        with suppress(OSError):
+            os.close(self.read_fd)
+
+
 class DefaultMcpTransport:
     def __init__(self) -> None:
         self._connections: dict[str, _McpConnection] = {}
@@ -197,9 +293,11 @@ class DefaultMcpTransport:
                             )
                         )
                 else:
+                    stdio_errlog = await stack.enter_async_context(_McpStdioErrorLog())
                     read_stream, write_stream = await stack.enter_async_context(
                         stdio_client(
                             self._stdio_parameters(server, config),
+                            errlog=cast(TextIO, stdio_errlog),
                         )
                     )
                 session = await stack.enter_async_context(
