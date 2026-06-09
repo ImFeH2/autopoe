@@ -700,7 +700,7 @@ function MessageActionBar({
   return (
     <div
       className={cn(
-        "mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 focus-within:opacity-100",
+        "mt-1 flex items-center gap-0.5 opacity-100 transition-opacity duration-150 hover-only:opacity-0 hover-only:group-hover/message:opacity-100 focus-within:opacity-100",
         message.author === "user" ? "justify-end pr-1" : "justify-start pl-1",
       )}
     >

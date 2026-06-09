@@ -90,6 +90,72 @@ describe("edit and resend regressions", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows message actions without hover on touch devices", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify(
+            selectedProviderState([
+              {
+                author: "user",
+                content: "Draft a launch checklist",
+                id: "message-user",
+              },
+              {
+                active_output: "text",
+                author: "assistant",
+                content: "Old checklist.",
+                id: "message-assistant",
+                isStreamingText: false,
+                status: "completed",
+              },
+            ]),
+          ),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const userArticle = await messageArticle("Draft a launch checklist");
+    const editButton = within(userArticle).getByRole("button", {
+      name: "Edit",
+    });
+    const userActionBar = editButton.closest("div");
+    expect(userActionBar).toHaveClass("opacity-100");
+    expect(userActionBar).toHaveClass("hover-only:opacity-0");
+    expect(userActionBar).toHaveClass(
+      "hover-only:group-hover/message:opacity-100",
+    );
+    expect(userActionBar).not.toHaveClass("opacity-0");
+
+    await user.click(editButton);
+    expect(
+      within(userArticle).getByRole("textbox", { name: "Edit message" }),
+    ).toBeInTheDocument();
+
+    const assistantArticle = await messageArticle("Old checklist.");
+    const assistantActionBar = within(assistantArticle)
+      .getByRole("button", { name: "Retry" })
+      .closest("div");
+    expect(assistantActionBar).toHaveClass("opacity-100");
+    expect(assistantActionBar).not.toHaveClass("opacity-0");
+  });
+
   it("edits and resends a user message without uploading the conversation history", async () => {
     const user = userEvent.setup();
     const messages: TestMessage[] = [
