@@ -17,11 +17,11 @@ A workflow orchestration platform for multi-agent collaboration.
 
 ## Install
 
-Flowent requires Bubblewrap for local tool isolation. Install the system package
-first:
+Flowent requires Bubblewrap for local tool isolation and ripgrep for file
+search. Install the system packages first:
 
 ```bash
-sudo apt-get install bubblewrap
+sudo apt-get install bubblewrap ripgrep
 ```
 
 Install the CLI globally:

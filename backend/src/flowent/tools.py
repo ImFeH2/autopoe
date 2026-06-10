@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from flowent.patch import affected_paths
 from flowent.sandbox import SandboxError, SandboxRunner
 from flowent.shell import shell_invocation
+from flowent.system_tools import ensure_ripgrep_available
 
 
 class ToolResult(BaseModel):
@@ -285,7 +286,7 @@ def grep_files(arguments: dict[str, object], context: ToolContext) -> ToolResult
     pattern = str(arguments["pattern"])
     path = resolve_tool_path(str(arguments.get("path", ".") or "."), context.cwd)
     limit = integer_argument(arguments, "limit", 100)
-    command = ["rg", "--line-number", "--max-count", str(limit)]
+    command = [ensure_ripgrep_available(), "--line-number", "--max-count", str(limit)]
     include = arguments.get("include")
     if include:
         command.extend(["--glob", str(include)])

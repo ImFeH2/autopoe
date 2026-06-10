@@ -26,7 +26,7 @@ ENV UV_LINK_MODE=copy
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bubblewrap \
+  && apt-get install -y --no-install-recommends bubblewrap ripgrep \
   && rm -rf /var/lib/apt/lists/*
 
 COPY backend ./backend

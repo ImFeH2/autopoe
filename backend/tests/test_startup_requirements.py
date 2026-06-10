@@ -8,6 +8,7 @@ from flowent.cli import main
 from flowent.main import create_app
 from flowent.paths import WORKDIR_ENV_VAR
 from flowent.sandbox import SandboxError
+from flowent.system_tools import SystemToolError
 
 
 def test_create_app_fails_when_sandbox_is_missing(monkeypatch) -> None:
@@ -33,6 +34,13 @@ def test_create_app_starts_when_bubblewrap_fallback_is_available(monkeypatch) ->
     assert app.title == "Flowent"
 
 
+def test_create_app_fails_when_search_tool_is_missing(monkeypatch) -> None:
+    monkeypatch.setattr("flowent.system_tools.ripgrep_binary", lambda: None)
+
+    with pytest.raises(SystemToolError, match="Install ripgrep"):
+        create_app(serve_frontend=False)
+
+
 def test_legacy_main_module_exports_create_app() -> None:
     from flowent.app import create_app as canonical_create_app
     from flowent.main import create_app as legacy_create_app
@@ -50,14 +58,30 @@ def test_doctor_reports_missing_sandbox(monkeypatch, capsys) -> None:
     assert "Sandbox: missing." in capsys.readouterr().err
 
 
-def test_doctor_reports_available_sandbox(monkeypatch, capsys) -> None:
-    monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: "/usr/bin/bwrap")
+def test_doctor_reports_missing_search_tool(monkeypatch, capsys) -> None:
+    monkeypatch.setattr("flowent.system_tools.ripgrep_binary", lambda: None)
 
     with pytest.raises(SystemExit) as error:
         main(["doctor"])
 
+    output = capsys.readouterr()
+    assert error.value.code == 1
+    assert "Sandbox: /usr/bin/bwrap" in output.out
+    assert "Search: missing." in output.err
+    assert "Install ripgrep" in output.err
+
+
+def test_doctor_reports_available_sandbox(monkeypatch, capsys) -> None:
+    monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: "/usr/bin/bwrap")
+    monkeypatch.setattr("flowent.system_tools.ripgrep_binary", lambda: "/usr/bin/rg")
+
+    with pytest.raises(SystemExit) as error:
+        main(["doctor"])
+
+    output = capsys.readouterr()
     assert error.value.code == 0
-    assert "Sandbox: /usr/bin/bwrap" in capsys.readouterr().out
+    assert "Sandbox: /usr/bin/bwrap" in output.out
+    assert "Search: /usr/bin/rg" in output.out
 
 
 def test_main_sets_workdir_for_server_start(tmp_path, monkeypatch) -> None:

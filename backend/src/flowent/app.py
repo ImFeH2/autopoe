@@ -22,6 +22,7 @@ from flowent.routes.workflow_routes import register_workflow_routes
 from flowent.routes.workspace import register_workspace_routes
 from flowent.sandbox import ensure_sandbox_available
 from flowent.storage import StateStore
+from flowent.system_tools import ensure_ripgrep_available
 from flowent.workspace.runtime import WorkspaceRuntime
 
 logger = logging.getLogger("flowent.app")
@@ -50,6 +51,7 @@ def create_app(
 ) -> FastAPI:
     ensure_logging_configured()
     ensure_sandbox_available()
+    ensure_ripgrep_available()
 
     cwd = resolve_workdir(workdir)
     store = StateStore()

@@ -59,13 +59,22 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "doctor":
         from flowent.sandbox import SANDBOX_INSTALL_HINT, sandbox_binary
+        from flowent.system_tools import RIPGREP_INSTALL_HINT, ripgrep_binary
 
         bwrap = sandbox_binary()
+        rg = ripgrep_binary()
+
         if bwrap:
             print(f"Sandbox: {bwrap}")
-            raise SystemExit(0)
-        print(f"Sandbox: missing. {SANDBOX_INSTALL_HINT}", file=sys.stderr)
-        raise SystemExit(1)
+        else:
+            print(f"Sandbox: missing. {SANDBOX_INSTALL_HINT}", file=sys.stderr)
+
+        if rg:
+            print(f"Search: {rg}")
+        else:
+            print(f"Search: missing. {RIPGREP_INSTALL_HINT}", file=sys.stderr)
+
+        raise SystemExit(0 if bwrap and rg else 1)
 
     if args.version:
         try:
