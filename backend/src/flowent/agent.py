@@ -45,7 +45,7 @@ Use tools deliberately:
 - Search the web only when current external information is needed.
 - Update the plan when a task has multiple meaningful steps.
 
-After each tool result, decide whether the task is complete, whether another tool is needed, or whether you need to explain a blocker. When no more tool work is needed, provide the final response."""
+After each tool result, decide whether the task is complete, whether another tool is needed, or whether you need to explain a blocker. A tool call is not a final response. After every tool result, continue the same turn until you either call another tool, explain a blocker, or provide a final response. If a tool fails, use the error as context and continue deciding whether to retry, use another tool, or explain the blocker. When no more tool work is needed, provide the final response."""
 
 
 class AgentStreamEvent(BaseModel):

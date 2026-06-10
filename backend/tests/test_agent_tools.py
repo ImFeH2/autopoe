@@ -98,6 +98,14 @@ def thinking_chunk(content: str) -> dict[str, object]:
     return {"choices": [{"delta": {"reasoning_content": content}}]}
 
 
+def test_agent_prompt_treats_tool_calls_as_intermediate_work() -> None:
+    assert "A tool call is not a final response." in FLOWENT_AGENT_SYSTEM_PROMPT
+    assert "After every tool result, continue the same turn" in (
+        FLOWENT_AGENT_SYSTEM_PROMPT
+    )
+    assert "If a tool fails, use the error as context" in FLOWENT_AGENT_SYSTEM_PROMPT
+
+
 def test_workspace_response_streams_tool_process_and_final_text(
     tmp_path, monkeypatch
 ) -> None:
