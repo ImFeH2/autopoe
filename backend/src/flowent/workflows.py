@@ -45,6 +45,30 @@ def validate_workflow(workflow: StoredWorkflow) -> StoredWorkflow:
     return workflow
 
 
+def validate_workflow_draft(workflow: StoredWorkflow) -> StoredWorkflow:
+    validate_workflow_draft_definition(workflow.definition)
+    return workflow
+
+
+def validate_workflow_draft_definition(definition: StoredWorkflowDefinition) -> None:
+    node_ids = [node.id for node in definition.nodes]
+    if any(not node_id.strip() for node_id in node_ids):
+        raise ValueError("Workflow node ids must not be empty.")
+    if len(set(node_ids)) != len(node_ids):
+        raise ValueError("Workflow node ids must be unique.")
+
+    edge_ids = [edge.id for edge in definition.edges]
+    if any(not edge_id.strip() for edge_id in edge_ids):
+        raise ValueError("Workflow edge ids must not be empty.")
+    if len(set(edge_ids)) != len(edge_ids):
+        raise ValueError("Workflow edge ids must be unique.")
+
+    node_id_set = set(node_ids)
+    for edge in definition.edges:
+        if edge.source not in node_id_set or edge.target not in node_id_set:
+            raise ValueError("Workflow edges must connect existing nodes.")
+
+
 def validate_workflow_definition(definition: StoredWorkflowDefinition) -> list[str]:
     node_ids = [node.id for node in definition.nodes]
     if not node_ids:

@@ -6,7 +6,7 @@ from flowent.storage import StateStore, StoredWorkflow
 from flowent.workflows import (
     WorkflowRunResponse,
     run_workflow_definition,
-    validate_workflow,
+    validate_workflow_draft,
     workflow_requires_connection,
 )
 
@@ -21,7 +21,7 @@ def register_workflow_routes(
     async def save_workflow(workflow: StoredWorkflow) -> StoredWorkflow:
         try:
             return store.save_workflow(
-                validate_workflow(
+                validate_workflow_draft(
                     workflow.model_copy(
                         update={"name": workflow.name.strip() or "Untitled Workflow"}
                     )

@@ -179,6 +179,16 @@ type ApiAbout = {
   version?: string;
 };
 
+type RequestResult<T> =
+  | {
+      data: T;
+      error: "";
+    }
+  | {
+      data: null;
+      error: string;
+    };
+
 type WorkspaceRunResponse = {
   run_id: string;
 };
@@ -450,6 +460,21 @@ const workflowRunResultFromApi = (
   status: result.status,
   workflowId: result.workflow_id,
 });
+
+const errorMessageFromResponse = async (
+  response: Response,
+  fallback: string,
+) => {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string" && body.detail.trim()) {
+      return body.detail;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+};
 
 const mcpCommandLine = (server: Pick<McpServer, "args" | "command">) =>
   [server.command, ...server.args].filter(Boolean).join(" ");
@@ -2519,7 +2544,9 @@ function App() {
     setActiveView("workspace");
   };
 
-  const saveWorkflow = async (workflow: Workflow) => {
+  const saveWorkflow = async (
+    workflow: Workflow,
+  ): Promise<RequestResult<Workflow>> => {
     const response = await fetch("/api/workflows", {
       body: JSON.stringify(workflowToApi(workflow)),
       headers: { "Content-Type": "application/json" },
@@ -2527,7 +2554,13 @@ function App() {
     });
 
     if (!response.ok) {
-      return null;
+      return {
+        data: null,
+        error: await errorMessageFromResponse(
+          response,
+          "Workflow could not be saved.",
+        ),
+      };
     }
 
     const savedWorkflow = workflowFromApi(
@@ -2548,7 +2581,7 @@ function App() {
       return [savedWorkflow, ...currentWorkflows];
     });
     setActiveWorkflowId(savedWorkflow.id);
-    return savedWorkflow;
+    return { data: savedWorkflow, error: "" };
   };
 
   const deleteWorkflow = async (workflowId: string) => {
@@ -2576,7 +2609,9 @@ function App() {
     return true;
   };
 
-  const runWorkflow = async (workflowId: string) => {
+  const runWorkflow = async (
+    workflowId: string,
+  ): Promise<RequestResult<WorkflowRunResult>> => {
     setRunningWorkflowId(workflowId);
     setWorkflowRunResult(null);
     try {
@@ -2589,14 +2624,20 @@ function App() {
       );
 
       if (!response.ok) {
-        return null;
+        return {
+          data: null,
+          error: await errorMessageFromResponse(
+            response,
+            "Run could not be completed.",
+          ),
+        };
       }
 
       const result = workflowRunResultFromApi(
         (await response.json()) as ApiWorkflowRunResult,
       );
       setWorkflowRunResult(result);
-      return result;
+      return { data: result, error: "" };
     } finally {
       setRunningWorkflowId("");
     }

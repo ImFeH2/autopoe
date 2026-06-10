@@ -1085,8 +1085,14 @@ export function WorkflowsView({
   newWorkflowKey: number;
   onCloseEditor: () => void;
   onDeleteWorkflow: (workflowId: string) => Promise<boolean>;
-  onRunWorkflow: (workflowId: string) => Promise<WorkflowRunResult | null>;
-  onSaveWorkflow: (workflow: Workflow) => Promise<Workflow | null>;
+  onRunWorkflow: (workflowId: string) => Promise<{
+    data: WorkflowRunResult | null;
+    error: string;
+  }>;
+  onSaveWorkflow: (workflow: Workflow) => Promise<{
+    data: Workflow | null;
+    error: string;
+  }>;
   runningWorkflowId: string;
   workflowRunResult: WorkflowRunResult | null;
 }) {
@@ -1096,8 +1102,23 @@ export function WorkflowsView({
   const [isDirty, setIsDirty] = useState(!activeWorkflow);
   const [saveError, setSaveError] = useState("");
   const [runError, setRunError] = useState("");
+  const editorKeyRef = useRef({
+    newWorkflowKey,
+    workflowId: activeWorkflow?.id ?? "",
+  });
 
   useEffect(() => {
+    const nextWorkflowId = activeWorkflow?.id ?? "";
+    if (
+      editorKeyRef.current.workflowId === nextWorkflowId &&
+      editorKeyRef.current.newWorkflowKey === newWorkflowKey
+    ) {
+      return;
+    }
+    editorKeyRef.current = {
+      newWorkflowKey,
+      workflowId: nextWorkflowId,
+    };
     setDraftWorkflow(
       activeWorkflow ? cloneWorkflow(activeWorkflow) : createDraftWorkflow(),
     );
@@ -1121,25 +1142,25 @@ export function WorkflowsView({
 
   const saveDraft = async () => {
     setSaveError("");
-    const savedWorkflow = await onSaveWorkflow(draftWorkflow);
-    if (!savedWorkflow) {
-      setSaveError("Workflow could not be saved.");
+    const result = await onSaveWorkflow(draftWorkflow);
+    if (!result.data) {
+      setSaveError(result.error);
       return null;
     }
-    setDraftWorkflow(savedWorkflow);
+    setDraftWorkflow(result.data);
     setIsDirty(false);
-    return savedWorkflow;
+    return result.data;
   };
 
   const runDraft = async () => {
+    setRunError("");
     const savedWorkflow = await saveDraft();
     if (!savedWorkflow) {
       return;
     }
-    setRunError("");
     const result = await onRunWorkflow(savedWorkflow.id);
-    if (!result) {
-      setRunError("Run could not be completed.");
+    if (!result.data) {
+      setRunError(result.error);
     }
   };
 
