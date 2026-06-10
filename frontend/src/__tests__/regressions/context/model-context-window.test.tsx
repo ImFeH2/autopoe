@@ -23,6 +23,112 @@ describe("model context window regressions", () => {
     vi.restoreAllMocks();
   });
 
+  it("subtracts fixed context overhead from the displayed capacity percent", async () => {
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            mcp_servers: [],
+            messages: [],
+            providers: [],
+            settings: {
+              agent_prompt: "",
+              reasoning_effort: "default",
+              selected_model: "gpt-5.1",
+              selected_provider_id: "",
+            },
+            skills: [],
+            telegram_bot: {
+              bot_token: "",
+              enabled: false,
+              error: "",
+              sessions: [],
+              status: "disabled",
+            },
+            usage_info: contextUsageInfo(12_000, 120_000),
+            writable_paths: [],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("12k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", { name: "Context capacity status" }),
+    ).toHaveAttribute("aria-valuenow", "0");
+  });
+
+  it("estimates draft context with UTF-8 bytes", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            mcp_servers: [],
+            messages: [],
+            providers: [],
+            settings: {
+              agent_prompt: "",
+              reasoning_effort: "default",
+              selected_model: "gpt-5.1",
+              selected_provider_id: "",
+            },
+            skills: [],
+            telegram_bot: {
+              bot_token: "",
+              enabled: false,
+              error: "",
+              sessions: [],
+              status: "disabled",
+            },
+            usage_info: null,
+            writable_paths: [],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "你你你你");
+
+    expect(await screen.findByText("3 / 120k")).toBeInTheDocument();
+  });
+
   it("refreshes the context capacity when the selected model changes", async () => {
     const user = userEvent.setup();
     let selectedModel = "gpt-5.1";

@@ -10,7 +10,7 @@ from flowent.llm import (
     ProviderConnection,
     complete_chat_with_usage,
 )
-from flowent.usage import TokenUsage
+from flowent.usage import APPROX_BYTES_PER_TOKEN, TokenUsage, approximate_token_count
 
 if TYPE_CHECKING:
     from flowent.storage import StoredMessage
@@ -172,14 +172,41 @@ def retained_recent_user_messages(
 def truncate_text_to_token_budget(content: str, token_budget: int) -> str:
     if token_budget <= 0 or not content:
         return ""
-    character_budget = max(token_budget * 4, 1)
-    if len(content) <= character_budget:
+    byte_budget = max(token_budget * APPROX_BYTES_PER_TOKEN, 1)
+    if len(content.encode("utf-8")) <= byte_budget:
         return content
-    left_budget = character_budget // 2
-    right_budget = character_budget - left_budget
-    removed_tokens = approximate_token_count(content[left_budget:-right_budget])
+    left_budget = byte_budget // 2
+    right_budget = byte_budget - left_budget
+    prefix = text_prefix_for_byte_budget(content, left_budget)
+    suffix = text_suffix_for_byte_budget(content, right_budget)
+    middle_end = -len(suffix) if suffix else len(content)
+    removed_tokens = approximate_token_count(content[len(prefix) : middle_end])
     marker = f"…{removed_tokens} tokens truncated…"
-    return f"{content[:left_budget]}{marker}{content[-right_budget:]}"
+    return f"{prefix}{marker}{suffix}"
+
+
+def text_prefix_for_byte_budget(content: str, byte_budget: int) -> str:
+    used_bytes = 0
+    prefix: list[str] = []
+    for character in content:
+        character_bytes = len(character.encode("utf-8"))
+        if used_bytes + character_bytes > byte_budget:
+            break
+        prefix.append(character)
+        used_bytes += character_bytes
+    return "".join(prefix)
+
+
+def text_suffix_for_byte_budget(content: str, byte_budget: int) -> str:
+    used_bytes = 0
+    suffix: list[str] = []
+    for character in reversed(content):
+        character_bytes = len(character.encode("utf-8"))
+        if used_bytes + character_bytes > byte_budget:
+            break
+        suffix.append(character)
+        used_bytes += character_bytes
+    return "".join(reversed(suffix))
 
 
 def transcript_messages_after(
@@ -196,9 +223,3 @@ def transcript_messages_after(
 
 def approximate_tokens_for_messages(messages: Sequence[ChatMessage]) -> int:
     return sum(approximate_token_count(message.content) for message in messages)
-
-
-def approximate_token_count(content: str) -> int:
-    if not content:
-        return 0
-    return max(1, (len(content) + 3) // 4)

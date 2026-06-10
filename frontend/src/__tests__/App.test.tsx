@@ -1841,7 +1841,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("90k / 120k")).toBeInTheDocument();
-    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(screen.getByText("72%")).toBeInTheDocument();
   });
 
   it("uses model-reported context usage from loaded state before local estimates", async () => {
@@ -1859,7 +1859,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("12k / 48k")).toBeInTheDocument();
-    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
     expect(screen.queryByText("90k / 120k")).toBeNull();
   });
 
@@ -1877,7 +1877,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("90k / 120k")).toBeInTheDocument();
-    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(screen.getByText("72%")).toBeInTheDocument();
   });
 
   it("adds the current draft to the model-reported context baseline", async () => {
@@ -1894,7 +1894,7 @@ describe("App", () => {
     });
 
     expect(await screen.findByText("21k / 100k")).toBeInTheDocument();
-    expect(screen.getByText("21%")).toBeInTheDocument();
+    expect(screen.getByText("10%")).toBeInTheDocument();
   });
 
   it("continues counting messages after the latest saved usage marker", async () => {
@@ -1917,11 +1917,11 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("31k / 100k")).toBeInTheDocument();
-    expect(screen.getByText("31%")).toBeInTheDocument();
+    expect(screen.getByText("21%")).toBeInTheDocument();
   });
 
   it("uses a warning tone when context capacity is nearly full", async () => {
-    const highCapacityContent = "A".repeat(360_000);
+    const highCapacityContent = "A".repeat(384_000);
     mockInitialState({
       ...selectedProviderState(),
       messages: [
@@ -1939,14 +1939,14 @@ describe("App", () => {
     });
 
     await waitFor(() => {
-      expect(capacityStatus).toHaveAttribute("aria-valuenow", "75");
+      expect(capacityStatus).toHaveAttribute("aria-valuenow", "77");
     });
     if (!(capacityStatus.firstElementChild instanceof HTMLElement)) {
       throw new Error("Capacity indicator was not rendered.");
     }
     expect(capacityStatus.firstElementChild).toHaveClass("bg-amber-500");
-    expect(screen.getByText("90k / 120k")).toBeInTheDocument();
-    expect(screen.getByText("75%")).toHaveClass("text-amber-400");
+    expect(screen.getByText("96k / 120k")).toBeInTheDocument();
+    expect(screen.getByText("77%")).toHaveClass("text-amber-400");
   });
 
   it("keeps context capacity compact on narrow screens", () => {
@@ -3096,7 +3096,7 @@ describe("App", () => {
     );
     expect(screen.getByText("Context compacted")).toBeInTheDocument();
     expect(screen.getByText("12k / 120k")).toBeInTheDocument();
-    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
     expect(stateRequests).toBeGreaterThanOrEqual(2);
   });
 
@@ -3170,7 +3170,7 @@ describe("App", () => {
     );
     expect(screen.getByText("Context compacted")).toBeInTheDocument();
     expect(screen.getByText("12k / 120k")).toBeInTheDocument();
-    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
     expect(stateRequests).toBeGreaterThanOrEqual(3);
   });
 
@@ -3212,7 +3212,7 @@ describe("App", () => {
 
     await screen.findByText("Context compacted");
     expect(await screen.findByText("12k / 120k")).toBeInTheDocument();
-    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
     expect(screen.queryByText("90k / 120k")).toBeNull();
   });
 
@@ -3260,7 +3260,7 @@ describe("App", () => {
         screen.getByRole("progressbar", {
           name: "Context capacity status",
         }),
-      ).toHaveAttribute("aria-valuenow", "10");
+      ).toHaveAttribute("aria-valuenow", "0");
     });
     expect(screen.queryByText("Context compacted")).toBeNull();
 
@@ -3322,7 +3322,7 @@ describe("App", () => {
 
     await screen.findByText("Context optimized");
     expect(await screen.findByText("10k / 120k")).toBeInTheDocument();
-    expect(screen.getByText("8%")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
     expect(screen.queryByText("90k / 120k")).toBeNull();
   });
 
@@ -3370,7 +3370,7 @@ describe("App", () => {
 
     await screen.findByText("Done with measured usage.");
     expect(await screen.findByText("24k / 60k")).toBeInTheDocument();
-    expect(screen.getByText("40%")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
     expect(screen.queryByText("0 / 120k")).toBeNull();
   });
 

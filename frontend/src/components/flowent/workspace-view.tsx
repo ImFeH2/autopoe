@@ -2115,6 +2115,7 @@ function isCaretOnLastLine(textarea: HTMLTextAreaElement) {
 }
 
 const CONTEXT_CAPACITY_LIMIT = 120_000;
+const CONTEXT_BASELINE_UNITS = 12_000;
 
 type ContextCapacity = {
   percent: number;
@@ -2226,7 +2227,7 @@ function contextCapacityFromMessages(
       latestUsageInfo?.model_context_window ??
       CONTEXT_CAPACITY_LIMIT,
   );
-  const percent = Math.min(100, Math.floor((used / total) * 100));
+  const percent = contextCapacityPercent(used, total);
 
   return {
     percent,
@@ -2253,11 +2254,21 @@ function formatContextUnits(units: number) {
   return units.toString();
 }
 
+function contextCapacityPercent(used: number, total: number) {
+  if (total <= CONTEXT_BASELINE_UNITS) {
+    return used > 0 ? 100 : 0;
+  }
+
+  const effectiveUsed = Math.max(0, used - CONTEXT_BASELINE_UNITS);
+  const effectiveTotal = total - CONTEXT_BASELINE_UNITS;
+  return Math.min(100, Math.floor((effectiveUsed / effectiveTotal) * 100));
+}
+
 function approximateContextUnits(content: string) {
   if (!content) {
     return 0;
   }
-  return Math.max(1, Math.ceil(content.length / 4));
+  return Math.max(1, Math.ceil(new TextEncoder().encode(content).length / 4));
 }
 
 function shouldHandleSoftKeyboardSubmit() {

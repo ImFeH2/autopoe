@@ -16,6 +16,7 @@ from flowent.llm import ChatMessage
 from flowent.main import create_app
 from flowent.sandbox import CommandResult, SandboxRunner
 from flowent.storage import StoredMessage
+from flowent.usage import approximate_token_count
 
 
 def configure_provider(
@@ -897,10 +898,13 @@ def test_workspace_response_auto_compacts_before_next_message(
         "reasoning_output_tokens": 1,
         "total_tokens": 255,
     }
-    assert usage_info["last_token_usage"]["total_tokens"] > 0
-    assert usage_info["last_token_usage"]["total_tokens"] != 47
-    assert usage_info["last_token_usage"]["input_tokens"] == 0
-    assert usage_info["last_token_usage"]["output_tokens"] == 0
+    assert usage_info["last_token_usage"] == {
+        "cached_input_tokens": 7,
+        "input_tokens": 44,
+        "output_tokens": 3,
+        "reasoning_output_tokens": 1,
+        "total_tokens": 47,
+    }
     assert len(captured_requests) == 2
     assert (
         "CONTEXT CHECKPOINT COMPACTION"
@@ -1002,13 +1006,13 @@ def test_workspace_response_auto_compacts_after_tool_result(
     ]
     assert json.loads(events[5]["data"])["message"]["content"] == ("Context optimized")
     usage_info = json.loads(events[7]["data"])["usage_info"]
-    last_usage = usage_info["last_token_usage"]
-    assert last_usage["cached_input_tokens"] == 0
-    assert last_usage["input_tokens"] == 0
-    assert last_usage["output_tokens"] == 0
-    assert last_usage["reasoning_output_tokens"] == 0
-    assert last_usage["total_tokens"] > 100
-    assert last_usage["total_tokens"] > usage_info["total_token_usage"]["total_tokens"]
+    assert usage_info["last_token_usage"] == {
+        "cached_input_tokens": 5,
+        "input_tokens": 70,
+        "output_tokens": 4,
+        "reasoning_output_tokens": 2,
+        "total_tokens": 74,
+    }
     assert usage_info["total_token_usage"] == {
         "cached_input_tokens": 5,
         "input_tokens": 70,
@@ -2541,7 +2545,44 @@ def test_workspace_response_estimates_usage_when_model_stream_omits_usage(
     assert state["messages"][-1]["usage_info"] == state["usage_info"]
 
 
-def test_workspace_response_keeps_context_usage_separate_from_model_usage(
+def test_workspace_response_estimates_tool_results_when_model_stream_omits_usage(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    tool_content = "你" * 8_000
+    (tmp_path / "notes.txt").write_text(tool_content)
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
+                return
+            yield {"choices": [{"delta": {"content": "Read the notes."}}]}
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Read the local notes."},
+    )
+
+    assert response.status_code == 200
+    state = client.get("/api/state").json()
+    assert state["usage_info"]["last_token_usage"][
+        "total_tokens"
+    ] >= approximate_token_count(tool_content)
+
+
+def test_workspace_response_keeps_model_reported_context_usage(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -2579,9 +2620,13 @@ def test_workspace_response_keeps_context_usage_separate_from_model_usage(
     state = client.get("/api/state").json()
     usage_info = state["usage_info"]
     assert usage_info["total_token_usage"]["total_tokens"] == 90_000
-    assert 0 < usage_info["last_token_usage"]["total_tokens"] < 90_000
-    assert usage_info["last_token_usage"]["input_tokens"] == 0
-    assert usage_info["last_token_usage"]["output_tokens"] == 0
+    assert usage_info["last_token_usage"] == {
+        "cached_input_tokens": 0,
+        "input_tokens": 80_000,
+        "output_tokens": 10_000,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 90_000,
+    }
     assert events[-1]["data"]["message"]["content"] == "Tiny reply."
     assert events[-1]["data"]["message"]["usage_info"] == usage_info
     assert state["messages"][-1]["usage_info"] == usage_info

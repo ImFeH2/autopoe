@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_MODEL_CONTEXT_WINDOW = 120_000
+APPROX_BYTES_PER_TOKEN = 4
 
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "claude-3-7-sonnet-20250219": 200_000,
@@ -251,12 +252,12 @@ def estimated_token_usage_for_messages(
     *,
     output_content: str = "",
 ) -> TokenUsage:
-    total_tokens = sum(estimate_mapping_message_tokens(message) for message in messages)
+    input_tokens = sum(estimate_mapping_message_tokens(message) for message in messages)
     output_tokens = approximate_token_count(output_content)
     return TokenUsage(
-        input_tokens=max(total_tokens - output_tokens, 0),
+        input_tokens=input_tokens,
         output_tokens=output_tokens,
-        total_tokens=total_tokens,
+        total_tokens=input_tokens + output_tokens,
     )
 
 
@@ -273,7 +274,11 @@ def estimate_mapping_message_tokens(message: Mapping[str, object]) -> int:
 def approximate_token_count(content: str) -> int:
     if not content:
         return 0
-    return max(1, (len(content) + 3) // 4)
+    return max(
+        1,
+        (len(content.encode("utf-8")) + APPROX_BYTES_PER_TOKEN - 1)
+        // APPROX_BYTES_PER_TOKEN,
+    )
 
 
 def string_content(value: object) -> str:

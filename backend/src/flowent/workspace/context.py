@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Mapping, Sequence
 from typing import Literal
@@ -56,7 +57,9 @@ def should_auto_compact(
     if token_limit <= 0:
         return False
     return (
-        sum(max(1, (len(message.content) + 3) // 4) for message in messages)
+        estimated_token_usage_for_messages(
+            [message.model_dump() for message in messages]
+        ).total_tokens
         >= token_limit
     )
 
@@ -80,16 +83,60 @@ def update_context_usage_for_response(
     *,
     messages: Sequence[Mapping[str, object]],
     output_content: str,
+    output_tools: Sequence[Mapping[str, object]] = (),
     model_context_window: int,
 ) -> TokenUsageInfo:
     return recompute_context_usage(
         usage_info,
         estimated_token_usage_for_messages(
-            model_visible_messages_for_usage(messages),
-            output_content=output_content,
+            [
+                *model_visible_messages_for_usage(messages),
+                *model_visible_response_messages_for_usage(
+                    output_content, output_tools
+                ),
+            ],
         ).total_tokens,
         model_context_window=model_context_window,
     )
+
+
+def model_visible_response_messages_for_usage(
+    output_content: str,
+    output_tools: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    visible_messages: list[dict[str, object]] = []
+    for index, tool in enumerate(output_tools):
+        tool_id = str(tool.get("id") or f"call_{index}")
+        arguments = tool.get("arguments")
+        visible_messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": tool_id,
+                        "type": "function",
+                        "function": {
+                            "name": str(tool.get("name") or ""),
+                            "arguments": json.dumps(
+                                arguments if arguments is not None else {},
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
+        )
+        visible_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_id,
+                "content": str(tool.get("content") or ""),
+            }
+        )
+    if output_content:
+        visible_messages.append({"role": "assistant", "content": output_content})
+    return visible_messages
 
 
 def usage_info_for_model(

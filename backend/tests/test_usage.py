@@ -1,5 +1,10 @@
 from flowent.llm import ChatMessage
-from flowent.usage import DEFAULT_MODEL_CONTEXT_WINDOW, model_context_window_for
+from flowent.usage import (
+    DEFAULT_MODEL_CONTEXT_WINDOW,
+    approximate_token_count,
+    estimated_token_usage_for_messages,
+    model_context_window_for,
+)
 from flowent.workspace.context import should_auto_compact
 
 
@@ -33,8 +38,30 @@ def test_auto_compact_triggers_near_context_window_limit(monkeypatch) -> None:
     assert should_auto_compact(messages, context_window=400_000)
 
 
+def test_auto_compact_uses_utf8_byte_estimate(monkeypatch) -> None:
+    monkeypatch.delenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", raising=False)
+    messages = [ChatMessage(role="user", content="你" * 600)]
+
+    assert should_auto_compact(messages, context_window=400)
+
+
 def test_auto_compact_env_limit_overrides_context_window_ratio(monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "120000")
     messages = [ChatMessage(role="user", content="A" * (120_000 * 4))]
 
     assert should_auto_compact(messages, context_window=400_000)
+
+
+def test_token_estimate_uses_utf8_bytes() -> None:
+    assert approximate_token_count("你" * 4) == 3
+
+
+def test_estimated_usage_includes_output_content() -> None:
+    usage = estimated_token_usage_for_messages(
+        [{"role": "user", "content": "AAAA"}],
+        output_content="BBBB",
+    )
+
+    assert usage.input_tokens == 1
+    assert usage.output_tokens == 1
+    assert usage.total_tokens == 2

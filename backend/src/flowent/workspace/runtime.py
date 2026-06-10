@@ -243,6 +243,8 @@ class WorkspaceRuntime:
         assistant_id = str(uuid4())
         assistant_output = AssistantOutputBuilder(assistant_id)
         turn_usage_info: TokenUsageInfo | None = None
+        current_output_index = 0
+        latest_usage_output_index: int | None = None
 
         async def review_tool_approval(request: ApprovalReviewRequest):
             return await review_approval_request(
@@ -289,6 +291,7 @@ class WorkspaceRuntime:
             if event.event == "output_start":
                 index = event.data.get("index")
                 if isinstance(index, int):
+                    current_output_index = index
                     assistant_output.start_group(index)
             if event.event == "delta":
                 assistant_output.append_text(str(event.data.get("content") or ""))
@@ -297,18 +300,14 @@ class WorkspaceRuntime:
             if event.event == "usage":
                 usage_data = event.data.get("usage")
                 if isinstance(usage_data, dict):
-                    usage_info = update_context_usage_for_response(
-                        append_token_usage(
-                            self.store.read_usage_info(),
-                            TokenUsage.model_validate(usage_data),
-                            model_context_window=context_window_limit,
-                        ),
-                        messages=request_messages,
-                        output_content=assistant_output.content,
+                    usage_info = append_token_usage(
+                        self.store.read_usage_info(),
+                        TokenUsage.model_validate(usage_data),
                         model_context_window=context_window_limit,
                     )
                     self.store.save_usage_info(usage_info)
                     turn_usage_info = usage_info
+                    latest_usage_output_index = current_output_index
             if event.event == "tool_start":
                 tool = event.data.get("tool")
                 if isinstance(tool, dict) and isinstance(tool.get("id"), str):
@@ -325,18 +324,18 @@ class WorkspaceRuntime:
                     assistant_output.apply_done_message(message)
 
         final_usage_info = turn_usage_info
-        if final_usage_info is None:
+        if (
+            final_usage_info is None
+            or latest_usage_output_index != current_output_index
+        ):
             final_usage_info = update_context_usage_for_response(
-                self.store.read_usage_info(),
+                final_usage_info or self.store.read_usage_info(),
                 messages=request_messages,
                 output_content=assistant_output.content,
-                model_context_window=context_window_limit,
-            )
-        else:
-            final_usage_info = update_context_usage_for_response(
-                final_usage_info,
-                messages=request_messages,
-                output_content=assistant_output.content,
+                output_tools=[
+                    tool.model_dump(exclude_none=True)
+                    for tool in assistant_output.tools.values()
+                ],
                 model_context_window=context_window_limit,
             )
         self.store.save_usage_info(final_usage_info)
@@ -602,6 +601,8 @@ class WorkspaceRuntime:
             try:
                 current_tool_id: str | None = None
                 turn_usage_info: TokenUsageInfo | None = None
+                current_output_index = 0
+                latest_usage_output_index: int | None = None
                 current_request_messages = self.request_messages_for_content(
                     state,
                     next_messages,
@@ -762,6 +763,7 @@ class WorkspaceRuntime:
                     if event.event == "output_start":
                         index = event.data.get("index")
                         if isinstance(index, int):
+                            current_output_index = index
                             run.active_output = None
                             assistant_output.start_group(index)
                             snapshot_after_event = persist_assistant()
@@ -802,18 +804,14 @@ class WorkspaceRuntime:
                     if event.event == "usage":
                         usage_data = event.data.get("usage")
                         if isinstance(usage_data, dict):
-                            usage_info = update_context_usage_for_response(
-                                append_token_usage(
-                                    self.store.read_usage_info(),
-                                    TokenUsage.model_validate(usage_data),
-                                    model_context_window=context_window_limit,
-                                ),
-                                messages=current_request_messages,
-                                output_content=assistant_output.content,
+                            usage_info = append_token_usage(
+                                self.store.read_usage_info(),
+                                TokenUsage.model_validate(usage_data),
                                 model_context_window=context_window_limit,
                             )
                             self.store.save_usage_info(usage_info)
                             turn_usage_info = usage_info
+                            latest_usage_output_index = current_output_index
                             run_event_data = usage_event_data(usage_info)
                             should_append_run_event = True
                             snapshot_after_event = persist_assistant()
@@ -830,18 +828,18 @@ class WorkspaceRuntime:
                             assistant_output.apply_done_message(message)
                             response_usage_info = self.store.read_usage_info()
                             final_usage_info = turn_usage_info
-                            if final_usage_info is None:
+                            if (
+                                final_usage_info is None
+                                or latest_usage_output_index != current_output_index
+                            ):
                                 final_usage_info = update_context_usage_for_response(
-                                    response_usage_info,
+                                    final_usage_info or response_usage_info,
                                     messages=current_request_messages,
                                     output_content=assistant_output.content,
-                                    model_context_window=context_window_limit,
-                                )
-                            else:
-                                final_usage_info = update_context_usage_for_response(
-                                    final_usage_info,
-                                    messages=current_request_messages,
-                                    output_content=assistant_output.content,
+                                    output_tools=[
+                                        tool.model_dump(exclude_none=True)
+                                        for tool in assistant_output.tools.values()
+                                    ],
                                     model_context_window=context_window_limit,
                                 )
                             self.store.save_usage_info(final_usage_info)
