@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
+from flowent.network import flowent_user_agent
 from flowent.patch import affected_paths
 from flowent.sandbox import SandboxError, SandboxRunner
 from flowent.shell import shell_invocation
@@ -439,7 +440,7 @@ def default_web_search(query: str) -> list[dict[str, str]]:
     encoded_query = urllib.parse.urlencode({"q": query})
     request = urllib.request.Request(
         f"https://duckduckgo.com/html/?{encoded_query}",
-        headers={"User-Agent": "Flowent/0.1"},
+        headers={"User-Agent": flowent_user_agent()},
     )
     with urllib.request.urlopen(request, timeout=10) as response:
         body = response.read().decode(errors="replace")

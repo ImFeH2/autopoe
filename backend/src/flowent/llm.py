@@ -13,6 +13,7 @@ from flowent.logging import (
     configure_litellm_logging,
     write_llm_request_diagnostic,
 )
+from flowent.network import flowent_user_agent
 from flowent.usage import TokenUsage, token_usage_from_response
 
 
@@ -300,6 +301,7 @@ def build_litellm_request(
     )
     request: dict[str, Any] = {
         "api_key": connection.secret_reference,
+        "extra_headers": {"User-Agent": flowent_user_agent()},
         "messages": request_messages,
         "model": provider_model_name(connection),
     }

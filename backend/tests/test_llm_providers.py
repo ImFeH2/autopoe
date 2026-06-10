@@ -18,6 +18,7 @@ from flowent.llm import (
     stream_chat,
     stream_chat_chunks,
 )
+from flowent.network import flowent_user_agent
 
 
 def read_single_llm_request_diagnostic(tmp_path):
@@ -53,12 +54,28 @@ def test_build_litellm_request_maps_provider_connection_to_completion_args() -> 
     assert request == {
         "api_base": "https://example.test/v1",
         "api_key": "connection-primary",
+        "extra_headers": {"User-Agent": flowent_user_agent()},
         "messages": [
             {"role": "system", "content": "Keep answers direct."},
             {"role": "user", "content": "Draft a launch checklist."},
         ],
         "model": "anthropic/claude-sonnet-4-5",
     }
+
+
+def test_build_litellm_request_uses_flowent_user_agent() -> None:
+    connection = ProviderConnection(
+        name="Primary",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+    )
+
+    request = build_litellm_request(
+        connection, [ChatMessage(role="user", content="Draft a checklist.")]
+    )
+
+    assert request["extra_headers"] == {"User-Agent": flowent_user_agent()}
 
 
 def test_build_litellm_request_appends_default_api_version_to_base_url() -> None:

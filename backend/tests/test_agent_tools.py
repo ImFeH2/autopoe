@@ -13,8 +13,9 @@ from fastapi.testclient import TestClient
 from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT, run_agent_stream
 from flowent.llm import ProviderConnection, ProviderFormat
 from flowent.main import create_app
+from flowent.network import flowent_user_agent
 from flowent.sandbox import CommandResult, SandboxCommand, SandboxRunner
-from flowent.tools import ToolContext, ToolResult, run_tool
+from flowent.tools import ToolContext, ToolResult, default_web_search, run_tool
 
 
 class UserRecord:
@@ -958,6 +959,37 @@ def test_web_search_result_enters_tool_output(tmp_path) -> None:
 
     assert result.ok
     assert "https://example.test" in result.content
+
+
+def test_default_web_search_uses_flowent_user_agent(monkeypatch) -> None:
+    captured_headers: dict[str, str | None] = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self) -> bytes:
+            return b'<a class="result__a" href="https://example.test">Result</a>'
+
+    def fake_urlopen(request, timeout: int):
+        captured_headers["user_agent"] = request.get_header("User-agent")
+        captured_headers["timeout"] = str(timeout)
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    results = default_web_search("release checklist")
+
+    assert captured_headers == {
+        "timeout": "10",
+        "user_agent": flowent_user_agent(),
+    }
+    assert results == [
+        {"title": "Result", "url": "https://example.test", "snippet": ""}
+    ]
 
 
 def test_agent_continues_until_final_text_after_multiple_tool_rounds(
