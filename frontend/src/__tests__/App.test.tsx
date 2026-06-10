@@ -5356,6 +5356,11 @@ describe("App", () => {
     const planTasks = within(composerForm).getByRole("list", {
       name: "Plan tasks",
     });
+    expect(planTasks.parentElement).toHaveAttribute(
+      "data-slot",
+      "plan-tasks-panel",
+    );
+    expect(planTasks.parentElement).toHaveClass("overflow-hidden");
     expect(within(planTasks).getByText("Inspect warnings")).toBeInTheDocument();
     expect(
       within(planTasks).getByText("Apply focused fixes"),

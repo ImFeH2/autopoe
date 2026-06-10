@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Activity,
   ArrowUp,
@@ -1343,6 +1344,7 @@ function PlanTray({
   plan: WorkspacePlan | null;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const shouldReduceMotion = useReducedMotion();
 
   useEffect(() => {
     if (isHidden) {
@@ -1377,35 +1379,57 @@ function PlanTray({
         />
         <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
       </Button>
-      {isOpen ? (
-        <ol
-          aria-label="Plan tasks"
-          className="grid max-h-[150px] gap-1 overflow-auto border-t border-zinc-800/50 bg-zinc-950/50 p-1.5 sm:max-h-[25vh]"
-        >
-          {plan.items.map((item, index) => (
-            <li
-              className={cn(
-                "grid min-w-0 grid-cols-[1.25rem_auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg px-2 py-1.5 text-sm leading-5",
-                item.status === "in_progress"
-                  ? "bg-input/30 text-white"
-                  : item.status === "completed"
-                    ? "text-white/55"
-                    : "text-white/75",
-              )}
-              key={`${index}-${item.step}`}
+      <AnimatePresence initial={false}>
+        {isOpen ? (
+          <motion.div
+            animate={
+              shouldReduceMotion
+                ? { opacity: 1 }
+                : { height: "auto", opacity: 1 }
+            }
+            className="overflow-hidden border-t border-zinc-800/50 bg-zinc-950/50"
+            data-slot="plan-tasks-panel"
+            exit={
+              shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0 }
+            }
+            initial={shouldReduceMotion ? false : { height: 0, opacity: 0 }}
+            key="plan-tasks-panel"
+            transition={
+              shouldReduceMotion
+                ? { duration: 0 }
+                : { duration: 0.18, ease: [0.32, 0.72, 0, 1] }
+            }
+          >
+            <ol
+              aria-label="Plan tasks"
+              className="grid max-h-[150px] gap-1 overflow-auto p-1.5 sm:max-h-[25vh]"
             >
-              <span className="text-right text-xs leading-5 text-white/35">
-                {index + 1}
-              </span>
-              <PlanStatusIcon status={item.status} />
-              <span className="min-w-0 break-words">{item.step}</span>
-              <span className="shrink-0 text-xs leading-5 text-white/45">
-                {planStatusLabel(item.status)}
-              </span>
-            </li>
-          ))}
-        </ol>
-      ) : null}
+              {plan.items.map((item, index) => (
+                <li
+                  className={cn(
+                    "grid min-w-0 grid-cols-[1.25rem_auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg px-2 py-1.5 text-sm leading-5",
+                    item.status === "in_progress"
+                      ? "bg-input/30 text-white"
+                      : item.status === "completed"
+                        ? "text-white/55"
+                        : "text-white/75",
+                  )}
+                  key={`${index}-${item.step}`}
+                >
+                  <span className="text-right text-xs leading-5 text-white/35">
+                    {index + 1}
+                  </span>
+                  <PlanStatusIcon status={item.status} />
+                  <span className="min-w-0 break-words">{item.step}</span>
+                  <span className="shrink-0 text-xs leading-5 text-white/45">
+                    {planStatusLabel(item.status)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
