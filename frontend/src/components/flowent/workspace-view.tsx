@@ -1344,6 +1344,7 @@ function PlanTray({
   plan: WorkspacePlan | null;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const trayRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
 
   useEffect(() => {
@@ -1351,6 +1352,38 @@ function PlanTray({
       setIsOpen(false);
     }
   }, [isHidden]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType === "mouse") {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (trayRef.current?.contains(target)) {
+        return;
+      }
+      setIsOpen(false);
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
 
   if (!plan || isHidden) {
     return null;
@@ -1362,7 +1395,15 @@ function PlanTray({
   const summary = `Plan · ${completedCount}/${plan.items.length} done`;
 
   return (
-    <div className="border-b border-zinc-800/50 bg-zinc-900/40 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]">
+    <div
+      className="border-b border-zinc-800/50 bg-zinc-900/40 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]"
+      onPointerLeave={(event) => {
+        if (event.pointerType === "mouse") {
+          setIsOpen(false);
+        }
+      }}
+      ref={trayRef}
+    >
       <Button
         aria-expanded={isOpen}
         className="h-9 w-full justify-start gap-2 rounded-none border-0 bg-transparent px-3 text-xs font-medium text-zinc-300 shadow-none hover:bg-input/40 hover:text-white sm:text-sm"

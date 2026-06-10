@@ -5372,6 +5372,71 @@ describe("App", () => {
     await expectDocumentText("Plan updated.");
   });
 
+  it("collapses an open plan when users leave it or dismiss it", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      messages: [
+        {
+          author: "assistant",
+          content: "Plan ready.",
+          id: "message-plan",
+          tools: [
+            {
+              data: {
+                items: [
+                  { status: "completed", step: "Inspect warnings" },
+                  { status: "in_progress", step: "Apply focused fixes" },
+                  { status: "pending", step: "Verify the result" },
+                ],
+              },
+              id: "tool-plan",
+              name: "update_plan",
+              status: "success",
+              title: "Updating plan",
+            },
+          ],
+        },
+      ],
+    });
+    render(<App />);
+
+    const composerForm = await screen.findByRole("form", {
+      name: "Workspace composer",
+    });
+    const planToggle = await within(composerForm).findByRole("button", {
+      name: "Plan · 1/3 done",
+    });
+
+    await user.click(planToggle);
+    expect(planToggle).toHaveAttribute("aria-expanded", "true");
+    const planTasks = within(composerForm).getByRole("list", {
+      name: "Plan tasks",
+    });
+    const planContainer = planToggle.parentElement;
+    expect(planContainer).not.toBeNull();
+
+    fireEvent.pointerLeave(planContainer as HTMLElement, {
+      pointerType: "mouse",
+    });
+    expect(planToggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(planToggle);
+    expect(planToggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.pointerDown(planTasks, { pointerType: "touch" });
+    expect(planToggle).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.pointerDown(screen.getByLabelText("Message Flowent"), {
+      pointerType: "touch",
+    });
+    expect(planToggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(planToggle);
+    expect(planToggle).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{Escape}");
+    expect(planToggle).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("renders assistant reply lists as Markdown", async () => {
     const user = userEvent.setup();
     mockInitialState(
