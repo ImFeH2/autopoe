@@ -64,7 +64,7 @@ def register_workspace_routes(
     ) -> WorkspaceRunResponse:
         logger.info("Workspace run requested content_length=%s", len(request.content))
         logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
-        run = runtime.create_run(request.content)
+        run = runtime.create_run(request.content, message_id=request.message_id)
         return WorkspaceRunResponse(run_id=run.id)
 
     @app.get("/api/workspace/runs/{run_id}/stream")
@@ -98,7 +98,7 @@ def register_workspace_routes(
             "Workspace response requested content_length=%s", len(request.content)
         )
         logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
-        run = runtime.create_run(request.content)
+        run = runtime.create_run(request.content, message_id=request.message_id)
         return StreamingResponse(
             runtime.run_stream(run, include_snapshots=False),
             media_type="text/event-stream",

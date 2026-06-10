@@ -1618,6 +1618,29 @@ const fetchWasCalledWith = (path: string, method: string) =>
     return input === path && init?.method === method;
   });
 
+const expectWorkspaceMessagePost = (path: string, content: string) => {
+  const request = vi.mocked(window.fetch).mock.calls.find(([input, init]) => {
+    if (input !== path || init?.method !== "POST") {
+      return false;
+    }
+    try {
+      const body = JSON.parse(String(init.body)) as { content?: unknown };
+      return body.content === content;
+    } catch {
+      return false;
+    }
+  });
+  expect(request).toBeDefined();
+  const body = JSON.parse(String(request?.[1]?.body)) as {
+    content?: unknown;
+    message_id?: unknown;
+  };
+  expect(body).toEqual({
+    content,
+    message_id: expect.stringMatching(/^message-/),
+  });
+};
+
 const mockSelectedProviderWorkspaceResponse = (response: Response) => {
   mockInitialState(selectedProviderState());
   vi.mocked(window.fetch).mockImplementation(async (input, init) => {
@@ -3706,12 +3729,9 @@ describe("App", () => {
     await user.type(composer, "Draft a launch checklist");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(window.fetch).toHaveBeenCalledWith(
+    expectWorkspaceMessagePost(
       "/api/workspace/respond",
-      expect.objectContaining({
-        body: JSON.stringify({ content: "Draft a launch checklist" }),
-        method: "POST",
-      }),
+      "Draft a launch checklist",
     );
     await expectDocumentText("The plan is ready.");
   });
@@ -3774,12 +3794,9 @@ describe("App", () => {
 
     await expectDocumentText("The plan is ready.");
     assistantSnapshot.finish();
-    expect(window.fetch).toHaveBeenCalledWith(
+    expectWorkspaceMessagePost(
       "/api/workspace/runs",
-      expect.objectContaining({
-        body: JSON.stringify({ content: "Draft a launch checklist" }),
-        method: "POST",
-      }),
+      "Draft a launch checklist",
     );
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workspace/runs/run-checklist/stream?after=0",
@@ -4482,12 +4499,9 @@ describe("App", () => {
 
     await expectDocumentText("First step is ready.");
 
-    expect(window.fetch).toHaveBeenCalledWith(
+    expectWorkspaceMessagePost(
       "/api/workspace/respond",
-      expect.objectContaining({
-        body: JSON.stringify({ content: "Draft a launch checklist" }),
-        method: "POST",
-      }),
+      "Draft a launch checklist",
     );
   });
 
@@ -5532,13 +5546,7 @@ describe("App", () => {
     await user.type(composer, "   ");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/respond",
-      expect.objectContaining({
-        body: JSON.stringify({ content: "   " }),
-        method: "POST",
-      }),
-    );
+    expectWorkspaceMessagePost("/api/workspace/respond", "   ");
   });
 
   it("keeps the composer content when Shift Enter is pressed", async () => {
@@ -8251,13 +8259,7 @@ describe("App", () => {
     await user.type(composer, " /clear");
     await user.keyboard("{Enter}");
 
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/respond",
-      expect.objectContaining({
-        body: JSON.stringify({ content: " /clear" }),
-        method: "POST",
-      }),
-    );
+    expectWorkspaceMessagePost("/api/workspace/respond", " /clear");
     expect(screen.getByText("/clear")).toBeInTheDocument();
   });
 
@@ -8370,13 +8372,7 @@ describe("App", () => {
     await user.type(composer, "Continue from there");
     await user.keyboard("{Enter}");
 
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/respond",
-      expect.objectContaining({
-        body: JSON.stringify({ content: "Continue from there" }),
-        method: "POST",
-      }),
-    );
+    expectWorkspaceMessagePost("/api/workspace/respond", "Continue from there");
     expect(screen.getByText("Context compacted")).toBeInTheDocument();
   });
 

@@ -443,7 +443,9 @@ class WorkspaceRuntime:
             {"message": stream_message_data(message, run.active_output)},
         )
 
-    def create_run(self, content: str) -> WorkspaceRun:
+    def create_run(
+        self, content: str, *, message_id: str | None = None
+    ) -> WorkspaceRun:
         if self.has_active_run():
             active_run = self.active_run()
             raise HTTPException(
@@ -452,10 +454,13 @@ class WorkspaceRuntime:
                 headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
             )
         state = self.store.read_state()
+        user_message_id = message_id or str(uuid4())
+        if any(message.id == user_message_id for message in state.messages):
+            raise HTTPException(status_code=409, detail="Message already exists.")
         user_message = StoredMessage(
             author="user",
             content=content,
-            id=str(uuid4()),
+            id=user_message_id,
         )
         next_messages = [*state.messages, user_message]
         self.store.save_messages(next_messages)

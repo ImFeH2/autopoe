@@ -2110,9 +2110,9 @@ function App() {
   );
 
   const requestWorkspaceRun = useCallback(
-    async (content: string) => {
+    async (content: string, messageId: string) => {
       const response = await fetch("/api/workspace/runs", {
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, message_id: messageId }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
@@ -2226,11 +2226,12 @@ function App() {
 
   const requestLegacyWorkspaceResponse = async (
     content: string,
+    messageId: string,
     handlers: WorkspaceStreamHandlers,
     signal?: AbortSignal,
   ) => {
     const response = await fetch("/api/workspace/respond", {
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, message_id: messageId }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
       signal,
@@ -2369,12 +2370,13 @@ function App() {
     responseRunRef.current = responseRun;
     activeRunEventIndexRef.current = 0;
     const userContent = submittedDraft;
+    const userMessageId = createClientId("message");
     const nextMessages: Message[] = [
       ...baseMessages,
       {
         author: "user",
         content: userContent,
-        id: createClientId("message"),
+        id: userMessageId,
       },
     ];
     setResponseError("");
@@ -2386,7 +2388,7 @@ function App() {
 
     try {
       try {
-        const runId = await requestWorkspaceRun(userContent);
+        const runId = await requestWorkspaceRun(userContent, userMessageId);
         activeRunIdRef.current = runId;
         activeRunEventIndexRef.current = 0;
         setActiveRunId(runId);
@@ -2398,6 +2400,7 @@ function App() {
           );
           await requestLegacyWorkspaceResponse(
             userContent,
+            userMessageId,
             handlers,
             responseAbortController.signal,
           );

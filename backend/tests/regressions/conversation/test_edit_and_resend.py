@@ -111,6 +111,46 @@ async def test_workspace_edits_and_resends_user_message_from_server_state(
 
 
 @pytest.mark.anyio
+async def test_workspace_run_keeps_sent_message_editable_by_request_id(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Initial checklist."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider(client)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={
+                "content": "Draft a launch checklist.",
+                "message_id": "message-sent-checklist",
+            },
+        )
+        assert response.status_code == 200
+        run_id = response.json()["run_id"]
+        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+        edit_response = await client.post(
+            "/api/workspace/messages/message-sent-checklist/edit",
+            json={"action": "save", "content": "Update the launch checklist."},
+        )
+        state = (await client.get("/api/state")).json()
+
+    assert stream_response.status_code == 200
+    assert edit_response.status_code == 200
+    assert state["messages"][0]["id"] == "message-sent-checklist"
+    assert state["messages"][0]["content"] == "Update the launch checklist."
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("author", ["assistant", "tool"])
 async def test_workspace_rejects_editing_non_user_messages(
     tmp_path, monkeypatch, author: str

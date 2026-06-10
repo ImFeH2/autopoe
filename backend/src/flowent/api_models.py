@@ -43,6 +43,7 @@ class WorkspaceRespondRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: str
+    message_id: str | None = None
 
 
 class WorkspaceRunResponse(BaseModel):

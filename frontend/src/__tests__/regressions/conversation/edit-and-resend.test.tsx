@@ -263,4 +263,101 @@ describe("edit and resend regressions", () => {
       expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     });
   });
+
+  it("uses the sent message identity when editing a message from the same page", async () => {
+    const user = userEvent.setup();
+    let sentMessageId = "";
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState([])), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as {
+          content?: unknown;
+          message_id?: unknown;
+        };
+        expect(body.content).toBe("Draft a launch checklist");
+        const messageId = body.message_id;
+        expect(typeof messageId).toBe("string");
+        if (typeof messageId !== "string") {
+          throw new Error("Message ID was not sent.");
+        }
+        expect(messageId).toMatch(/^message-/);
+        sentMessageId = messageId;
+        return new Response(JSON.stringify({ run_id: "run-send" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/runs/run-send/stream?after=0") {
+        return assistantStreamResponse("Initial checklist.");
+      }
+      if (
+        input ===
+          `/api/workspace/messages/${encodeURIComponent(sentMessageId)}/edit` &&
+        init?.method === "POST"
+      ) {
+        expect(JSON.parse(String(init.body))).toEqual({
+          action: "resend",
+          content: "Update the launch checklist",
+        });
+        return new Response(
+          JSON.stringify({
+            messages: [
+              {
+                author: "user",
+                content: "Update the launch checklist",
+                id: sentMessageId,
+              },
+            ],
+            run_id: "run-edit-sent-message",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (
+        input === "/api/workspace/runs/run-edit-sent-message/stream?after=0" &&
+        init?.method === "GET"
+      ) {
+        return assistantStreamResponse("Updated checklist.");
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const sentArticle = await messageArticle("Draft a launch checklist");
+    await user.click(within(sentArticle).getByRole("button", { name: "Edit" }));
+    const editor = within(sentArticle).getByRole("textbox", {
+      name: "Edit message",
+    });
+    await user.clear(editor);
+    await user.type(editor, "Update the launch checklist");
+    await user.click(
+      within(sentArticle).getByRole("button", { name: "Save and retry" }),
+    );
+
+    expect(await screen.findByText("Updated checklist.")).toBeInTheDocument();
+    expect(sentMessageId).toMatch(/^message-/);
+  });
 });
