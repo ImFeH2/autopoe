@@ -453,6 +453,11 @@ class WorkspaceRuntime:
                 detail="Response in progress",
                 headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
             )
+        if self.store.read_is_compacting():
+            raise HTTPException(
+                status_code=409,
+                detail="Context refining in progress. Please wait a moment.",
+            )
         state = self.store.read_state()
         user_message_id = message_id or str(uuid4())
         if any(message.id == user_message_id for message in state.messages):
@@ -484,6 +489,11 @@ class WorkspaceRuntime:
                 status_code=409,
                 detail="Response in progress",
                 headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
+            )
+        if self.store.read_is_compacting():
+            raise HTTPException(
+                status_code=409,
+                detail="Context refining in progress. Please wait a moment.",
             )
         state = self.store.read_state()
         message_index = next(

@@ -2723,6 +2723,82 @@ def test_workspace_compact_is_unavailable_while_response_is_running(
     asyncio.run(run_test())
 
 
+@pytest.mark.anyio
+async def test_workspace_response_is_unavailable_while_compact_is_running(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    compact_started = asyncio.Event()
+    compact_can_finish = asyncio.Event()
+
+    async def fake_completion(**request: object) -> dict[str, object]:
+        compact_started.set()
+        await asyncio.wait_for(compact_can_finish.wait(), timeout=2)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Keep launch context tidy.",
+                        "role": "assistant",
+                    }
+                }
+            ]
+        }
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Draft a launch checklist.",
+                        "id": "message-1",
+                    },
+                    {
+                        "author": "assistant",
+                        "content": "Use provider setup first.",
+                        "id": "message-2",
+                    },
+                ]
+            },
+        )
+        compact_response_task = asyncio.create_task(
+            client.post("/api/workspace/compact")
+        )
+        await asyncio.wait_for(compact_started.wait(), timeout=2)
+        response = await client.post(
+            "/api/workspace/runs",
+            json={"content": "Can I send now?", "message_id": "message-3"},
+        )
+        legacy_response = await client.post(
+            "/api/workspace/respond",
+            json={"content": "Can I send now?", "message_id": "message-4"},
+        )
+        active_state = (await client.get("/api/state")).json()
+        compact_can_finish.set()
+        compact_response = await compact_response_task
+
+    assert response.status_code == 409
+    assert legacy_response.status_code == 409
+    assert response.json()["detail"] == (
+        "Context refining in progress. Please wait a moment."
+    )
+    assert legacy_response.json()["detail"] == (
+        "Context refining in progress. Please wait a moment."
+    )
+    assert [message["content"] for message in active_state["messages"]] == [
+        "Draft a launch checklist.",
+        "Use provider setup first.",
+    ]
+    assert compact_response.status_code == 200
+
+
 def configured_agent_prompt_message(
     request: dict[str, object],
 ) -> dict[str, object] | None:

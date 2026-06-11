@@ -2359,7 +2359,7 @@ function App() {
     baseMessages = messages,
     options: { clearDraft?: boolean } = {},
   ) => {
-    if (submittedDraft.length === 0 || isResponding) {
+    if (submittedDraft.length === 0 || isResponding || isRefiningContext) {
       return;
     }
     const shouldClearDraft = options.clearDraft ?? baseMessages === messages;

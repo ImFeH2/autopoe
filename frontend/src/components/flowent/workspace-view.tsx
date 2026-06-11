@@ -1690,7 +1690,9 @@ function ChatComposer({
   const handlesSoftKeyboardSubmit = shouldHandleSoftKeyboardSubmit();
   handlesSoftKeyboardSubmitRef.current = handlesSoftKeyboardSubmit;
   const canSubmit =
-    currentDraft().length > 0 && (!isSending || canSubmitCommand);
+    currentDraft().length > 0 &&
+    (!isSending || canSubmitCommand) &&
+    !isRefiningContext;
   const showStopButton = isSending && !canSubmitCommand;
   const isSendUnavailable = !showStopButton && !canSubmit;
   const isSendDisabled = isSendUnavailable && !handlesSoftKeyboardSubmit;

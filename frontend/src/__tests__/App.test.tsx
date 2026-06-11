@@ -2932,7 +2932,7 @@ describe("App", () => {
     await screen.findByText("Context compacted");
   });
 
-  it("keeps the composer available while Compact is refining context", async () => {
+  it("keeps the draft editable but prevents sending while Compact is refining context", async () => {
     const user = userEvent.setup();
     const compactRequest = deferred();
     mockInitialState(selectedProviderState());
@@ -2962,11 +2962,13 @@ describe("App", () => {
     await screen.findByText("Refining...");
 
     expect(composer).toBeEnabled();
-    expect(
-      screen.getByRole("button", { name: "Send message" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     await user.type(composer, "Keep writing");
     expect(composer).toHaveValue("Keep writing");
+    await user.keyboard("{Enter}");
+    expect(composer).toHaveValue("Keep writing");
+    expect(fetchWasCalledWith("/api/workspace/runs", "POST")).toBe(false);
+    expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
 
     compactRequest.resolve();
     await screen.findByText("Context compacted");
