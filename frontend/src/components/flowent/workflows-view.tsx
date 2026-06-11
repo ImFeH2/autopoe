@@ -59,6 +59,7 @@ import {
   sectionTitleClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
+import { useFlowentToast } from "@/components/flowent/toast-context";
 import type {
   Workflow,
   WorkflowDefinition,
@@ -944,9 +945,7 @@ function WorkflowEditorView({
   onMarkDirty,
   onRun,
   onSave,
-  runError,
   runResult,
-  saveError,
 }: {
   draftWorkflow: Workflow;
   isDirty: boolean;
@@ -957,9 +956,7 @@ function WorkflowEditorView({
   onMarkDirty: () => void;
   onRun: () => void;
   onSave: () => void;
-  runError: string;
   runResult: WorkflowRunResult | null;
-  saveError: string;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
@@ -1043,11 +1040,6 @@ function WorkflowEditorView({
           </Button>
         </div>
       </div>
-      {saveError || runError ? (
-        <div className="border-b border-white/10 px-3 py-2 text-xs text-[#ff8a8a]">
-          {saveError || runError}
-        </div>
-      ) : null}
       {runResult?.outputs ? (
         <div className="flex min-h-9 shrink-0 items-center gap-2 border-b border-white/10 px-3 text-xs text-[#dedede]">
           <ArrowRight className="size-4 text-[#7ddf89]" aria-hidden="true" />
@@ -1100,8 +1092,7 @@ export function WorkflowsView({
     activeWorkflow ? cloneWorkflow(activeWorkflow) : createDraftWorkflow(),
   );
   const [isDirty, setIsDirty] = useState(!activeWorkflow);
-  const [saveError, setSaveError] = useState("");
-  const [runError, setRunError] = useState("");
+  const toast = useFlowentToast();
   const editorKeyRef = useRef({
     newWorkflowKey,
     workflowId: activeWorkflow?.id ?? "",
@@ -1123,8 +1114,6 @@ export function WorkflowsView({
       activeWorkflow ? cloneWorkflow(activeWorkflow) : createDraftWorkflow(),
     );
     setIsDirty(!activeWorkflow);
-    setSaveError("");
-    setRunError("");
   }, [activeWorkflow, newWorkflowKey]);
 
   const activeRunResult =
@@ -1141,10 +1130,9 @@ export function WorkflowsView({
   };
 
   const saveDraft = async () => {
-    setSaveError("");
     const result = await onSaveWorkflow(draftWorkflow);
     if (!result.data) {
-      setSaveError(result.error);
+      toast.error(result.error);
       return null;
     }
     setDraftWorkflow(result.data);
@@ -1153,14 +1141,13 @@ export function WorkflowsView({
   };
 
   const runDraft = async () => {
-    setRunError("");
     const savedWorkflow = await saveDraft();
     if (!savedWorkflow) {
       return;
     }
     const result = await onRunWorkflow(savedWorkflow.id);
     if (!result.data) {
-      setRunError(result.error);
+      toast.error(result.error);
     }
   };
 
@@ -1188,9 +1175,7 @@ export function WorkflowsView({
       onSave={() => {
         void saveDraft();
       }}
-      runError={runError}
       runResult={activeRunResult}
-      saveError={saveError}
     />
   );
 }

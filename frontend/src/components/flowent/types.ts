@@ -8,6 +8,16 @@ export type ViewId =
   | "skills"
   | "settings";
 
+export type FlowentToastTone = "error" | "info" | "success";
+
+export type FlowentToast = {
+  description?: string;
+  duration: number;
+  id: string;
+  message: string;
+  tone: FlowentToastTone;
+};
+
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
 
 export type ProviderKind =

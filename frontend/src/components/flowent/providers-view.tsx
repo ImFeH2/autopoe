@@ -31,7 +31,6 @@ import { cn } from "@/lib/utils";
 
 export function ProvidersView({
   activeProvider,
-  fetchError,
   isFetchingModels,
   isCreatingProvider,
   onFetchModels,
@@ -43,7 +42,6 @@ export function ProvidersView({
   providers,
 }: {
   activeProvider: Provider;
-  fetchError: string;
   isFetchingModels: boolean;
   isCreatingProvider: boolean;
   onFetchModels: () => void;
@@ -66,7 +64,6 @@ export function ProvidersView({
         />
         <ProviderDetails
           activeProvider={activeProvider}
-          fetchError={fetchError}
           isFetchingModels={isFetchingModels}
           isCreatingProvider={isCreatingProvider}
           onFetchModels={onFetchModels}
@@ -147,7 +144,6 @@ function ProviderSidebar({
 
 function ProviderDetails({
   activeProvider,
-  fetchError,
   isFetchingModels,
   isCreatingProvider,
   onFetchModels,
@@ -156,7 +152,6 @@ function ProviderDetails({
   onUpdateProvider,
 }: {
   activeProvider: Provider;
-  fetchError: string;
   isFetchingModels: boolean;
   isCreatingProvider: boolean;
   onFetchModels: () => void;
@@ -188,10 +183,7 @@ function ProviderDetails({
 
       <section className="grid gap-3">
         <h3 className="text-base font-semibold text-white">Models</h3>
-        <ProviderModels
-          fetchError={fetchError}
-          models={activeProvider.models}
-        />
+        <ProviderModels models={activeProvider.models} />
       </section>
 
       <div className={cn(formActionsClassName, "mt-0")}>
@@ -311,13 +303,7 @@ function ProviderFields({
   );
 }
 
-function ProviderModels({
-  fetchError,
-  models,
-}: {
-  fetchError: string;
-  models: string[];
-}) {
+function ProviderModels({ models }: { models: string[] }) {
   return (
     <div className={fieldGroupClassName}>
       {models.length === 0 ? (
@@ -337,11 +323,6 @@ function ProviderModels({
           ))}
         </div>
       )}
-      {fetchError ? (
-        <p className="m-0 text-xs leading-[1.4] text-destructive">
-          {fetchError}
-        </p>
-      ) : null}
     </div>
   );
 }

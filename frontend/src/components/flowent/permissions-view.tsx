@@ -13,6 +13,7 @@ import {
   stableScrollbarClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
+import { useFlowentToast } from "@/components/flowent/toast-context";
 import type { WritablePath } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,7 @@ export function PermissionsView({
   onRemoveWritablePath: (path: string) => void;
   writablePaths: WritablePath[];
 }) {
+  const toast = useFlowentToast();
   const [directoryPath, setDirectoryPath] = useState("");
   const [addError, setAddError] = useState("");
   const trimmedDirectoryPath = directoryPath.trim();
@@ -48,7 +50,7 @@ export function PermissionsView({
       setDirectoryPath("");
       setAddError("");
     } catch {
-      setAddError("Directory could not be added.");
+      toast.error("Directory could not be added.");
     }
   };
 

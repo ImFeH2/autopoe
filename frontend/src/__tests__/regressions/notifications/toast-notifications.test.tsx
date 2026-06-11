@@ -1,0 +1,423 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import App from "@/App";
+import { FlowentToastProvider } from "@/components/flowent/toast";
+import { useFlowentToast } from "@/components/flowent/toast-context";
+
+const emptyTelegramBot = () => ({
+  bot_token: "",
+  enabled: false,
+  error: "",
+  sessions: [],
+  status: "disabled",
+});
+
+const commandMcpServer = (updates = {}) => ({
+  args: [],
+  command: "npx",
+  config: {},
+  enabled: true,
+  error: "",
+  id: "mcp-files",
+  name: "Files",
+  status: "ready",
+  tools: [],
+  type: "command",
+  url: "",
+  ...updates,
+});
+
+const projectSkill = (updates = {}) => ({
+  description: "Review project changes.",
+  enabled: true,
+  error: "",
+  id: "skill-project-review",
+  name: "Project Review",
+  path: "/workspace/.flowent/skills/project-review.md",
+  scope: "project",
+  slug: "project-review",
+  ...updates,
+});
+
+const savedWorkflow = () => ({
+  created_at: 1710000020,
+  definition: {
+    edges: [
+      {
+        id: "edge-input-output",
+        label: "",
+        source: "input",
+        source_handle: "out",
+        target: "output",
+        target_handle: "in",
+      },
+    ],
+    nodes: [
+      {
+        data: { default_value: "launch checklist", input_type: "text" },
+        description: "",
+        id: "input",
+        name: "Input",
+        position: { x: 0, y: 0 },
+        type: "input",
+      },
+      {
+        data: { output_key: "final_result", transform: "" },
+        description: "",
+        id: "output",
+        name: "Output",
+        position: { x: 260, y: 0 },
+        type: "output",
+      },
+    ],
+    version: 1,
+  },
+  id: "workflow-1",
+  name: "Launch Workflow",
+  updated_at: 1710000030,
+});
+
+const appState = (updates = {}) => ({
+  mcp_servers: [],
+  messages: [],
+  providers: [],
+  settings: {
+    reasoning_effort: "default",
+    selected_model: "",
+    selected_provider_id: "",
+  },
+  skills: [],
+  telegram_bot: emptyTelegramBot(),
+  workflows: [],
+  writable_paths: [],
+  ...updates,
+});
+
+const mockAppFetch = (
+  state: Record<string, unknown>,
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Response | null,
+) => {
+  vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+    if (input === "/api/state") {
+      return new Response(JSON.stringify(state), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    if (input === "/api/about") {
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    const response = handler(input, init);
+    if (response) {
+      return response;
+    }
+
+    return new Response(JSON.stringify({}), {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    });
+  });
+};
+
+function ToastStackHarness() {
+  const toast = useFlowentToast();
+
+  return (
+    <button
+      onClick={() => {
+        for (const message of ["One", "Two", "Three", "Four"]) {
+          toast.error({ duration: 60_000, message });
+        }
+      }}
+      type="button"
+    >
+      Show notifications
+    </button>
+  );
+}
+
+function ShortToastHarness() {
+  const toast = useFlowentToast();
+
+  return (
+    <button
+      onClick={() => toast.error({ duration: 80, message: "Short message" })}
+      type="button"
+    >
+      Show short notification
+    </button>
+  );
+}
+
+describe("toast notifications", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("keeps only three visible notifications and lets users dismiss one", async () => {
+    const user = userEvent.setup();
+    render(
+      <FlowentToastProvider>
+        <ToastStackHarness />
+      </FlowentToastProvider>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Show notifications" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("alert")).toHaveLength(3);
+    });
+    expect(screen.queryByText("One")).not.toBeInTheDocument();
+    expect(screen.getByText("Two")).toBeInTheDocument();
+    expect(screen.getByText("Three")).toBeInTheDocument();
+    expect(screen.getByText("Four")).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getAllByRole("alert")[0]).getByRole("button", {
+        name: "Dismiss notification",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("alert")).toHaveLength(2);
+    });
+  });
+
+  it("removes short notifications automatically", async () => {
+    const user = userEvent.setup();
+    render(
+      <FlowentToastProvider>
+        <ShortToastHarness />
+      </FlowentToastProvider>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Show short notification" }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Short message");
+    await waitFor(
+      () => {
+        expect(screen.queryByText("Short message")).not.toBeInTheDocument();
+      },
+      { timeout: 1200 },
+    );
+  });
+
+  it("shows provider fetch failures as a notification", async () => {
+    const user = userEvent.setup();
+    mockAppFetch(appState(), (input, init) => {
+      if (input === "/api/providers/models" && init?.method === "POST") {
+        return new Response(null, { status: 500 });
+      }
+      return null;
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Providers" }));
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Models could not be fetched.",
+    );
+  });
+
+  it("shows failed writable path additions as a notification", async () => {
+    const user = userEvent.setup();
+    mockAppFetch(appState(), (input, init) => {
+      if (
+        input === "/api/permissions/writable-paths" &&
+        init?.method === "POST"
+      ) {
+        return new Response(null, { status: 500 });
+      }
+      return null;
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Permissions" }));
+    await user.type(screen.getByLabelText("Directory path"), "/tmp/cache");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Directory could not be added.",
+    );
+    expect(screen.getByLabelText("Directory path")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
+
+  it("shows MCP import scan failures as a notification", async () => {
+    const user = userEvent.setup();
+    mockAppFetch(appState(), (input, init) => {
+      if (input === "/api/mcp/import/preview" && init?.method === "POST") {
+        return new Response(null, { status: 500 });
+      }
+      return null;
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Scan could not be completed.",
+    );
+  });
+
+  it("shows workflow run failures as a notification", async () => {
+    const user = userEvent.setup();
+    mockAppFetch(appState({ workflows: [savedWorkflow()] }), (input, init) => {
+      if (input === "/api/workflows" && init?.method === "PUT") {
+        return new Response(String(init.body), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        input === "/api/workflows/workflow-1/run" &&
+        init?.method === "POST"
+      ) {
+        return new Response(
+          JSON.stringify({ detail: "Workflow needs an output node." }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      return null;
+    });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Launch Workflow" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Workflow needs an output node.",
+    );
+  });
+
+  it("shows channel status errors as a notification while keeping the page status", async () => {
+    const user = userEvent.setup();
+    mockAppFetch(
+      appState({
+        telegram_bot: {
+          bot_token: "bot-secret",
+          enabled: true,
+          error: "",
+          sessions: [],
+          status: "running",
+        },
+      }),
+      (input, init) => {
+        if (input === "/api/telegram-bot" && init?.method === "PUT") {
+          return new Response(
+            JSON.stringify({
+              bot_token: "bot-secret",
+              enabled: true,
+              error: "Secret is invalid",
+              sessions: [],
+              status: "error",
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200,
+            },
+          );
+        }
+        return null;
+      },
+    );
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Channels" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Secret is invalid",
+    );
+    expect(screen.getByText("Error")).toBeInTheDocument();
+  });
+
+  it("shows skill enablement errors as a notification while keeping the skill error", async () => {
+    const user = userEvent.setup();
+    const disabledSkill = projectSkill({ enabled: false });
+    mockAppFetch(appState({ skills: [disabledSkill] }), (input, init) => {
+      if (
+        input === "/api/skills/skill-project-review" &&
+        init?.method === "PUT"
+      ) {
+        return new Response(
+          JSON.stringify({
+            ...disabledSkill,
+            enabled: true,
+            error: "Skill could not be loaded.",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      return null;
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Skills" }));
+    await user.click(screen.getByRole("button", { name: "On" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Skill could not be loaded.",
+    );
+    expect(
+      screen.getAllByText("Skill could not be loaded.").length,
+    ).toBeGreaterThan(1);
+  });
+
+  it("shows MCP connection errors as a notification while keeping the server error", async () => {
+    const user = userEvent.setup();
+    mockAppFetch(
+      appState({ mcp_servers: [commandMcpServer({ status: "disabled" })] }),
+      (input, init) => {
+        if (input === "/api/mcp/servers" && init?.method === "PUT") {
+          return new Response(
+            JSON.stringify(
+              commandMcpServer({
+                error: "Server could not connect.",
+                status: "error",
+              }),
+            ),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200,
+            },
+          );
+        }
+        return null;
+      },
+    );
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "MCP" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Server could not connect.",
+    );
+    expect(
+      screen.getAllByText("Server could not connect.").length,
+    ).toBeGreaterThan(1);
+  });
+});

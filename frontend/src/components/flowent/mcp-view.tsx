@@ -31,7 +31,6 @@ export function McpView({
   activeServer,
   isCreatingServer,
   isImportOpen,
-  importError,
   importPreview,
   importSource,
   importingServerId,
@@ -50,7 +49,6 @@ export function McpView({
   activeServer: McpServer;
   isCreatingServer: boolean;
   isImportOpen: boolean;
-  importError: string;
   importPreview: McpServer[];
   importSource: McpImportSource;
   importingServerId: string;
@@ -81,7 +79,6 @@ export function McpView({
           activeServer={activeServer}
           isCreatingServer={isCreatingServer}
           isImportOpen={isImportOpen}
-          importError={importError}
           importPreview={importPreview}
           importSource={importSource}
           importingServerId={importingServerId}
@@ -183,7 +180,6 @@ function McpDetails({
   activeServer,
   isCreatingServer,
   isImportOpen,
-  importError,
   importPreview,
   importSource,
   importingServerId,
@@ -199,7 +195,6 @@ function McpDetails({
   activeServer: McpServer;
   isCreatingServer: boolean;
   isImportOpen: boolean;
-  importError: string;
   importPreview: McpServer[];
   importSource: McpImportSource;
   importingServerId: string;
@@ -222,7 +217,6 @@ function McpDetails({
         aria-label="MCP import"
       >
         <McpImportPanel
-          importError={importError}
           importPreview={importPreview}
           importSource={importSource}
           importingServerId={importingServerId}
@@ -298,7 +292,6 @@ function McpDetails({
 }
 
 function McpImportPanel({
-  importError,
   importPreview,
   importSource,
   importingServerId,
@@ -307,7 +300,6 @@ function McpImportPanel({
   onImportServer,
   onImportSourceChange,
 }: {
-  importError: string;
   importPreview: McpServer[];
   importSource: McpImportSource;
   importingServerId: string;
@@ -349,11 +341,6 @@ function McpImportPanel({
             Codex
           </Button>
         </div>
-        {importError ? (
-          <p className="m-0 text-xs leading-[1.4] text-destructive">
-            {importError}
-          </p>
-        ) : null}
       </section>
 
       <section className="grid gap-3">

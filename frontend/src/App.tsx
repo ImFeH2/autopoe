@@ -12,6 +12,8 @@ import { ProvidersView } from "@/components/flowent/providers-view";
 import { SettingsView } from "@/components/flowent/settings-view";
 import { SkillsView } from "@/components/flowent/skills-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
+import { FlowentToastProvider } from "@/components/flowent/toast";
+import { useFlowentToast } from "@/components/flowent/toast-context";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
@@ -177,6 +179,28 @@ type ApiState = {
 
 type ApiAbout = {
   version?: string;
+};
+
+const errorNotificationKeysFromState = (
+  telegramBot: TelegramBot,
+  mcpServers: McpServer[],
+  skills: Skill[],
+) => {
+  const keys: string[] = [];
+  if (telegramBot.status === "error" && telegramBot.error) {
+    keys.push(`channel:telegram:${telegramBot.error}`);
+  }
+  for (const server of mcpServers) {
+    if (server.status === "error" && server.error) {
+      keys.push(`mcp:${server.id}:${server.error}`);
+    }
+  }
+  for (const skill of skills) {
+    if (skill.enabled && skill.error) {
+      keys.push(`skill:${skill.id}:${skill.error}`);
+    }
+  }
+  return keys;
 };
 
 type RequestResult<T> =
@@ -708,7 +732,8 @@ const previousUserMessage = (messages: Message[], fromIndex: number) => {
   return null;
 };
 
-function App() {
+function FlowentApp() {
+  const toast = useFlowentToast();
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
   const [agentPrompt, setAgentPrompt] = useState("");
@@ -737,7 +762,6 @@ function App() {
     useState<McpImportSource>("claude_code");
   const [isPreviewingMcpImport, setIsPreviewingMcpImport] = useState(false);
   const [importingMcpServerId, setImportingMcpServerId] = useState("");
-  const [mcpImportError, setMcpImportError] = useState("");
   const [telegramBot, setTelegramBot] = useState<TelegramBot>(() =>
     createEmptyTelegramBot(),
   );
@@ -746,7 +770,6 @@ function App() {
     createEmptyProvider(),
   );
   const [isFetchingModels, setIsFetchingModels] = useState(false);
-  const [fetchError, setFetchError] = useState("");
   const [isResponding, setIsResponding] = useState(false);
   const [isRefiningContext, setIsRefiningContext] = useState(false);
   const [writablePaths, setWritablePaths] = useState<WritablePath[]>([]);
@@ -757,6 +780,8 @@ function App() {
   const activeRunEventIndexRef = useRef(0);
   const messagesRef = useRef<Message[]>([]);
   const responseRunRef = useRef(0);
+  const errorNotificationKeysRef = useRef<Set<string>>(new Set());
+  const hasLoadedStateRef = useRef(false);
   const [streamReconnectKey, setStreamReconnectKey] = useState(0);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [workflowRunResult, setWorkflowRunResult] =
@@ -809,6 +834,38 @@ function App() {
   );
 
   useEffect(() => {
+    const nextNotificationKeys = new Set<string>();
+
+    const notifyOnce = (key: string, message: string) => {
+      nextNotificationKeys.add(key);
+      if (errorNotificationKeysRef.current.has(key)) {
+        return;
+      }
+      toast.error(message);
+    };
+
+    if (telegramBot.status === "error" && telegramBot.error) {
+      notifyOnce(`channel:telegram:${telegramBot.error}`, telegramBot.error);
+    }
+
+    for (const server of mcpServers) {
+      if (server.status !== "error" || !server.error) {
+        continue;
+      }
+      notifyOnce(`mcp:${server.id}:${server.error}`, server.error);
+    }
+
+    for (const skill of skills) {
+      if (!skill.enabled || !skill.error) {
+        continue;
+      }
+      notifyOnce(`skill:${skill.id}:${skill.error}`, skill.error);
+    }
+
+    errorNotificationKeysRef.current = nextNotificationKeys;
+  }, [mcpServers, skills, telegramBot, toast]);
+
+  useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
@@ -829,14 +886,16 @@ function App() {
         setMcpEditorId(loadedMcpServers[0].id);
         setMcpDraft(loadedMcpServers[0]);
       }
-      setSkills(state.skills ?? []);
-      setActiveSkillId((state.skills ?? [])[0]?.id ?? "");
+      const loadedSkills = state.skills ?? [];
+      setSkills(loadedSkills);
+      setActiveSkillId(loadedSkills[0]?.id ?? "");
       setAgentPrompt(state.settings.agent_prompt ?? "");
       setSelectedProviderId(state.settings.selected_provider_id);
       setSelectedModel(state.settings.selected_model);
       setContextWindowLimit(state.settings.context_window_limit ?? null);
       setReasoningEffort(state.settings.reasoning_effort ?? "default");
-      setTelegramBot(telegramBotFromApi(state.telegram_bot));
+      const loadedTelegramBot = telegramBotFromApi(state.telegram_bot);
+      setTelegramBot(loadedTelegramBot);
       setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
       setWorkflows((state.workflows ?? []).map(workflowFromApi));
       activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
@@ -844,6 +903,16 @@ function App() {
       setActiveRunId(state.active_run_id ?? "");
       setIsResponding(Boolean(state.active_run_id));
       setIsRefiningContext(Boolean(state.is_compacting));
+      if (!hasLoadedStateRef.current) {
+        errorNotificationKeysRef.current = new Set(
+          errorNotificationKeysFromState(
+            loadedTelegramBot,
+            loadedMcpServers,
+            loadedSkills,
+          ),
+        );
+        hasLoadedStateRef.current = true;
+      }
     },
     [setTrackedUsageInfo],
   );
@@ -957,13 +1026,11 @@ function App() {
   const loadProviderEditor = (provider: Provider) => {
     setProviderEditorId(provider.id);
     setProviderDraft(provider);
-    setFetchError("");
   };
 
   const openNewProviderEditor = () => {
     setProviderEditorId("new");
     setProviderDraft(createEmptyProvider());
-    setFetchError("");
   };
 
   const updateTelegramBot = (updates: Partial<TelegramBot>) => {
@@ -984,7 +1051,6 @@ function App() {
 
   const openMcpImport = () => {
     setIsMcpImportOpen(true);
-    setMcpImportError("");
     setMcpImportPreview([]);
     setMcpImportSource("claude_code");
     void previewMcpImport("claude_code");
@@ -1000,7 +1066,6 @@ function App() {
 
   const previewMcpImport = async (source = mcpImportSource) => {
     setIsPreviewingMcpImport(true);
-    setMcpImportError("");
     try {
       const response = await fetch("/api/mcp/import/preview", {
         body: JSON.stringify({ source }),
@@ -1017,7 +1082,7 @@ function App() {
       setMcpImportPreview(servers);
     } catch {
       setMcpImportPreview([]);
-      setMcpImportError("Scan could not be completed.");
+      toast.error("Scan could not be completed.");
     } finally {
       setIsPreviewingMcpImport(false);
     }
@@ -1025,12 +1090,11 @@ function App() {
 
   const importMcpServer = async (serverId: string) => {
     if (!mcpImportPreview.some((server) => server.id === serverId)) {
-      setMcpImportError("No servers found.");
+      toast.error("No servers found.");
       return;
     }
 
     setImportingMcpServerId(serverId);
-    setMcpImportError("");
     try {
       const response = await fetch("/api/mcp/import", {
         body: JSON.stringify({
@@ -1055,7 +1119,7 @@ function App() {
         setMcpDraft(nextServer);
       }
     } catch {
-      setMcpImportError("Import could not be completed.");
+      toast.error("Import could not be completed.");
     } finally {
       setImportingMcpServerId("");
     }
@@ -1063,14 +1127,12 @@ function App() {
 
   const updateMcpImportSource = (source: McpImportSource) => {
     setMcpImportSource(source);
-    setMcpImportError("");
     setMcpImportPreview([]);
     void previewMcpImport(source);
   };
 
   const updateProviderDraft = (updates: Partial<Provider>) => {
     setProviderDraft((current) => ({ ...current, ...updates }));
-    setFetchError("");
   };
 
   const persistSettings = async (settings: RuntimeSettings) => {
@@ -1154,7 +1216,6 @@ function App() {
 
   const fetchProviderModels = async () => {
     setIsFetchingModels(true);
-    setFetchError("");
 
     try {
       const response = await fetch("/api/providers/models", {
@@ -1174,7 +1235,7 @@ function App() {
       const result = (await response.json()) as { models?: string[] };
       updateProviderDraft({ models: result.models ?? [] });
     } catch {
-      setFetchError("Models could not be fetched.");
+      toast.error("Models could not be fetched.");
     } finally {
       setIsFetchingModels(false);
     }
@@ -2735,7 +2796,6 @@ function App() {
       <TabsContent value="providers" className={viewPanelClassName}>
         <ProvidersView
           activeProvider={providerDraft}
-          fetchError={fetchError}
           isFetchingModels={isFetchingModels}
           isCreatingProvider={isCreatingProvider}
           onFetchModels={fetchProviderModels}
@@ -2769,7 +2829,6 @@ function App() {
           activeServer={mcpDraft}
           isCreatingServer={isCreatingMcpServer}
           isImportOpen={isMcpImportOpen}
-          importError={mcpImportError}
           importPreview={mcpImportPreview}
           importSource={mcpImportSource}
           importingServerId={importingMcpServerId}
@@ -2820,6 +2879,14 @@ function App() {
         />
       </TabsContent>
     </AppShell>
+  );
+}
+
+function App() {
+  return (
+    <FlowentToastProvider>
+      <FlowentApp />
+    </FlowentToastProvider>
   );
 }
 
