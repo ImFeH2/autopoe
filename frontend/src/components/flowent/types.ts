@@ -171,6 +171,7 @@ export type Message = {
   isStreamingText?: boolean;
   items?: AssistantOutputItem[];
   status?: "completed" | "failed" | "interrupted" | "running";
+  summary?: string;
   thinking?: string;
   tools?: ToolItem[];
   usage_info?: ContextUsageInfo | null;

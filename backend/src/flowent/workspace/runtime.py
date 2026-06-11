@@ -149,6 +149,7 @@ class WorkspaceRuntime:
             author="system",
             content=marker_content,
             id=str(uuid4()),
+            summary=compact_result.summary,
             usage_info=usage_info,
         )
         self.store.save_compaction_checkpoint(

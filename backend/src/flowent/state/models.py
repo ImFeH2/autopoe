@@ -217,6 +217,7 @@ class StoredMessage(BaseModel):
     status: str = Field(
         default="completed", exclude_if=lambda value: value == "completed"
     )
+    summary: str = Field(default="", exclude_if=lambda value: value == "")
     thinking: str = Field(default="", exclude_if=lambda value: value == "")
     tools: list[StoredToolItem] = Field(default_factory=list)
     usage_info: TokenUsageInfo | None = Field(

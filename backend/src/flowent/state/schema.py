@@ -83,6 +83,7 @@ def migrate(connection: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             author TEXT NOT NULL,
             content TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'completed',
             usage_info TEXT,
             position INTEGER NOT NULL
@@ -154,6 +155,10 @@ def migrate(connection: sqlite3.Connection) -> None:
         )
     if "usage_info" not in message_columns:
         connection.execute("ALTER TABLE messages ADD COLUMN usage_info TEXT")
+    if "summary" not in message_columns:
+        connection.execute(
+            "ALTER TABLE messages ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
+        )
     settings_columns = table_columns(connection, "settings")
     if "reasoning_effort" not in settings_columns:
         connection.execute(

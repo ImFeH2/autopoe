@@ -270,6 +270,7 @@ const compactStreamResponse = (
     author: "system",
     content: "Context compacted",
     id,
+    summary: "Keep the launch checklist and provider setup decisions.",
     tools: [],
     usage_info: usageInfo,
   };
@@ -330,6 +331,7 @@ const controlledCompactUsageStreamResponse = (
     author: "system",
     content: "Context compacted",
     id,
+    summary: "Keep the launch checklist and provider setup decisions.",
     tools: [],
     usage_info: usageInfo,
   };
@@ -379,6 +381,7 @@ const assistantOptimizedContextStreamResponse = (
               author: "system",
               content: "Context optimized",
               id: "context-optimized",
+              summary: "Keep the latest optimized context.",
               usage_info: usageInfo,
             },
             usage_info: usageInfo,
@@ -8377,7 +8380,7 @@ describe("App", () => {
     expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
   });
 
-  it("shows the compacted context marker after Compact succeeds", async () => {
+  it("shows the compacted context block after Compact succeeds", async () => {
     const user = userEvent.setup();
     mockInitialState(selectedProviderState());
     render(<App />);
@@ -8388,10 +8391,28 @@ describe("App", () => {
     await user.type(composer, "/compact");
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByText("Context compacted")).toBeInTheDocument();
+    const compactBlock = await screen.findByRole("button", {
+      name: "Context compacted",
+    });
+
+    expect(compactBlock).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByText(
+        "Keep the launch checklist and provider setup decisions.",
+      ),
+    ).toBeNull();
+
+    await user.click(compactBlock);
+
+    expect(compactBlock).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await screen.findByText(
+        "Keep the launch checklist and provider setup decisions.",
+      ),
+    ).toBeInTheDocument();
   });
 
-  it("shows the optimized context marker after automatic context optimization", async () => {
+  it("shows the optimized context block after automatic context optimization", async () => {
     const user = userEvent.setup();
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
@@ -8423,7 +8444,18 @@ describe("App", () => {
     await user.type(composer, "Continue from there");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByText("Context optimized")).toBeInTheDocument();
+    const optimizedBlock = await screen.findByRole("button", {
+      name: "Context optimized",
+    });
+    expect(optimizedBlock).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Keep the latest optimized context.")).toBeNull();
+
+    await user.click(optimizedBlock);
+
+    expect(optimizedBlock).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await screen.findByText("Keep the latest optimized context."),
+    ).toBeInTheDocument();
     expect(await screen.findByText("Continuing.")).toBeInTheDocument();
   });
 
@@ -8437,13 +8469,15 @@ describe("App", () => {
     });
     await user.type(composer, "/compact");
     await user.keyboard("{Enter}");
-    await screen.findByText("Context compacted");
+    await screen.findByRole("button", { name: "Context compacted" });
 
     await user.type(composer, "Continue from there");
     await user.keyboard("{Enter}");
 
     expectWorkspaceMessagePost("/api/workspace/respond", "Continue from there");
-    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Context compacted" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps Compact unavailable while a streamed reply is still running", async () => {

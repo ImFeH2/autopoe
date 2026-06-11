@@ -452,6 +452,7 @@ def test_workspace_compact_persists_compacted_context(tmp_path, monkeypatch) -> 
         "author": "system",
         "content": "Context compacted",
         "id": marker["id"],
+        "summary": "Keep the launch checklist and provider setup decisions.",
         "tools": [],
         "usage_info": usage_info,
     }
@@ -536,6 +537,7 @@ def test_workspace_manual_compact_streams_marker_before_done(
         "done",
     ]
     assert events[1]["data"]["message"]["content"] == "Context compacted"
+    assert events[1]["data"]["message"]["summary"] == "Keep current launch context."
     assert events[2]["data"]["message"] == events[1]["data"]["message"]
 
 
@@ -883,6 +885,9 @@ def test_workspace_response_auto_compacts_before_next_message(
     assert events[0]["event"] == "context_optimized"
     optimized_event_data = json.loads(events[0]["data"])
     assert optimized_event_data["message"]["content"] == ("Context optimized")
+    assert optimized_event_data["message"]["summary"] == (
+        "Keep the launch plan summary."
+    )
     assert (
         optimized_event_data["message"]["usage_info"]
         == optimized_event_data["usage_info"]
@@ -934,6 +939,7 @@ def test_workspace_response_auto_compacts_before_next_message(
         "Continue from there.",
         "Continuing.",
     ]
+    assert state["messages"][-3]["summary"] == "Keep the launch plan summary."
     assert state["usage_info"] == json.loads(usage_events[0]["data"])["usage_info"]
     assert state["messages"][-1]["usage_info"] == state["usage_info"]
 
@@ -1004,7 +1010,9 @@ def test_workspace_response_auto_compacts_after_tool_result(
         "output_done",
         "done",
     ]
-    assert json.loads(events[5]["data"])["message"]["content"] == ("Context optimized")
+    optimized_message = json.loads(events[5]["data"])["message"]
+    assert optimized_message["content"] == "Context optimized"
+    assert optimized_message["summary"] == "Keep the file findings from notes.txt."
     usage_info = json.loads(events[7]["data"])["usage_info"]
     assert usage_info["last_token_usage"] == {
         "cached_input_tokens": 5,
@@ -1038,6 +1046,7 @@ def test_workspace_response_auto_compacts_after_tool_result(
         "Context optimized",
         "Done.",
     ]
+    assert state["messages"][1]["summary"] == "Keep the file findings from notes.txt."
 
 
 def test_workspace_auto_compact_failure_keeps_existing_checkpoint(

@@ -79,6 +79,7 @@ class StateStore:
                     ],
                     id=row["id"],
                     status=row["status"],
+                    summary=row["summary"],
                     thinking=row["thinking"],
                     tools=[
                         StoredToolItem.model_validate(tool)
@@ -90,7 +91,7 @@ class StateStore:
                 )
                 for row in connection.execute(
                     """
-                    SELECT id, author, content, tools, thinking, groups, status, usage_info
+                    SELECT id, author, content, summary, tools, thinking, groups, status, usage_info
                     FROM messages
                     ORDER BY position, id
                     """
@@ -576,6 +577,7 @@ class StateStore:
                     id,
                     author,
                     content,
+                    summary,
                     tools,
                     thinking,
                     groups,
@@ -583,13 +585,14 @@ class StateStore:
                     usage_info,
                     position
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         message.id,
                         message.author,
                         message.content,
+                        message.summary,
                         json.dumps(
                             [
                                 tool.model_dump(exclude_none=True)
@@ -635,6 +638,7 @@ class StateStore:
                     id,
                     author,
                     content,
+                    summary,
                     tools,
                     thinking,
                     groups,
@@ -642,10 +646,11 @@ class StateStore:
                     usage_info,
                     position
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     author = excluded.author,
                     content = excluded.content,
+                    summary = excluded.summary,
                     tools = excluded.tools,
                     thinking = excluded.thinking,
                     groups = excluded.groups,
@@ -657,6 +662,7 @@ class StateStore:
                     message.id,
                     message.author,
                     message.content,
+                    message.summary,
                     json.dumps(
                         [tool.model_dump(exclude_none=True) for tool in message.tools]
                     ),
