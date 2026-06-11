@@ -230,6 +230,35 @@ describe("toast notifications", () => {
     );
   });
 
+  it("shows empty provider fetch results as a notification", async () => {
+    const user = userEvent.setup();
+    mockAppFetch(appState(), (input, init) => {
+      if (input === "/api/providers/models" && init?.method === "POST") {
+        return new Response(JSON.stringify({ models: [] }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return null;
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Providers" }));
+    await user.type(
+      screen.getByLabelText("Base URL"),
+      "https://example.invalid",
+    );
+    await user.type(screen.getByLabelText("API key"), "not-a-real-key");
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+
+    const notification = await screen.findByRole("alert");
+    expect(notification).toHaveTextContent("No models found.");
+    expect(notification).toHaveTextContent(
+      "Check connection settings and try again.",
+    );
+    expect(screen.getByText("No models")).toBeInTheDocument();
+  });
+
   it("shows failed writable path additions as a notification", async () => {
     const user = userEvent.setup();
     mockAppFetch(appState(), (input, init) => {

@@ -1233,7 +1233,15 @@ function FlowentApp() {
       }
 
       const result = (await response.json()) as { models?: string[] };
-      updateProviderDraft({ models: result.models ?? [] });
+      const models = result.models ?? [];
+      updateProviderDraft({ models });
+
+      if (models.length === 0) {
+        toast.error({
+          description: "Check connection settings and try again.",
+          message: "No models found.",
+        });
+      }
     } catch {
       toast.error("Models could not be fetched.");
     } finally {
