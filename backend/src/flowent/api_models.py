@@ -19,6 +19,18 @@ class ProviderModelsResponse(BaseModel):
     models: list[str]
 
 
+class ProviderModelsFailureResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal[
+        "connection_failed",
+        "access_denied",
+        "rate_limited",
+        "provider_unavailable",
+        "request_failed",
+    ]
+
+
 class WorkspaceMessagesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

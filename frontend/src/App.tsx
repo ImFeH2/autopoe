@@ -1214,6 +1214,53 @@ function FlowentApp() {
     void persistSettingsAndRefresh(settings);
   };
 
+  const providerModelFetchFailureMessages = {
+    access_denied: {
+      description: "Check the key and account access.",
+      message: "Access denied.",
+    },
+    connection_failed: {
+      description: "Check the address and try again.",
+      message: "Connection failed.",
+    },
+    provider_unavailable: {
+      description: "The service is currently unreachable.",
+      message: "Provider unavailable.",
+    },
+    rate_limited: {
+      description: "Please wait a moment and try again.",
+      message: "Too many requests.",
+    },
+    request_failed: {
+      description: "Check the connection settings and try again.",
+      message: "Request failed.",
+    },
+  } as const;
+
+  type ProviderModelFetchFailure =
+    keyof typeof providerModelFetchFailureMessages;
+
+  const isProviderModelFetchFailure = (
+    value: unknown,
+  ): value is ProviderModelFetchFailure =>
+    typeof value === "string" && value in providerModelFetchFailureMessages;
+
+  const providerModelFetchFailureFromResponse = async (
+    response: Response,
+  ): Promise<ProviderModelFetchFailure> => {
+    try {
+      const result = (await response.json()) as { detail?: { code?: unknown } };
+      const code = result.detail?.code;
+      if (isProviderModelFetchFailure(code)) {
+        return code;
+      }
+    } catch {
+      return "request_failed";
+    }
+
+    return "request_failed";
+  };
+
   const fetchProviderModels = async () => {
     setIsFetchingModels(true);
 
@@ -1229,7 +1276,9 @@ function FlowentApp() {
       });
 
       if (!response.ok) {
-        throw new Error("Models could not be fetched.");
+        const failure = await providerModelFetchFailureFromResponse(response);
+        toast.error(providerModelFetchFailureMessages[failure]);
+        return;
       }
 
       const result = (await response.json()) as { models?: string[] };
@@ -1238,12 +1287,12 @@ function FlowentApp() {
 
       if (models.length === 0) {
         toast.error({
-          description: "Check connection settings and try again.",
+          description: "No models available for this provider.",
           message: "No models found.",
         });
       }
     } catch {
-      toast.error("Models could not be fetched.");
+      toast.error(providerModelFetchFailureMessages.connection_failed);
     } finally {
       setIsFetchingModels(false);
     }

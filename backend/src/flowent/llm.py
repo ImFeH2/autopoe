@@ -85,6 +85,20 @@ class LLMStreamError(RuntimeError):
     pass
 
 
+class ProviderModelFetchFailure(StrEnum):
+    CONNECTION_FAILED = "connection_failed"
+    ACCESS_DENIED = "access_denied"
+    RATE_LIMITED = "rate_limited"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    REQUEST_FAILED = "request_failed"
+
+
+class ProviderModelFetchError(RuntimeError):
+    def __init__(self, failure: ProviderModelFetchFailure) -> None:
+        super().__init__(failure.value)
+        self.failure = failure
+
+
 async def wait_before_llm_retry(attempt_number: int) -> None:
     await asyncio.sleep(LLM_RETRY_BASE_DELAY_SECONDS * attempt_number)
 
@@ -248,6 +262,31 @@ def unique_model_names(provider: ProviderFormat, models: Sequence[str]) -> list[
     return normalized_models
 
 
+def classify_provider_model_fetch_failure(
+    exception: Exception,
+) -> ProviderModelFetchFailure:
+    try:
+        import litellm
+    except Exception:
+        return ProviderModelFetchFailure.REQUEST_FAILED
+
+    if isinstance(exception, (litellm.APIConnectionError, litellm.Timeout)):
+        return ProviderModelFetchFailure.CONNECTION_FAILED
+    if isinstance(
+        exception, (litellm.AuthenticationError, litellm.PermissionDeniedError)
+    ):
+        return ProviderModelFetchFailure.ACCESS_DENIED
+    if isinstance(exception, litellm.RateLimitError):
+        return ProviderModelFetchFailure.RATE_LIMITED
+    if isinstance(
+        exception, (litellm.ServiceUnavailableError, litellm.InternalServerError)
+    ):
+        return ProviderModelFetchFailure.PROVIDER_UNAVAILABLE
+    if isinstance(exception, (ConnectionError, TimeoutError)):
+        return ProviderModelFetchFailure.CONNECTION_FAILED
+    return ProviderModelFetchFailure.REQUEST_FAILED
+
+
 def list_provider_models(
     *,
     provider: ProviderFormat,
@@ -261,12 +300,17 @@ def list_provider_models(
         configure_litellm_logging()
         model_lister = get_valid_models
 
-    models = model_lister(
-        api_base=normalize_provider_base_url(provider, base_url),
-        api_key=secret_reference,
-        check_provider_endpoint=True,
-        custom_llm_provider=provider_litellm_name(provider),
-    )
+    try:
+        models = model_lister(
+            api_base=normalize_provider_base_url(provider, base_url),
+            api_key=secret_reference,
+            check_provider_endpoint=True,
+            custom_llm_provider=provider_litellm_name(provider),
+        )
+    except Exception as exc:
+        raise ProviderModelFetchError(
+            classify_provider_model_fetch_failure(exc)
+        ) from exc
     return unique_model_names(provider, models)
 
 

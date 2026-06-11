@@ -212,23 +212,51 @@ describe("toast notifications", () => {
     );
   });
 
-  it("shows provider fetch failures as a notification", async () => {
-    const user = userEvent.setup();
-    mockAppFetch(appState(), (input, init) => {
-      if (input === "/api/providers/models" && init?.method === "POST") {
-        return new Response(null, { status: 500 });
-      }
-      return null;
-    });
-    render(<App />);
+  it.each([
+    [
+      "connection_failed",
+      "Connection failed.",
+      "Check the address and try again.",
+    ],
+    ["access_denied", "Access denied.", "Check the key and account access."],
+    [
+      "rate_limited",
+      "Too many requests.",
+      "Please wait a moment and try again.",
+    ],
+    [
+      "provider_unavailable",
+      "Provider unavailable.",
+      "The service is currently unreachable.",
+    ],
+    [
+      "request_failed",
+      "Request failed.",
+      "Check the connection settings and try again.",
+    ],
+  ])(
+    "shows %s provider fetch failures as a notification",
+    async (code, message, description) => {
+      const user = userEvent.setup();
+      mockAppFetch(appState(), (input, init) => {
+        if (input === "/api/providers/models" && init?.method === "POST") {
+          return new Response(JSON.stringify({ detail: { code } }), {
+            headers: { "Content-Type": "application/json" },
+            status: 502,
+          });
+        }
+        return null;
+      });
+      render(<App />);
 
-    await user.click(await screen.findByRole("tab", { name: "Providers" }));
-    await user.click(screen.getByRole("button", { name: "Fetch" }));
+      await user.click(await screen.findByRole("tab", { name: "Providers" }));
+      await user.click(screen.getByRole("button", { name: "Fetch" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Models could not be fetched.",
-    );
-  });
+      const notification = await screen.findByRole("alert");
+      expect(notification).toHaveTextContent(message);
+      expect(notification).toHaveTextContent(description);
+    },
+  );
 
   it("shows empty provider fetch results as a notification", async () => {
     const user = userEvent.setup();
@@ -254,7 +282,7 @@ describe("toast notifications", () => {
     const notification = await screen.findByRole("alert");
     expect(notification).toHaveTextContent("No models found.");
     expect(notification).toHaveTextContent(
-      "Check connection settings and try again.",
+      "No models available for this provider.",
     );
     expect(screen.getByText("No models")).toBeInTheDocument();
   });

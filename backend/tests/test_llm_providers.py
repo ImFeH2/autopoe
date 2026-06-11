@@ -1,12 +1,16 @@
 import json
 
+import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from flowent.llm import (
     ChatMessage,
     LLMStreamError,
     ProviderConnection,
     ProviderFormat,
+    ProviderModelFetchError,
+    ProviderModelFetchFailure,
     ReasoningEffort,
     build_litellm_request,
     chunk_delta_reasoning,
@@ -18,6 +22,7 @@ from flowent.llm import (
     stream_chat,
     stream_chat_chunks,
 )
+from flowent.main import create_app
 from flowent.network import flowent_user_agent
 
 
@@ -190,6 +195,94 @@ def test_list_provider_models_uses_normalized_base_url() -> None:
 
     assert captured_request["api_base"] == "https://example.test/v1"
     assert models == ["gpt-5.1", "gpt-5.1-mini"]
+
+
+@pytest.mark.parametrize(
+    ("exception_name", "expected_failure"),
+    [
+        ("APIConnectionError", ProviderModelFetchFailure.CONNECTION_FAILED),
+        ("Timeout", ProviderModelFetchFailure.CONNECTION_FAILED),
+        ("AuthenticationError", ProviderModelFetchFailure.ACCESS_DENIED),
+        ("PermissionDeniedError", ProviderModelFetchFailure.ACCESS_DENIED),
+        ("RateLimitError", ProviderModelFetchFailure.RATE_LIMITED),
+        ("ServiceUnavailableError", ProviderModelFetchFailure.PROVIDER_UNAVAILABLE),
+        ("InternalServerError", ProviderModelFetchFailure.PROVIDER_UNAVAILABLE),
+        ("BadRequestError", ProviderModelFetchFailure.REQUEST_FAILED),
+        ("NotFoundError", ProviderModelFetchFailure.REQUEST_FAILED),
+        ("APIError", ProviderModelFetchFailure.REQUEST_FAILED),
+    ],
+)
+def test_list_provider_models_classifies_litellm_failures(
+    exception_name: str, expected_failure: ProviderModelFetchFailure
+) -> None:
+    import litellm
+
+    def fake_model_lister(**_: object) -> list[str]:
+        exception_class = getattr(litellm, exception_name)
+        if exception_name == "APIConnectionError":
+            raise exception_class(
+                "connection failed", llm_provider="openai", model="gpt-5.1"
+            )
+        if exception_name == "APIError":
+            raise exception_class(
+                418, "request failed", llm_provider="openai", model="gpt-5.1"
+            )
+        if exception_name == "PermissionDeniedError":
+            raise exception_class(
+                "request failed",
+                llm_provider="openai",
+                model="gpt-5.1",
+                response=httpx.Response(
+                    403, request=httpx.Request("POST", "https://example.test")
+                ),
+            )
+        raise exception_class("request failed", llm_provider="openai", model="gpt-5.1")
+
+    with pytest.raises(ProviderModelFetchError) as exc_info:
+        list_provider_models(
+            provider=ProviderFormat.OPENAI,
+            secret_reference="connection-primary",
+            base_url="https://example.test",
+            model_lister=fake_model_lister,
+        )
+
+    assert exc_info.value.failure == expected_failure
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        (ProviderModelFetchFailure.CONNECTION_FAILED, 502),
+        (ProviderModelFetchFailure.ACCESS_DENIED, 403),
+        (ProviderModelFetchFailure.RATE_LIMITED, 429),
+        (ProviderModelFetchFailure.PROVIDER_UNAVAILABLE, 503),
+        (ProviderModelFetchFailure.REQUEST_FAILED, 400),
+    ],
+)
+def test_provider_models_route_returns_fetch_failure_code(
+    failure: ProviderModelFetchFailure, expected_status: int, monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+
+    def fail_model_fetch(**_: object) -> list[str]:
+        raise ProviderModelFetchError(failure)
+
+    monkeypatch.setattr(
+        "flowent.routes.providers.list_provider_models", fail_model_fetch
+    )
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.post(
+        "/api/providers/models",
+        json={
+            "base_url": "https://example.test/v1",
+            "provider": "openai",
+            "secret_reference": "not-a-real-key",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": {"code": failure.value}}
 
 
 def test_build_litellm_request_omits_default_reasoning_effort() -> None:
