@@ -18,6 +18,7 @@ const renderWorkspace = (messages: Message[]) =>
       onCommandError={vi.fn()}
       onDraftChange={vi.fn()}
       onEditMessage={vi.fn()}
+      onRetryError={vi.fn()}
       onRetryMessage={vi.fn()}
       onSendMessage={vi.fn()}
       onStopResponse={vi.fn()}

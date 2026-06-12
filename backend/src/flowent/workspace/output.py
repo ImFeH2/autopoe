@@ -7,6 +7,7 @@ from flowent.storage import (
     StoredAssistantOutputGroup,
     StoredErrorOutputItem,
     StoredMessage,
+    StoredOutputItem,
     StoredTextOutputItem,
     StoredThinkingOutputItem,
     StoredToolItem,
@@ -107,6 +108,42 @@ class AssistantOutputBuilder:
         self.thinking_item_id = ""
         self.error_item_index = 0
         self.tools: dict[str, StoredToolItem] = {}
+
+    @classmethod
+    def from_message(cls, message: StoredMessage) -> "AssistantOutputBuilder":
+        builder = cls(message.id)
+        builder.content = message.content
+        builder.groups = message.groups
+        builder.thinking = message.thinking
+        builder.tools = {tool.id: tool for tool in message.tools}
+        builder.text_item_index = sum(
+            1 for group in message.groups for item in group.items if item.type == "text"
+        )
+        builder.thinking_item_index = sum(
+            1
+            for group in message.groups
+            for item in group.items
+            if item.type == "thinking"
+        )
+        builder.error_item_index = sum(
+            1
+            for group in message.groups
+            for item in group.items
+            if item.type == "error"
+        )
+        latest_item = next(
+            (
+                item
+                for group in reversed(message.groups)
+                for item in reversed(group.items)
+            ),
+            None,
+        )
+        if latest_item is not None and latest_item.type == "text":
+            builder.text_item_id = latest_item.id
+        if latest_item is not None and latest_item.type == "thinking":
+            builder.thinking_item_id = latest_item.id
+        return builder
 
     def set_assistant_id(self, assistant_id: str) -> None:
         self.assistant_id = assistant_id
@@ -218,9 +255,29 @@ class AssistantOutputBuilder:
     def has_output(self) -> bool:
         return any(group.items for group in self.groups)
 
-    def apply_done_message(self, message: dict[str, object]) -> None:
-        final_content = str(message.get("content") or self.content)
-        final_thinking = str(message.get("thinking") or self.thinking)
+    def apply_done_message(
+        self,
+        message: dict[str, object],
+        *,
+        content_prefix: str = "",
+        thinking_prefix: str = "",
+    ) -> None:
+        message_content = str(message.get("content") or "")
+        message_thinking = str(message.get("thinking") or "")
+        final_content = message_content or self.content
+        final_thinking = message_thinking or self.thinking
+        if (
+            content_prefix
+            and message_content
+            and not message_content.startswith(content_prefix)
+        ):
+            final_content = f"{content_prefix}{message_content}"
+        if (
+            thinking_prefix
+            and message_thinking
+            and not message_thinking.startswith(thinking_prefix)
+        ):
+            final_thinking = f"{thinking_prefix}{message_thinking}"
         self._append_missing_done_text(final_content)
         self._append_missing_done_thinking(final_thinking)
         self.content = final_content
@@ -272,3 +329,68 @@ class AssistantOutputBuilder:
         self.groups[-1] = self.groups[-1].model_copy(
             update={"items": [*self.groups[-1].items, item]}
         )
+
+
+def trim_assistant_message_at_error(
+    message: StoredMessage,
+    error_id: str,
+    *,
+    status: str,
+) -> StoredMessage | None:
+    next_groups: list[StoredAssistantOutputGroup] = []
+    found_error = False
+    for group in message.groups:
+        next_items: list[StoredOutputItem] = []
+        for item in group.items:
+            if item.type == "error" and item.id == error_id:
+                found_error = True
+                break
+            next_items.append(item)
+        if found_error:
+            if next_items:
+                next_groups.append(group.model_copy(update={"items": next_items}))
+            break
+        next_groups.append(group)
+
+    if not found_error:
+        return None
+
+    text_content = "".join(
+        item.content
+        for group in next_groups
+        for item in group.items
+        if item.type == "text"
+    )
+    thinking_content = "".join(
+        item.content
+        for group in next_groups
+        for item in group.items
+        if item.type == "thinking"
+    )
+    tools = [
+        item.tool
+        for group in next_groups
+        for item in group.items
+        if item.type == "tool"
+    ]
+    return message.model_copy(
+        update={
+            "content": text_content,
+            "groups": next_groups,
+            "status": status,
+            "thinking": thinking_content,
+            "tools": tools,
+        }
+    )
+
+
+def assistant_retry_output_start_index(message: StoredMessage) -> int:
+    prefix = f"{message.id}-group-"
+    indexes: list[int] = []
+    for group in message.groups:
+        if not group.id.startswith(prefix):
+            continue
+        raw_index = group.id.removeprefix(prefix)
+        if raw_index.isdigit():
+            indexes.append(int(raw_index))
+    return max(indexes, default=1)

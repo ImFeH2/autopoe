@@ -139,6 +139,53 @@ def model_visible_response_messages_for_usage(
     return visible_messages
 
 
+def model_visible_assistant_output_messages(
+    message: StoredMessage,
+) -> list[dict[str, object]]:
+    visible_messages: list[dict[str, object]] = []
+    for group in message.groups:
+        group_content = "".join(
+            item.content for item in group.items if item.type == "text"
+        )
+        group_tools = [item.tool for item in group.items if item.type == "tool"]
+        if not group_tools:
+            if group_content:
+                visible_messages.append({"role": "assistant", "content": group_content})
+            continue
+        visible_messages.append(
+            {
+                "role": "assistant",
+                "content": group_content or None,
+                "tool_calls": [
+                    {
+                        "id": tool.id,
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "arguments": json.dumps(
+                                tool.arguments or {},
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                    for tool in group_tools
+                ],
+            }
+        )
+        visible_messages.extend(
+            {
+                "role": "tool",
+                "tool_call_id": tool.id,
+                "content": tool.content or "",
+            }
+            for tool in group_tools
+            if tool.status != "running"
+        )
+    if not visible_messages and message.content:
+        visible_messages.append({"role": "assistant", "content": message.content})
+    return visible_messages
+
+
 def usage_info_for_model(
     usage_info: TokenUsageInfo | None,
     model_context_window: int,

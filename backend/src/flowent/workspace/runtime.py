@@ -38,6 +38,7 @@ from flowent.workspace.context import (
     COMPACTED_CONTEXT_MARKER,
     OPTIMIZED_CONTEXT_MARKER,
     context_window_for_settings,
+    model_visible_assistant_output_messages,
     should_auto_compact,
     update_context_usage_for_response,
     usage_event_data,
@@ -54,8 +55,10 @@ from flowent.workspace.output import (
     EMPTY_MODEL_RESPONSE_DETAIL,
     AssistantOutputBuilder,
     approval_transcript,
+    assistant_retry_output_start_index,
     run_error_event_data,
     run_error_output_item,
+    trim_assistant_message_at_error,
 )
 
 logger = logging.getLogger("flowent.workspace.runtime")
@@ -532,12 +535,93 @@ class WorkspaceRuntime:
         )
         return next_messages, response
 
+    def retry_error(
+        self,
+        message_id: str,
+        *,
+        error_id: str,
+    ) -> tuple[list[StoredMessage], WorkspaceResponse]:
+        if self.has_active_response():
+            raise HTTPException(
+                status_code=409,
+                detail="Response in progress",
+            )
+        if self.store.read_is_compacting():
+            raise HTTPException(
+                status_code=409,
+                detail="Context refining in progress. Please wait a moment.",
+            )
+        state = self.store.read_state()
+        message_index = next(
+            (
+                index
+                for index, message in enumerate(state.messages)
+                if message.id == message_id
+            ),
+            -1,
+        )
+        if message_index < 0:
+            raise HTTPException(status_code=404, detail="Message not found.")
+        message = state.messages[message_index]
+        if message.author != "assistant":
+            raise HTTPException(
+                status_code=400, detail="Only assistant errors can be retried."
+            )
+        previous_user_message = next(
+            (
+                current_message
+                for current_message in reversed(state.messages[:message_index])
+                if current_message.author == "user"
+            ),
+            None,
+        )
+        if previous_user_message is None:
+            raise HTTPException(status_code=400, detail="Message history is invalid.")
+        trimmed_message = trim_assistant_message_at_error(
+            message,
+            error_id,
+            status="running",
+        )
+        if trimmed_message is None:
+            raise HTTPException(status_code=404, detail="Error block not found.")
+
+        previous_messages = state.messages[:message_index]
+        next_messages = [*previous_messages, trimmed_message]
+        self.store.save_messages(next_messages)
+        state_before_assistant = state.model_copy(
+            update={"messages": previous_messages}
+        )
+        base_request_messages = self.request_messages_for_content(
+            state_before_assistant,
+            previous_messages,
+            previous_user_message.content,
+        )
+        request_messages = [
+            *base_request_messages,
+            *model_visible_assistant_output_messages(trimmed_message),
+        ]
+        response = self._start_response_from_messages(
+            content=previous_user_message.content,
+            initial_assistant_message=trimmed_message,
+            next_messages=next_messages,
+            output_start_index=assistant_retry_output_start_index(trimmed_message),
+            request_messages=request_messages,
+            state=state_before_assistant,
+            usage_request_messages=base_request_messages,
+            user_message=previous_user_message,
+        )
+        return next_messages, response
+
     def _start_response_from_messages(
         self,
         *,
         content: str,
+        initial_assistant_message: StoredMessage | None = None,
         next_messages: list[StoredMessage],
+        output_start_index: int = 1,
+        request_messages: list[dict[str, object]] | None = None,
         state: StoredState,
+        usage_request_messages: list[dict[str, object]] | None = None,
         user_message: StoredMessage,
     ) -> WorkspaceResponse:
         connection = selected_connection(state)
@@ -550,13 +634,23 @@ class WorkspaceRuntime:
 
         async def response_task() -> None:
             nonlocal next_messages
-            assistant_message = StoredMessage(
-                author="assistant",
-                content="",
-                id=str(uuid4()),
-                status="running",
+            assistant_message = (
+                initial_assistant_message
+                if initial_assistant_message is not None
+                else StoredMessage(
+                    author="assistant",
+                    content="",
+                    id=str(uuid4()),
+                    status="running",
+                )
             )
-            assistant_output = AssistantOutputBuilder(assistant_message.id)
+            assistant_output = (
+                AssistantOutputBuilder.from_message(assistant_message)
+                if initial_assistant_message is not None
+                else AssistantOutputBuilder(assistant_message.id)
+            )
+            initial_assistant_content = assistant_output.content
+            initial_assistant_thinking = assistant_output.thinking
             last_progress_flush_at = 0.0
 
             def is_current_generation() -> bool:
@@ -613,43 +707,51 @@ class WorkspaceRuntime:
                 turn_usage_info: TokenUsageInfo | None = None
                 current_output_index = 0
                 latest_usage_output_index: int | None = None
-                current_request_messages = self.request_messages_for_content(
-                    state,
-                    next_messages,
-                    content,
-                )
-                pre_turn_request_messages = self.request_messages_for_content(
-                    state,
-                    state.messages,
-                    content,
-                )
-                auto_compaction = await self.auto_compact_messages(
-                    connection=connection,
-                    context_window_limit=context_window_limit,
-                    messages=state.messages,
-                    model_history=[
-                        ChatMessage.model_validate(message)
-                        for message in pre_turn_request_messages
-                    ],
-                    source_message_id=None,
-                )
-                if auto_compaction is not None:
-                    marker, _, usage_info = auto_compaction
-                    next_messages = [*state.messages, marker, user_message]
-                    self.store.save_messages(next_messages)
-                    await self.append_event(
-                        response,
-                        "context_optimized",
-                        {
-                            "message": marker.model_dump(),
-                            **usage_event_data(usage_info),
-                        },
-                    )
+                if request_messages is None:
                     current_request_messages = self.request_messages_for_content(
                         state,
                         next_messages,
                         content,
                     )
+                    pre_turn_request_messages = self.request_messages_for_content(
+                        state,
+                        state.messages,
+                        content,
+                    )
+                    auto_compaction = await self.auto_compact_messages(
+                        connection=connection,
+                        context_window_limit=context_window_limit,
+                        messages=state.messages,
+                        model_history=[
+                            ChatMessage.model_validate(message)
+                            for message in pre_turn_request_messages
+                        ],
+                        source_message_id=None,
+                    )
+                    if auto_compaction is not None:
+                        marker, _, usage_info = auto_compaction
+                        next_messages = [*state.messages, marker, user_message]
+                        self.store.save_messages(next_messages)
+                        await self.append_event(
+                            response,
+                            "context_optimized",
+                            {
+                                "message": marker.model_dump(),
+                                **usage_event_data(usage_info),
+                            },
+                        )
+                        current_request_messages = self.request_messages_for_content(
+                            state,
+                            next_messages,
+                            content,
+                        )
+                else:
+                    current_request_messages = request_messages
+                context_usage_messages = (
+                    usage_request_messages
+                    if usage_request_messages is not None
+                    else current_request_messages
+                )
 
                 async def review_tool_approval(request: ApprovalReviewRequest):
                     return await review_approval_request(
@@ -764,7 +866,11 @@ class WorkspaceRuntime:
                     snapshot_after_event: StoredMessage | None = None
                     if event.event == "start":
                         event_id = event.data.get("id")
-                        if isinstance(event_id, str):
+                        if initial_assistant_message is not None:
+                            assistant_output.set_assistant_id(assistant_message.id)
+                            run_event_data = {"id": assistant_message.id}
+                            snapshot_after_event = persist_assistant()
+                        elif isinstance(event_id, str):
                             assistant_message = assistant_message.model_copy(
                                 update={"id": event_id}
                             )
@@ -773,11 +879,19 @@ class WorkspaceRuntime:
                     if event.event == "output_start":
                         index = event.data.get("index")
                         if isinstance(index, int):
-                            current_output_index = index
+                            output_index = index + output_start_index - 1
+                            current_output_index = output_index
+                            run_event_data = {**event.data, "index": output_index}
                             response.active_output = None
-                            assistant_output.start_group(index)
+                            assistant_output.start_group(output_index)
                             snapshot_after_event = persist_assistant()
                     if event.event == "output_done":
+                        index = event.data.get("index")
+                        if isinstance(index, int):
+                            run_event_data = {
+                                **event.data,
+                                "index": index + output_start_index - 1,
+                            }
                         response.active_output = None
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
@@ -835,7 +949,11 @@ class WorkspaceRuntime:
                         message = event.data.get("message")
                         if isinstance(message, dict):
                             response.active_output = None
-                            assistant_output.apply_done_message(message)
+                            assistant_output.apply_done_message(
+                                message,
+                                content_prefix=initial_assistant_content,
+                                thinking_prefix=initial_assistant_thinking,
+                            )
                             response_usage_info = self.store.read_usage_info()
                             final_usage_info = turn_usage_info
                             if (
@@ -844,7 +962,7 @@ class WorkspaceRuntime:
                             ):
                                 final_usage_info = update_context_usage_for_response(
                                     final_usage_info or response_usage_info,
-                                    messages=current_request_messages,
+                                    messages=context_usage_messages,
                                     output_content=assistant_output.content,
                                     output_tools=[
                                         tool.model_dump(exclude_none=True)

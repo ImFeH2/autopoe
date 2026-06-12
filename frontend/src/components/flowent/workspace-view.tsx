@@ -45,6 +45,7 @@ import type {
   ContextUsageInfo,
   Message,
   MessageActionRequest,
+  MessageErrorRetryRequest,
   Skill,
   ToolItem,
   WorkspaceCommand,
@@ -65,6 +66,7 @@ export function WorkspaceView({
   onCommandError,
   onDraftChange,
   onEditMessage,
+  onRetryError,
   onRetryMessage,
   onSendMessage,
   onStopResponse,
@@ -82,6 +84,7 @@ export function WorkspaceView({
   onCommandError: (message: string) => void;
   onDraftChange: (value: string) => void;
   onEditMessage: (request: MessageActionRequest) => void;
+  onRetryError: (request: MessageErrorRetryRequest) => void;
   onRetryMessage: (messageId: string) => void;
   onSendMessage: (content: string) => void;
   onStopResponse: () => void;
@@ -117,6 +120,7 @@ export function WorkspaceView({
             isResponding={isResponding}
             messages={messages}
             onEditMessage={onEditMessage}
+            onRetryError={onRetryError}
             onRetryMessage={onRetryMessage}
           />
         </div>
@@ -130,12 +134,14 @@ function MessageList({
   isResponding,
   messages,
   onEditMessage,
+  onRetryError,
   onRetryMessage,
 }: {
   composerOffset: number;
   isResponding: boolean;
   messages: Message[];
   onEditMessage: (request: MessageActionRequest) => void;
+  onRetryError: (request: MessageErrorRetryRequest) => void;
   onRetryMessage: (messageId: string) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -238,6 +244,7 @@ function MessageList({
                 isResponding={isResponding}
                 message={message}
                 onEditMessage={onEditMessage}
+                onRetryError={onRetryError}
                 onRetryMessage={onRetryMessage}
               />
             )}
@@ -550,6 +557,7 @@ function MessageRow({
   isStreaming,
   message,
   onEditMessage,
+  onRetryError,
   onRetryMessage,
 }: {
   isPending: boolean;
@@ -557,6 +565,7 @@ function MessageRow({
   isStreaming: boolean;
   message: Message;
   onEditMessage: (request: MessageActionRequest) => void;
+  onRetryError: (request: MessageErrorRetryRequest) => void;
   onRetryMessage: (messageId: string) => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -627,8 +636,12 @@ function MessageRow({
               ) : (
                 <AssistantMessageContent
                   assistantGroups={assistantGroups}
+                  disableErrorRetry={isRetryUnavailable}
                   isStreaming={isStreaming}
                   message={message}
+                  onRetryError={(errorId) =>
+                    onRetryError({ errorId, messageId: message.id })
+                  }
                   showWaitingAfterOutput={shouldShowWaitingAfterOutput}
                 />
               )}
@@ -951,21 +964,27 @@ function assistantOutputGroups(message: Message): AssistantOutputGroup[] {
 
 function AssistantMessageContent({
   assistantGroups,
+  disableErrorRetry,
   isStreaming,
   message,
+  onRetryError,
   showWaitingAfterOutput,
 }: {
   assistantGroups: AssistantOutputGroup[];
+  disableErrorRetry: boolean;
   isStreaming: boolean;
   message: Message;
+  onRetryError: (errorId: string) => void;
   showWaitingAfterOutput: boolean;
 }) {
   if (message.author === "assistant") {
     return (
       <div className="flowent-markdown-message min-w-0 break-words">
         <AssistantOutputTimeline
+          disableErrorRetry={disableErrorRetry}
           groups={assistantGroups}
           isStreaming={isStreaming}
+          onRetryError={onRetryError}
           showWaitingAfterOutput={showWaitingAfterOutput}
         />
       </div>
@@ -980,12 +999,16 @@ function AssistantMessageContent({
 }
 
 function AssistantOutputTimeline({
+  disableErrorRetry,
   groups,
   isStreaming,
+  onRetryError,
   showWaitingAfterOutput,
 }: {
+  disableErrorRetry: boolean;
   groups: AssistantOutputGroup[];
   isStreaming: boolean;
+  onRetryError: (errorId: string) => void;
   showWaitingAfterOutput: boolean;
 }) {
   const lastTextItemId = groups
@@ -1009,7 +1032,12 @@ function AssistantOutputTimeline({
                   isStreaming={item.isStreaming === true}
                 />
               ) : item.type === "error" ? (
-                <AssistantErrorItem key={item.id} item={item} />
+                <AssistantErrorItem
+                  disabled={disableErrorRetry}
+                  key={item.id}
+                  item={item}
+                  onRetry={() => onRetryError(item.id)}
+                />
               ) : (
                 <MarkdownMessage
                   key={item.id}
@@ -1031,9 +1059,13 @@ function AssistantOutputTimeline({
 }
 
 function AssistantErrorItem({
+  disabled,
   item,
+  onRetry,
 }: {
+  disabled: boolean;
   item: Extract<AssistantOutputItem, { type: "error" }>;
+  onRetry: () => void;
 }) {
   return (
     <div
@@ -1053,6 +1085,14 @@ function AssistantErrorItem({
           </div>
         ) : null}
       </div>
+      <MessageIconButton
+        className="shrink-0 text-red-100/55 hover:bg-red-400/10 hover:text-red-50 disabled:text-red-100/25"
+        disabled={disabled}
+        label="Retry"
+        onClick={onRetry}
+      >
+        <RotateCcw aria-hidden="true" className="size-4" />
+      </MessageIconButton>
     </div>
   );
 }

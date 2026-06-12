@@ -195,6 +195,11 @@ export type MessageActionRequest = {
   messageId: string;
 };
 
+export type MessageErrorRetryRequest = {
+  errorId: string;
+  messageId: string;
+};
+
 export type WorkspaceCommandId = "clear" | "compact";
 
 export type WorkspaceCommand = {

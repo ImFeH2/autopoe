@@ -1863,6 +1863,174 @@ def test_workspace_persists_error_block_when_model_fails_before_output(
     ]
 
 
+@pytest.mark.anyio
+async def test_workspace_retries_failed_error_block_after_tool_result(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "notes.txt").write_text("Launch notes")
+    captured_requests: list[dict[str, object]] = []
+    fail_next_tool_result_call = True
+    retry_chunk_sent = asyncio.Event()
+    finish_retry = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        nonlocal fail_next_tool_result_call
+        captured_requests.append(request)
+        should_call_tool = request["messages"][-1]["role"] == "user"
+        should_fail = not should_call_tool and fail_next_tool_result_call
+        if should_fail:
+            fail_next_tool_result_call = False
+
+        async def chunks() -> object:
+            if should_call_tool:
+                yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
+                return
+            if should_fail:
+                yield {"choices": [{"delta": {}}]}
+                raise RuntimeError("provider dropped")
+            yield {"choices": [{"delta": {"content": "Recovered "}}]}
+            retry_chunk_sent.set()
+            await asyncio.wait_for(finish_retry.wait(), timeout=2)
+            yield {"choices": [{"delta": {"content": "from notes."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+
+        first_response = await client.post(
+            "/api/workspace/respond", json={"content": "Read the notes."}
+        )
+
+        assert first_response.status_code == 200
+        assert stream_events(first_response.text)[-1]["event"] == "error"
+        failed_state = (await client.get("/api/state")).json()
+        failed_assistant = failed_state["messages"][-1]
+        error_item = failed_assistant["groups"][-1]["items"][0]
+        assert failed_assistant["status"] == "failed"
+        assert failed_assistant["tools"][0]["name"] == "read_file"
+        assert failed_assistant["tools"][0]["content"] == "Launch notes"
+
+        retry_response = await client.post(
+            f"/api/workspace/messages/{failed_assistant['id']}/errors/{error_item['id']}/retry"
+        )
+
+        assert retry_response.status_code == 200
+        retry_body = retry_response.json()
+        assert retry_body["is_responding"] is True
+        assert retry_body["messages"][-1]["id"] == failed_assistant["id"]
+        assert retry_body["messages"][-1]["status"] == "running"
+        assert not any(
+            item["type"] == "error"
+            for group in retry_body["messages"][-1]["groups"]
+            for item in group["items"]
+        )
+
+        await asyncio.wait_for(retry_chunk_sent.wait(), timeout=2)
+        stream_task = asyncio.create_task(client.get("/api/workspace/stream?after=0"))
+        finish_retry.set()
+        retry_stream = await stream_task
+        state = (await client.get("/api/state")).json()
+
+    assert retry_stream.status_code == 200
+    assert stream_events(retry_stream.text)[-1]["event"] == "done"
+    assistant = state["messages"][-1]
+    assert assistant["id"] == failed_assistant["id"]
+    assert assistant.get("status", "completed") == "completed"
+    assert assistant["content"] == "Recovered from notes."
+    assert len(assistant["tools"]) == 1
+    assert assistant["tools"][0]["content"] == "Launch notes"
+    assert not any(
+        item["type"] == "error"
+        for group in assistant["groups"]
+        for item in group["items"]
+    )
+    assert len(captured_requests) == 3
+    retry_messages = captured_requests[-1]["messages"]
+    assert any(
+        message.get("role") == "tool" and message.get("content") == "Launch notes"
+        for message in retry_messages
+    )
+
+
+@pytest.mark.anyio
+async def test_workspace_retries_failed_error_block_before_any_output(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    captured_requests: list[dict[str, object]] = []
+    fail_next_call = True
+    retry_chunk_sent = asyncio.Event()
+    finish_retry = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        nonlocal fail_next_call
+        captured_requests.append(request)
+        should_fail = fail_next_call
+        if should_fail:
+            fail_next_call = False
+
+        async def chunks() -> object:
+            if should_fail:
+                yield {"choices": [{"delta": {}}]}
+                raise RuntimeError("provider unavailable")
+            yield {"choices": [{"delta": {"content": "Recover"}}]}
+            retry_chunk_sent.set()
+            await asyncio.wait_for(finish_retry.wait(), timeout=2)
+            yield {"choices": [{"delta": {"content": "ed."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+
+        first_response = await client.post(
+            "/api/workspace/respond", json={"content": "Hello."}
+        )
+
+        assert first_response.status_code == 200
+        assert stream_events(first_response.text)[-1]["event"] == "error"
+        failed_state = (await client.get("/api/state")).json()
+        failed_assistant = failed_state["messages"][-1]
+        error_item = failed_assistant["groups"][-1]["items"][0]
+        assert failed_assistant["content"] == ""
+        assert failed_assistant["status"] == "failed"
+
+        retry_response = await client.post(
+            f"/api/workspace/messages/{failed_assistant['id']}/errors/{error_item['id']}/retry"
+        )
+
+        assert retry_response.status_code == 200
+        retry_body = retry_response.json()
+        assert retry_body["is_responding"] is True
+        assert retry_body["messages"][-1]["id"] == failed_assistant["id"]
+        assert retry_body["messages"][-1]["content"] == ""
+        assert retry_body["messages"][-1]["status"] == "running"
+
+        await asyncio.wait_for(retry_chunk_sent.wait(), timeout=2)
+        stream_task = asyncio.create_task(client.get("/api/workspace/stream?after=0"))
+        finish_retry.set()
+        retry_stream = await stream_task
+        state = (await client.get("/api/state")).json()
+
+    assert retry_stream.status_code == 200
+    assert stream_events(retry_stream.text)[-1]["event"] == "done"
+    assistant = state["messages"][-1]
+    assert assistant["id"] == failed_assistant["id"]
+    assert assistant.get("status", "completed") == "completed"
+    assert assistant["content"] == "Recovered."
+    assert len(captured_requests) == 2
+
+
 def test_workspace_treats_empty_model_result_as_failed_error_block(
     tmp_path, monkeypatch
 ) -> None:

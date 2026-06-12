@@ -23,6 +23,7 @@ import type {
   Message,
   ContextUsageInfo,
   MessageActionRequest,
+  MessageErrorRetryRequest,
   Provider,
   ReasoningEffort,
   RuntimeSettings,
@@ -685,6 +686,57 @@ const latestAssistantOutputItem = (groups: AssistantOutputGroup[]) => {
   }
 
   return null;
+};
+
+const trimAssistantMessageAtError = (
+  message: Message,
+  errorId: string,
+): Message | null => {
+  const nextGroups: AssistantOutputGroup[] = [];
+  let foundError = false;
+  for (const group of assistantGroupsFromMessage(message)) {
+    const nextItems: AssistantOutputItem[] = [];
+    for (const item of group.items) {
+      if (item.type === "error" && item.id === errorId) {
+        foundError = true;
+        break;
+      }
+      nextItems.push(item);
+    }
+    if (foundError) {
+      if (nextItems.length > 0) {
+        nextGroups.push({ ...group, items: nextItems });
+      }
+      break;
+    }
+    nextGroups.push(group);
+  }
+
+  if (!foundError) {
+    return null;
+  }
+
+  return {
+    ...message,
+    content: nextGroups
+      .flatMap((group) => group.items)
+      .filter((item) => item.type === "text")
+      .map((item) => item.content)
+      .join(""),
+    groups: nextGroups,
+    isStreamingText: false,
+    isStreamingThinking: false,
+    status: "running",
+    thinking: nextGroups
+      .flatMap((group) => group.items)
+      .filter((item) => item.type === "thinking")
+      .map((item) => item.content)
+      .join(""),
+    tools: nextGroups
+      .flatMap((group) => group.items)
+      .filter((item) => item.type === "tool")
+      .map((item) => item.tool),
+  };
 };
 
 const streamErrorFromMessage = (
@@ -1647,6 +1699,29 @@ function FlowentApp() {
     return result;
   };
 
+  const retryWorkspaceError = async ({
+    errorId,
+    messageId,
+  }: MessageErrorRetryRequest) => {
+    const response = await fetch(
+      `/api/workspace/messages/${encodeURIComponent(messageId)}/errors/${encodeURIComponent(errorId)}/retry`,
+      {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(await responseErrorFromApi(response));
+    }
+
+    const result = (await response.json()) as WorkspaceMessageEditResponse;
+    if (!Array.isArray(result.messages)) {
+      throw new Error("Message could not be updated.");
+    }
+    return result;
+  };
+
   const parseWorkspaceStreamEvent = useCallback(
     (rawEvent: string): WorkspaceStreamEventEnvelope => {
       const lines = rawEvent.split("\n");
@@ -2559,6 +2634,53 @@ function FlowentApp() {
     }
   };
 
+  const retryError = async ({
+    errorId,
+    messageId,
+  }: MessageErrorRetryRequest) => {
+    if (isResponding) {
+      return;
+    }
+
+    const messageIndex = messages.findIndex(
+      (message) => message.id === messageId,
+    );
+    if (messageIndex < 0 || messages[messageIndex].author !== "assistant") {
+      return;
+    }
+
+    const trimmedMessage = trimAssistantMessageAtError(
+      messages[messageIndex],
+      errorId,
+    );
+    if (!trimmedMessage) {
+      return;
+    }
+
+    const previousMessages = messages;
+    const optimisticMessages = [
+      ...messages.slice(0, messageIndex),
+      trimmedMessage,
+    ];
+    setResponseError("");
+    setIsResponding(true);
+    setMessages(optimisticMessages);
+
+    try {
+      const result = await retryWorkspaceError({ errorId, messageId });
+      if (!result.is_responding) {
+        throw new Error("Message could not be sent.");
+      }
+      startEditedResponse(result.messages);
+    } catch (error) {
+      setMessages(previousMessages);
+      setIsResponding(false);
+      setResponseError(
+        error instanceof Error ? error.message : "Message could not be sent.",
+      );
+    }
+  };
+
   const editMessage = async ({
     action,
     content,
@@ -2778,6 +2900,9 @@ function FlowentApp() {
           }}
           onRetryMessage={(messageId) => {
             void retryMessage(messageId);
+          }}
+          onRetryError={(request) => {
+            void retryError(request);
           }}
           onSendMessage={(content) => {
             void sendMessage(content);

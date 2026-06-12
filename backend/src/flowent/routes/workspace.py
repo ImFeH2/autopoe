@@ -51,6 +51,25 @@ def register_workspace_routes(
             messages=messages,
         )
 
+    @app.post("/api/workspace/messages/{message_id}/errors/{error_id}/retry")
+    async def retry_workspace_error(
+        message_id: str,
+        error_id: str,
+    ) -> WorkspaceMessageEditResponse:
+        logger.info(
+            "Workspace error retry requested message_id=%s error_id=%s",
+            message_id,
+            error_id,
+        )
+        messages, response = runtime.retry_error(
+            message_id,
+            error_id=error_id,
+        )
+        return WorkspaceMessageEditResponse(
+            is_responding=response is not None,
+            messages=messages,
+        )
+
     @app.post("/api/workspace/clear")
     async def clear_workspace() -> WorkspaceClearResponse:
         messages = runtime.clear()
