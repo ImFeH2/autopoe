@@ -1,7 +1,6 @@
 import json
 import os
 from collections.abc import Mapping, Sequence
-from typing import Literal
 
 from fastapi import HTTPException
 
@@ -49,7 +48,7 @@ def auto_compact_token_limit(context_window: int) -> int:
 
 
 def should_auto_compact(
-    messages: list[ChatMessage],
+    messages: Sequence[ChatMessage | Mapping[str, object]],
     *,
     context_window: int,
 ) -> bool:
@@ -58,7 +57,7 @@ def should_auto_compact(
         return False
     return (
         estimated_token_usage_for_messages(
-            [message.model_dump() for message in messages]
+            model_request_messages_data(messages)
         ).total_tokens
         >= token_limit
     )
@@ -186,6 +185,76 @@ def model_visible_assistant_output_messages(
     return visible_messages
 
 
+def model_visible_workspace_message(message: StoredMessage) -> list[dict[str, object]]:
+    if message.author == "user":
+        return [{"role": "user", "content": message.content}]
+    if message.author != "assistant":
+        raise HTTPException(status_code=400, detail="Message history is invalid.")
+    errors = message_error_items(message)
+    if errors:
+        return [
+            {"role": "assistant", "content": error_context_summary(error)}
+            for error in errors
+        ]
+    return model_visible_assistant_output_messages(message)
+
+
+def model_visible_workspace_messages(
+    messages: Sequence[StoredMessage],
+) -> list[dict[str, object]]:
+    visible_messages: list[dict[str, object]] = []
+    for message in messages:
+        visible_messages.extend(model_visible_workspace_message(message))
+    return visible_messages
+
+
+def compact_prompt_chat_message(message: Mapping[str, object]) -> ChatMessage:
+    role_value = message.get("role")
+    content = str(message.get("content") or "")
+    if role_value == "system":
+        return ChatMessage(role="system", content=content)
+    if role_value == "assistant":
+        tool_calls = message.get("tool_calls")
+        if tool_calls:
+            return ChatMessage(
+                role="assistant",
+                content=(
+                    f"Tool call: {json.dumps(tool_calls, ensure_ascii=False)}"
+                    if not content
+                    else f"{content}\nTool call: {json.dumps(tool_calls, ensure_ascii=False)}"
+                ),
+            )
+        return ChatMessage(role="assistant", content=content)
+    if role_value == "tool":
+        return ChatMessage(role="user", content=f"Tool result: {content}")
+    return ChatMessage(role="user", content=content)
+
+
+def model_request_message_data(
+    message: ChatMessage | Mapping[str, object],
+) -> dict[str, object]:
+    if isinstance(message, ChatMessage):
+        return message.model_dump()
+    return dict(message)
+
+
+def model_request_messages_data(
+    messages: Sequence[ChatMessage | Mapping[str, object]],
+) -> list[dict[str, object]]:
+    return [model_request_message_data(message) for message in messages]
+
+
+def compact_prompt_chat_messages(
+    messages: Sequence[ChatMessage | Mapping[str, object]],
+) -> list[ChatMessage]:
+    return [
+        message
+        if isinstance(message, ChatMessage)
+        else compact_prompt_chat_message(message)
+        for message in messages
+    ]
+
+
 def usage_info_for_model(
     usage_info: TokenUsageInfo | None,
     model_context_window: int,
@@ -230,11 +299,13 @@ def workspace_chat_messages(
     messages: list[StoredMessage],
     compacted_context: str = "",
     checkpoint: StoredCompactionCheckpoint | None = None,
-) -> list[ChatMessage]:
-    chat_messages: list[ChatMessage] = []
+) -> list[dict[str, object]]:
+    chat_messages: list[dict[str, object]] = []
 
     if checkpoint is not None:
-        chat_messages.extend(checkpoint.replacement_history)
+        chat_messages.extend(
+            model_request_messages_data(checkpoint.replacement_history)
+        )
         visible_messages = transcript_messages_after(
             messages,
             checkpoint.source_message_id,
@@ -242,26 +313,7 @@ def workspace_chat_messages(
         for message in visible_messages:
             if message.author == "system" and is_context_marker(message):
                 continue
-            if message.author not in ("user", "assistant"):
-                raise HTTPException(
-                    status_code=400, detail="Message history is invalid."
-                )
-            if message.author == "assistant":
-                errors = message_error_items(message)
-                if errors:
-                    chat_messages.extend(
-                        ChatMessage(
-                            role="assistant", content=error_context_summary(error)
-                        )
-                        for error in errors
-                    )
-                    continue
-            checkpoint_role: Literal["user", "assistant"] = (
-                "user" if message.author == "user" else "assistant"
-            )
-            chat_messages.append(
-                ChatMessage(role=checkpoint_role, content=message.content)
-            )
+            chat_messages.extend(model_visible_workspace_message(message))
         return chat_messages
 
     marker_index = latest_compacted_context_index(messages)
@@ -270,8 +322,8 @@ def workspace_chat_messages(
     if compacted_context and marker_index is not None:
         chat_messages.extend(
             [
-                ChatMessage(role="user", content=COMPACTED_CONTEXT_MARKER),
-                ChatMessage(role="assistant", content=compacted_context),
+                {"role": "user", "content": COMPACTED_CONTEXT_MARKER},
+                {"role": "assistant", "content": compacted_context},
             ]
         )
         visible_messages = messages[marker_index + 1 :]
@@ -279,18 +331,5 @@ def workspace_chat_messages(
     for message in visible_messages:
         if message.author == "system" and is_context_marker(message):
             continue
-        if message.author not in ("user", "assistant"):
-            raise HTTPException(status_code=400, detail="Message history is invalid.")
-        if message.author == "assistant":
-            errors = message_error_items(message)
-            if errors:
-                chat_messages.extend(
-                    ChatMessage(role="assistant", content=error_context_summary(error))
-                    for error in errors
-                )
-                continue
-        role: Literal["user", "assistant"] = (
-            "user" if message.author == "user" else "assistant"
-        )
-        chat_messages.append(ChatMessage(role=role, content=message.content))
+        chat_messages.extend(model_visible_workspace_message(message))
     return chat_messages

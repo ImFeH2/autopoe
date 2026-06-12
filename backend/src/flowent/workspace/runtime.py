@@ -37,7 +37,9 @@ from flowent.usage import (
 from flowent.workspace.context import (
     COMPACTED_CONTEXT_MARKER,
     OPTIMIZED_CONTEXT_MARKER,
+    compact_prompt_chat_messages,
     context_window_for_settings,
+    model_request_messages_data,
     model_visible_assistant_output_messages,
     should_auto_compact,
     update_context_usage_for_response,
@@ -104,14 +106,13 @@ class WorkspaceRuntime:
             compacted_context,
             checkpoint,
         )
-        return [
-            message.model_dump()
-            for message in [
+        return model_request_messages_data(
+            [
                 *runtime_context_messages(self.cwd, state.settings.agent_prompt),
                 *explicit_skill_messages(self.cwd, self.store, content),
                 *chat_messages,
             ]
-        ]
+        )
 
     async def save_context_checkpoint(
         self,
@@ -119,16 +120,17 @@ class WorkspaceRuntime:
         connection: ProviderConnection,
         context_window_limit: int,
         messages: list[StoredMessage],
-        model_history: list[ChatMessage],
+        model_history: Sequence[ChatMessage | Mapping[str, object]],
         marker_content: str,
         source_message_id: str | None = None,
         trigger: Literal["manual", "auto"],
     ) -> tuple[StoredMessage, list[dict[str, object]], TokenUsageInfo]:
+        compact_model_history = compact_prompt_chat_messages(model_history)
         compact_result = await self.compact_provider.compact(
             connection,
             CompactInput(
                 messages=messages,
-                model_history=model_history,
+                model_history=compact_model_history,
                 retained_message_token_budget=AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET,
                 trigger=trigger,
             ),
@@ -187,7 +189,7 @@ class WorkspaceRuntime:
         connection: ProviderConnection,
         context_window_limit: int,
         messages: list[StoredMessage],
-        model_history: list[ChatMessage],
+        model_history: Sequence[ChatMessage | Mapping[str, object]],
         source_message_id: str | None = None,
     ) -> tuple[StoredMessage, list[dict[str, object]], TokenUsageInfo] | None:
         if not should_auto_compact(
@@ -221,7 +223,7 @@ class WorkspaceRuntime:
         )
         next_messages = [*state.messages, user_message]
         self.store.save_messages(next_messages)
-        model_history = [
+        model_history: list[ChatMessage | Mapping[str, object]] = [
             *runtime_context_messages(self.cwd, state.settings.agent_prompt),
             *workspace_chat_messages(
                 state.messages,
@@ -722,10 +724,7 @@ class WorkspaceRuntime:
                         connection=connection,
                         context_window_limit=context_window_limit,
                         messages=state.messages,
-                        model_history=[
-                            ChatMessage.model_validate(message)
-                            for message in pre_turn_request_messages
-                        ],
+                        model_history=pre_turn_request_messages,
                         source_message_id=None,
                     )
                     if auto_compaction is not None:
@@ -796,34 +795,11 @@ class WorkspaceRuntime:
                         tools=list(assistant_output.tools.values()),
                         usage_info=self.store.read_usage_info(),
                     )
-                    model_history: list[ChatMessage] = []
-                    for message in conversation:
-                        role_value = message.get("role")
-                        content = str(message.get("content") or "")
-                        if role_value == "system":
-                            model_history.append(
-                                ChatMessage(role="system", content=content)
-                            )
-                        if role_value == "user":
-                            model_history.append(
-                                ChatMessage(role="user", content=content)
-                            )
-                        if role_value == "assistant":
-                            model_history.append(
-                                ChatMessage(role="assistant", content=content)
-                            )
-                        if role_value == "tool":
-                            model_history.append(
-                                ChatMessage(
-                                    role="user",
-                                    content=f"Tool result: {content}",
-                                )
-                            )
                     auto_result = await self.auto_compact_messages(
                         connection=connection,
                         context_window_limit=context_window_limit,
                         messages=next_messages,
-                        model_history=model_history,
+                        model_history=compact_prompt_chat_messages(conversation),
                         source_message_id=assistant_snapshot.id,
                     )
                     if auto_result is None:
@@ -1096,7 +1072,7 @@ class WorkspaceRuntime:
         ) -> tuple[StoredMessage, TokenUsageInfo]:
             logger.info("Workspace compact requested")
             try:
-                model_history = [
+                model_history: list[ChatMessage | Mapping[str, object]] = [
                     *runtime_context_messages(self.cwd, state.settings.agent_prompt),
                     *workspace_chat_messages(
                         state.messages,
