@@ -157,8 +157,7 @@ type ApiWorkflowRunResult = {
 type ApiMessage = Message;
 
 type ApiState = {
-  active_run_event_index?: number;
-  active_run_id?: string | null;
+  is_responding?: boolean;
   is_compacting?: boolean;
   mcp_servers?: ApiMcpServer[];
   messages: ApiMessage[];
@@ -173,6 +172,7 @@ type ApiState = {
   skills?: ApiSkill[];
   telegram_bot?: ApiTelegramBot;
   usage_info?: ContextUsageInfo | null;
+  response_event_index?: number;
   writable_paths?: ApiWritablePath[];
   workflows?: ApiWorkflow[];
 };
@@ -213,13 +213,9 @@ type RequestResult<T> =
       error: string;
     };
 
-type WorkspaceRunResponse = {
-  run_id: string;
-};
-
 type WorkspaceMessageEditResponse = {
+  is_responding?: boolean;
   messages: ApiMessage[];
-  run_id?: string | null;
 };
 
 const contextWindowFromLimit = (
@@ -719,8 +715,7 @@ const isAbortError = (error: unknown) =>
   "name" in error &&
   error.name === "AbortError";
 
-const supportsWorkspaceRuns = (response: Response) =>
-  response.status !== 404 && response.status !== 405;
+class WorkspaceRequestError extends Error {}
 
 const previousUserMessage = (messages: Message[], fromIndex: number) => {
   for (let index = fromIndex; index >= 0; index -= 1) {
@@ -773,11 +768,9 @@ function FlowentApp() {
   const [isResponding, setIsResponding] = useState(false);
   const [isRefiningContext, setIsRefiningContext] = useState(false);
   const [writablePaths, setWritablePaths] = useState<WritablePath[]>([]);
-  const [activeRunId, setActiveRunId] = useState("");
   const [responseError, setResponseError] = useState("");
   const responseAbortRef = useRef<AbortController | null>(null);
-  const activeRunIdRef = useRef("");
-  const activeRunEventIndexRef = useRef(0);
+  const responseEventIndexRef = useRef(0);
   const messagesRef = useRef<Message[]>([]);
   const responseRunRef = useRef(0);
   const errorNotificationKeysRef = useRef<Set<string>>(new Set());
@@ -898,12 +891,14 @@ function FlowentApp() {
       setTelegramBot(loadedTelegramBot);
       setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
       setWorkflows((state.workflows ?? []).map(workflowFromApi));
-      activeRunEventIndexRef.current = state.active_run_event_index ?? 0;
-      activeRunIdRef.current = state.active_run_id ?? "";
-      setActiveRunId(state.active_run_id ?? "");
-      setIsResponding(Boolean(state.active_run_id));
+      const shouldResumeResponse = Boolean(state.is_responding);
+      responseEventIndexRef.current = state.response_event_index ?? 0;
+      setIsResponding(shouldResumeResponse);
       setIsRefiningContext(Boolean(state.is_compacting));
       if (!hasLoadedStateRef.current) {
+        if (shouldResumeResponse) {
+          setStreamReconnectKey((current) => current + 1);
+        }
         errorNotificationKeysRef.current = new Set(
           errorNotificationKeysFromState(
             loadedTelegramBot,
@@ -2134,9 +2129,7 @@ function FlowentApp() {
           }
           finishAssistantFromLegacyDone(message);
           cancelPendingAssistantUpdate();
-          activeRunIdRef.current = "";
-          activeRunEventIndexRef.current = 0;
-          setActiveRunId("");
+          responseEventIndexRef.current = 0;
           setIsResponding(false);
         },
         onError: (error) => {
@@ -2220,52 +2213,47 @@ function FlowentApp() {
           if (!isCurrentResponse()) {
             return;
           }
-          activeRunEventIndexRef.current = eventIndex;
+          responseEventIndexRef.current = eventIndex;
         },
       };
     },
     [setTrackedUsageInfo],
   );
 
-  const requestWorkspaceRun = useCallback(
-    async (content: string, messageId: string) => {
-      const response = await fetch("/api/workspace/runs", {
+  const requestWorkspaceResponse = useCallback(
+    async (
+      content: string,
+      messageId: string,
+      handlers: WorkspaceStreamHandlers,
+      signal?: AbortSignal,
+    ) => {
+      const response = await fetch("/api/workspace/respond", {
         body: JSON.stringify({ content, message_id: messageId }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
+        signal,
       });
 
       if (!response.ok) {
-        if (!supportsWorkspaceRuns(response)) {
-          throw new SyntaxError("Run was not returned.");
-        }
-        throw new Error(await responseErrorFromApi(response));
+        throw new WorkspaceRequestError(await responseErrorFromApi(response));
       }
 
-      const result = (await response.json()) as Partial<WorkspaceRunResponse>;
-      if (typeof result.run_id !== "string" || result.run_id.length === 0) {
-        throw new SyntaxError("Run was not returned.");
-      }
-      return result.run_id;
+      await readWorkspaceStream(response, handlers);
     },
-    [responseErrorFromApi],
+    [readWorkspaceStream, responseErrorFromApi],
   );
 
-  const streamWorkspaceRun = useCallback(
+  const streamWorkspaceResponse = useCallback(
     async (
-      runId: string,
       handlers: WorkspaceStreamHandlers,
       after: number,
       signal?: AbortSignal,
     ) => {
-      const response = await fetch(
-        `/api/workspace/runs/${encodeURIComponent(runId)}/stream?after=${after}`,
-        {
-          headers: { "Content-Type": "text/event-stream" },
-          method: "GET",
-          signal,
-        },
-      );
+      const response = await fetch(`/api/workspace/stream?after=${after}`, {
+        headers: { "Content-Type": "text/event-stream" },
+        method: "GET",
+        signal,
+      });
 
       if (!response.ok) {
         throw new Error(await responseErrorFromApi(response));
@@ -2277,7 +2265,7 @@ function FlowentApp() {
   );
 
   useEffect(() => {
-    if (!activeRunId) {
+    if (streamReconnectKey === 0) {
       return;
     }
 
@@ -2288,16 +2276,15 @@ function FlowentApp() {
     setIsResponding(true);
     setResponseError("");
 
-    const streamCurrentRun = async () => {
+    const streamCurrentResponse = async () => {
       const handlers = createWorkspaceStreamHandlers(
         messagesRef.current,
         responseRun,
       );
       try {
-        await streamWorkspaceRun(
-          activeRunId,
+        await streamWorkspaceResponse(
           handlers,
-          activeRunEventIndexRef.current,
+          responseEventIndexRef.current,
           responseAbortController.signal,
         );
       } catch (error) {
@@ -2308,59 +2295,33 @@ function FlowentApp() {
           return;
         }
         const state = await refreshAppState().catch(() => null);
-        if (state?.active_run_id) {
+        if (state?.is_responding) {
           setStreamReconnectKey((current) => current + 1);
           return;
         }
-        activeRunIdRef.current = "";
-        activeRunEventIndexRef.current = 0;
-        setActiveRunId("");
+        responseEventIndexRef.current = 0;
         setIsResponding(false);
         setResponseError(
           error instanceof Error ? error.message : "Message could not be sent.",
         );
       } finally {
-        if (
-          responseRunRef.current === responseRun &&
-          activeRunIdRef.current !== activeRunId
-        ) {
+        if (responseRunRef.current === responseRun) {
           responseAbortRef.current = null;
         }
       }
     };
 
-    void streamCurrentRun();
+    void streamCurrentResponse();
 
     return () => {
       responseAbortController.abort();
     };
   }, [
-    activeRunId,
     createWorkspaceStreamHandlers,
     refreshAppState,
     streamReconnectKey,
-    streamWorkspaceRun,
+    streamWorkspaceResponse,
   ]);
-
-  const requestLegacyWorkspaceResponse = async (
-    content: string,
-    messageId: string,
-    handlers: WorkspaceStreamHandlers,
-    signal?: AbortSignal,
-  ) => {
-    const response = await fetch("/api/workspace/respond", {
-      body: JSON.stringify({ content, message_id: messageId }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(await responseErrorFromApi(response));
-    }
-
-    await readWorkspaceStream(response, handlers);
-  };
 
   const compactWorkspace = async () => {
     setResponseError("");
@@ -2455,20 +2416,17 @@ function FlowentApp() {
   };
 
   const stopResponse = () => {
-    const runId = activeRunIdRef.current;
-    if (runId) {
-      void fetch(`/api/workspace/runs/${encodeURIComponent(runId)}/stop`, {
+    if (isResponding) {
+      void fetch("/api/workspace/stop", {
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
     }
     responseRunRef.current += 1;
-    activeRunIdRef.current = "";
-    activeRunEventIndexRef.current = 0;
+    responseEventIndexRef.current = 0;
     responseAbortRef.current?.abort();
     responseAbortRef.current = null;
     setResponseError("");
-    setActiveRunId("");
     setIsResponding(false);
   };
 
@@ -2486,7 +2444,7 @@ function FlowentApp() {
     const responseAbortController = new AbortController();
     responseAbortRef.current = responseAbortController;
     responseRunRef.current = responseRun;
-    activeRunEventIndexRef.current = 0;
+    responseEventIndexRef.current = 0;
     const userContent = submittedDraft;
     const userMessageId = createClientId("message");
     const nextMessages: Message[] = [
@@ -2505,27 +2463,13 @@ function FlowentApp() {
     }
 
     try {
-      try {
-        const runId = await requestWorkspaceRun(userContent, userMessageId);
-        activeRunIdRef.current = runId;
-        activeRunEventIndexRef.current = 0;
-        setActiveRunId(runId);
-      } catch (error) {
-        if (error instanceof SyntaxError) {
-          const handlers = createWorkspaceStreamHandlers(
-            nextMessages,
-            responseRun,
-          );
-          await requestLegacyWorkspaceResponse(
-            userContent,
-            userMessageId,
-            handlers,
-            responseAbortController.signal,
-          );
-          return;
-        }
-        throw error;
-      }
+      const handlers = createWorkspaceStreamHandlers(nextMessages, responseRun);
+      await requestWorkspaceResponse(
+        userContent,
+        userMessageId,
+        handlers,
+        responseAbortController.signal,
+      );
     } catch (error) {
       if (responseRunRef.current !== responseRun) {
         return;
@@ -2543,24 +2487,30 @@ function FlowentApp() {
           setDraft(userContent);
         }
       }
+      if (!(error instanceof WorkspaceRequestError)) {
+        const state = await refreshAppState().catch(() => null);
+        if (state?.is_responding) {
+          setStreamReconnectKey((current) => current + 1);
+          return;
+        }
+      }
       setResponseError(
         error instanceof Error ? error.message : "Message could not be sent.",
       );
+      setIsResponding(false);
     } finally {
-      if (responseRunRef.current === responseRun && !activeRunIdRef.current) {
+      if (responseRunRef.current === responseRun) {
         responseAbortRef.current = null;
-        setIsResponding(false);
       }
     }
   };
 
-  const startEditedRun = (runId: string, nextMessages: Message[]) => {
+  const startEditedResponse = (nextMessages: Message[]) => {
     responseRunRef.current += 1;
-    activeRunIdRef.current = runId;
-    activeRunEventIndexRef.current = 0;
+    responseEventIndexRef.current = 0;
     setMessages(nextMessages);
-    setActiveRunId(runId);
     setIsResponding(true);
+    setStreamReconnectKey((current) => current + 1);
   };
 
   const retryMessage = async (messageId: string) => {
@@ -2594,10 +2544,10 @@ function FlowentApp() {
         content: userMessage.content,
         messageId: userMessage.id,
       });
-      if (!result.run_id) {
+      if (!result.is_responding) {
         throw new Error("Message could not be sent.");
       }
-      startEditedRun(result.run_id, result.messages);
+      startEditedResponse(result.messages);
     } catch (error) {
       setMessages(previousMessages);
       setIsResponding(false);
@@ -2634,10 +2584,10 @@ function FlowentApp() {
     try {
       const result = await editWorkspaceMessage({ action, content, messageId });
       if (action === "resend") {
-        if (!result.run_id) {
+        if (!result.is_responding) {
           throw new Error("Message could not be sent.");
         }
-        startEditedRun(result.run_id, result.messages);
+        startEditedResponse(result.messages);
         return;
       }
       setMessages(result.messages);
@@ -2660,13 +2610,11 @@ function FlowentApp() {
 
     responseAbortRef.current?.abort();
     responseAbortRef.current = null;
-    activeRunIdRef.current = "";
-    activeRunEventIndexRef.current = 0;
+    responseEventIndexRef.current = 0;
     responseRunRef.current += 1;
     setMessages([]);
     setTrackedUsageInfo(null);
     setResponseError("");
-    setActiveRunId("");
     setIsResponding(false);
 
     try {

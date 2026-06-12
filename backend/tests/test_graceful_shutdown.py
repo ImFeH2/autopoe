@@ -52,6 +52,7 @@ async def test_shutdown_interrupts_running_workspace_response(
         return chunks()
 
     app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    response_task: asyncio.Task[httpx.Response] | None = None
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(
@@ -59,12 +60,18 @@ async def test_shutdown_interrupts_running_workspace_response(
         ) as client,
     ):
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Keep working."},
+        response_task = asyncio.create_task(
+            client.post(
+                "/api/workspace/respond",
+                json={"content": "Keep working."},
+            )
         )
-        assert response.status_code == 200
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
+
+    if response_task is not None and not response_task.done():
+        response_task.cancel()
+        with suppress(asyncio.CancelledError, httpx.TransportError):
+            await response_task
 
     state = StateStore(tmp_path / "data").read_state()
     finish_response.set()

@@ -28,14 +28,13 @@ def register_system_routes(
     @app.get("/api/state")
     async def app_state() -> StoredState:
         state = state_with_current_model_context_window(store.read_state())
-        active_run = runtime.active_run()
+        active_response = runtime.current_response()
         update: dict[str, object] = {
-            "active_run_event_index": active_run.latest_event_index
-            if active_run
+            "is_responding": active_response is not None
+            and not active_response.is_done,
+            "response_event_index": active_response.latest_event_index
+            if active_response
             else 0,
-            "active_run_id": active_run.id
-            if active_run and not active_run.is_done
-            else None,
             "mcp_servers": mcp_manager.servers_with_status(state.mcp_servers),
             "skills": discover_skills(cwd, store),
         }

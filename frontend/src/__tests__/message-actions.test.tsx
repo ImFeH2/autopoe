@@ -196,8 +196,8 @@ const mockWorkspace = (
             ];
       return new Response(
         JSON.stringify({
+          is_responding: request.action === "resend",
           messages: nextMessages,
-          run_id: request.action === "resend" ? "run-edit" : null,
         }),
         {
           headers: { "Content-Type": "application/json" },
@@ -205,14 +205,8 @@ const mockWorkspace = (
         },
       );
     }
-    if (input === "/api/workspace/runs/run-edit/stream?after=0") {
+    if (input === "/api/workspace/stream?after=0") {
       return response;
-    }
-    if (input === "/api/workspace/runs" && init?.method === "POST") {
-      return new Response(JSON.stringify({ detail: "Not found." }), {
-        headers: { "Content-Type": "application/json" },
-        status: 404,
-      });
     }
     if (input === "/api/workspace/respond" && init?.method === "POST") {
       return response;

@@ -47,8 +47,8 @@ class WorkspaceMessageEditRequest(BaseModel):
 class WorkspaceMessageEditResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    is_responding: bool = False
     messages: list[StoredMessage]
-    run_id: str | None = None
 
 
 class WorkspaceRespondRequest(BaseModel):
@@ -58,16 +58,9 @@ class WorkspaceRespondRequest(BaseModel):
     message_id: str | None = None
 
 
-class WorkspaceRunResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: str
-
-
 class WorkspaceClearResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    active_run_id: str | None = None
     messages: list[StoredMessage]
     usage_info: TokenUsageInfo | None = None
 

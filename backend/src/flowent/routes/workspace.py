@@ -9,7 +9,6 @@ from flowent.api_models import (
     WorkspaceMessageEditResponse,
     WorkspaceMessagesRequest,
     WorkspaceRespondRequest,
-    WorkspaceRunResponse,
 )
 from flowent.logging import TRACE_LEVEL
 from flowent.storage import StateStore
@@ -42,45 +41,35 @@ def register_workspace_routes(
             len(request.content),
         )
         logger.log(TRACE_LEVEL, "Workspace edited user content=%r", request.content)
-        messages, run = runtime.edit_message(
+        messages, response = runtime.edit_message(
             message_id,
             action=request.action,
             content=request.content,
         )
         return WorkspaceMessageEditResponse(
+            is_responding=response is not None,
             messages=messages,
-            run_id=run.id if run else None,
         )
 
     @app.post("/api/workspace/clear")
     async def clear_workspace() -> WorkspaceClearResponse:
         messages = runtime.clear()
-        await runtime.notify_cleared_runs()
+        await runtime.notify_cleared_response()
         return WorkspaceClearResponse(messages=messages)
 
-    @app.post("/api/workspace/runs")
-    async def start_workspace_run(
-        request: WorkspaceRespondRequest,
-    ) -> WorkspaceRunResponse:
-        logger.info("Workspace run requested content_length=%s", len(request.content))
-        logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
-        run = runtime.create_run(request.content, message_id=request.message_id)
-        return WorkspaceRunResponse(run_id=run.id)
-
-    @app.get("/api/workspace/runs/{run_id}/stream")
-    async def stream_workspace_run(
-        run_id: str,
+    @app.get("/api/workspace/stream")
+    async def stream_workspace_response(
         after: int = Query(default=0, ge=0),
     ) -> StreamingResponse:
-        run = runtime.run_by_id(run_id)
+        response = runtime.stream_current_response()
         return StreamingResponse(
-            runtime.run_stream(run, after),
+            runtime.response_stream(response, after),
             media_type="text/event-stream",
         )
 
-    @app.post("/api/workspace/runs/{run_id}/stop")
-    async def stop_workspace_run(run_id: str) -> dict[str, bool]:
-        runtime.stop_run(run_id)
+    @app.post("/api/workspace/stop")
+    async def stop_workspace_response() -> dict[str, bool]:
+        runtime.stop_response()
         return {"ok": True}
 
     @app.post("/api/workspace/compact", response_class=StreamingResponse)
@@ -98,8 +87,10 @@ def register_workspace_routes(
             "Workspace response requested content_length=%s", len(request.content)
         )
         logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
-        run = runtime.create_run(request.content, message_id=request.message_id)
+        response = runtime.start_response(
+            request.content, message_id=request.message_id
+        )
         return StreamingResponse(
-            runtime.run_stream(run, include_snapshots=False),
+            runtime.response_stream(response, include_snapshots=False),
             media_type="text/event-stream",
         )

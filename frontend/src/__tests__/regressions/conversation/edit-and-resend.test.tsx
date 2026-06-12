@@ -197,6 +197,7 @@ describe("edit and resend regressions", () => {
       ) {
         return new Response(
           JSON.stringify({
+            is_responding: true,
             messages: [
               {
                 author: "user",
@@ -204,7 +205,6 @@ describe("edit and resend regressions", () => {
                 id: "message-user",
               },
             ],
-            run_id: "run-edit",
           }),
           {
             headers: { "Content-Type": "application/json" },
@@ -212,10 +212,7 @@ describe("edit and resend regressions", () => {
           },
         );
       }
-      if (
-        input === "/api/workspace/runs/run-edit/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/stream?after=0" && init?.method === "GET") {
         return assistantStreamResponse("Fresh checklist.");
       }
       return new Response(JSON.stringify({}), {
@@ -280,7 +277,7 @@ describe("edit and resend regressions", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as {
           content?: unknown;
           message_id?: unknown;
@@ -293,12 +290,6 @@ describe("edit and resend regressions", () => {
         }
         expect(messageId).toMatch(/^message-/);
         sentMessageId = messageId;
-        return new Response(JSON.stringify({ run_id: "run-send" }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (input === "/api/workspace/runs/run-send/stream?after=0") {
         return assistantStreamResponse("Initial checklist.");
       }
       if (
@@ -312,6 +303,7 @@ describe("edit and resend regressions", () => {
         });
         return new Response(
           JSON.stringify({
+            is_responding: true,
             messages: [
               {
                 author: "user",
@@ -319,7 +311,6 @@ describe("edit and resend regressions", () => {
                 id: sentMessageId,
               },
             ],
-            run_id: "run-edit-sent-message",
           }),
           {
             headers: { "Content-Type": "application/json" },
@@ -327,10 +318,7 @@ describe("edit and resend regressions", () => {
           },
         );
       }
-      if (
-        input === "/api/workspace/runs/run-edit-sent-message/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/stream?after=0" && init?.method === "GET") {
         return assistantStreamResponse("Updated checklist.");
       }
       return new Response(JSON.stringify({}), {

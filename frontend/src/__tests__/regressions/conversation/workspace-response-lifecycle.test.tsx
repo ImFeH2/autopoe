@@ -157,7 +157,7 @@ const expectDocumentText = async (text: string) => {
   });
 };
 
-describe("workspace run lifecycle regressions", () => {
+describe("workspace response lifecycle regressions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -177,7 +177,7 @@ describe("workspace run lifecycle regressions", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs") {
+      if (input === "/api/workspace/respond") {
         return new Response(
           JSON.stringify({ detail: "Response in progress" }),
           {
@@ -240,8 +240,8 @@ describe("workspace run lifecycle regressions", () => {
     );
     const runningState = {
       ...selectedProviderState(),
-      active_run_event_index: 1,
-      active_run_id: "run-server-index",
+      is_responding: true,
+      response_event_index: 1,
       messages: [
         {
           author: "user",
@@ -277,16 +277,10 @@ describe("workspace run lifecycle regressions", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return new Response(JSON.stringify({ run_id: "run-server-index" }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (input === "/api/workspace/runs/run-server-index/stream?after=0") {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return droppedStream;
       }
-      if (input === "/api/workspace/runs/run-server-index/stream?after=1") {
+      if (input === "/api/workspace/stream?after=1") {
         return assistantIndexedStreamResponse(
           "Continued.",
           "message-assistant",
@@ -309,11 +303,11 @@ describe("workspace run lifecycle regressions", () => {
 
     await expectDocumentText("Continued.");
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/runs/run-server-index/stream?after=1",
+      "/api/workspace/stream?after=1",
       expect.objectContaining({ method: "GET" }),
     );
     expect(window.fetch).not.toHaveBeenCalledWith(
-      "/api/workspace/runs/run-server-index/stream?after=2",
+      "/api/workspace/stream?after=2",
       expect.objectContaining({ method: "GET" }),
     );
   });
@@ -355,8 +349,8 @@ describe("workspace run lifecycle regressions", () => {
         return new Response(
           JSON.stringify({
             ...selectedProviderState(),
-            active_run_event_index: 6,
-            active_run_id: "run-usage-snapshot",
+            is_responding: true,
+            response_event_index: 6,
             messages: [
               {
                 author: "user",
@@ -379,7 +373,7 @@ describe("workspace run lifecycle regressions", () => {
       }
       if (
         typeof input === "string" &&
-        input === "/api/workspace/runs/run-usage-snapshot/stream?after=6"
+        input === "/api/workspace/stream?after=6"
       ) {
         streamRequests.push(input);
         return streamRequests.length === 1
@@ -410,8 +404,8 @@ describe("workspace run lifecycle regressions", () => {
         return new Response(
           JSON.stringify({
             ...selectedProviderState(),
-            active_run_event_index: 2,
-            active_run_id: "run-snapshot",
+            is_responding: true,
+            response_event_index: 2,
             messages: [
               {
                 author: "user",
@@ -432,7 +426,7 @@ describe("workspace run lifecycle regressions", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs/run-snapshot/stream?after=2") {
+      if (input === "/api/workspace/stream?after=2") {
         return assistantSnapshotStreamResponse(
           {
             author: "assistant",
@@ -505,13 +499,7 @@ describe("workspace run lifecycle regressions", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return new Response(JSON.stringify({ run_id: "run-snapshot" }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (input === "/api/workspace/runs/run-snapshot/stream?after=0") {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         const encoder = new TextEncoder();
         return new Response(
           new ReadableStream({
@@ -640,13 +628,7 @@ describe("workspace run lifecycle regressions", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return new Response(JSON.stringify({ run_id: "run-delta" }), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (input === "/api/workspace/runs/run-delta/stream?after=0") {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return new Response(
           new ReadableStream({
             async start(controller) {
@@ -726,8 +708,8 @@ describe("workspace run lifecycle regressions", () => {
         return new Response(
           JSON.stringify({
             ...selectedProviderState(),
-            active_run_event_index: 0,
-            active_run_id: "run-usage-snapshot",
+            is_responding: true,
+            response_event_index: 0,
             messages: [
               {
                 author: "user",
@@ -748,7 +730,7 @@ describe("workspace run lifecycle regressions", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs/run-usage-snapshot/stream?after=0") {
+      if (input === "/api/workspace/stream?after=0") {
         return new Response(
           new ReadableStream({
             async start(controller) {
@@ -791,11 +773,11 @@ describe("workspace run lifecycle regressions", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 50));
 
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/runs/run-usage-snapshot/stream?after=0",
+      "/api/workspace/stream?after=0",
       expect.objectContaining({ method: "GET" }),
     );
     expect(window.fetch).not.toHaveBeenCalledWith(
-      "/api/workspace/runs/run-usage-snapshot/stream?after=1",
+      "/api/workspace/stream?after=1",
       expect.objectContaining({ method: "GET" }),
     );
     releaseStream();

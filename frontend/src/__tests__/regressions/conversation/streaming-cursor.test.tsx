@@ -186,8 +186,8 @@ const mockRunningSnapshotStream = (
   const stream = eventStreamResponse([streamEvent("snapshot", { message })]);
   const state = {
     ...selectedProviderState(),
-    active_run_event_index: 3,
-    active_run_id: "run-1",
+    is_responding: true,
+    response_event_index: 3,
     messages: [
       {
         author: "user",
@@ -212,7 +212,7 @@ const mockRunningSnapshotStream = (
     }
     if (
       typeof input === "string" &&
-      input === "/api/workspace/runs/run-1/stream?after=3"
+      input === "/api/workspace/stream?after=3"
     ) {
       return stream.response;
     }
@@ -249,8 +249,8 @@ describe("streaming cursor regressions", () => {
     ]);
     const state = {
       ...selectedProviderState(),
-      active_run_event_index: 3,
-      active_run_id: "run-1",
+      is_responding: true,
+      response_event_index: 3,
       messages: [
         {
           author: "user",
@@ -292,7 +292,7 @@ describe("streaming cursor regressions", () => {
       }
       if (
         typeof input === "string" &&
-        input === "/api/workspace/runs/run-1/stream?after=3"
+        input === "/api/workspace/stream?after=3"
       ) {
         return stream.response;
       }
@@ -395,8 +395,8 @@ describe("streaming cursor regressions", () => {
     ]);
     const state = {
       ...selectedProviderState(),
-      active_run_event_index: 0,
-      active_run_id: "run-1",
+      is_responding: true,
+      response_event_index: 0,
       messages: [
         {
           author: "user",
@@ -421,7 +421,7 @@ describe("streaming cursor regressions", () => {
       }
       if (
         typeof input === "string" &&
-        input === "/api/workspace/runs/run-1/stream?after=0"
+        input === "/api/workspace/stream?after=0"
       ) {
         return stream.response;
       }

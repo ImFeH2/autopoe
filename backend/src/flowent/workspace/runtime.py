@@ -44,9 +44,9 @@ from flowent.workspace.context import (
     workspace_chat_messages,
 )
 from flowent.workspace.events import (
-    WorkspaceRun,
+    WorkspaceResponse,
     append_or_replace_message,
-    run_snapshot_data_at,
+    response_snapshot_data_at,
     stream_event,
     stream_message_data,
 )
@@ -84,8 +84,7 @@ class WorkspaceRuntime:
         self.cwd = cwd
         self.mcp_manager = mcp_manager
         self.store = store
-        self.runs: dict[str, WorkspaceRun] = {}
-        self.active_run_id: str | None = None
+        self.active_response: WorkspaceResponse | None = None
         self.generation = 0
         self.active_compact_task: WorkspaceCompactTask | None = None
 
@@ -373,14 +372,14 @@ class WorkspaceRuntime:
                     exc_info=(type(result), result, result.__traceback__),
                 )
 
-    async def stop_runs_for_shutdown(self) -> None:
+    async def stop_response_for_shutdown(self) -> None:
         tasks: list[asyncio.Task[None]] = []
-        for run in self.runs.values():
-            if run.task is None or run.task.done():
-                continue
-            run.task.cancel()
-            tasks.append(run.task)
-        await self.gather_shutdown_tasks("Workspace run", tasks)
+        response = self.active_response
+        if response is not None and response.task is not None:
+            if not response.task.done():
+                response.task.cancel()
+            tasks.append(response.task)
+        await self.gather_shutdown_tasks("Workspace response", tasks)
 
     async def stop_compact_for_shutdown(self) -> None:
         if self.active_compact_task is None:
@@ -394,64 +393,67 @@ class WorkspaceRuntime:
         self.store.save_is_compacting(False)
 
     async def stop_for_shutdown(self) -> None:
-        await self.stop_runs_for_shutdown()
+        await self.stop_response_for_shutdown()
         await self.stop_compact_for_shutdown()
 
-    def active_run(self) -> WorkspaceRun | None:
-        if self.active_run_id is None:
+    def current_response(self) -> WorkspaceResponse | None:
+        response = self.active_response
+        if response is None or response.is_done:
             return None
-        run = self.runs.get(self.active_run_id)
-        if run is None or run.is_done:
-            return None
-        return run
+        return response
 
-    def has_active_run(self) -> bool:
-        return any(
-            not run.is_done and run.task is not None and not run.task.done()
-            for run in self.runs.values()
+    def has_active_response(self) -> bool:
+        response = self.active_response
+        return (
+            response is not None
+            and not response.is_done
+            and response.task is not None
+            and not response.task.done()
         )
 
     def clear(self) -> list[StoredMessage]:
         self.generation += 1
-        for run in self.runs.values():
-            run.is_done = True
-            if run.task is not None and not run.task.done():
-                run.discard_on_cancel = True
-                run.task.cancel()
-        self.active_run_id = None
+        response = self.active_response
+        if response is not None:
+            response.is_done = True
+            if response.task is not None and not response.task.done():
+                response.discard_on_cancel = True
+                response.task.cancel()
         return self.store.save_messages([])
 
-    async def notify_cleared_runs(self) -> None:
-        for run in self.runs.values():
-            async with run.condition:
-                run.condition.notify_all()
+    async def notify_cleared_response(self) -> None:
+        response = self.active_response
+        if response is None:
+            return
+        async with response.condition:
+            response.condition.notify_all()
 
     async def append_event(
-        self, run: WorkspaceRun, event: str, data: dict[str, object]
+        self, response: WorkspaceResponse, event: str, data: dict[str, object]
     ) -> None:
-        async with run.condition:
-            run.events.append((run.latest_event_index + 1, event, data))
-            run.condition.notify_all()
+        async with response.condition:
+            response.events.append((response.latest_event_index + 1, event, data))
+            response.condition.notify_all()
 
-    async def append_snapshot(self, run: WorkspaceRun, message: StoredMessage) -> None:
+    async def append_snapshot(
+        self, response: WorkspaceResponse, message: StoredMessage
+    ) -> None:
         if message.author != "assistant":
             return
-        run.latest_snapshot = message
+        response.latest_snapshot = message
         await self.append_event(
-            run,
+            response,
             "snapshot",
-            {"message": stream_message_data(message, run.active_output)},
+            {"message": stream_message_data(message, response.active_output)},
         )
 
-    def create_run(
+    def start_response(
         self, content: str, *, message_id: str | None = None
-    ) -> WorkspaceRun:
-        if self.has_active_run():
-            active_run = self.active_run()
+    ) -> WorkspaceResponse:
+        if self.has_active_response():
             raise HTTPException(
                 status_code=409,
                 detail="Response in progress",
-                headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
             )
         if self.store.read_is_compacting():
             raise HTTPException(
@@ -469,7 +471,7 @@ class WorkspaceRuntime:
         )
         next_messages = [*state.messages, user_message]
         self.store.save_messages(next_messages)
-        return self._create_run_from_messages(
+        return self._start_response_from_messages(
             content=content,
             next_messages=next_messages,
             state=state,
@@ -482,13 +484,11 @@ class WorkspaceRuntime:
         *,
         action: Literal["resend", "save"],
         content: str,
-    ) -> tuple[list[StoredMessage], WorkspaceRun | None]:
-        if self.has_active_run():
-            active_run = self.active_run()
+    ) -> tuple[list[StoredMessage], WorkspaceResponse | None]:
+        if self.has_active_response():
             raise HTTPException(
                 status_code=409,
                 detail="Response in progress",
-                headers={"X-Flowent-Run-Id": active_run.id if active_run else ""},
             )
         if self.store.read_is_compacting():
             raise HTTPException(
@@ -524,32 +524,31 @@ class WorkspaceRuntime:
         previous_messages = state.messages[:message_index]
         next_messages = [*previous_messages, updated_message]
         self.store.save_messages(next_messages)
-        run = self._create_run_from_messages(
+        response = self._start_response_from_messages(
             content=content,
             next_messages=next_messages,
             state=state.model_copy(update={"messages": previous_messages}),
             user_message=updated_message,
         )
-        return next_messages, run
+        return next_messages, response
 
-    def _create_run_from_messages(
+    def _start_response_from_messages(
         self,
         *,
         content: str,
         next_messages: list[StoredMessage],
         state: StoredState,
         user_message: StoredMessage,
-    ) -> WorkspaceRun:
+    ) -> WorkspaceResponse:
         connection = selected_connection(state)
         context_window_limit = context_window_for_settings(state.settings)
-        run = WorkspaceRun(
+        response = WorkspaceResponse(
             condition=asyncio.Condition(),
             generation=self.generation,
         )
-        self.runs[run.id] = run
-        self.active_run_id = run.id
+        self.active_response = response
 
-        async def run_task() -> None:
+        async def response_task() -> None:
             nonlocal next_messages
             assistant_message = StoredMessage(
                 author="assistant",
@@ -561,13 +560,13 @@ class WorkspaceRuntime:
             last_progress_flush_at = 0.0
 
             def is_current_generation() -> bool:
-                return run.generation == self.generation
+                return response.generation == self.generation
 
             def update_assistant_message(
                 status: str = "running", *, persist: bool
             ) -> StoredMessage | None:
                 nonlocal next_messages, assistant_message
-                if not is_current_generation() or run.discard_on_cancel:
+                if not is_current_generation() or response.discard_on_cancel:
                     return None
                 assistant_message = StoredMessage(
                     author="assistant",
@@ -639,7 +638,7 @@ class WorkspaceRuntime:
                     next_messages = [*state.messages, marker, user_message]
                     self.store.save_messages(next_messages)
                     await self.append_event(
-                        run,
+                        response,
                         "context_optimized",
                         {
                             "message": marker.model_dump(),
@@ -683,7 +682,7 @@ class WorkspaceRuntime:
                     conversation: Sequence[Mapping[str, object]],
                 ) -> AgentContextUpdate | None:
                     nonlocal next_messages
-                    if not is_current_generation() or run.discard_on_cancel:
+                    if not is_current_generation() or response.discard_on_cancel:
                         return None
                     assistant_snapshot = StoredMessage(
                         author="assistant",
@@ -758,7 +757,7 @@ class WorkspaceRuntime:
                     messages=current_request_messages,
                     tool_runner=tool_runner,
                 ):
-                    if not is_current_generation() or run.discard_on_cancel:
+                    if not is_current_generation() or response.discard_on_cancel:
                         raise asyncio.CancelledError
                     run_event_data = event.data
                     should_append_run_event = event.event != "usage"
@@ -775,15 +774,15 @@ class WorkspaceRuntime:
                         index = event.data.get("index")
                         if isinstance(index, int):
                             current_output_index = index
-                            run.active_output = None
+                            response.active_output = None
                             assistant_output.start_group(index)
                             snapshot_after_event = persist_assistant()
                     if event.event == "output_done":
-                        run.active_output = None
+                        response.active_output = None
                     if event.event == "tool_start":
                         tool = event.data.get("tool")
                         if isinstance(tool, dict) and isinstance(tool.get("id"), str):
-                            run.active_output = None
+                            response.active_output = None
                             current_tool_id = tool["id"]
                             assistant_output.start_tool(
                                 StoredToolItem.model_validate(tool)
@@ -801,13 +800,13 @@ class WorkspaceRuntime:
                             assistant_output.update_tool(tool_id, event.data)
                             snapshot_after_event = persist_assistant()
                     if event.event == "delta":
-                        run.active_output = "text"
+                        response.active_output = "text"
                         assistant_output.append_text(
                             str(event.data.get("content") or "")
                         )
                         snapshot_after_event = persist_assistant_progress()
                     if event.event == "thinking_delta":
-                        run.active_output = "thinking"
+                        response.active_output = "thinking"
                         assistant_output.append_thinking(
                             str(event.data.get("content") or "")
                         )
@@ -835,7 +834,7 @@ class WorkspaceRuntime:
                     if event.event == "done":
                         message = event.data.get("message")
                         if isinstance(message, dict):
-                            run.active_output = None
+                            response.active_output = None
                             assistant_output.apply_done_message(message)
                             response_usage_info = self.store.read_usage_info()
                             final_usage_info = turn_usage_info
@@ -860,21 +859,23 @@ class WorkspaceRuntime:
                                     "message": stream_message_data(snapshot_after_event)
                                 }
                     if event.event == "done" and snapshot_after_event is not None:
-                        await self.append_snapshot(run, snapshot_after_event)
-                        await self.append_event(run, event.event, run_event_data)
+                        await self.append_snapshot(response, snapshot_after_event)
+                        await self.append_event(response, event.event, run_event_data)
                     else:
                         if should_append_run_event:
-                            await self.append_event(run, event.event, run_event_data)
+                            await self.append_event(
+                                response, event.event, run_event_data
+                            )
                         if snapshot_after_event is not None:
-                            await self.append_snapshot(run, snapshot_after_event)
+                            await self.append_snapshot(response, snapshot_after_event)
             except asyncio.CancelledError:
-                logger.info("Workspace run stopped")
-                if not run.discard_on_cancel:
+                logger.info("Workspace response stopped")
+                if not response.discard_on_cancel:
                     interrupted_snapshot = persist_assistant("interrupted")
                     if interrupted_snapshot is not None:
-                        await self.append_snapshot(run, interrupted_snapshot)
+                        await self.append_snapshot(response, interrupted_snapshot)
                     await self.append_event(
-                        run,
+                        response,
                         "error",
                         {"message": "Response stopped."},
                     )
@@ -898,23 +899,30 @@ class WorkspaceRuntime:
                 )
                 failed_snapshot = persist_assistant("failed")
                 if failed_snapshot is not None:
-                    await self.append_snapshot(run, failed_snapshot)
-                await self.append_event(run, "error", run_error_event_data(error_item))
+                    await self.append_snapshot(response, failed_snapshot)
+                await self.append_event(
+                    response, "error", run_error_event_data(error_item)
+                )
             finally:
-                run.is_done = True
-                async with run.condition:
-                    run.condition.notify_all()
-                if self.active_run_id == run.id:
-                    self.active_run_id = None
+                response.is_done = True
+                async with response.condition:
+                    response.condition.notify_all()
+                if self.active_response is response:
+                    self.active_response = None
 
-        run.task = asyncio.create_task(run_task())
-        return run
+        response.task = asyncio.create_task(response_task())
+        return response
 
-    async def run_stream(
-        self, run: WorkspaceRun, after: int = 0, include_snapshots: bool = True
+    async def response_stream(
+        self,
+        response: WorkspaceResponse,
+        after: int = 0,
+        include_snapshots: bool = True,
     ) -> AsyncIterator[str]:
         next_event_index = after + 1
-        reconnect_snapshot = run_snapshot_data_at(run, after) if after > 0 else None
+        reconnect_snapshot = (
+            response_snapshot_data_at(response, after) if after > 0 else None
+        )
         if include_snapshots and reconnect_snapshot is not None:
             yield stream_event(
                 "snapshot",
@@ -922,15 +930,17 @@ class WorkspaceRuntime:
                 event_id=after,
             )
         while True:
-            async with run.condition:
+            async with response.condition:
 
                 def has_next_event(index: int = next_event_index) -> bool:
-                    return run.is_done or any(
-                        event_index >= index for event_index, _, _ in run.events
+                    return response.is_done or any(
+                        event_index >= index for event_index, _, _ in response.events
                     )
 
-                await run.condition.wait_for(has_next_event)
-                events = [event for event in run.events if event[0] >= next_event_index]
+                await response.condition.wait_for(has_next_event)
+                events = [
+                    event for event in response.events if event[0] >= next_event_index
+                ]
 
             for index, event, data in events:
                 next_event_index = index + 1
@@ -940,19 +950,23 @@ class WorkspaceRuntime:
                 if event in {"done", "error"}:
                     return
 
-            if run.is_done and not events:
+            if response.is_done and not events:
                 return
 
-    def run_by_id(self, run_id: str) -> WorkspaceRun:
-        run = self.runs.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Run not found.")
-        return run
+    def stream_current_response(self) -> WorkspaceResponse:
+        response = self.current_response()
+        if response is None:
+            raise HTTPException(status_code=404, detail="Response not found.")
+        return response
 
-    def stop_run(self, run_id: str) -> None:
-        run = self.run_by_id(run_id)
-        if run.task is not None and not run.task.done():
-            run.task.cancel()
+    def stop_response(self) -> None:
+        response = self.current_response()
+        if (
+            response is not None
+            and response.task is not None
+            and not response.task.done()
+        ):
+            response.task.cancel()
 
     def compact_stream(self) -> AsyncIterator[str]:
         async def run_manual_compact(
@@ -1010,7 +1024,7 @@ class WorkspaceRuntime:
                 self.active_compact_task = None
 
         if self.active_compact_task is None:
-            if self.active_run() is not None:
+            if self.current_response() is not None:
                 raise HTTPException(
                     status_code=409,
                     detail="Compact is unavailable while Flowent is responding.",

@@ -3,19 +3,17 @@ import copy
 import json
 from dataclasses import dataclass, field
 from typing import Literal
-from uuid import uuid4
 
 from flowent.storage import StoredMessage
 
 
 @dataclass
-class WorkspaceRun:
+class WorkspaceResponse:
     condition: asyncio.Condition
     active_output: Literal["text", "thinking"] | None = None
     discard_on_cancel: bool = False
     events: list[tuple[int, str, dict[str, object]]] = field(default_factory=list)
     generation: int = 0
-    id: str = field(default_factory=lambda: str(uuid4()))
     is_done: bool = False
     latest_snapshot: StoredMessage | None = None
     task: asyncio.Task[None] | None = None
@@ -50,12 +48,12 @@ def append_or_replace_message(
     ]
 
 
-def run_snapshot_data_at(
-    run: WorkspaceRun, event_index: int
+def response_snapshot_data_at(
+    response: WorkspaceResponse, event_index: int
 ) -> dict[str, object] | None:
     snapshot_event_index = 0
     snapshot: dict[str, object] | None = None
-    for current_event_index, event, data in run.events:
+    for current_event_index, event, data in response.events:
         if current_event_index > event_index:
             break
         if event != "snapshot":
@@ -78,7 +76,7 @@ def run_snapshot_data_at(
             snapshot = copy.deepcopy(message)
     if snapshot is None:
         return None
-    for current_event_index, event, data in run.events:
+    for current_event_index, event, data in response.events:
         if current_event_index <= snapshot_event_index:
             continue
         if current_event_index > event_index:

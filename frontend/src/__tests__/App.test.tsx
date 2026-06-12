@@ -94,12 +94,6 @@ const controlledAssistantSnapshotStreamResponse = (
   };
 };
 
-const runStartResponse = (runId = "run-1") =>
-  new Response(JSON.stringify({ run_id: runId }), {
-    headers: { "Content-Type": "application/json" },
-    status: 200,
-  });
-
 const deferred = () => {
   let resolve!: () => void;
   const promise = new Promise<void>((nextResolve) => {
@@ -1402,7 +1396,11 @@ const mockInitialState = (
 
     if (input === "/api/workspace/clear" && init?.method === "POST") {
       return new Response(
-        JSON.stringify({ active_run_id: null, messages: [], usage_info: null }),
+        JSON.stringify({
+          is_responding: false,
+          messages: [],
+          usage_info: null,
+        }),
         {
           headers: { "Content-Type": "application/json" },
           status: 200,
@@ -1647,12 +1645,6 @@ const expectWorkspaceMessagePost = (path: string, content: string) => {
 const mockSelectedProviderWorkspaceResponse = (response: Response) => {
   mockInitialState(selectedProviderState());
   vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-    if (input === "/api/workspace/runs" && init?.method === "POST") {
-      return new Response(JSON.stringify({ detail: "Not found." }), {
-        headers: { "Content-Type": "application/json" },
-        status: 404,
-      });
-    }
     if (input === "/api/workspace/respond" && init?.method === "POST") {
       return response;
     }
@@ -2967,7 +2959,6 @@ describe("App", () => {
     expect(composer).toHaveValue("Keep writing");
     await user.keyboard("{Enter}");
     expect(composer).toHaveValue("Keep writing");
-    expect(fetchWasCalledWith("/api/workspace/runs", "POST")).toBe(false);
     expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
 
     compactRequest.resolve();
@@ -3293,13 +3284,7 @@ describe("App", () => {
           },
         );
       }
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-optimized-usage");
-      }
-      if (
-        input === "/api/workspace/runs/run-optimized-usage/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantOptimizedContextStreamResponse(
           "Continuing.",
           "message-optimized-usage",
@@ -3341,13 +3326,7 @@ describe("App", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-usage");
-      }
-      if (
-        input === "/api/workspace/runs/run-usage/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantUsageStreamResponse(
           "Done with measured usage.",
           contextUsageInfo(24_000, 60_000),
@@ -3391,13 +3370,7 @@ describe("App", () => {
           status: 200,
         });
       }
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-done-usage");
-      }
-      if (
-        input === "/api/workspace/runs/run-done-usage/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           start(controller) {
@@ -3741,7 +3714,7 @@ describe("App", () => {
     await expectDocumentText("The plan is ready.");
   });
 
-  it("starts a workspace run and subscribes to its stream", async () => {
+  it("starts a workspace response and reads its stream", async () => {
     const user = userEvent.setup();
     const assistantSnapshot = controlledAssistantSnapshotStreamResponse({
       author: "assistant",
@@ -3763,13 +3736,7 @@ describe("App", () => {
     });
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-checklist");
-      }
-      if (
-        input === "/api/workspace/runs/run-checklist/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantSnapshot.response;
       }
       if (input === "/api/state") {
@@ -3800,16 +3767,12 @@ describe("App", () => {
     await expectDocumentText("The plan is ready.");
     assistantSnapshot.finish();
     expectWorkspaceMessagePost(
-      "/api/workspace/runs",
+      "/api/workspace/respond",
       "Draft a launch checklist",
-    );
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/runs/run-checklist/stream?after=0",
-      expect.objectContaining({ method: "GET" }),
     );
   });
 
-  it("reloads state and reconnects when a workspace run stream drops", async () => {
+  it("reloads state and reconnects when a workspace response stream drops", async () => {
     const user = userEvent.setup();
     const assistantSnapshot = controlledAssistantSnapshotStreamResponse(
       {
@@ -3845,8 +3808,8 @@ describe("App", () => {
     );
     const runningState = {
       ...selectedProviderState(),
-      active_run_event_index: 2,
-      active_run_id: "run-reconnect",
+      is_responding: true,
+      response_event_index: 2,
       messages: [
         {
           author: "user",
@@ -3864,19 +3827,10 @@ describe("App", () => {
     let stateRequests = 0;
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-reconnect");
-      }
-      if (
-        input === "/api/workspace/runs/run-reconnect/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return droppedStream;
       }
-      if (
-        input === "/api/workspace/runs/run-reconnect/stream?after=2" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/stream?after=2" && init?.method === "GET") {
         return assistantSnapshot.response;
       }
       if (input === "/api/state") {
@@ -3907,13 +3861,13 @@ describe("App", () => {
     await expectDocumentText("Partial answer.");
     assistantSnapshot.finish();
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/runs/run-reconnect/stream?after=2",
+      "/api/workspace/stream?after=2",
       expect.objectContaining({ method: "GET" }),
     );
     expect(document.body).not.toHaveTextContent("Load failed");
   });
 
-  it("uses server event indexes when reconnecting a workspace run stream", async () => {
+  it("uses server event indexes when reconnecting a workspace response stream", async () => {
     const user = userEvent.setup();
     const assistantSnapshot = controlledAssistantSnapshotStreamResponse(
       {
@@ -3963,8 +3917,8 @@ describe("App", () => {
     );
     const runningState = {
       ...selectedProviderState(),
-      active_run_event_index: 1,
-      active_run_id: "run-server-index",
+      is_responding: true,
+      response_event_index: 1,
       messages: [
         {
           author: "user",
@@ -3983,19 +3937,10 @@ describe("App", () => {
     let stateRequests = 0;
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-server-index");
-      }
-      if (
-        input === "/api/workspace/runs/run-server-index/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return droppedStream;
       }
-      if (
-        input === "/api/workspace/runs/run-server-index/stream?after=1" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/stream?after=1" && init?.method === "GET") {
         return assistantSnapshot.response;
       }
       if (input === "/api/state") {
@@ -4026,11 +3971,11 @@ describe("App", () => {
     await expectDocumentText("Continued from snapshot.");
     assistantSnapshot.finish();
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workspace/runs/run-server-index/stream?after=1",
+      "/api/workspace/stream?after=1",
       expect.objectContaining({ method: "GET" }),
     );
     expect(window.fetch).not.toHaveBeenCalledWith(
-      "/api/workspace/runs/run-server-index/stream?after=2",
+      "/api/workspace/stream?after=2",
       expect.objectContaining({ method: "GET" }),
     );
   });
@@ -4717,13 +4662,7 @@ describe("App", () => {
     );
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-review");
-      }
-      if (
-        input === "/api/workspace/runs/run-review/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return toolStream.response;
       }
       if (input === "/api/state") {
@@ -4795,13 +4734,7 @@ describe("App", () => {
     );
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-sandbox-review");
-      }
-      if (
-        input === "/api/workspace/runs/run-sandbox-review/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return toolStream.response;
       }
       if (input === "/api/state") {
@@ -4849,8 +4782,8 @@ describe("App", () => {
     const user = userEvent.setup();
     const runningState = {
       ...selectedProviderState(),
-      active_run_event_index: 4,
-      active_run_id: "run-review",
+      is_responding: true,
+      response_event_index: 4,
       messages: [
         {
           author: "user",
@@ -4896,10 +4829,7 @@ describe("App", () => {
           status: 200,
         });
       }
-      if (
-        input === "/api/workspace/runs/run-review/stream?after=4" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/stream?after=4" && init?.method === "GET") {
         return new Response(
           new ReadableStream({
             start() {},
@@ -8418,13 +8348,7 @@ describe("App", () => {
     const user = userEvent.setup();
     mockInitialState(selectedProviderState());
     vi.mocked(window.fetch).mockImplementation(async (input, init) => {
-      if (input === "/api/workspace/runs" && init?.method === "POST") {
-        return runStartResponse("run-optimized");
-      }
-      if (
-        input === "/api/workspace/runs/run-optimized/stream?after=0" &&
-        init?.method === "GET"
-      ) {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantOptimizedContextStreamResponse("Continuing.");
       }
       if (input === "/api/state") {

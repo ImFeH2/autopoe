@@ -2081,7 +2081,7 @@ def test_workspace_persists_assistant_output_groups_after_tool_round(
 
 
 @pytest.mark.anyio
-async def test_workspace_run_continues_without_stream_consumer(
+async def test_workspace_response_continues_without_stream_consumer(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -2103,11 +2103,24 @@ async def test_workspace_run_continues_without_stream_consumer(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider_async(client)
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Keep working.",
+                        "id": "message-keep-working",
+                    }
+                ]
+            },
+        )
         response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Keep working."},
+            "/api/workspace/messages/message-keep-working/edit",
+            json={"action": "resend", "content": "Keep working."},
         )
         assert response.status_code == 200
+        assert response.json()["is_responding"] is True
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
         finish_response.set()
 
@@ -2121,13 +2134,13 @@ async def test_workspace_run_continues_without_stream_consumer(
                 break
             await asyncio.sleep(0.05)
         else:
-            raise AssertionError("Workspace run did not complete.")
+            raise AssertionError("Workspace response did not complete.")
 
     assert assistant["content"] == "Partial answer."
 
 
 @pytest.mark.anyio
-async def test_workspace_state_exposes_active_run_for_reconnect(
+async def test_workspace_state_exposes_active_response_for_reconnect(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -2149,20 +2162,31 @@ async def test_workspace_state_exposes_active_run_for_reconnect(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider_async(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Continue if I reconnect."},
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Continue if I reconnect.",
+                        "id": "message-reconnect",
+                    }
+                ]
+            },
         )
-        run_id = response.json()["run_id"]
+        response = await client.post(
+            "/api/workspace/messages/message-reconnect/edit",
+            json={"action": "resend", "content": "Continue if I reconnect."},
+        )
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
         state = (await client.get("/api/state")).json()
-        event_index = state["active_run_event_index"]
+        event_index = state["response_event_index"]
         finish_response.set()
-        stream_response = await client.get(
-            f"/api/workspace/runs/{run_id}/stream?after={event_index}"
-        )
+        stream_response = await client.get(f"/api/workspace/stream?after={event_index}")
 
-    assert state["active_run_id"] == run_id
+    assert response.status_code == 200
+    assert response.json()["is_responding"] is True
+    assert state["is_responding"] is True
     assert event_index > 0
     events = stream_events(stream_response.text)
     assert {"event": "delta", "data": '{"content": "First "}'} not in events
@@ -2229,20 +2253,33 @@ async def test_workspace_persists_automatic_review_result_during_stream(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider_async(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Edit notes."},
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Edit notes.",
+                        "id": "message-edit-notes",
+                    }
+                ]
+            },
         )
-        run_id = response.json()["run_id"]
+        response = await client.post(
+            "/api/workspace/messages/message-edit-notes/edit",
+            json={"action": "resend", "content": "Edit notes."},
+        )
         await asyncio.wait_for(review_started.wait(), timeout=2)
         state = (await client.get("/api/state")).json()
         finish_review.set()
         stream_response = await client.get(
-            f"/api/workspace/runs/{run_id}/stream?after={state['active_run_event_index']}"
+            f"/api/workspace/stream?after={state['response_event_index']}"
         )
 
     assistant = state["messages"][-1]
-    assert state["active_run_id"] == run_id
+    assert response.status_code == 200
+    assert response.json()["is_responding"] is True
+    assert state["is_responding"] is True
     assert assistant["tools"][0]["name"] == "apply_patch"
     assert assistant["tools"][0]["status"] == "running"
     events = stream_events(stream_response.text)
@@ -2341,13 +2378,11 @@ async def test_workspace_review_request_includes_recent_transcript(
             },
         )
         response = await client.post(
-            "/api/workspace/runs",
+            "/api/workspace/respond",
             json={"content": "确认"},
         )
-        run_id = response.json()["run_id"]
-        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
 
-    events = stream_events(stream_response.text)
+    events = stream_events(response.text)
     assert "tool_error" in [event["event"] for event in events]
     assert review_payload["user_request"] == "确认"
     transcript = review_payload["transcript"]
@@ -2365,7 +2400,9 @@ async def test_workspace_review_request_includes_recent_transcript(
 
 
 @pytest.mark.anyio
-async def test_workspace_clear_removes_running_run_draft(tmp_path, monkeypatch) -> None:
+async def test_workspace_clear_removes_running_response_draft(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     first_chunk_sent = asyncio.Event()
@@ -2384,11 +2421,24 @@ async def test_workspace_clear_removes_running_run_draft(tmp_path, monkeypatch) 
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider_async(client)
+        await client.put(
+            "/api/workspace/messages",
+            json={
+                "messages": [
+                    {
+                        "author": "user",
+                        "content": "Keep working.",
+                        "id": "message-clear-running",
+                    }
+                ]
+            },
+        )
         response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Keep working."},
+            "/api/workspace/messages/message-clear-running/edit",
+            json={"action": "resend", "content": "Keep working."},
         )
         assert response.status_code == 200
+        assert response.json()["is_responding"] is True
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
         clear_response = await client.post("/api/workspace/clear")
         await asyncio.sleep(0)
@@ -2396,7 +2446,7 @@ async def test_workspace_clear_removes_running_run_draft(tmp_path, monkeypatch) 
 
     assert clear_response.status_code == 200
     assert state["messages"] == []
-    assert state["active_run_id"] is None
+    assert state["is_responding"] is False
 
 
 def test_workspace_response_uses_compaction_checkpoint_after_restart(
@@ -2773,23 +2823,15 @@ async def test_workspace_response_is_unavailable_while_compact_is_running(
         )
         await asyncio.wait_for(compact_started.wait(), timeout=2)
         response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Can I send now?", "message_id": "message-3"},
-        )
-        legacy_response = await client.post(
             "/api/workspace/respond",
-            json={"content": "Can I send now?", "message_id": "message-4"},
+            json={"content": "Can I send now?", "message_id": "message-3"},
         )
         active_state = (await client.get("/api/state")).json()
         compact_can_finish.set()
         compact_response = await compact_response_task
 
     assert response.status_code == 409
-    assert legacy_response.status_code == 409
     assert response.json()["detail"] == (
-        "Context refining in progress. Please wait a moment."
-    )
-    assert legacy_response.json()["detail"] == (
         "Context refining in progress. Please wait a moment."
     )
     assert [message["content"] for message in active_state["messages"]] == [

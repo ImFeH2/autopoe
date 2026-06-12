@@ -80,8 +80,35 @@ async def configure_provider(client: httpx.AsyncClient) -> None:
     )
 
 
+async def start_response_from_message(
+    client: httpx.AsyncClient,
+    content: str,
+    *,
+    message_id: str = "message-user",
+) -> httpx.Response:
+    await client.put(
+        "/api/workspace/messages",
+        json={
+            "messages": [
+                {
+                    "author": "user",
+                    "content": content,
+                    "id": message_id,
+                }
+            ]
+        },
+    )
+    response = await client.post(
+        f"/api/workspace/messages/{message_id}/edit",
+        json={"action": "resend", "content": content},
+    )
+    assert response.status_code == 200
+    assert response.json()["is_responding"] is True
+    return response
+
+
 @pytest.mark.anyio
-async def test_workspace_rejects_second_run_while_response_is_running(
+async def test_workspace_rejects_second_response_while_response_is_running(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -103,25 +130,24 @@ async def test_workspace_rejects_second_run_while_response_is_running(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        first_response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Keep working."},
+        first_response = await start_response_from_message(
+            client,
+            "Keep working.",
         )
-        run_id = first_response.json()["run_id"]
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
 
         second_response = await client.post(
-            "/api/workspace/runs",
+            "/api/workspace/respond",
             json={"content": "Start another reply."},
         )
         state = (await client.get("/api/state")).json()
         finish_response.set()
-        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+        stream_response = await client.get("/api/workspace/stream")
 
     assert first_response.status_code == 200
     assert second_response.status_code == 409
     assert second_response.json()["detail"] == "Response in progress"
-    assert state["active_run_id"] == run_id
+    assert state["is_responding"] is True
     assert [message["content"] for message in state["messages"]].count(
         "Start another reply."
     ) == 0
@@ -129,7 +155,7 @@ async def test_workspace_rejects_second_run_while_response_is_running(
 
 
 @pytest.mark.anyio
-async def test_workspace_run_stream_includes_server_event_indexes(
+async def test_workspace_response_stream_includes_server_event_indexes(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -146,12 +172,11 @@ async def test_workspace_run_stream_includes_server_event_indexes(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Number the events."},
+        response = await start_response_from_message(
+            client,
+            "Number the events.",
         )
-        run_id = response.json()["run_id"]
-        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+        stream_response = await client.get("/api/workspace/stream")
 
     assert response.status_code == 200
     assert stream_response.status_code == 200
@@ -172,7 +197,7 @@ async def test_workspace_run_stream_includes_server_event_indexes(
 
 
 @pytest.mark.anyio
-async def test_workspace_clear_cancels_running_run_before_it_writes_again(
+async def test_workspace_clear_cancels_running_response_before_it_writes_again(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -194,11 +219,10 @@ async def test_workspace_clear_cancels_running_run_before_it_writes_again(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Keep working."},
+        await start_response_from_message(
+            client,
+            "Keep working.",
         )
-        assert response.status_code == 200
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
         clear_response = await client.post("/api/workspace/clear")
         finish_response.set()
@@ -207,11 +231,11 @@ async def test_workspace_clear_cancels_running_run_before_it_writes_again(
 
     assert clear_response.status_code == 200
     assert state["messages"] == []
-    assert state["active_run_id"] is None
+    assert state["is_responding"] is False
 
 
 @pytest.mark.anyio
-async def test_workspace_run_stream_snapshots_tool_and_text_progress(
+async def test_workspace_response_stream_snapshots_tool_and_text_progress(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -232,12 +256,11 @@ async def test_workspace_run_stream_snapshots_tool_and_text_progress(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Read notes."},
+        response = await start_response_from_message(
+            client,
+            "Read notes.",
         )
-        run_id = response.json()["run_id"]
-        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+        stream_response = await client.get("/api/workspace/stream")
 
     assert response.status_code == 200
     snapshots = [
@@ -267,7 +290,7 @@ async def test_workspace_run_stream_snapshots_tool_and_text_progress(
 
 
 @pytest.mark.anyio
-async def test_workspace_run_reconnect_sends_current_snapshot_before_later_events(
+async def test_workspace_response_reconnect_sends_current_snapshot_before_later_events(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -289,18 +312,15 @@ async def test_workspace_run_reconnect_sends_current_snapshot_before_later_event
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Continue if I reconnect."},
+        response = await start_response_from_message(
+            client,
+            "Continue if I reconnect.",
         )
-        run_id = response.json()["run_id"]
         await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
         state = (await client.get("/api/state")).json()
-        event_index = state["active_run_event_index"]
+        event_index = state["response_event_index"]
         finish_response.set()
-        stream_response = await client.get(
-            f"/api/workspace/runs/{run_id}/stream?after={event_index}"
-        )
+        stream_response = await client.get(f"/api/workspace/stream?after={event_index}")
 
     assert response.status_code == 200
     events = stream_events(stream_response.text)
@@ -311,7 +331,7 @@ async def test_workspace_run_reconnect_sends_current_snapshot_before_later_event
 
 
 @pytest.mark.anyio
-async def test_workspace_run_stream_does_not_snapshot_every_text_delta(
+async def test_workspace_response_stream_does_not_snapshot_every_text_delta(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -333,12 +353,11 @@ async def test_workspace_run_stream_does_not_snapshot_every_text_delta(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Stream efficiently."},
+        response = await start_response_from_message(
+            client,
+            "Stream efficiently.",
         )
-        run_id = response.json()["run_id"]
-        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+        stream_response = await client.get("/api/workspace/stream")
 
     assert response.status_code == 200
     events = stream_events(stream_response.text)
@@ -350,7 +369,7 @@ async def test_workspace_run_stream_does_not_snapshot_every_text_delta(
 
 
 @pytest.mark.anyio
-async def test_workspace_run_persists_text_progress_with_throttle(
+async def test_workspace_response_persists_text_progress_with_throttle(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -385,12 +404,11 @@ async def test_workspace_run_persists_text_progress_with_throttle(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Save progress efficiently."},
+        response = await start_response_from_message(
+            client,
+            "Save progress efficiently.",
         )
-        run_id = response.json()["run_id"]
-        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+        stream_response = await client.get("/api/workspace/stream")
 
     running_text_persists = [
         message
@@ -405,7 +423,7 @@ async def test_workspace_run_persists_text_progress_with_throttle(
 
 
 @pytest.mark.anyio
-async def test_workspace_run_reconnect_snapshot_includes_unsaved_text_deltas(
+async def test_workspace_response_reconnect_snapshot_includes_unsaved_text_deltas(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -431,16 +449,15 @@ async def test_workspace_run_reconnect_snapshot_includes_unsaved_text_deltas(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Reconnect to current content."},
+        response = await start_response_from_message(
+            client,
+            "Reconnect to current content.",
         )
-        run_id = response.json()["run_id"]
         await asyncio.wait_for(first_two_chunks_sent.wait(), timeout=2)
         state = (await client.get("/api/state")).json()
         finish_response.set()
         stream_response = await client.get(
-            f"/api/workspace/runs/{run_id}/stream?after={state['active_run_event_index']}"
+            f"/api/workspace/stream?after={state['response_event_index']}"
         )
 
     assert response.status_code == 200
@@ -452,7 +469,7 @@ async def test_workspace_run_reconnect_snapshot_includes_unsaved_text_deltas(
 
 
 @pytest.mark.anyio
-async def test_workspace_run_stream_marks_each_model_output_done_before_tools(
+async def test_workspace_response_stream_marks_each_model_output_done_before_tools(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -474,12 +491,11 @@ async def test_workspace_run_stream_marks_each_model_output_done_before_tools(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider(client)
-        response = await client.post(
-            "/api/workspace/runs",
-            json={"content": "Read notes."},
+        response = await start_response_from_message(
+            client,
+            "Read notes.",
         )
-        run_id = response.json()["run_id"]
-        stream_response = await client.get(f"/api/workspace/runs/{run_id}/stream")
+        stream_response = await client.get("/api/workspace/stream")
 
     assert response.status_code == 200
     events = stream_events(stream_response.text)

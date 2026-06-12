@@ -242,8 +242,8 @@ class StoredCompactionCheckpoint(BaseModel):
 class StoredState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    active_run_event_index: int = 0
-    active_run_id: str | None = None
+    is_responding: bool = False
+    response_event_index: int = 0
     is_compacting: bool = False
     mcp_servers: list[StoredMcpServer]
     messages: list[StoredMessage]
