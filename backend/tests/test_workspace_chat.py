@@ -702,21 +702,28 @@ async def test_workspace_manual_compact_failure_clears_progress(
     assert compact_response.status_code == 200
     assert compact_response.headers["content-type"].startswith("text/event-stream")
     events = stream_json_events(compact_response.text)
-    assert events == [
-        {
-            "event": "error",
-            "data": {"message": "Context could not be compacted."},
-        }
-    ]
+    assert [event["event"] for event in events] == ["snapshot", "error"]
+    failed_message = events[0]["data"]["message"]
+    failed_error = failed_message["groups"][0]["items"][0]
+    assert failed_message["author"] == "assistant"
+    assert failed_message["content"] == ""
+    assert failed_message["status"] == "failed"
+    assert failed_error["title"] == "Request failed"
+    assert failed_error["message"] == "Context could not be compacted."
+    assert failed_error["detail"] == "provider stopped"
+    assert events[1]["data"] == {
+        "error": failed_error,
+        "message": "Context could not be compacted.",
+    }
     assert state["is_compacting"] is False
-    assert state["messages"] == [
-        {
-            "author": "user",
-            "content": "Try compacting this.",
-            "id": "message-1",
-            "tools": [],
-        }
-    ]
+    assert len(state["messages"]) == 2
+    assert state["messages"][0] == {
+        "author": "user",
+        "content": "Try compacting this.",
+        "id": "message-1",
+        "tools": [],
+    }
+    assert state["messages"][1] == failed_message
 
 
 def test_workspace_response_uses_compacted_context_after_compact(

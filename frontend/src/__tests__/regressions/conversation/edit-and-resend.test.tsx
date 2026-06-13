@@ -261,6 +261,87 @@ describe("edit and resend regressions", () => {
     });
   });
 
+  it("shows an error block when edited retry cannot start", async () => {
+    const user = userEvent.setup();
+    const messages: TestMessage[] = [
+      {
+        author: "user",
+        content: "Draft a launch checklist",
+        id: "message-user",
+      },
+      {
+        active_output: "text",
+        author: "assistant",
+        content: "Old checklist.",
+        id: "message-assistant",
+        isStreamingText: false,
+        status: "completed",
+      },
+      {
+        author: "user",
+        content: "Keep this later note",
+        id: "message-later-user",
+      },
+    ];
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState(messages)), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        input === "/api/workspace/messages/message-user/edit" &&
+        init?.method === "POST"
+      ) {
+        return new Response(
+          JSON.stringify({
+            detail: "Choose a provider and model before sending.",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const article = await messageArticle("Draft a launch checklist");
+    await user.click(within(article).getByRole("button", { name: "Edit" }));
+    const editor = within(article).getByRole("textbox", {
+      name: "Edit message",
+    });
+    await user.clear(editor);
+    await user.type(editor, "Update the launch checklist");
+    await user.click(
+      within(article).getByRole("button", { name: "Save and retry" }),
+    );
+
+    expect(screen.getByText("Update the launch checklist")).toBeInTheDocument();
+    expect(screen.queryByText("Old checklist.")).toBeNull();
+    expect(screen.queryByText("Keep this later note")).toBeNull();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Request failed");
+    expect(alert).toHaveTextContent(
+      "Check the model connection settings and try again.",
+    );
+    expect(alert).toHaveTextContent(
+      "Choose a provider and model before sending.",
+    );
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
   it("uses the sent message identity when editing a message from the same page", async () => {
     const user = userEvent.setup();
     let sentMessageId = "";

@@ -297,13 +297,37 @@ const compactStreamResponse = (
   });
 };
 
-const compactErrorStreamResponse = (message: string) => {
+const compactStructuredErrorStreamResponse = (error: {
+  detail?: string;
+  id: string;
+  message: string;
+  title: string;
+  type: "error";
+}) => {
   const encoder = new TextEncoder();
+  const message = {
+    author: "assistant",
+    content: "",
+    groups: [
+      {
+        id: "compact-message-errors",
+        items: [error],
+      },
+    ],
+    id: "compact-message",
+    status: "failed",
+    tools: [],
+  };
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
         encoder.encode(
-          `event: error\ndata: ${JSON.stringify({ message })}\n\n`,
+          `event: snapshot\ndata: ${JSON.stringify({ message })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: error\ndata: ${JSON.stringify({ error, message: error.message })}\n\n`,
         ),
       );
       controller.close();
@@ -314,6 +338,31 @@ const compactErrorStreamResponse = (message: string) => {
     status: 200,
   });
 };
+
+const persistedAssistantErrorMessage = (
+  detail = "Old provider failure.",
+  id = "message-old-error",
+) => ({
+  author: "assistant",
+  content: "",
+  groups: [
+    {
+      id: `${id}-errors`,
+      items: [
+        {
+          detail,
+          id: `${id}-error-1`,
+          message: "Check the model connection settings and try again.",
+          title: "Request failed",
+          type: "error",
+        },
+      ],
+    },
+  ],
+  id,
+  status: "failed",
+  tools: [],
+});
 
 const controlledCompactUsageStreamResponse = (
   usageInfo: TestContextUsageInfo,
@@ -5535,9 +5584,86 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Request failed");
+    expect(alert).toHaveTextContent(
+      "Check the model connection settings and try again.",
+    );
+    expect(alert).toHaveTextContent(
+      "Choose a provider and model before sending.",
+    );
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  it("shows a new sending error when earlier history already has an error block", async () => {
+    const user = userEvent.setup();
+    const messages = [persistedAssistantErrorMessage()];
+    mockInitialState({
+      messages,
+      providers: [],
+      settings: {
+        selected_model: "",
+        selected_provider_id: "",
+      },
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            messages,
+            providers: [],
+            settings: {
+              selected_model: "",
+              selected_provider_id: "",
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            detail: "Choose a provider and model before sending.",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
     expect(
-      await screen.findByText("Choose a provider and model before sending."),
+      await screen.findByText("Old provider failure."),
     ).toBeInTheDocument();
+
+    await user.type(composer, "Draft a launch checklist");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts[0]).toHaveTextContent("Old provider failure.");
+    expect(alerts[1]).toHaveTextContent("Request failed");
+    expect(alerts[1]).toHaveTextContent(
+      "Choose a provider and model before sending.",
+    );
   });
 
   it("sends drafted spaces to the workspace reply", async () => {
@@ -8197,6 +8323,66 @@ describe("App", () => {
     expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
   });
 
+  it("shows a notification and keeps messages when Clear fails", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      messages: [
+        {
+          author: "user",
+          content: "Draft a launch checklist",
+          id: "message-1",
+        },
+      ],
+      providers: selectedProviderState().providers,
+      settings: selectedProviderState().settings,
+    });
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              {
+                author: "user",
+                content: "Draft a launch checklist",
+                id: "message-1",
+              },
+            ],
+            providers: selectedProviderState().providers,
+            settings: selectedProviderState().settings,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/workspace/clear" && init?.method === "POST") {
+        return new Response("{}", {
+          headers: { "Content-Type": "application/json" },
+          status: 500,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await screen.findByText("Draft a launch checklist");
+    await user.type(composer, "/clear");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Conversation could not be cleared.",
+    );
+    expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
+    expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
+  });
+
   it("runs Clear from the command menu while a streamed reply is still running", async () => {
     const user = userEvent.setup();
     const assistantStream = controlledAssistantStreamResponse(
@@ -8280,7 +8466,9 @@ describe("App", () => {
     await user.keyboard("{Enter}");
 
     expect(composer).toHaveValue("/missing");
-    expect(screen.getByText("Command not found.")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Command not found.",
+    );
     expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
   });
 
@@ -8453,9 +8641,9 @@ describe("App", () => {
     await user.keyboard("{Enter}");
 
     expect(composer).toHaveValue("/compact");
-    expect(
-      screen.getByText("Compact is unavailable while Flowent is responding."),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Compact is unavailable while Flowent is responding.",
+    );
     expect(fetchWasCalledWith("/api/workspace/compact", "POST")).toBe(false);
     assistantStream.finish();
   });
@@ -8494,7 +8682,13 @@ describe("App", () => {
         );
       }
       if (input === "/api/workspace/compact" && init?.method === "POST") {
-        return compactErrorStreamResponse("Context could not be compacted.");
+        return compactStructuredErrorStreamResponse({
+          detail: "provider stopped",
+          id: "compact-message-error-1",
+          message: "Context could not be compacted.",
+          title: "Request failed",
+          type: "error",
+        });
       }
       return new Response("{}", {
         headers: { "Content-Type": "application/json" },
@@ -8510,9 +8704,11 @@ describe("App", () => {
     await user.type(composer, "/compact");
     await user.keyboard("{Enter}");
 
-    expect(
-      await screen.findByText("Context could not be compacted."),
-    ).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Request failed");
+    expect(alert).toHaveTextContent("Context could not be compacted.");
+    expect(alert).toHaveTextContent("provider stopped");
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeEnabled();
     expect(screen.getByText("Draft a launch checklist")).toBeInTheDocument();
     expect(screen.queryByText("Context compacted")).toBeNull();
   });

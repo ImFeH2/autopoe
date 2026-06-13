@@ -321,7 +321,9 @@ type WorkspaceStreamHandlers = {
   onContextOptimized: (message: ApiMessage) => void;
   onDelta: (content: string) => void;
   onDone: (message: ApiMessage) => void;
-  onError: (error: Extract<AssistantOutputItem, { type: "error" }>) => void;
+  onError: (
+    error: Extract<AssistantOutputItem, { type: "error" }>,
+  ) => Message | null | void;
   onOutputDone: () => void;
   onOutputStart: (index: number) => void;
   onSnapshot: (message: ApiMessage) => void;
@@ -749,6 +751,74 @@ const streamErrorFromMessage = (
   type: "error",
 });
 
+const requestFailedMessage =
+  "Check the model connection settings and try again.";
+
+const createWorkspaceErrorMessage = (
+  detail: string,
+  id = createClientId("message"),
+): Message => ({
+  author: "assistant",
+  content: "",
+  groups: [
+    {
+      id: `${id}-errors`,
+      items: [
+        {
+          id: `${id}-error-1`,
+          message: requestFailedMessage,
+          title: "Request failed",
+          type: "error",
+          ...(detail &&
+          detail !== requestFailedMessage &&
+          detail !== "Request failed"
+            ? { detail }
+            : {}),
+        },
+      ],
+    },
+  ],
+  id,
+  status: "failed",
+});
+
+const createWorkspaceStreamErrorMessage = (
+  outputError: Extract<AssistantOutputItem, { type: "error" }>,
+  id = createClientId("message"),
+): Message => ({
+  author: "assistant",
+  content: "",
+  groups: [
+    {
+      id: `${id}-errors`,
+      items: [
+        {
+          ...outputError,
+          id: outputError.id || `${id}-error-1`,
+        },
+      ],
+    },
+  ],
+  id,
+  status: "failed",
+});
+
+const messageHasErrorBlock = (message: Message) =>
+  (message.groups ?? [])
+    .flatMap((group) => group.items)
+    .some((item) => item.type === "error");
+
+const messagesIncludeErrorBlockFrom = (
+  messages: Message[],
+  startIndex: number,
+) =>
+  messages
+    .slice(startIndex)
+    .some(
+      (message) =>
+        message.author === "assistant" && messageHasErrorBlock(message),
+    );
+
 const latestUsageInfoFromMessages = (
   messages: Message[],
 ): ContextUsageInfo | null => {
@@ -768,6 +838,21 @@ const isAbortError = (error: unknown) =>
   error.name === "AbortError";
 
 class WorkspaceRequestError extends Error {}
+
+class WorkspaceStreamError extends Error {
+  errorMessage: Message | null;
+  outputError: Extract<AssistantOutputItem, { type: "error" }>;
+
+  constructor(
+    message: string,
+    outputError: Extract<AssistantOutputItem, { type: "error" }>,
+    errorMessage: Message | null,
+  ) {
+    super(message);
+    this.errorMessage = errorMessage;
+    this.outputError = outputError;
+  }
+}
 
 const previousUserMessage = (messages: Message[], fromIndex: number) => {
   for (let index = fromIndex; index >= 0; index -= 1) {
@@ -1658,6 +1743,13 @@ function FlowentApp() {
       : "Message could not be sent.";
   }, []);
 
+  const showWorkspaceNotification = useCallback(
+    (message: string) => {
+      toast.error(message);
+    },
+    [toast],
+  );
+
   const editWorkspaceMessage = async ({
     action,
     content,
@@ -1813,11 +1905,15 @@ function FlowentApp() {
             handlers.onToolDone(streamEvent.data);
           }
           if (streamEvent.event === "error") {
-            handlers.onError(
+            const outputError =
               streamEvent.data.error ??
-                streamErrorFromMessage(streamEvent.data.message, ""),
+              streamErrorFromMessage(streamEvent.data.message, "");
+            const errorMessage = handlers.onError(outputError) ?? null;
+            throw new WorkspaceStreamError(
+              streamEvent.data.message,
+              outputError,
+              errorMessage,
             );
-            throw new Error(streamEvent.data.message);
           }
         }
 
@@ -2034,7 +2130,43 @@ function FlowentApp() {
         assistantTextItemId = "";
         assistantIsStreamingText = false;
         updateCurrentAssistantGroupItems((items) => [...items, error]);
-        updateAssistantMessage();
+        if (!isCurrentResponse()) {
+          return null;
+        }
+        const resolvedAssistantId = assistantId || createClientId("message");
+        assistantId = resolvedAssistantId;
+        const hasTextItem = assistantGroups
+          .flatMap((group) => group.items)
+          .some((item) => item.type === "text");
+        if (assistantContent && !hasTextItem) {
+          assistantGroups = [
+            {
+              id: `${resolvedAssistantId}-content`,
+              items: [
+                {
+                  content: assistantContent,
+                  id: `${resolvedAssistantId}-text-1`,
+                  type: "text",
+                },
+              ],
+            },
+            ...assistantGroups,
+          ];
+        }
+        assistantMessage = {
+          author: "assistant",
+          content: assistantContent,
+          groups: assistantGroups,
+          id: resolvedAssistantId,
+          isStreamingText: false,
+          isStreamingThinking: false,
+          status: "failed",
+          thinking: assistantThinking,
+          tools: assistantTools,
+          usage_info: latestUsageInfo,
+        };
+        flushAssistantUpdate();
+        return assistantMessage;
       };
       const updateAssistantTool = (
         toolId: string,
@@ -2211,7 +2343,7 @@ function FlowentApp() {
           if (!isCurrentResponse()) {
             return;
           }
-          appendAssistantError(
+          return appendAssistantError(
             error.id ? error : { ...error, id: `${assistantId}-error-1` },
           );
         },
@@ -2401,6 +2533,7 @@ function FlowentApp() {
   const compactWorkspace = async () => {
     setResponseError("");
     setIsRefiningContext(true);
+    const compactErrorStartIndex = messages.length;
 
     const appendCompactMessage = (message: ApiMessage) => {
       setMessages((currentMessages) =>
@@ -2411,6 +2544,19 @@ function FlowentApp() {
           : [...currentMessages, message],
       );
     };
+    const appendCompactSnapshot = (message: ApiMessage) => {
+      setMessages((currentMessages) => {
+        const messageIndex = currentMessages.findIndex(
+          (currentMessage) => currentMessage.id === message.id,
+        );
+        if (messageIndex >= 0) {
+          return currentMessages.map((currentMessage, index) =>
+            index === messageIndex ? message : currentMessage,
+          );
+        }
+        return [...currentMessages, message];
+      });
+    };
 
     try {
       const response = await fetch("/api/workspace/compact", {
@@ -2419,7 +2565,9 @@ function FlowentApp() {
       });
 
       if (!response.ok) {
-        throw new Error(await responseErrorFromApi(response));
+        showWorkspaceNotification(await responseErrorFromApi(response));
+        setIsRefiningContext(false);
+        return;
       }
 
       await readWorkspaceStream(response, {
@@ -2427,10 +2575,10 @@ function FlowentApp() {
         onContextOptimized: appendCompactMessage,
         onDelta: () => undefined,
         onDone: appendCompactMessage,
-        onError: (error) => setResponseError(error.message),
+        onError: () => undefined,
         onOutputDone: () => undefined,
         onOutputStart: () => undefined,
-        onSnapshot: () => undefined,
+        onSnapshot: appendCompactSnapshot,
         onStart: () => undefined,
         onThinkingDelta: () => undefined,
         onToolDone: () => undefined,
@@ -2443,10 +2591,18 @@ function FlowentApp() {
         void refreshAppState().catch(() => undefined);
         return;
       }
-      setResponseError(
+      if (error instanceof WorkspaceStreamError) {
+        setIsRefiningContext(false);
+        return;
+      }
+      const detail =
         error instanceof Error
           ? error.message
-          : "Context could not be compacted.",
+          : "Context could not be compacted.";
+      setMessages((currentMessages) =>
+        messagesIncludeErrorBlockFrom(currentMessages, compactErrorStartIndex)
+          ? currentMessages
+          : [...currentMessages, createWorkspaceErrorMessage(detail)],
       );
       setIsRefiningContext(false);
     }
@@ -2477,7 +2633,9 @@ function FlowentApp() {
     }
     if (commandId === "compact") {
       if (isResponding) {
-        setResponseError("Compact is unavailable while Flowent is responding.");
+        showWorkspaceNotification(
+          "Compact is unavailable while Flowent is responding.",
+        );
         return false;
       }
       void compactWorkspace();
@@ -2487,8 +2645,20 @@ function FlowentApp() {
   };
 
   const handleWorkspaceCommandError = (message: string) => {
-    setResponseError(message);
+    showWorkspaceNotification(message);
   };
+
+  const workspaceErrorDetail = (error: unknown, fallback: string) =>
+    error instanceof Error ? error.message : fallback;
+
+  const appendWorkspaceErrorMessage = (
+    baseMessages: Message[],
+    error: unknown,
+    fallback: string,
+  ) => [
+    ...baseMessages,
+    createWorkspaceErrorMessage(workspaceErrorDetail(error, fallback)),
+  ];
 
   const stopResponse = () => {
     if (isResponding) {
@@ -2561,6 +2731,9 @@ function FlowentApp() {
         if (shouldClearDraft) {
           setDraft(userContent);
         }
+        setIsResponding(false);
+        showWorkspaceNotification(error.message);
+        return;
       }
       if (!(error instanceof WorkspaceRequestError)) {
         const state = await refreshAppState().catch(() => null);
@@ -2568,9 +2741,32 @@ function FlowentApp() {
           setStreamReconnectKey((current) => current + 1);
           return;
         }
+        if (
+          state?.messages &&
+          messagesIncludeErrorBlockFrom(state.messages, baseMessages.length)
+        ) {
+          setMessages(state.messages);
+          setIsResponding(false);
+          return;
+        }
       }
-      setResponseError(
-        error instanceof Error ? error.message : "Message could not be sent.",
+      if (error instanceof WorkspaceStreamError) {
+        setMessages([
+          ...nextMessages,
+          error.errorMessage ??
+            createWorkspaceStreamErrorMessage(error.outputError),
+        ]);
+        setIsResponding(false);
+        return;
+      }
+      setMessages((currentMessages) =>
+        messagesIncludeErrorBlockFrom(currentMessages, baseMessages.length)
+          ? currentMessages
+          : appendWorkspaceErrorMessage(
+              nextMessages,
+              error,
+              "Message could not be sent.",
+            ),
       );
       setIsResponding(false);
     } finally {
@@ -2608,8 +2804,10 @@ function FlowentApp() {
     if (!userMessage) {
       return;
     }
+    const userMessageIndex = messages.findIndex(
+      (currentMessage) => currentMessage.id === userMessage.id,
+    );
 
-    const previousMessages = messages;
     setResponseError("");
     setIsResponding(true);
 
@@ -2624,13 +2822,14 @@ function FlowentApp() {
       }
       startEditedResponse(result.messages);
     } catch (error) {
-      setMessages(previousMessages);
-      setIsResponding(false);
-      setResponseError(
-        error instanceof Error
-          ? error.message
-          : "Message could not be updated.",
+      setMessages(
+        appendWorkspaceErrorMessage(
+          messages.slice(0, userMessageIndex + 1),
+          error,
+          "Message could not be updated.",
+        ),
       );
+      setIsResponding(false);
     }
   };
 
@@ -2657,7 +2856,6 @@ function FlowentApp() {
       return;
     }
 
-    const previousMessages = messages;
     const optimisticMessages = [
       ...messages.slice(0, messageIndex),
       trimmedMessage,
@@ -2673,11 +2871,14 @@ function FlowentApp() {
       }
       startEditedResponse(result.messages);
     } catch (error) {
-      setMessages(previousMessages);
-      setIsResponding(false);
-      setResponseError(
-        error instanceof Error ? error.message : "Message could not be sent.",
+      setMessages(
+        appendWorkspaceErrorMessage(
+          optimisticMessages,
+          error,
+          "Message could not be sent.",
+        ),
       );
+      setIsResponding(false);
     }
   };
 
@@ -2714,15 +2915,29 @@ function FlowentApp() {
       }
       setMessages(result.messages);
     } catch (error) {
-      setMessages(previousMessages);
+      setMessages(
+        action === "resend"
+          ? appendWorkspaceErrorMessage(
+              [
+                ...previousMessages.slice(0, messageIndex),
+                {
+                  ...previousMessages[messageIndex],
+                  content,
+                },
+              ],
+              error,
+              "Message could not be updated.",
+            )
+          : previousMessages,
+      );
       if (action === "resend") {
         setIsResponding(false);
       }
-      setResponseError(
-        error instanceof Error
-          ? error.message
-          : "Message could not be updated.",
-      );
+      if (action !== "resend") {
+        showWorkspaceNotification(
+          workspaceErrorDetail(error, "Message could not be updated."),
+        );
+      }
     }
   };
 
@@ -2748,7 +2963,7 @@ function FlowentApp() {
     } catch {
       setMessages(previousMessages);
       setTrackedUsageInfo(previousUsageInfo);
-      setResponseError("Conversation could not be cleared.");
+      showWorkspaceNotification("Conversation could not be cleared.");
     }
   };
 

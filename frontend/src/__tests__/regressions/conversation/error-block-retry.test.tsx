@@ -295,6 +295,78 @@ describe("error block retry regressions", () => {
     expect(screen.queryByText("Stale tail.")).not.toBeInTheDocument();
   });
 
+  it("keeps a retryable error block in place when error retry cannot start", async () => {
+    const user = userEvent.setup();
+    const initialMessages = [
+      {
+        author: "user" as const,
+        content: "Read the notes.",
+        id: "message-user",
+      },
+      failedAssistantMessage(),
+    ];
+
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify(selectedProviderState(initialMessages)),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        input ===
+          "/api/workspace/messages/message-assistant/errors/message-assistant-error-1/retry" &&
+        init?.method === "POST"
+      ) {
+        return new Response(
+          JSON.stringify({
+            detail: "Choose a provider and model before sending.",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    const alert = await screen.findByRole("alert");
+    expect(screen.getByText("I read the notes.")).toBeInTheDocument();
+    expect(screen.getByText("Stale tail.")).toBeInTheDocument();
+
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    expect(screen.getByText("I read the notes.")).toBeInTheDocument();
+    expect(screen.getByText("Read notes.txt")).toBeInTheDocument();
+    expect(screen.queryByText("Stale tail.")).not.toBeInTheDocument();
+    const retryAlert = await screen.findByRole("alert");
+    expect(retryAlert).toHaveTextContent("Request failed");
+    expect(retryAlert).toHaveTextContent(
+      "Check the model connection settings and try again.",
+    );
+    expect(retryAlert).toHaveTextContent(
+      "Choose a provider and model before sending.",
+    );
+    expect(
+      within(retryAlert).getByRole("button", { name: "Retry" }),
+    ).toBeEnabled();
+  });
+
   it("keeps the error block Retry disabled while Flowent is responding", async () => {
     const holdStream = deferred<void>();
     const messages = [

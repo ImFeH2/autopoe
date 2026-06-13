@@ -69,6 +69,7 @@ logger = logging.getLogger("flowent.workspace.runtime")
 
 AUTO_COMPACT_RETAINED_MESSAGE_TOKEN_BUDGET = 20_000
 WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS = 0.5
+USER_VISIBLE_MANUAL_COMPACT_ERROR_MESSAGE = "Context could not be compacted."
 
 
 @dataclass
@@ -1206,10 +1207,31 @@ class WorkspaceRuntime:
         async def compact_events() -> AsyncIterator[str]:
             try:
                 marker, usage_info = await asyncio.shield(compact_task)
-            except Exception:
+            except Exception as error:
+                assistant_id = str(uuid4())
+                assistant_output = AssistantOutputBuilder(assistant_id)
+                error_item = run_error_output_item(assistant_id, str(error)).model_copy(
+                    update={"message": USER_VISIBLE_MANUAL_COMPACT_ERROR_MESSAGE}
+                )
+                assistant_output.append_error(error_item)
+                failed_message = StoredMessage(
+                    author="assistant",
+                    content="",
+                    groups=assistant_output.groups,
+                    id=assistant_id,
+                    status="failed",
+                )
+                self.store.save_messages(
+                    [*self.store.read_state().messages, failed_message]
+                )
+                failed_message_data = stream_message_data(failed_message)
+                yield stream_event("snapshot", {"message": failed_message_data})
                 yield stream_event(
                     "error",
-                    {"message": "Context could not be compacted."},
+                    {
+                        "error": error_item.model_dump(exclude_none=True),
+                        "message": USER_VISIBLE_MANUAL_COMPACT_ERROR_MESSAGE,
+                    },
                 )
                 return
 
