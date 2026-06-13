@@ -600,6 +600,119 @@ describe("workspace response lifecycle regressions", () => {
     expect(document.body).not.toHaveTextContent("Local preview.");
   });
 
+  it("keeps one error block when a failed snapshot is followed by the stream error", async () => {
+    const user = userEvent.setup();
+    const error = {
+      detail: "provider stopped",
+      id: "message-assistant-error-1",
+      message: "Check the model connection settings and try again.",
+      title: "Request failed",
+      type: "error",
+    };
+    const failedMessage = {
+      author: "assistant",
+      content: "Partial answer.",
+      groups: [
+        {
+          id: "message-assistant-group-1",
+          items: [
+            {
+              content: "Partial answer.",
+              id: "message-assistant-text-1",
+              type: "text",
+            },
+          ],
+        },
+        {
+          id: "message-assistant-errors",
+          items: [error],
+        },
+      ],
+      id: "message-assistant",
+      status: "failed",
+    };
+    const encoder = new TextEncoder();
+
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent("start", { id: "message-assistant" }, 1),
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(streamEvent("output_start", { index: 1 }, 2)),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent("delta", { content: "Partial answer." }, 3),
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent("snapshot", { message: failedMessage }, 4),
+                ),
+              );
+              controller.enqueue(
+                encoder.encode(
+                  streamEvent(
+                    "error",
+                    {
+                      error,
+                      message:
+                        "Check the model connection settings and try again.",
+                    },
+                    5,
+                  ),
+                ),
+              );
+              controller.close();
+            },
+          }),
+          {
+            headers: { "Content-Type": "text/event-stream" },
+            status: 200,
+          },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Draft live output");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Request failed");
+    expect(alert).toHaveTextContent(
+      "Check the model connection settings and try again.",
+    );
+    expect(alert.textContent?.match(/provider stopped/g)).toHaveLength(1);
+  });
+
   it("renders rapid delta events without waiting for a final snapshot", async () => {
     const user = userEvent.setup();
     const streamEvents = [

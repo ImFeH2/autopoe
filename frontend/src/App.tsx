@@ -2129,7 +2129,14 @@ function FlowentApp() {
         finishAssistantThinking();
         assistantTextItemId = "";
         assistantIsStreamingText = false;
-        updateCurrentAssistantGroupItems((items) => [...items, error]);
+        const isErrorAlreadyApplied =
+          Boolean(error.id) &&
+          assistantGroups
+            .flatMap((group) => group.items)
+            .some((item) => item.type === "error" && item.id === error.id);
+        if (!isErrorAlreadyApplied) {
+          updateCurrentAssistantGroupItems((items) => [...items, error]);
+        }
         if (!isCurrentResponse()) {
           return null;
         }
