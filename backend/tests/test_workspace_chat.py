@@ -12,7 +12,7 @@ from flowent.compact import (
     build_replacement_history,
     retained_recent_user_messages,
 )
-from flowent.llm import ChatMessage
+from flowent.llm import ChatMessage, LLMStreamError
 from flowent.main import create_app
 from flowent.sandbox import CommandResult, SandboxRunner
 from flowent.storage import StoredMessage
@@ -1049,6 +1049,89 @@ def test_workspace_response_auto_compacts_after_tool_result(
     assert state["messages"][1]["summary"] == "Keep the file findings from notes.txt."
 
 
+@pytest.mark.anyio
+async def test_workspace_retry_error_auto_compacts_before_retry_request(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "100000")
+    (tmp_path / "notes.txt").write_text("Launch notes. " * 600)
+    captured_requests: list[dict[str, object]] = []
+    stream_attempts = 0
+
+    async def fake_completion(**request: object) -> object:
+        nonlocal stream_attempts
+        captured_requests.append(request)
+        if not request.get("stream"):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Keep the launch notes findings.",
+                            "role": "assistant",
+                        }
+                    }
+                ]
+            }
+
+        stream_attempts += 1
+
+        async def chunks() -> object:
+            if stream_attempts == 1:
+                yield tool_call_chunk("read_file", '{"path": "notes.txt"}')
+                return
+            if stream_attempts == 2:
+                yield {"choices": [{"delta": {}}]}
+                raise RuntimeError("provider dropped")
+            yield {"choices": [{"delta": {"content": "Recovered."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+
+        first_response = await client.post(
+            "/api/workspace/respond", json={"content": "Read the notes."}
+        )
+
+        assert first_response.status_code == 200
+        assert stream_events(first_response.text)[-1]["event"] == "error"
+        failed_state = (await client.get("/api/state")).json()
+        failed_assistant = failed_state["messages"][-1]
+        error_item = failed_assistant["groups"][-1]["items"][0]
+        assert failed_assistant["tools"][0]["content"].startswith("Launch notes.")
+
+        monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "1200")
+        retry_response = await client.post(
+            f"/api/workspace/messages/{failed_assistant['id']}/errors/{error_item['id']}/retry"
+        )
+
+        assert retry_response.status_code == 200
+        retry_stream = await client.get("/api/workspace/stream?after=0")
+        state = (await client.get("/api/state")).json()
+
+    events = stream_json_events(retry_stream.text)
+    assert events[0]["event"] == "context_optimized"
+    assert events[-1]["event"] == "done"
+    assert events[0]["data"]["message"]["summary"] == (
+        "Keep the launch notes findings."
+    )
+    assert state["messages"][-1]["id"] == failed_assistant["id"]
+    assert state["messages"][-1]["content"] == "Recovered."
+    assert len(captured_requests) == 4
+    assert not captured_requests[-2].get("stream")
+    assert (
+        "CONTEXT CHECKPOINT COMPACTION"
+        in captured_requests[-2]["messages"][-1]["content"]
+    )
+    assert captured_requests[-1].get("stream") is True
+    assert compact_summary_messages(captured_requests[-1]["messages"])
+
+
 def test_workspace_auto_compact_failure_keeps_existing_checkpoint(
     tmp_path, monkeypatch
 ) -> None:
@@ -1861,6 +1944,47 @@ def test_workspace_persists_error_block_when_model_fails_before_output(
             ],
         },
     ]
+
+
+def test_workspace_context_window_error_marks_context_full(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {}}]}
+            raise LLMStreamError(
+                "Your input exceeds the context window of this model. "
+                "Please adjust your input and try again."
+            )
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Trigger context overflow."},
+    )
+
+    assert response.status_code == 200
+    events = stream_json_events(response.text)
+    assert events[-1]["event"] == "error"
+    state = client.get("/api/state").json()
+    assert state["usage_info"]["model_context_window"] == 272_000
+    assert state["usage_info"]["last_token_usage"] == {
+        "cached_input_tokens": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 272_000,
+    }
+    assert state["messages"][-1]["usage_info"] == state["usage_info"]
 
 
 @pytest.mark.anyio

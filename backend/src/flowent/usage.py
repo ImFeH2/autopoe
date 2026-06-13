@@ -148,6 +148,9 @@ def current_model_context_window(model_name: str | None = None) -> int:
 
 def model_context_window_for(model_name: str | None = None) -> int:
     candidates = normalized_model_name_candidates(model_name)
+    metadata_context_window = litellm_input_context_window_for(candidates)
+    if metadata_context_window is not None:
+        return metadata_context_window
     for candidate in candidates:
         context_window = MODEL_CONTEXT_WINDOWS.get(candidate)
         if context_window is not None:
@@ -157,6 +160,22 @@ def model_context_window_for(model_name: str | None = None) -> int:
             if is_model_context_window_prefix_match(candidate, known_model):
                 return MODEL_CONTEXT_WINDOWS[known_model]
     return DEFAULT_MODEL_CONTEXT_WINDOW
+
+
+def litellm_input_context_window_for(candidates: Sequence[str]) -> int | None:
+    try:
+        from litellm import model_cost
+    except Exception:
+        return None
+
+    for candidate in candidates:
+        metadata = model_cost.get(candidate)
+        if metadata is None:
+            continue
+        context_window = first_int_value(value_at(metadata, "max_input_tokens"))
+        if context_window is not None and context_window > 0:
+            return context_window
+    return None
 
 
 def normalized_model_name_candidates(model_name: str | None) -> tuple[str, ...]:
@@ -258,6 +277,53 @@ def estimated_token_usage_for_messages(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
+    )
+
+
+def estimated_token_usage_for_request(
+    messages: Sequence[Mapping[str, object]],
+    *,
+    output_content: str = "",
+    tools: Sequence[Mapping[str, object]] = (),
+) -> TokenUsage:
+    message_usage = estimated_token_usage_for_messages(
+        messages,
+        output_content=output_content,
+    )
+    tool_tokens = sum(
+        approximate_token_count(json.dumps(tool, ensure_ascii=False)) for tool in tools
+    )
+    input_tokens = message_usage.input_tokens + tool_tokens
+    return TokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=message_usage.output_tokens,
+        total_tokens=input_tokens + message_usage.output_tokens,
+    )
+
+
+def full_context_usage(
+    usage_info: TokenUsageInfo | None,
+    *,
+    model_context_window: int,
+) -> TokenUsageInfo:
+    info = usage_info or TokenUsageInfo(model_context_window=model_context_window)
+    return TokenUsageInfo(
+        total_token_usage=info.total_token_usage,
+        last_token_usage=TokenUsage(total_tokens=max(0, model_context_window)),
+        model_context_window=model_context_window,
+    )
+
+
+def is_context_window_error(error: BaseException) -> bool:
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "context window",
+            "context_length_exceeded",
+            "maximum context length",
+            "too many tokens",
+        )
     )
 
 

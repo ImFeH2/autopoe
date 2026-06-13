@@ -95,6 +95,38 @@ def test_app_state_refreshes_context_window_when_selected_model_changes(
     assert state["messages"][-1]["usage_info"] == state["usage_info"]
 
 
+def test_app_state_includes_context_window_before_usage_exists(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    client = TestClient(create_app(serve_frontend=False))
+
+    save_provider_and_model(client, "gpt-5.5")
+
+    state = client.get("/api/state").json()
+
+    assert state["settings"]["selected_model"] == "gpt-5.5"
+    assert state["usage_info"] == {
+        "last_token_usage": {
+            "cached_input_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 0,
+        },
+        "model_context_window": 1_050_000,
+        "total_token_usage": {
+            "cached_input_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 0,
+        },
+    }
+
+
 def test_app_state_uses_manual_context_window_limit(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))

@@ -15,7 +15,7 @@ from flowent.storage import (
 from flowent.usage import (
     TokenUsageInfo,
     current_model_context_window,
-    estimated_token_usage_for_messages,
+    estimated_token_usage_for_request,
     recompute_context_usage,
 )
 from flowent.workspace.output import error_context_summary, message_error_items
@@ -51,13 +51,15 @@ def should_auto_compact(
     messages: Sequence[ChatMessage | Mapping[str, object]],
     *,
     context_window: int,
+    tools: Sequence[Mapping[str, object]] = (),
 ) -> bool:
     token_limit = auto_compact_token_limit(context_window)
     if token_limit <= 0:
         return False
     return (
-        estimated_token_usage_for_messages(
-            model_request_messages_data(messages)
+        estimated_token_usage_for_request(
+            model_request_messages_data(messages),
+            tools=tools,
         ).total_tokens
         >= token_limit
     )
@@ -83,17 +85,19 @@ def update_context_usage_for_response(
     messages: Sequence[Mapping[str, object]],
     output_content: str,
     output_tools: Sequence[Mapping[str, object]] = (),
+    request_tools: Sequence[Mapping[str, object]] = (),
     model_context_window: int,
 ) -> TokenUsageInfo:
     return recompute_context_usage(
         usage_info,
-        estimated_token_usage_for_messages(
+        estimated_token_usage_for_request(
             [
                 *model_visible_messages_for_usage(messages),
                 *model_visible_response_messages_for_usage(
                     output_content, output_tools
                 ),
             ],
+            tools=request_tools,
         ).total_tokens,
         model_context_window=model_context_window,
     )
@@ -260,7 +264,7 @@ def usage_info_for_model(
     model_context_window: int,
 ) -> TokenUsageInfo | None:
     if usage_info is None:
-        return None
+        return TokenUsageInfo(model_context_window=model_context_window)
     return usage_info.model_copy(update={"model_context_window": model_context_window})
 
 

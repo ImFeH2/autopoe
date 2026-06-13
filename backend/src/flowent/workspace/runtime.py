@@ -27,11 +27,13 @@ from flowent.storage import (
     StoredState,
     StoredToolItem,
 )
-from flowent.tools import ToolContext
+from flowent.tools import ToolContext, tool_specs
 from flowent.usage import (
     TokenUsage,
     TokenUsageInfo,
     append_token_usage,
+    full_context_usage,
+    is_context_window_error,
     recompute_context_usage,
 )
 from flowent.workspace.context import (
@@ -188,13 +190,16 @@ class WorkspaceRuntime:
         *,
         connection: ProviderConnection,
         context_window_limit: int,
+        budget_messages: Sequence[ChatMessage | Mapping[str, object]] | None = None,
         messages: list[StoredMessage],
         model_history: Sequence[ChatMessage | Mapping[str, object]],
         source_message_id: str | None = None,
+        tools: Sequence[Mapping[str, object]] = (),
     ) -> tuple[StoredMessage, list[dict[str, object]], TokenUsageInfo] | None:
         if not should_auto_compact(
-            model_history,
+            budget_messages or model_history,
             context_window=context_window_limit,
+            tools=tools,
         ):
             return None
         logger.info("Workspace auto compact requested")
@@ -223,6 +228,10 @@ class WorkspaceRuntime:
         )
         next_messages = [*state.messages, user_message]
         self.store.save_messages(next_messages)
+        model_tool_specs = [
+            *tool_specs(),
+            *list(self.mcp_manager.tool_specs()),
+        ]
         model_history: list[ChatMessage | Mapping[str, object]] = [
             *runtime_context_messages(self.cwd, state.settings.agent_prompt),
             *workspace_chat_messages(
@@ -234,9 +243,13 @@ class WorkspaceRuntime:
         auto_compaction = await self.auto_compact_messages(
             connection=connection,
             context_window_limit=context_window_limit,
+            budget_messages=self.request_messages_for_content(
+                state, next_messages, content
+            ),
             messages=state.messages,
             model_history=model_history,
             source_message_id=None,
+            tools=model_tool_specs,
         )
         if auto_compaction is not None:
             marker, _, _ = auto_compaction
@@ -341,6 +354,7 @@ class WorkspaceRuntime:
                     tool.model_dump(exclude_none=True)
                     for tool in assistant_output.tools.values()
                 ],
+                request_tools=model_tool_specs,
                 model_context_window=context_window_limit,
             )
         self.store.save_usage_info(final_usage_info)
@@ -709,6 +723,10 @@ class WorkspaceRuntime:
                 turn_usage_info: TokenUsageInfo | None = None
                 current_output_index = 0
                 latest_usage_output_index: int | None = None
+                model_tool_specs = [
+                    *tool_specs(),
+                    *list(self.mcp_manager.tool_specs()),
+                ]
                 if request_messages is None:
                     current_request_messages = self.request_messages_for_content(
                         state,
@@ -723,9 +741,11 @@ class WorkspaceRuntime:
                     auto_compaction = await self.auto_compact_messages(
                         connection=connection,
                         context_window_limit=context_window_limit,
+                        budget_messages=current_request_messages,
                         messages=state.messages,
                         model_history=pre_turn_request_messages,
                         source_message_id=None,
+                        tools=model_tool_specs,
                     )
                     if auto_compaction is not None:
                         marker, _, usage_info = auto_compaction
@@ -746,6 +766,42 @@ class WorkspaceRuntime:
                         )
                 else:
                     current_request_messages = request_messages
+                    auto_compaction = await self.auto_compact_messages(
+                        connection=connection,
+                        context_window_limit=context_window_limit,
+                        messages=next_messages,
+                        model_history=compact_prompt_chat_messages(
+                            current_request_messages
+                        ),
+                        source_message_id=assistant_message.id,
+                        tools=model_tool_specs,
+                    )
+                    if auto_compaction is not None:
+                        marker, replacement_history, usage_info = auto_compaction
+                        assistant_message = assistant_message.model_copy(
+                            update={"usage_info": usage_info}
+                        )
+                        next_messages = append_or_replace_message(
+                            [*next_messages, marker], assistant_message
+                        )
+                        self.store.save_messages(next_messages)
+                        await self.append_event(
+                            response,
+                            "context_optimized",
+                            {
+                                "message": marker.model_dump(),
+                                **usage_event_data(usage_info),
+                            },
+                        )
+                        current_request_messages = model_request_messages_data(
+                            [
+                                *runtime_context_messages(
+                                    self.cwd, state.settings.agent_prompt
+                                ),
+                                *explicit_skill_messages(self.cwd, self.store, content),
+                                *replacement_history,
+                            ]
+                        )
                 context_usage_messages = (
                     usage_request_messages
                     if usage_request_messages is not None
@@ -801,6 +857,7 @@ class WorkspaceRuntime:
                         messages=next_messages,
                         model_history=compact_prompt_chat_messages(conversation),
                         source_message_id=assistant_snapshot.id,
+                        tools=model_tool_specs,
                     )
                     if auto_result is None:
                         return None
@@ -944,6 +1001,7 @@ class WorkspaceRuntime:
                                         tool.model_dump(exclude_none=True)
                                         for tool in assistant_output.tools.values()
                                     ],
+                                    request_tools=model_tool_specs,
                                     model_context_window=context_window_limit,
                                 )
                             self.store.save_usage_info(final_usage_info)
@@ -976,6 +1034,12 @@ class WorkspaceRuntime:
                 raise
             except Exception as error:
                 logger.exception("Workspace response failed")
+                if is_context_window_error(error):
+                    usage_info = full_context_usage(
+                        self.store.read_usage_info(),
+                        model_context_window=context_window_limit,
+                    )
+                    self.store.save_usage_info(usage_info)
                 if (
                     current_tool_id is not None
                     and current_tool_id in assistant_output.tools
