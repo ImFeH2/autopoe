@@ -456,86 +456,85 @@ describe("model context window regressions", () => {
     expect(await screen.findByText("30k / 64k")).toBeInTheDocument();
   });
 
-  it.each(["0", "-1", "abc"])(
-    "prevents saving an invalid manual context limit: %s",
-    async (contextLimitDraft) => {
-      const user = userEvent.setup();
-      const settingsRequests: unknown[] = [];
-      const appState = () => ({
-        mcp_servers: [],
-        messages: [],
-        providers: [
-          {
-            api_key: "sk-local",
-            base_url: "",
-            id: "provider-openai",
-            models: ["gpt-5.1"],
-            name: "OpenAI",
-            type: "openai",
-          },
-        ],
-        settings: {
-          agent_prompt: "",
-          context_window_limit: null,
-          reasoning_effort: "default",
-          selected_model: "gpt-5.1",
-          selected_provider_id: "provider-openai",
+  it.each([
+    "0",
+    "-1",
+    "abc",
+  ])("prevents saving an invalid manual context limit: %s", async (contextLimitDraft) => {
+    const user = userEvent.setup();
+    const settingsRequests: unknown[] = [];
+    const appState = () => ({
+      mcp_servers: [],
+      messages: [],
+      providers: [
+        {
+          api_key: "sk-local",
+          base_url: "",
+          id: "provider-openai",
+          models: ["gpt-5.1"],
+          name: "OpenAI",
+          type: "openai",
         },
-        skills: [],
-        telegram_bot: {
-          bot_token: "",
-          enabled: false,
-          error: "",
-          sessions: [],
-          status: "disabled",
-        },
-        usage_info: contextUsageInfo(30_000, 272_000),
-        writable_paths: [],
-      });
+      ],
+      settings: {
+        agent_prompt: "",
+        context_window_limit: null,
+        reasoning_effort: "default",
+        selected_model: "gpt-5.1",
+        selected_provider_id: "provider-openai",
+      },
+      skills: [],
+      telegram_bot: {
+        bot_token: "",
+        enabled: false,
+        error: "",
+        sessions: [],
+        status: "disabled",
+      },
+      usage_info: contextUsageInfo(30_000, 272_000),
+      writable_paths: [],
+    });
 
-      vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
-        if (input === "/api/state") {
-          return new Response(JSON.stringify(appState()), {
-            headers: { "Content-Type": "application/json" },
-            status: 200,
-          });
-        }
-        if (input === "/api/about") {
-          return new Response(JSON.stringify({}), {
-            headers: { "Content-Type": "application/json" },
-            status: 200,
-          });
-        }
-        if (input === "/api/settings" && init?.method === "PUT") {
-          settingsRequests.push(JSON.parse(String(init.body)));
-          return new Response(init.body, {
-            headers: { "Content-Type": "application/json" },
-            status: 200,
-          });
-        }
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(appState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
         return new Response(JSON.stringify({}), {
           headers: { "Content-Type": "application/json" },
           status: 200,
         });
+      }
+      if (input === "/api/settings" && init?.method === "PUT") {
+        settingsRequests.push(JSON.parse(String(init.body)));
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
       });
+    });
 
-      render(<App />);
+    render(<App />);
 
-      await screen.findByText("30k / 272k");
+    await screen.findByText("30k / 272k");
 
-      await user.click(screen.getByRole("tab", { name: "Settings" }));
-      await user.click(
-        screen.getByRole("combobox", { name: "Context window" }),
-      );
-      await user.click(screen.getByRole("option", { name: "Manual" }));
-      await user.type(
-        screen.getByRole("textbox", { name: "Context size" }),
-        contextLimitDraft,
-      );
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    await user.click(screen.getByRole("combobox", { name: "Context window" }));
+    await user.click(screen.getByRole("option", { name: "Manual" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Context size" }),
+      contextLimitDraft,
+    );
 
-      expect(screen.getByText("Enter a positive integer")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-      expect(settingsRequests).toEqual([]);
-    },
-  );
+    expect(screen.getByText("Enter a positive integer")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(settingsRequests).toEqual([]);
+  });
 });

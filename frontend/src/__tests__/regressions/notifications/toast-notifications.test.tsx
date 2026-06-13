@@ -234,29 +234,26 @@ describe("toast notifications", () => {
       "Request failed.",
       "Check the connection settings and try again.",
     ],
-  ])(
-    "shows %s provider fetch failures as a notification",
-    async (code, message, description) => {
-      const user = userEvent.setup();
-      mockAppFetch(appState(), (input, init) => {
-        if (input === "/api/providers/models" && init?.method === "POST") {
-          return new Response(JSON.stringify({ detail: { code } }), {
-            headers: { "Content-Type": "application/json" },
-            status: 502,
-          });
-        }
-        return null;
-      });
-      render(<App />);
+  ])("shows %s provider fetch failures as a notification", async (code, message, description) => {
+    const user = userEvent.setup();
+    mockAppFetch(appState(), (input, init) => {
+      if (input === "/api/providers/models" && init?.method === "POST") {
+        return new Response(JSON.stringify({ detail: { code } }), {
+          headers: { "Content-Type": "application/json" },
+          status: 502,
+        });
+      }
+      return null;
+    });
+    render(<App />);
 
-      await user.click(await screen.findByRole("tab", { name: "Providers" }));
-      await user.click(screen.getByRole("button", { name: "Fetch" }));
+    await user.click(await screen.findByRole("tab", { name: "Providers" }));
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
 
-      const notification = await screen.findByRole("alert");
-      expect(notification).toHaveTextContent(message);
-      expect(notification).toHaveTextContent(description);
-    },
-  );
+    const notification = await screen.findByRole("alert");
+    expect(notification).toHaveTextContent(message);
+    expect(notification).toHaveTextContent(description);
+  });
 
   it("shows empty provider fetch results as a notification", async () => {
     const user = userEvent.setup();

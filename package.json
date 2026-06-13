@@ -60,8 +60,8 @@
     "build:backend": "node scripts/prepare-python-package.mjs && uv build --project backend",
     "build:npm": "pnpm build && node scripts/prepare-npm-package.mjs",
     "start": "uv run --project backend flowent",
-    "format": "prettier --write . && uv run --project backend ruff format",
-    "format:check": "prettier --check . && uv run --project backend ruff format --check",
+    "format": "biome format --write . && uv run --project backend ruff format",
+    "format:check": "biome format . && uv run --project backend ruff format --check",
     "lint": "pnpm lint:frontend && pnpm lint:backend",
     "lint:frontend": "pnpm --dir frontend lint",
     "lint:backend": "node scripts/prepare-python-readme.mjs && uv run --project backend ruff check && uv run --project backend mypy --config-file backend/pyproject.toml backend/src",
@@ -76,19 +76,18 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,mjs,mts}": "prettier --write",
+    "*.{js,jsx,ts,tsx,mjs,mts,cjs,cts,json,jsonc,css}": "biome check --write --no-errors-on-unmatched",
     "*.py": [
       "uv run --project backend ruff format",
       "uv run --project backend ruff check --fix"
-    ],
-    "*.{css,json,jsonc,md,mdx,yml,yaml}": "prettier --write"
+    ]
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
     "@release-it/bumper": "^7.0.5",
     "concurrently": "^9.2.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "prettier": "^3.8.3",
     "release-it": "^20.0.1"
   }
 }

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!**/.next/",
+      "!**/.playwright-mcp/",
+      "!**/.pytest_cache/",
+      "!**/.venv/",
+      "!**/build/",
+      "!**/coverage/",
+      "!**/dist/",
+      "!**/node_modules/",
+      "!**/out/",
+      "!**/pnpm-lock.yaml",
+      "!**/AGENTS.md"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 80
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "a11y": "off",
+      "complexity": {
+        "noUselessConstructor": "off"
+      },
+      "correctness": {
+        "noRestrictedElements": {
+          "level": "error",
+          "options": {
+            "elements": {
+              "option": "Use the shared Select components from src/components/ui/select.tsx instead of a native <option>.",
+              "select": "Use the shared Select components from src/components/ui/select.tsx instead of a native <select>."
+            }
+          }
+        },
+        "useExhaustiveDependencies": {
+          "level": "warn",
+          "options": {
+            "reportUnnecessaryDependencies": false
+          }
+        }
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "noUselessElse": "off",
+        "useComponentExportOnlyModules": {
+          "level": "warn",
+          "options": {
+            "allowConstantExport": true,
+            "allowExportNames": [
+              "useAgent",
+              "useAgentActivityRuntime",
+              "useAgentConnectionRuntime",
+              "useAgentGraphRuntime",
+              "useAgentHistoryRuntime",
+              "useAgentNodesRuntime",
+              "useAgentRuntime",
+              "useAgentUI"
+            ]
+          }
+        },
+        "useConst": "off",
+        "useImportType": "off"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "off",
+        "noConfusingVoidType": "off",
+        "noTemplateCurlyInString": "off"
+      }
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    },
+    "linter": {
+      "enabled": false
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "arrowParentheses": "always",
+      "bracketSameLine": false,
+      "bracketSpacing": true,
+      "jsxQuoteStyle": "double",
+      "quoteProperties": "asNeeded",
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "json": {
+    "parser": {
+      "allowComments": true,
+      "allowTrailingCommas": true
+    },
+    "formatter": {
+      "trailingCommas": "none"
+    }
+  },
+  "assist": {
+    "enabled": false
+  },
+  "overrides": [
+    {
+      "includes": ["**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useComponentExportOnlyModules": "off"
+          }
+        }
+      }
+    }
+  ]
+}

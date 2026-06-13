@@ -2270,9 +2270,9 @@ function FlowentApp() {
       const hasAssistantOutputSnapshot = (message: ApiMessage) =>
         Boolean(
           message.groups?.length ||
-          message.items?.length ||
-          message.tools?.length ||
-          (message.status && message.status !== "completed"),
+            message.items?.length ||
+            message.tools?.length ||
+            (message.status && message.status !== "completed"),
         );
       const finishAssistantFromLegacyDone = (message: ApiMessage) => {
         if (

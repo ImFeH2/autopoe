@@ -96,16 +96,8 @@ textarea {
 
 .flowent-navigation-label {
   font-family:
-    -apple-system-body,
-    ui-sans-serif,
-    -apple-system,
-    system-ui,
-    "Segoe UI",
-    Helvetica,
-    "Apple Color Emoji",
-    Arial,
-    sans-serif,
-    "Segoe UI Emoji",
+    -apple-system-body, ui-sans-serif, -apple-system, system-ui, "Segoe UI",
+    Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji",
     "Segoe UI Symbol";
   font-feature-settings:
     "liga" 0,
