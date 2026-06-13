@@ -80,11 +80,8 @@ jobs:
             exit 1
           fi
 
-      - name: Check formatting
-        run: pnpm format:check
-
-      - name: Lint
-        run: pnpm lint
+      - name: Check code quality
+        run: pnpm check
 
       - name: Typecheck
         run: pnpm typecheck

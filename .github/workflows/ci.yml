@@ -60,11 +60,8 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --project backend --frozen
 
-      - name: Check formatting
-        run: pnpm format:check
-
-      - name: Lint
-        run: pnpm lint
+      - name: Check code quality
+        run: pnpm check
 
       - name: Typecheck
         run: pnpm typecheck

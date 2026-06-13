@@ -1,6 +1,6 @@
 set -e
 
 pnpm exec lint-staged
-pnpm lint
+pnpm check
 pnpm typecheck
 pnpm test
