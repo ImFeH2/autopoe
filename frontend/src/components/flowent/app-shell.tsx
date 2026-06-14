@@ -140,13 +140,13 @@ export function AppShell({
       orientation="vertical"
       className="grid h-[var(--flowent-viewport-height)] min-h-0 grid-cols-[260px_minmax(0,1fr)] gap-0 overflow-hidden bg-black pt-[var(--flowent-safe-area-top)] pr-[var(--flowent-safe-area-right)] pb-[var(--flowent-safe-area-bottom)] pl-[var(--flowent-safe-area-left)] text-white max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]"
     >
-      <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black px-5 py-6 max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3">
-        <div className="flex min-h-10 items-center gap-3 bg-black max-[560px]:min-h-10">
-          <div className="grid size-8 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
+      <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black px-4 py-4 max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3">
+        <div className="flex min-h-12 items-center gap-3.5 bg-black max-[560px]:min-h-12">
+          <div className="grid size-10 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
             <img alt="" className="size-full object-cover" src="/flowent.png" />
           </div>
           <div className="min-w-0 flex-1 self-center">
-            <div className="truncate text-[15px] font-medium leading-5 text-white">
+            <div className="truncate text-[22px] font-medium leading-8 text-white">
               Flowent
             </div>
           </div>
@@ -154,7 +154,7 @@ export function AppShell({
 
         <nav aria-label="Primary navigation">
           <TabsList
-            className="mt-6 -mx-[14px] flex w-auto flex-none flex-col items-stretch gap-0 p-0 max-[900px]:mt-3 max-[900px]:mx-0 max-[900px]:flex-row max-[560px]:justify-start max-[560px]:overflow-x-auto"
+            className="mt-5 -mx-[10px] flex w-auto flex-none flex-col items-stretch gap-0 p-0 max-[900px]:mt-3 max-[900px]:mx-0 max-[900px]:flex-row max-[560px]:justify-start max-[560px]:overflow-x-auto"
             variant="line"
           >
             <NavigationTrigger item={workspaceNavigationItem} />
