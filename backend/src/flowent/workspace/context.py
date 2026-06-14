@@ -12,6 +12,7 @@ from flowent.storage import (
     StoredSettings,
     StoredState,
 )
+from flowent.tools import tool_result_model_content
 from flowent.usage import (
     TokenUsageInfo,
     current_model_context_window,
@@ -111,6 +112,8 @@ def model_visible_response_messages_for_usage(
     for index, tool in enumerate(output_tools):
         tool_id = str(tool.get("id") or f"call_{index}")
         arguments = tool.get("arguments")
+        result_payload = tool.get("result")
+        tool_result = result_payload if isinstance(result_payload, dict) else {}
         visible_messages.append(
             {
                 "role": "assistant",
@@ -134,7 +137,7 @@ def model_visible_response_messages_for_usage(
             {
                 "role": "tool",
                 "tool_call_id": tool_id,
-                "content": str(tool.get("content") or ""),
+                "content": tool_result_model_content(tool_result),
             }
         )
     if output_content:
@@ -179,7 +182,7 @@ def model_visible_assistant_output_messages(
             {
                 "role": "tool",
                 "tool_call_id": tool.id,
-                "content": tool.content or "",
+                "content": tool_result_model_content(tool.result or {}),
             }
             for tool in group_tools
             if tool.status != "running"

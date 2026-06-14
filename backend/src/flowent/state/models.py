@@ -151,8 +151,7 @@ class StoredToolItem(BaseModel):
     status: str
     title: str
     arguments: dict[str, object] | None = None
-    content: str | None = None
-    data: dict[str, object] | None = None
+    result: dict[str, object] | None = None
 
 
 class StoredThinkingOutputItem(BaseModel):

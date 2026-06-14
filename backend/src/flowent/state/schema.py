@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 
@@ -185,7 +186,122 @@ def migrate(connection: sqlite3.Connection) -> None:
             "ALTER TABLE workspace_context "
             "ADD COLUMN is_compacting INTEGER NOT NULL DEFAULT 0"
         )
+    if not migration_version_exists(connection, 2):
+        migrate_tool_result_items(connection)
+        connection.execute("INSERT INTO schema_migrations (version) VALUES (2)")
 
 
 def table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def migration_version_exists(connection: sqlite3.Connection, version: int) -> bool:
+    return (
+        connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (version,),
+        ).fetchone()
+        is not None
+    )
+
+
+def migrate_tool_result_items(connection: sqlite3.Connection) -> None:
+    for row in connection.execute("SELECT id, tools, groups FROM messages"):
+        tools, tools_changed = migrate_tool_list(json.loads(row["tools"] or "[]"))
+        groups, groups_changed = migrate_tool_groups(json.loads(row["groups"] or "[]"))
+        if not tools_changed and not groups_changed:
+            continue
+        connection.execute(
+            "UPDATE messages SET tools = ?, groups = ? WHERE id = ?",
+            (
+                json.dumps(tools, ensure_ascii=False),
+                json.dumps(groups, ensure_ascii=False),
+                row["id"],
+            ),
+        )
+
+
+def migrate_tool_groups(groups: object) -> tuple[object, bool]:
+    if not isinstance(groups, list):
+        return groups, False
+    changed = False
+    next_groups: list[object] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            next_groups.append(group)
+            continue
+        items = group.get("items")
+        if not isinstance(items, list):
+            next_groups.append(group)
+            continue
+        next_items: list[object] = []
+        for item in items:
+            if not isinstance(item, dict) or item.get("type") != "tool":
+                next_items.append(item)
+                continue
+            tool, tool_changed = migrate_tool_item(item.get("tool"))
+            changed = changed or tool_changed
+            next_items.append({**item, "tool": tool})
+        next_groups.append({**group, "items": next_items})
+    return next_groups, changed
+
+
+def migrate_tool_list(tools: object) -> tuple[object, bool]:
+    if not isinstance(tools, list):
+        return tools, False
+    changed = False
+    next_tools: list[object] = []
+    for tool in tools:
+        next_tool, tool_changed = migrate_tool_item(tool)
+        changed = changed or tool_changed
+        next_tools.append(next_tool)
+    return next_tools, changed
+
+
+def migrate_tool_item(tool: object) -> tuple[object, bool]:
+    if not isinstance(tool, dict):
+        return tool, False
+    if "content" not in tool and "data" not in tool:
+        return tool, False
+    legacy_content = tool.get("content")
+    legacy_data = tool.get("data")
+    result = tool.get("result")
+    if not isinstance(result, dict):
+        result = legacy_tool_result(legacy_content, legacy_data)
+    return (
+        {
+            key: value
+            for key, value in {**tool, "result": result}.items()
+            if key not in {"content", "data"}
+        },
+        True,
+    )
+
+
+def legacy_tool_result(content: object, data: object) -> dict[str, object]:
+    text = content if isinstance(content, str) else ""
+    payload = data if isinstance(data, dict) else {}
+    if {"command", "exit_code", "stderr", "stdout"}.issubset(payload):
+        return {
+            "type": "command",
+            "command": str(payload.get("command") or ""),
+            "exit_code": payload.get("exit_code"),
+            "stderr": str(payload.get("stderr") or ""),
+            "stdout": str(payload.get("stdout") or ""),
+            "output": text or str(payload.get("stdout") or payload.get("stderr") or ""),
+        }
+    if "server" in payload and "tool" in payload and "result" in payload:
+        return {
+            "type": "mcp",
+            "output": text,
+            "server": payload.get("server"),
+            "tool": payload.get("tool"),
+            "raw_result": payload.get("result"),
+        }
+    if "items" in payload:
+        return {"type": "plan", "output": text, **payload}
+    if "results" in payload and "query" in payload:
+        return {"type": "web_search", "output": text, **payload}
+    if "files" in payload:
+        return {"type": "patch", "output": text, **payload}
+    return {"type": "text", "text": text, **payload}

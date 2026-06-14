@@ -119,10 +119,9 @@ export type ToolItemStatus = "failed" | "running" | "success" | "waiting";
 
 export type ToolItem = {
   arguments?: Record<string, unknown> | null;
-  content?: string;
-  data?: Record<string, unknown> | null;
   id: string;
   name: string;
+  result?: Record<string, unknown> | null;
   status: ToolItemStatus;
   title: string;
 };

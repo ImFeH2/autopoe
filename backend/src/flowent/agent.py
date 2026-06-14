@@ -25,6 +25,8 @@ from flowent.tools import (
     new_tool_item,
     parse_tool_arguments,
     run_tool_async,
+    text_tool_result,
+    tool_result_model_content,
     tool_specs,
 )
 
@@ -277,7 +279,12 @@ async def run_agent_stream(
                 arguments = parse_tool_arguments(tool_call.arguments)
             except Exception as error:
                 arguments = {}
-                result_content = str(error)
+                result = ToolResult(
+                    result=text_tool_result(str(error)),
+                    ok=False,
+                    title=tool_call.name or "Tool failed",
+                )
+                result_content = tool_result_model_content(result)
                 tool_item = new_tool_item(tool_call.name, arguments)
                 logger.debug("Tool call argument parse failed name=%s", tool_call.name)
                 logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
@@ -292,10 +299,9 @@ async def run_agent_stream(
                     event="tool_error",
                     data={
                         "id": tool_item["id"],
-                        "content": result_content,
-                        "data": {},
+                        "result": result.result,
                         "status": "failed",
-                        "title": tool_call.name or "Tool failed",
+                        "title": result.title,
                     },
                 )
             else:
@@ -314,10 +320,12 @@ async def run_agent_stream(
                     if extra_tool_runner is not None
                     else None
                 )
-                result = extra_result if isinstance(extra_result, ToolResult) else None
-                if result is None:
+                tool_result: ToolResult | None = (
+                    extra_result if isinstance(extra_result, ToolResult) else None
+                )
+                if tool_result is None:
                     context = ToolContext(cwd=cwd, web_searcher=web_searcher)
-                    result = await (
+                    tool_result = await (
                         tool_runner(
                             tool_call.name,
                             arguments,
@@ -330,27 +338,26 @@ async def run_agent_stream(
                             context,
                         )
                     )
-                result_content = result.content
+                result_content = tool_result_model_content(tool_result)
                 logger.debug(
                     "Tool call finished name=%s id=%s ok=%s",
                     tool_call.name,
                     tool_item["id"],
-                    result.ok,
+                    tool_result.ok,
                 )
                 logger.log(
                     TRACE_LEVEL,
                     "Tool result id=%s result=%r",
                     tool_item["id"],
-                    result.model_dump(),
+                    tool_result.model_dump(),
                 )
                 yield AgentStreamEvent(
-                    event="tool_done" if result.ok else "tool_error",
+                    event="tool_done" if tool_result.ok else "tool_error",
                     data={
                         "id": tool_item["id"],
-                        "content": result.content,
-                        "data": result.data,
-                        "status": "success" if result.ok else "failed",
-                        "title": result.title,
+                        "result": tool_result.result,
+                        "status": "success" if tool_result.ok else "failed",
+                        "title": tool_result.title,
                     },
                 )
             conversation.append(tool_result_message(tool_call_id, result_content))

@@ -65,10 +65,13 @@ def test_follow_up_response_keeps_previous_tool_blocks_in_model_history(
                                     "id": "tool-call-1-item",
                                     "tool": {
                                         "arguments": {"path": "notes.txt"},
-                                        "content": "Launch is ready.",
-                                        "data": {},
                                         "id": "call-1",
                                         "name": "read_file",
+                                        "result": {
+                                            "path": "notes.txt",
+                                            "text": "Launch is ready.",
+                                            "type": "text",
+                                        },
                                         "status": "success",
                                         "title": "Reading notes.txt",
                                     },
@@ -91,10 +94,13 @@ def test_follow_up_response_keeps_previous_tool_blocks_in_model_history(
                     "tools": [
                         {
                             "arguments": {"path": "notes.txt"},
-                            "content": "Launch is ready.",
-                            "data": {},
                             "id": "call-1",
                             "name": "read_file",
+                            "result": {
+                                "path": "notes.txt",
+                                "text": "Launch is ready.",
+                                "type": "text",
+                            },
                             "status": "success",
                             "title": "Reading notes.txt",
                         }

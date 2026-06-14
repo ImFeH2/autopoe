@@ -13,6 +13,7 @@ from flowent.storage import (
     StoredToolItem,
     StoredToolOutputItem,
 )
+from flowent.tools import tool_result_model_content
 
 APPROVAL_TRANSCRIPT_MESSAGE_LIMIT = 12
 APPROVAL_TRANSCRIPT_TEXT_LIMIT = 2_000
@@ -84,7 +85,9 @@ def approval_transcript(
             if content:
                 entries.append(ApprovalTranscriptEntry(role=role, content=content))
             for tool in message.tools:
-                tool_content = approval_transcript_text(tool.content)
+                tool_content = approval_transcript_text(
+                    tool_result_model_content(tool.result or {})
+                )
                 if tool_content:
                     entries.append(
                         ApprovalTranscriptEntry(

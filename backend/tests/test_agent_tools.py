@@ -15,7 +15,14 @@ from flowent.llm import ProviderConnection, ProviderFormat
 from flowent.main import create_app
 from flowent.network import flowent_user_agent
 from flowent.sandbox import CommandResult, SandboxCommand, SandboxRunner
-from flowent.tools import ToolContext, ToolResult, default_web_search, run_tool
+from flowent.tools import (
+    ToolContext,
+    ToolResult,
+    default_web_search,
+    run_tool,
+    text_tool_result,
+    tool_result_model_content,
+)
 
 
 class UserRecord:
@@ -184,7 +191,7 @@ def test_tools_can_read_paths_outside_workdir(tmp_path) -> None:
     )
 
     assert result.ok
-    assert result.content == "outside content"
+    assert tool_result_model_content(result) == "outside content"
 
 
 def test_list_dir_can_list_paths_outside_workdir(tmp_path) -> None:
@@ -197,7 +204,7 @@ def test_list_dir_can_list_paths_outside_workdir(tmp_path) -> None:
     )
 
     assert result.ok
-    assert "file.txt" in result.content
+    assert "file.txt" in tool_result_model_content(result)
 
 
 def test_grep_files_can_search_paths_outside_workdir(tmp_path) -> None:
@@ -212,7 +219,7 @@ def test_grep_files_can_search_paths_outside_workdir(tmp_path) -> None:
     )
 
     assert result.ok
-    assert "file.txt" in result.content
+    assert "file.txt" in tool_result_model_content(result)
 
 
 def test_shell_command_can_write_workdir_and_tmp(tmp_path) -> None:
@@ -253,7 +260,7 @@ def test_shell_command_has_network_by_default(tmp_path, monkeypatch) -> None:
     )
 
     assert result.ok
-    assert "network-ready" in result.content
+    assert "network-ready" in tool_result_model_content(result)
 
 
 def test_shell_command_uses_executable_default_shell(
@@ -800,7 +807,7 @@ def test_shell_command_denies_ptrace_when_seccomp_is_available(tmp_path) -> None
         ToolContext(cwd=tmp_path),
     )
 
-    assert not result.ok or "-1" in result.content
+    assert not result.ok or "-1" in tool_result_model_content(result)
 
 
 def test_apply_patch_modifies_workdir_file(tmp_path) -> None:
@@ -944,7 +951,7 @@ def test_apply_patch_reports_patch_error_when_stderr_has_warning(
 
     assert not result.ok
     assert result.title == "Edit failed"
-    assert result.content == "Patch context was not found."
+    assert tool_result_model_content(result) == "Patch context was not found."
 
 
 def test_web_search_result_enters_tool_output(tmp_path) -> None:
@@ -958,7 +965,7 @@ def test_web_search_result_enters_tool_output(tmp_path) -> None:
     )
 
     assert result.ok
-    assert "https://example.test" in result.content
+    assert "https://example.test" in tool_result_model_content(result)
 
 
 def test_default_web_search_uses_flowent_user_agent(monkeypatch) -> None:
@@ -1324,7 +1331,7 @@ async def test_approval_denial_result_is_sent_to_agent(tmp_path) -> None:
         context: ToolContext,
     ) -> ToolResult:
         return ToolResult(
-            content=(
+            result=text_tool_result(
                 "Automatic approval review denied this action as high risk: "
                 "The command can delete broad data. The agent must not work around "
                 "this denial."
@@ -1373,4 +1380,4 @@ def test_update_plan_outputs_plan_state(tmp_path) -> None:
     )
 
     assert result.ok
-    assert "Read files" in result.content
+    assert "Read files" in tool_result_model_content(result)

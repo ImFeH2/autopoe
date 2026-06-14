@@ -104,10 +104,10 @@ const deferred = () => {
 
 type TestTool = {
   arguments?: Record<string, unknown> | null;
-  data?: Record<string, unknown> | null;
   id: string;
   name: string;
   output?: string;
+  result?: Record<string, unknown> | null;
   status?: "failed" | "running" | "success" | "waiting";
   title: string;
 };
@@ -748,7 +748,7 @@ const assistantToolStreamResponse = (
   id = "message-assistant",
 ) => {
   const encoder = new TextEncoder();
-  const { data, output, status, ...startTool } = tool;
+  const { output, result, status, ...startTool } = tool;
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
@@ -769,9 +769,8 @@ const assistantToolStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: output ?? "tool output",
-            data,
             id: tool.id,
+            result: result ?? { text: output ?? "tool output", type: "text" },
             status: status ?? "success",
             title: tool.title,
           })}\n\n`,
@@ -814,7 +813,7 @@ const assistantThinkingToolStreamResponse = (
   id = "message-assistant",
 ) => {
   const encoder = new TextEncoder();
-  const { data, output, status, ...startTool } = tool;
+  const { output, result, status, ...startTool } = tool;
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
@@ -840,9 +839,8 @@ const assistantThinkingToolStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: output ?? "tool output",
-            data,
             id: tool.id,
+            result: result ?? { text: output ?? "tool output", type: "text" },
             status: status ?? "success",
             title: tool.title,
           })}\n\n`,
@@ -882,7 +880,7 @@ const controlledToolTimelineResponse = (
   const encoder = new TextEncoder();
   const completeTool = deferred();
   const finish = deferred();
-  const { data, output, ...startTool } = tool;
+  const { output, result, ...startTool } = tool;
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(
@@ -904,9 +902,8 @@ const controlledToolTimelineResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: output ?? "tool output",
-            data,
             id: tool.id,
+            result: result ?? { text: output ?? "tool output", type: "text" },
             status: tool.status ?? "success",
             title: tool.title,
           })}\n\n`,
@@ -958,7 +955,7 @@ const controlledToolTextStreamResponse = (
   const completeTool = deferred();
   const startText = deferred();
   const finish = deferred();
-  const { data, output, ...startTool } = tool;
+  const { output, result, ...startTool } = tool;
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(
@@ -980,9 +977,8 @@ const controlledToolTextStreamResponse = (
       controller.enqueue(
         encoder.encode(
           `event: tool_done\ndata: ${JSON.stringify({
-            content: output ?? "tool output",
-            data,
             id: tool.id,
+            result: result ?? { text: output ?? "tool output", type: "text" },
             status: "success",
             title: tool.title,
           })}\n\n`,
@@ -1051,7 +1047,7 @@ const assistantToolBatchStreamResponse = (
         );
 
         tools.forEach((tool) => {
-          const { data, output, status, ...startTool } = tool;
+          const { output, result, status, ...startTool } = tool;
           controller.enqueue(
             encoder.encode(
               `event: tool_start\ndata: ${JSON.stringify({
@@ -1062,9 +1058,11 @@ const assistantToolBatchStreamResponse = (
           controller.enqueue(
             encoder.encode(
               `event: tool_done\ndata: ${JSON.stringify({
-                content: output ?? "tool output",
-                data,
                 id: tool.id,
+                result: result ?? {
+                  text: output ?? "tool output",
+                  type: "text",
+                },
                 status: status ?? "success",
                 title: tool.title,
               })}\n\n`,
@@ -4637,10 +4635,10 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { path: "notes.txt" },
-            data: { path: "notes.txt" },
             id: "tool-1",
             name: "read_file",
             output: "Note contents",
+            result: { path: "notes.txt", text: "Note contents", type: "text" },
             title: "Reading notes.txt",
           },
           "The notes are ready.",
@@ -4689,7 +4687,7 @@ describe("App", () => {
           command: "pnpm install",
           sandbox_permissions: "with_additional_permissions",
         },
-        data: {
+        result: {
           approval: {
             action: "additional_permissions",
             decision: "approved",
@@ -4699,8 +4697,10 @@ describe("App", () => {
           },
           command: "pnpm install",
           exit_code: 0,
+          output: "done",
           stderr: "",
           stdout: "done",
+          type: "command",
         },
         id: "tool-1",
         name: "shell_command",
@@ -4749,7 +4749,9 @@ describe("App", () => {
     expect(screen.getByText("/workspace/.cache/pnpm")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("FAILURE");
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent('"command": "pnpm install"');
+    expect(resultBlock).toHaveTextContent("Exit code: 0");
+    expect(resultBlock).toHaveTextContent("Output:");
+    expect(resultBlock).toHaveTextContent("done");
     expect(resultBlock).not.toHaveTextContent("Needed for cache writes.");
   });
 
@@ -4760,7 +4762,7 @@ describe("App", () => {
     const toolStream = controlledToolTimelineResponse(
       {
         arguments: { command: "pnpm test" },
-        data: {
+        result: {
           approval: {
             action: "sandbox_failure",
             decision: "approved",
@@ -4771,8 +4773,10 @@ describe("App", () => {
           },
           command: "pnpm test",
           exit_code: 0,
+          output: "all tests passed",
           stderr: "",
           stdout: "all tests passed",
+          type: "command",
         },
         id: "tool-1",
         name: "shell_command",
@@ -4823,11 +4827,12 @@ describe("App", () => {
     expect(screen.getByText("FAILURE")).toBeInTheDocument();
     expect(screen.getByText(firstFailureOutput)).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent('"stdout": "all tests passed"');
+    expect(resultBlock).toHaveTextContent("Output:");
+    expect(resultBlock).toHaveTextContent("all tests passed");
     expect(resultBlock).not.toHaveTextContent(firstFailureOutput);
   });
 
-  it("restores automatic review details from loaded tool data", async () => {
+  it("restores automatic review details from loaded tool result", async () => {
     const user = userEvent.setup();
     const runningState = {
       ...selectedProviderState(),
@@ -4846,8 +4851,7 @@ describe("App", () => {
           status: "running",
           tools: [
             {
-              content: "Outside the task scope.",
-              data: {
+              result: {
                 approval: {
                   action: "sandbox_failure",
                   decision: "denied",
@@ -4858,8 +4862,10 @@ describe("App", () => {
                 },
                 command: "pnpm install",
                 exit_code: 1,
+                output: "Outside the task scope.",
                 stderr: "Read-only file system",
                 stdout: "",
+                type: "command",
               },
               id: "tool-1",
               name: "shell_command",
@@ -4914,7 +4920,9 @@ describe("App", () => {
       screen.getByText("failed to write file: Read-only file system"),
     ).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent('"stderr": "Read-only file system"');
+    expect(resultBlock).toHaveTextContent("Exit code: 1");
+    expect(resultBlock).toHaveTextContent("Output:");
+    expect(resultBlock).toHaveTextContent("Outside the task scope.");
   });
 
   it("shows multiline sandbox failure output in review details", async () => {
@@ -4928,7 +4936,7 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { command: "pnpm lint" },
-            data: {
+            result: {
               approval: {
                 action: "sandbox_failure",
                 decision: "denied",
@@ -4939,8 +4947,10 @@ describe("App", () => {
               },
               command: "pnpm lint",
               exit_code: 1,
+              output: "Path access was not approved.",
               stderr: "Read-only file system",
               stdout: "",
+              type: "command",
             },
             id: "tool-1",
             name: "shell_command",
@@ -5004,10 +5014,10 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { path: "notes.txt" },
-            data: { path: "notes.txt" },
             id: "tool-1",
             name: "read_file",
             output: "Note contents",
+            result: { path: "notes.txt", text: "Note contents", type: "text" },
             title: "Reading notes.txt",
           },
           "The notes are ready.",
@@ -5047,9 +5057,9 @@ describe("App", () => {
 
     expect(screen.getByText("ARGS")).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent('"content": "Note contents"');
-    expect(resultBlock).toHaveTextContent('"data": {');
-    expect(resultBlock).toHaveTextContent('"path": "notes.txt"');
+    expect(resultBlock).toHaveTextContent("Note contents");
+    expect(resultBlock).not.toHaveTextContent('"content"');
+    expect(resultBlock).not.toHaveTextContent('"data"');
   });
 
   it("keeps streaming assistant text after a failed tool step", async () => {
@@ -5059,10 +5069,14 @@ describe("App", () => {
       if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantToolStreamResponse(
           {
-            data: { path: "missing.txt" },
             id: "tool-1",
             name: "read_file",
             output: "File not found",
+            result: {
+              path: "missing.txt",
+              text: "File not found",
+              type: "text",
+            },
             status: "failed",
             title: "Reading missing.txt",
           },
@@ -5105,8 +5119,8 @@ describe("App", () => {
     await user.click(toolDetails);
 
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent('"content": "File not found"');
-    expect(resultBlock).toHaveTextContent('"path": "missing.txt"');
+    expect(resultBlock).toHaveTextContent("File not found");
+    expect(resultBlock).not.toHaveTextContent('"content"');
     await expectDocumentText("I could not read it.");
   });
 
@@ -5117,10 +5131,14 @@ describe("App", () => {
       if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantToolStreamResponse(
           {
-            data: { path: "missing.txt" },
             id: "tool-1",
             name: "read_file",
             output: "File not found",
+            result: {
+              path: "missing.txt",
+              text: "File not found",
+              type: "text",
+            },
             status: "failed",
             title: "Reading missing.txt",
           },
@@ -5176,11 +5194,13 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { command: "printf done" },
-            data: {
+            result: {
               command: "printf done",
               exit_code: 0,
+              output: "done",
               stderr: "",
               stdout: "done",
+              type: "command",
             },
             id: "tool-1",
             name: "shell_command",
@@ -5222,11 +5242,9 @@ describe("App", () => {
 
     expect(screen.getByText("ARGS")).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent('"content": "done"');
-    expect(resultBlock).toHaveTextContent('"command": "printf done"');
-    expect(resultBlock).toHaveTextContent('"exit_code": 0');
-    expect(resultBlock).toHaveTextContent('"stdout": "done"');
-    expect(resultBlock).toHaveTextContent('"stderr": ""');
+    expect(resultBlock).toHaveTextContent("Exit code: 0");
+    expect(resultBlock).toHaveTextContent("Output:");
+    expect(resultBlock).toHaveTextContent("done");
   });
 
   it("shows content inside the tool result when no structured fields are returned", async () => {
@@ -5275,7 +5293,7 @@ describe("App", () => {
     await user.click(toolDetails);
 
     expect(screen.getByText("RESULT").parentElement).toHaveTextContent(
-      '"content": "Plan updated"',
+      "Plan updated",
     );
   });
 
@@ -5286,12 +5304,14 @@ describe("App", () => {
       if (input === "/api/workspace/respond" && init?.method === "POST") {
         return assistantToolStreamResponse(
           {
-            data: {
+            result: {
               items: [
                 { status: "completed", step: "Inspect warnings" },
                 { status: "in_progress", step: "Apply focused fixes" },
                 { status: "pending", step: "Verify the result" },
               ],
+              output: "Plan updated.",
+              type: "plan",
             },
             id: "tool-1",
             name: "update_plan",
@@ -5367,12 +5387,14 @@ describe("App", () => {
           id: "message-plan",
           tools: [
             {
-              data: {
+              result: {
                 items: [
                   { status: "completed", step: "Inspect warnings" },
                   { status: "in_progress", step: "Apply focused fixes" },
                   { status: "pending", step: "Verify the result" },
                 ],
+                output: "Plan ready.",
+                type: "plan",
               },
               id: "tool-plan",
               name: "update_plan",
@@ -7023,13 +7045,15 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { path: "README.md" },
-            data: {
-              result: {
+            result: {
+              output: "MCP file content",
+              raw_result: {
                 content: [{ text: "MCP file content", type: "text" }],
                 isError: false,
               },
               server: "Files",
               tool: "read_file",
+              type: "mcp",
             },
             id: "tool-1",
             name: "mcp__mcp-files__read_file",
@@ -7069,8 +7093,6 @@ describe("App", () => {
     await user.click(toolDetails);
 
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent('"server": "Files"');
-    expect(resultBlock).toHaveTextContent('"tool": "read_file"');
     expect(resultBlock).toHaveTextContent("MCP file content");
     await expectDocumentText("Used MCP.");
   });
@@ -7083,13 +7105,15 @@ describe("App", () => {
         return assistantToolStreamResponse(
           {
             arguments: { path: "secret.txt" },
-            data: {
-              result: {
+            result: {
+              output: "Permission denied",
+              raw_result: {
                 content: [{ text: "Permission denied", type: "text" }],
                 isError: true,
               },
               server: "Files",
               tool: "read_file",
+              type: "mcp",
             },
             id: "tool-1",
             name: "mcp__mcp-files__read_file",
@@ -7337,9 +7361,9 @@ describe("App", () => {
     const assistantStream = controlledToolTimelineResponse(
       {
         arguments: null,
-        data: null,
         id: "tool-1",
         name: "shell_command",
+        result: null,
         title: "Running npm test",
       },
       "Tests are ready.",
@@ -7434,10 +7458,10 @@ describe("App", () => {
     const user = userEvent.setup();
     const assistantStream = controlledToolTimelineResponse(
       {
-        data: { path: "missing.txt" },
         id: "tool-1",
         name: "read_file",
         output: "File not found",
+        result: { path: "missing.txt", text: "File not found", type: "text" },
         status: "failed",
         title: "Reading missing.txt",
       },

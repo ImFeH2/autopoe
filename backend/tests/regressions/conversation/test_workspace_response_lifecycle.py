@@ -282,8 +282,9 @@ async def test_workspace_response_stream_snapshots_tool_and_text_progress(
     assert running_tool_snapshot["groups"][0]["items"][0]["tool"]["status"] == (
         "running"
     )
-    assert completed_tool_snapshot["groups"][0]["items"][0]["tool"]["content"] == (
-        "Launch notes"
+    assert (
+        completed_tool_snapshot["groups"][0]["items"][0]["tool"]["result"]["text"]
+        == "Launch notes"
     )
     assert final_text_snapshot["content"] == "Done."
     assert final_text_snapshot["status"] == "completed"

@@ -27,7 +27,7 @@ from flowent.storage import (
     StoredState,
     StoredToolItem,
 )
-from flowent.tools import ToolContext, tool_specs
+from flowent.tools import ToolContext, text_tool_result, tool_specs
 from flowent.usage import (
     TokenUsage,
     TokenUsageInfo,
@@ -1048,7 +1048,10 @@ class WorkspaceRuntime:
                 ):
                     assistant_output.update_tool(
                         current_tool_id,
-                        {"content": str(error) or "Tool failed.", "status": "failed"},
+                        {
+                            "result": text_tool_result(str(error) or "Tool failed."),
+                            "status": "failed",
+                        },
                     )
                 error_item = assistant_output.append_error(
                     run_error_output_item(

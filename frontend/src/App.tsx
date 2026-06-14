@@ -296,9 +296,8 @@ type WorkspaceStreamEvent =
     }
   | {
       data: {
-        content?: string;
-        data?: Record<string, unknown>;
         id: string;
+        result?: Record<string, unknown>;
         status: ToolItem["status"];
         title?: string;
       };

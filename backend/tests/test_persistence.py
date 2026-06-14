@@ -382,10 +382,9 @@ def test_app_state_persists_settings_and_workspace_messages(
             "tools": [
                 {
                     "arguments": None,
-                    "content": None,
-                    "data": None,
                     "id": "tool-1",
                     "name": "read_file",
+                    "result": None,
                     "status": "success",
                     "title": "Read notes.txt",
                 }

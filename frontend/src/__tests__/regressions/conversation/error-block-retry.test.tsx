@@ -6,10 +6,9 @@ import App from "@/App";
 
 type TestTool = {
   arguments?: Record<string, unknown> | null;
-  content?: string;
-  data?: Record<string, unknown> | null;
   id: string;
   name: string;
+  result?: Record<string, unknown> | null;
   status: "failed" | "running" | "success" | "waiting";
   title: string;
 };
@@ -79,10 +78,13 @@ const selectedProviderState = (
 
 const tool: TestTool = {
   arguments: { path: "notes.txt" },
-  content: "Launch notes",
-  data: { path: "/workspace/notes.txt" },
   id: "tool-read",
   name: "read_file",
+  result: {
+    path: "/workspace/notes.txt",
+    text: "Launch notes",
+    type: "text",
+  },
   status: "success",
   title: "Read notes.txt",
 };

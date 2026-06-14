@@ -16,10 +16,13 @@ from flowent.shell import shell_invocation
 from flowent.tools import (
     ToolContext,
     ToolResult,
+    command_tool_result,
     number_argument,
     patch_title_from_result,
     run_tool_async,
+    text_tool_result,
     tool_failure_content,
+    tool_result_model_content,
 )
 
 SANDBOX_WITH_ADDITIONAL_PERMISSIONS = "with_additional_permissions"
@@ -66,7 +69,7 @@ def validate_additional_permissions(arguments: dict[str, object]) -> ToolResult 
         return None
     if sandbox_permissions != SANDBOX_WITH_ADDITIONAL_PERMISSIONS:
         return ToolResult(
-            content=(
+            result=text_tool_result(
                 "additional_permissions requires sandbox_permissions to be "
                 "with_additional_permissions."
             ),
@@ -130,8 +133,10 @@ async def review_missing_write_paths(
         return (
             effective_paths,
             ToolResult(
-                content=approval_denial_content(decision),
-                data=review_data,
+                result=text_tool_result(
+                    approval_denial_content(decision),
+                    **review_data,
+                ),
                 ok=False,
                 title="Denied by reviewer",
             ),
@@ -196,7 +201,7 @@ async def run_shell_command_with_permissions(
         arguments, context, effective_paths
     )
     if approval_data is not None:
-        result = tool_result_with_data(result, approval_data)
+        result = tool_result_with_fields(result, approval_data)
     if result.ok or not is_likely_sandbox_denied_result(result):
         return result
     review_request = ApprovalReviewRequest(
@@ -210,13 +215,16 @@ async def run_shell_command_with_permissions(
     review_data = approval_result_data(review_request, decision)
     if decision.decision == "denied":
         return ToolResult(
-            content=approval_denial_content(decision),
-            data={**result.data, **review_data},
+            result=text_tool_result(
+                approval_denial_content(decision),
+                previous_result=result.result,
+                **review_data,
+            ),
             ok=False,
             title="Denied by reviewer",
         )
     retry_result = await shell_command_without_sandbox(arguments, context)
-    return tool_result_with_data(retry_result, review_data)
+    return tool_result_with_fields(retry_result, review_data)
 
 
 async def run_apply_patch_with_permissions(
@@ -244,7 +252,7 @@ async def run_apply_patch_with_permissions(
 
     result = await apply_patch_with_writable_paths(arguments, context, effective_paths)
     if approval_data is not None:
-        result = tool_result_with_data(result, approval_data)
+        result = tool_result_with_fields(result, approval_data)
     return result
 
 
@@ -268,18 +276,23 @@ async def apply_patch_with_writable_paths(
             input_text=patch,
         )
     except SandboxError as error:
-        return ToolResult(content=str(error), ok=False, title="Edit failed")
+        return ToolResult(
+            result=text_tool_result(str(error)), ok=False, title="Edit failed"
+        )
 
     if result.exit_code != 0:
         return ToolResult(
-            content=tool_failure_content(result),
+            result=text_tool_result(tool_failure_content(result)),
             ok=False,
             title="Edit failed",
         )
     data = json.loads(result.stdout or "{}")
     return ToolResult(
-        content=result.stdout,
-        data=data if isinstance(data, dict) else {},
+        result={
+            "type": "patch",
+            "output": result.stdout,
+            **(data if isinstance(data, dict) else {}),
+        },
         title=patch_title_from_result(data),
     )
 
@@ -297,27 +310,25 @@ async def shell_command_with_writable_paths(
         writable_roots=writable_paths,
     ).run_async(invocation.args, env=invocation.env, timeout_seconds=timeout_seconds)
     ok = result.exit_code == 0
-    content = result.stdout or result.stderr
     return ToolResult(
-        content=content,
-        data={
-            "command": command,
-            "exit_code": result.exit_code,
-            "stderr": result.stderr,
-            "stdout": result.stdout,
-        },
+        result=command_tool_result(
+            command=command,
+            exit_code=result.exit_code,
+            stderr=result.stderr,
+            stdout=result.stdout,
+        ),
         ok=ok,
         title=f"Ran {command}",
     )
 
 
 def is_likely_sandbox_denied_result(result: ToolResult) -> bool:
-    data = result.data
-    exit_code = int_result_field(data.get("exit_code"))
+    payload = result.result
+    exit_code = int_result_field(payload.get("exit_code"))
     if exit_code == 0:
         return False
     output = "\n".join(
-        str(data.get(name, "") or "") for name in ["stderr", "stdout"]
+        str(payload.get(name, "") or "") for name in ["stderr", "stdout", "output"]
     ).lower()
     return any(
         keyword in output
@@ -345,13 +356,17 @@ def int_result_field(value: object) -> int:
 
 
 def tool_failure_text(result: ToolResult) -> str:
-    stderr = str(result.data.get("stderr", "") or "").strip()
-    stdout = str(result.data.get("stdout", "") or "").strip()
-    content = result.content.strip()
+    payload = result.result
+    stderr = str(payload.get("stderr", "") or "").strip()
+    stdout = str(payload.get("stdout", "") or "").strip()
     parts: list[str] = []
-    for part in [stderr, stdout, content]:
+    for part in [stderr, stdout]:
         if part and part not in parts:
             parts.append(part)
+    if not parts:
+        content = tool_result_model_content(result).strip()
+        if content:
+            parts.append(content)
     return "\n".join(parts)
 
 
@@ -366,15 +381,13 @@ async def shell_command_without_sandbox(
         invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
     )
     ok = result.exit_code == 0
-    content = result.stdout or result.stderr
     return ToolResult(
-        content=content,
-        data={
-            "command": command,
-            "exit_code": result.exit_code,
-            "stderr": result.stderr,
-            "stdout": result.stdout,
-        },
+        result=command_tool_result(
+            command=command,
+            exit_code=result.exit_code,
+            stderr=result.stderr,
+            stdout=result.stdout,
+        ),
         ok=ok,
         title=f"Ran {command}",
     )
@@ -403,7 +416,7 @@ def approval_result_data(
     }
 
 
-def tool_result_with_data(
-    result: ToolResult, extra_data: dict[str, object]
+def tool_result_with_fields(
+    result: ToolResult, extra_fields: dict[str, object]
 ) -> ToolResult:
-    return result.model_copy(update={"data": {**result.data, **extra_data}})
+    return result.model_copy(update={"result": {**result.result, **extra_fields}})

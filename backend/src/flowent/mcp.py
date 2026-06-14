@@ -662,11 +662,12 @@ class McpManager:
         content = mcp_result_content(result)
         server_name = self._server_names.get(server_id, server_id)
         return ToolResult(
-            content=content,
-            data={
+            result={
+                "type": "mcp",
+                "output": content,
                 "server": server_name,
                 "tool": tool_name,
-                "result": result,
+                "raw_result": result,
             },
             ok=not mcp_result_is_error(result),
             title=f"Calling {server_name}.{tool_name}",

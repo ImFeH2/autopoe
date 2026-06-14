@@ -1110,7 +1110,9 @@ async def test_workspace_retry_error_auto_compacts_before_retry_request(
         failed_state = (await client.get("/api/state")).json()
         failed_assistant = failed_state["messages"][-1]
         error_item = failed_assistant["groups"][-1]["items"][0]
-        assert failed_assistant["tools"][0]["content"].startswith("Launch notes.")
+        assert failed_assistant["tools"][0]["result"]["text"].startswith(
+            "Launch notes."
+        )
 
         monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "1200")
         retry_response = await client.post(
@@ -1801,7 +1803,7 @@ async def test_workspace_persists_tool_result_during_stream(
     assert response.status_code == 200
     assert assistant["status"] == "running"
     assert assistant["tools"][0]["status"] == "success"
-    assert assistant["tools"][0]["content"] == "Launch notes"
+    assert assistant["tools"][0]["result"]["text"] == "Launch notes"
 
 
 def test_workspace_persists_failed_draft_when_stream_errors(
@@ -2045,7 +2047,7 @@ async def test_workspace_retries_failed_error_block_after_tool_result(
         error_item = failed_assistant["groups"][-1]["items"][0]
         assert failed_assistant["status"] == "failed"
         assert failed_assistant["tools"][0]["name"] == "read_file"
-        assert failed_assistant["tools"][0]["content"] == "Launch notes"
+        assert failed_assistant["tools"][0]["result"]["text"] == "Launch notes"
 
         retry_response = await client.post(
             f"/api/workspace/messages/{failed_assistant['id']}/errors/{error_item['id']}/retry"
@@ -2075,7 +2077,7 @@ async def test_workspace_retries_failed_error_block_after_tool_result(
     assert assistant.get("status", "completed") == "completed"
     assert assistant["content"] == "Recovered from notes."
     assert len(assistant["tools"]) == 1
-    assert assistant["tools"][0]["content"] == "Launch notes"
+    assert assistant["tools"][0]["result"]["text"] == "Launch notes"
     assert not any(
         item["type"] == "error"
         for group in assistant["groups"]
@@ -2293,7 +2295,7 @@ def test_workspace_marks_running_tool_failed_when_stream_errors(
     assert assistant["status"] == "failed"
     assert assistant["tools"][0]["name"] == "shell_command"
     assert assistant["tools"][0]["status"] == "failed"
-    assert "sandbox failed" in assistant["tools"][0]["content"]
+    assert "sandbox failed" in assistant["tools"][0]["result"]["text"]
 
 
 def test_workspace_marks_draft_complete_when_stream_finishes(
@@ -2584,8 +2586,8 @@ async def test_workspace_persists_automatic_review_result_during_stream(
     events = stream_events(stream_response.text)
     tool_error = next(event for event in events if event["event"] == "tool_error")
     tool_error_data = json.loads(str(tool_error["data"]))
-    assert tool_error_data["data"]["approval"]["decision"] == "denied"
-    assert tool_error_data["data"]["approval"]["reason"] == "Outside the task scope."
+    assert tool_error_data["result"]["approval"]["decision"] == "denied"
+    assert tool_error_data["result"]["approval"]["reason"] == "Outside the task scope."
     assert review_payload["user_request"] == "Edit notes."
     assert target.read_text() == "alpha\n"
 
@@ -2664,10 +2666,16 @@ async def test_workspace_review_request_includes_recent_transcript(
                         "tools": [
                             {
                                 "arguments": {"command": "docker compose ps"},
-                                "content": "flowent-dev-preview-flowent-1 running",
-                                "data": {},
                                 "id": "tool-1",
                                 "name": "shell_command",
+                                "result": {
+                                    "command": "docker compose ps",
+                                    "exit_code": 0,
+                                    "output": "flowent-dev-preview-flowent-1 running",
+                                    "stderr": "",
+                                    "stdout": "flowent-dev-preview-flowent-1 running",
+                                    "type": "command",
+                                },
                                 "status": "success",
                                 "title": "Ran docker compose ps",
                             }

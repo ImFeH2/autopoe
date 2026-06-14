@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from flowent.network import flowent_user_agent
 from flowent.patch import affected_paths
@@ -23,8 +23,7 @@ from flowent.system_tools import ensure_ripgrep_available
 class ToolResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    content: str
-    data: dict[str, object] = {}
+    result: dict[str, object] = Field(default_factory=dict)
     ok: bool = True
     title: str
 
@@ -33,6 +32,46 @@ class ToolResult(BaseModel):
 class ToolContext:
     cwd: Path
     web_searcher: Callable[[str], Sequence[dict[str, str]]] | None = None
+
+
+def text_tool_result(text: str, **metadata: object) -> dict[str, object]:
+    return {"type": "text", "text": text, **metadata}
+
+
+def command_tool_result(
+    *,
+    command: str,
+    exit_code: int,
+    stderr: str,
+    stdout: str,
+) -> dict[str, object]:
+    return {
+        "type": "command",
+        "command": command,
+        "exit_code": exit_code,
+        "stderr": stderr,
+        "stdout": stdout,
+        "output": stdout or stderr,
+    }
+
+
+def tool_result_model_content(result: ToolResult | dict[str, object]) -> str:
+    payload = result.result if isinstance(result, ToolResult) else result
+    result_type = payload.get("type")
+    if result_type == "command":
+        output = str(payload.get("output") or "")
+        metadata: dict[str, object] = {}
+        if "exit_code" in payload:
+            metadata["exit_code"] = payload["exit_code"]
+        return json.dumps(
+            {"output": output, "metadata": metadata},
+            ensure_ascii=False,
+        )
+    for key in ("text", "output"):
+        value = payload.get(key)
+        if value is not None:
+            return str(value)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def tool_specs() -> list[dict[str, object]]:
@@ -222,7 +261,7 @@ def run_tool(
         title = (
             "Edit failed" if name == "apply_patch" else tool_call_title(name, arguments)
         )
-        return ToolResult(content=str(error), ok=False, title=title)
+        return ToolResult(result=text_tool_result(str(error)), ok=False, title=title)
 
 
 async def run_tool_async(
@@ -238,7 +277,7 @@ async def run_tool_async(
         title = (
             "Edit failed" if name == "apply_patch" else tool_call_title(name, arguments)
         )
-        return ToolResult(content=str(error), ok=False, title=title)
+        return ToolResult(result=text_tool_result(str(error)), ok=False, title=title)
 
 
 def integer_argument(arguments: dict[str, object], name: str, default: int) -> int:
@@ -266,7 +305,10 @@ def read_file(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     lines = path.read_text(errors="replace").splitlines()
     selected = lines[offset : offset + limit]
     content = "\n".join(selected)
-    return ToolResult(content=content, data={"path": str(path)}, title=f"Read {path}")
+    return ToolResult(
+        result=text_tool_result(content, path=str(path)),
+        title=f"Read {path}",
+    )
 
 
 def list_dir(arguments: dict[str, object], context: ToolContext) -> ToolResult:
@@ -279,7 +321,8 @@ def list_dir(arguments: dict[str, object], context: ToolContext) -> ToolResult:
         f"{entry.name}/" if entry.is_dir() else entry.name for entry in entries[:limit]
     ]
     return ToolResult(
-        content="\n".join(rendered), data={"path": str(path)}, title=f"Listed {path}"
+        result=text_tool_result("\n".join(rendered), path=str(path)),
+        title=f"Listed {path}",
     )
 
 
@@ -297,8 +340,7 @@ def grep_files(arguments: dict[str, object], context: ToolContext) -> ToolResult
     )
     output = completed.stdout or completed.stderr
     return ToolResult(
-        content=output[:20000],
-        data={"path": str(path), "pattern": pattern},
+        result=text_tool_result(output[:20000], path=str(path), pattern=pattern),
         title=f"Searched {pattern}",
     )
 
@@ -317,8 +359,11 @@ def apply_patch_tool(arguments: dict[str, object], context: ToolContext) -> Tool
         raise SandboxError(tool_failure_content(result))
     data = json.loads(result.stdout or "{}")
     return ToolResult(
-        content=result.stdout,
-        data=data if isinstance(data, dict) else {},
+        result={
+            "type": "patch",
+            "output": result.stdout,
+            **(data if isinstance(data, dict) else {}),
+        },
         title=patch_title_from_result(data),
     )
 
@@ -339,8 +384,11 @@ async def apply_patch_tool_async(
         raise SandboxError(tool_failure_content(result))
     data = json.loads(result.stdout or "{}")
     return ToolResult(
-        content=result.stdout,
-        data=data if isinstance(data, dict) else {},
+        result={
+            "type": "patch",
+            "output": result.stdout,
+            **(data if isinstance(data, dict) else {}),
+        },
         title=patch_title_from_result(data),
     )
 
@@ -388,15 +436,13 @@ def shell_command(arguments: dict[str, object], context: ToolContext) -> ToolRes
         invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
     )
     ok = result.exit_code == 0
-    content = result.stdout or result.stderr
     return ToolResult(
-        content=content,
-        data={
-            "command": command,
-            "exit_code": result.exit_code,
-            "stderr": result.stderr,
-            "stdout": result.stdout,
-        },
+        result=command_tool_result(
+            command=command,
+            exit_code=result.exit_code,
+            stderr=result.stderr,
+            stdout=result.stdout,
+        ),
         ok=ok,
         title=f"Ran {command}",
     )
@@ -412,15 +458,13 @@ async def shell_command_async(
         invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
     )
     ok = result.exit_code == 0
-    content = result.stdout or result.stderr
     return ToolResult(
-        content=content,
-        data={
-            "command": command,
-            "exit_code": result.exit_code,
-            "stderr": result.stderr,
-            "stdout": result.stdout,
-        },
+        result=command_tool_result(
+            command=command,
+            exit_code=result.exit_code,
+            stderr=result.stderr,
+            stdout=result.stdout,
+        ),
         ok=ok,
         title=f"Ran {command}",
     )
@@ -430,8 +474,11 @@ def update_plan(arguments: dict[str, object]) -> ToolResult:
     items = arguments.get("items", [])
     content = json.dumps(items, ensure_ascii=False)
     return ToolResult(
-        content=content,
-        data={"items": items if isinstance(items, list) else []},
+        result={
+            "type": "plan",
+            "items": items if isinstance(items, list) else [],
+            "output": content,
+        },
         title="Updated plan",
     )
 
@@ -473,8 +520,12 @@ def web_search(arguments: dict[str, object], context: ToolContext) -> ToolResult
         for result in results
     )
     return ToolResult(
-        content=content or "No results.",
-        data={"query": query, "results": results},
+        result={
+            "type": "web_search",
+            "output": content or "No results.",
+            "query": query,
+            "results": results,
+        },
         title=f"Searched web for {query}",
     )
 

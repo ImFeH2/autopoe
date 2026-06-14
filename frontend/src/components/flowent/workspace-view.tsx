@@ -1192,11 +1192,9 @@ function ToolProcessItem({ tool }: { tool: ToolItem }) {
 }
 
 function ToolProcessDetails({ tool }: { tool: ToolItem }) {
-  const approval = toolApprovalData(tool.data);
+  const approval = toolApprovalData(tool.result);
   const hasArguments = hasToolObjectPayload(tool.arguments);
-  const hasData = hasToolObjectPayload(tool.data);
-  const hasContent = tool.content !== undefined;
-  const hasResult = hasContent || hasData;
+  const hasResult = hasToolObjectPayload(tool.result);
 
   if (!hasArguments && !hasResult) {
     return null;
@@ -1295,20 +1293,39 @@ function formatToolValue(value: unknown) {
 }
 
 function formatToolResult(tool: ToolItem) {
-  const result: Record<string, unknown> = {};
-  if (tool.content !== undefined) {
-    result.content = tool.content;
+  const result = tool.result;
+  if (!hasToolObjectPayload(result)) {
+    return "";
   }
-  const toolData = tool.data;
-  if (hasToolObjectPayload(toolData)) {
-    const data = Object.fromEntries(
-      Object.entries(toolData).filter(([key]) => key !== "approval"),
-    );
-    if (Object.keys(data).length > 0) {
-      result.data = data;
-    }
+  const visibleResult = Object.fromEntries(
+    Object.entries(result).filter(([key]) => key !== "approval"),
+  );
+  if (typeof visibleResult.text === "string") {
+    return visibleResult.text;
   }
-  return formatToolValue(result);
+  if (visibleResult.type === "command") {
+    return formatCommandToolResult(visibleResult);
+  }
+  if (typeof visibleResult.output === "string") {
+    return visibleResult.output;
+  }
+  return formatToolValue(visibleResult);
+}
+
+function formatCommandToolResult(result: Record<string, unknown>) {
+  const sections: string[] = [];
+  if (result.exit_code !== undefined) {
+    sections.push(`Exit code: ${String(result.exit_code)}`);
+  }
+  const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+  const output = typeof result.output === "string" ? result.output.trim() : "";
+  if (stdout && stderr) {
+    sections.push(`STDOUT:\n${stdout}`, `STDERR:\n${stderr}`);
+  } else if (output) {
+    sections.push(`Output:\n${output}`);
+  }
+  return sections.join("\n\n") || formatToolValue(result);
 }
 
 function hasToolObjectPayload(
@@ -1396,7 +1413,7 @@ function latestPlanFromMessages(messages: Message[]): WorkspacePlan | null {
       }
 
       const items =
-        planItemsFromToolPayload(tool.data) ??
+        planItemsFromToolPayload(tool.result) ??
         planItemsFromToolPayload(tool.arguments);
       if (items?.length) {
         return { items };

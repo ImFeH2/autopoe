@@ -9,7 +9,7 @@ from flowent.main import create_app
 from flowent.permissions import run_tool_with_path_permissions
 from flowent.sandbox import CommandResult, SandboxRunner
 from flowent.storage import StateStore
-from flowent.tools import ToolContext
+from flowent.tools import ToolContext, tool_result_model_content
 
 
 class UserRecord:
@@ -107,13 +107,13 @@ async def test_approved_declared_write_path_runs_command_with_extra_permission(
     )
 
     assert result.ok
-    assert result.content == "created"
+    assert result.result["output"] == "created"
     assert len(calls) == 1
     assert cache_dir in calls[0]
     assert reviews[0].tool_name == "shell_command"
     assert reviews[0].action == "additional_permissions"
     assert reviews[0].write_paths == [cache_dir]
-    assert result.data["approval"] == {
+    assert result.result["approval"] == {
         "action": "additional_permissions",
         "decision": "approved",
         "reason": "Needed for cache writes.",
@@ -200,11 +200,12 @@ async def test_denied_declared_write_path_returns_failed_result_before_running_c
     )
 
     assert not result.ok
-    assert "Automatic approval review denied this action" in result.content
-    assert "Outside the task scope." in result.content
-    assert "must not work around" in result.content
-    assert result.data["approval"]["decision"] == "denied"
-    assert result.data["approval"]["reason"] == "Outside the task scope."
+    result_content = tool_result_model_content(result)
+    assert "Automatic approval review denied this action" in result_content
+    assert "Outside the task scope." in result_content
+    assert "must not work around" in result_content
+    assert result.result["approval"]["decision"] == "denied"
+    assert result.result["approval"]["reason"] == "Outside the task scope."
     assert calls == 0
 
 
@@ -340,9 +341,9 @@ async def test_declared_missing_write_path_is_not_precreated_by_sandbox(
         "additional_permissions",
         "sandbox_failure",
     ]
-    assert result.data["approval"]["decision"] == "denied"
+    assert result.result["approval"]["decision"] == "denied"
     assert (
-        result.data["approval"]["tool_result"]
+        result.result["approval"]["tool_result"]
         == "cannot create requested path: Read-only file system"
     )
 
@@ -395,14 +396,14 @@ async def test_sandbox_denied_shell_command_is_reviewed_and_retried_without_sand
     )
 
     assert result.ok
-    assert result.content == "created"
+    assert result.result["output"] == "created"
     assert calls == ["sandbox", "unsandboxed"]
     assert reviews[0].action == "sandbox_failure"
     assert "Read-only file system" in reviews[0].tool_result
-    assert result.data["approval"]["action"] == "sandbox_failure"
-    assert result.data["approval"]["decision"] == "approved"
+    assert result.result["approval"]["action"] == "sandbox_failure"
+    assert result.result["approval"]["decision"] == "approved"
     assert (
-        result.data["approval"]["tool_result"]
+        result.result["approval"]["tool_result"]
         == "failed to write file: Read-only file system"
     )
 
@@ -511,10 +512,10 @@ async def test_sandbox_denied_shell_command_is_not_retried_when_reviewer_denies(
 
     assert not result.ok
     assert calls == ["sandbox"]
-    assert "Too broad." in result.content
-    assert result.data["approval"]["decision"] == "denied"
+    assert "Too broad." in tool_result_model_content(result)
+    assert result.result["approval"]["decision"] == "denied"
     assert (
-        result.data["approval"]["tool_result"]
+        result.result["approval"]["tool_result"]
         == "failed to write file: Read-only file system"
     )
 
@@ -554,10 +555,10 @@ async def test_sandbox_denied_shell_command_preserves_failure_output_when_review
 
     assert not result.ok
     assert calls == ["sandbox"]
-    assert result.data["approval"]["decision"] == "denied"
-    assert "network unavailable" in result.data["approval"]["reason"]
+    assert result.result["approval"]["decision"] == "denied"
+    assert "network unavailable" in result.result["approval"]["reason"]
     assert (
-        result.data["approval"]["tool_result"]
+        result.result["approval"]["tool_result"]
         == "mkdir: cannot create directory '/root/.local/state': Permission denied"
     )
 
@@ -636,7 +637,7 @@ async def test_additional_permissions_require_matching_sandbox_permissions(
     )
 
     assert not result.ok
-    assert "with_additional_permissions" in result.content
+    assert "with_additional_permissions" in tool_result_model_content(result)
     assert calls == 0
     assert reviews == 0
 
@@ -679,8 +680,8 @@ async def test_apply_patch_uses_reviewer_before_writing_outside_workdir_file(
     assert reviews[0].tool_name == "apply_patch"
     assert reviews[0].action == "edit"
     assert reviews[0].write_paths == [outside_dir]
-    assert result.data["approval"]["action"] == "edit"
-    assert result.data["approval"]["decision"] == "approved"
+    assert result.result["approval"]["action"] == "edit"
+    assert result.result["approval"]["decision"] == "approved"
     assert target.read_text() == "beta\n"
 
 
@@ -753,7 +754,7 @@ async def test_denied_apply_patch_does_not_modify_file(tmp_path) -> None:
     )
 
     assert not result.ok
-    assert "outside the allowed scope" in result.content
-    assert result.data["approval"]["action"] == "edit"
-    assert result.data["approval"]["decision"] == "denied"
+    assert "outside the allowed scope" in tool_result_model_content(result)
+    assert result.result["approval"]["action"] == "edit"
+    assert result.result["approval"]["decision"] == "denied"
     assert target.read_text() == "alpha\n"
