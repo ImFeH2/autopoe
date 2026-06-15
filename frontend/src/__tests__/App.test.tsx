@@ -4828,9 +4828,10 @@ describe("App", () => {
     expect(screen.getByText("/workspace/.cache/pnpm")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("FAILURE");
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("Exit code: 0");
-    expect(resultBlock).toHaveTextContent("Output:");
+    expect(resultBlock).toHaveTextContent("STDOUT:");
     expect(resultBlock).toHaveTextContent("done");
+    expect(resultBlock).toHaveTextContent("STDERR:");
+    expect(resultBlock).toHaveTextContent(/Exit code:\s*0/);
     expect(resultBlock).not.toHaveTextContent("Needed for cache writes.");
   });
 
@@ -4906,8 +4907,10 @@ describe("App", () => {
     expect(screen.getByText("FAILURE")).toBeInTheDocument();
     expect(screen.getByText(firstFailureOutput)).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("Output:");
+    expect(resultBlock).toHaveTextContent("STDOUT:");
     expect(resultBlock).toHaveTextContent("all tests passed");
+    expect(resultBlock).toHaveTextContent("STDERR:");
+    expect(resultBlock).toHaveTextContent(/Exit code:\s*0/);
     expect(resultBlock).not.toHaveTextContent(firstFailureOutput);
   });
 
@@ -4999,9 +5002,10 @@ describe("App", () => {
       screen.getByText("failed to write file: Read-only file system"),
     ).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("Exit code: 1");
-    expect(resultBlock).toHaveTextContent("Output:");
-    expect(resultBlock).toHaveTextContent("Outside the task scope.");
+    expect(resultBlock).toHaveTextContent("STDOUT:");
+    expect(resultBlock).toHaveTextContent("STDERR:");
+    expect(resultBlock).toHaveTextContent("Read-only file system");
+    expect(resultBlock).toHaveTextContent(/Exit code:\s*1/);
   });
 
   it("shows multiline sandbox failure output in review details", async () => {
@@ -5321,9 +5325,10 @@ describe("App", () => {
 
     expect(screen.getByText("ARGS")).toBeInTheDocument();
     const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("Exit code: 0");
-    expect(resultBlock).toHaveTextContent("Output:");
+    expect(resultBlock).toHaveTextContent("STDOUT:");
     expect(resultBlock).toHaveTextContent("done");
+    expect(resultBlock).toHaveTextContent("STDERR:");
+    expect(resultBlock).toHaveTextContent(/Exit code:\s*0/);
   });
 
   it("streams shell command stdout and stderr into the open tool result", async () => {
@@ -5402,17 +5407,19 @@ describe("App", () => {
 
     expect(toolDetails).toHaveTextContent("Running");
     const runningResultBlock = screen.getByText("RESULT").parentElement;
-    expect(runningResultBlock).not.toHaveTextContent("Exit code:");
     expect(runningResultBlock).toHaveTextContent("STDOUT:");
     expect(runningResultBlock).toHaveTextContent("Installing");
     expect(runningResultBlock).toHaveTextContent("STDERR:");
     expect(runningResultBlock).toHaveTextContent("Warning");
+    expect(runningResultBlock).toHaveTextContent(/Exit code:\s*$/);
 
     toolStream.completeTool();
 
     await waitFor(() => expect(toolDetails).toHaveTextContent("Done"));
     const finalResultBlock = screen.getByText("RESULT").parentElement;
-    expect(finalResultBlock).toHaveTextContent("Exit code: 0");
+    expect(finalResultBlock).toHaveTextContent(/STDOUT:\s*Installing\s*Done/);
+    expect(finalResultBlock).toHaveTextContent(/STDERR:\s*Warning/);
+    expect(finalResultBlock).toHaveTextContent(/Exit code:\s*0/);
     expect(finalResultBlock).toHaveTextContent("Done");
     toolStream.finish();
     await expectDocumentText("Command finished.");

@@ -1313,21 +1313,22 @@ function formatToolResult(tool: ToolItem) {
 }
 
 function formatCommandToolResult(result: Record<string, unknown>) {
-  const sections: string[] = [];
-  if (result.exit_code !== undefined) {
-    sections.push(`Exit code: ${String(result.exit_code)}`);
-  }
   const outputChunks = commandOutputChunks(result.output_chunks);
   if (outputChunks.length > 0) {
-    sections.push(formatCommandOutputChunks(outputChunks));
-    return sections.join("\n\n");
+    return formatCommandOutputSections(
+      commandOutputText(outputChunks, "stdout"),
+      commandOutputText(outputChunks, "stderr"),
+      result.exit_code,
+    );
   }
   const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
   const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
   const output = typeof result.output === "string" ? result.output.trim() : "";
-  if (stdout && stderr) {
-    sections.push(`STDOUT:\n${stdout}`, `STDERR:\n${stderr}`);
-  } else if (output) {
+  if (stdout || stderr || result.exit_code !== undefined) {
+    return formatCommandOutputSections(stdout, stderr, result.exit_code);
+  }
+  const sections: string[] = [];
+  if (output) {
     sections.push(`Output:\n${output}`);
   }
   return sections.join("\n\n") || formatToolValue(result);
@@ -1357,12 +1358,27 @@ function commandOutputChunks(value: unknown): CommandOutputChunk[] {
   });
 }
 
-function formatCommandOutputChunks(chunks: CommandOutputChunk[]) {
+function commandOutputText(
+  chunks: CommandOutputChunk[],
+  stream: "stderr" | "stdout",
+) {
   return chunks
-    .map(
-      (chunk) => `${chunk.stream.toUpperCase()}:\n${chunk.content.trimEnd()}`,
-    )
-    .join("\n\n");
+    .filter((chunk) => chunk.stream === stream)
+    .map((chunk) => chunk.content)
+    .join("")
+    .trimEnd();
+}
+
+function formatCommandOutputSections(
+  stdout: string,
+  stderr: string,
+  exitCode: unknown,
+) {
+  return [
+    `STDOUT:\n${stdout}`,
+    `STDERR:\n${stderr}`,
+    `Exit code:\n${exitCode !== undefined ? String(exitCode) : ""}`,
+  ].join("\n\n");
 }
 
 function hasToolObjectPayload(
