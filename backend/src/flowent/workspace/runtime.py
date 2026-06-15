@@ -706,11 +706,14 @@ class WorkspaceRuntime:
             def refresh_assistant(status: str = "running") -> StoredMessage | None:
                 return update_assistant_message(status, persist=False)
 
-            def persist_assistant_progress() -> StoredMessage | None:
+            def persist_assistant_progress(
+                *, force: bool = False
+            ) -> StoredMessage | None:
                 nonlocal last_progress_flush_at
                 now = time.monotonic()
                 if (
-                    last_progress_flush_at > 0
+                    not force
+                    and last_progress_flush_at > 0
                     and now - last_progress_flush_at
                     < WORKSPACE_PROGRESS_FLUSH_INTERVAL_SECONDS
                 ):
@@ -718,6 +721,10 @@ class WorkspaceRuntime:
                     return None
                 last_progress_flush_at = now
                 return update_assistant_message("running", persist=True)
+
+            def has_tool_result(tool_id: str) -> bool:
+                tool = assistant_output.tools.get(tool_id)
+                return tool is not None and bool(tool.result)
 
             try:
                 current_tool_id: str | None = None
@@ -936,6 +943,17 @@ class WorkspaceRuntime:
                                 StoredToolItem.model_validate(tool)
                             )
                             snapshot_after_event = persist_assistant()
+                    if event.event == "tool_update":
+                        tool_id = event.data.get("id")
+                        if (
+                            isinstance(tool_id, str)
+                            and tool_id in assistant_output.tools
+                        ):
+                            had_result = has_tool_result(tool_id)
+                            assistant_output.update_tool(tool_id, event.data)
+                            snapshot_after_event = persist_assistant_progress(
+                                force=not had_result
+                            )
                     if event.event in {"tool_done", "tool_error"}:
                         tool_id = event.data.get("id")
                         if (

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -28,9 +28,57 @@ class ToolResult(BaseModel):
     title: str
 
 
+ToolEventEmitter = Callable[[dict[str, object]], Awaitable[None]]
+
+
+class CommandOutputCollector:
+    def __init__(
+        self, command: str, emit_event: ToolEventEmitter | None = None
+    ) -> None:
+        self.command = command
+        self.emit_event = emit_event
+        self.output_chunks: list[dict[str, str]] = []
+
+    @property
+    def stdout(self) -> str:
+        return "".join(
+            item["content"] for item in self.output_chunks if item["stream"] == "stdout"
+        )
+
+    @property
+    def stderr(self) -> str:
+        return "".join(
+            item["content"] for item in self.output_chunks if item["stream"] == "stderr"
+        )
+
+    def result(self) -> dict[str, object]:
+        return {
+            "type": "command",
+            "command": self.command,
+            "output_chunks": [dict(item) for item in self.output_chunks],
+            "stderr": self.stderr,
+            "stdout": self.stdout,
+            "output": self.stdout or self.stderr,
+        }
+
+    async def append(self, stream: str, content: str) -> None:
+        if not content:
+            return
+        self.output_chunks.append({"stream": stream, "content": content})
+        if self.emit_event is not None:
+            await self.emit_event({"result": self.result(), "status": "running"})
+
+    async def append_stderr(self, content: str) -> None:
+        await self.append("stderr", content)
+
+    async def append_stdout(self, content: str) -> None:
+        await self.append("stdout", content)
+
+
 @dataclass(frozen=True)
 class ToolContext:
     cwd: Path
+    emit_event: ToolEventEmitter | None = None
     web_searcher: Callable[[str], Sequence[dict[str, str]]] | None = None
 
 
@@ -42,6 +90,7 @@ def command_tool_result(
     *,
     command: str,
     exit_code: int,
+    output_chunks: list[dict[str, str]] | None = None,
     stderr: str,
     stdout: str,
 ) -> dict[str, object]:
@@ -49,6 +98,7 @@ def command_tool_result(
         "type": "command",
         "command": command,
         "exit_code": exit_code,
+        "output_chunks": [dict(item) for item in output_chunks or []],
         "stderr": stderr,
         "stdout": stdout,
         "output": stdout or stderr,
@@ -454,16 +504,22 @@ async def shell_command_async(
     command = str(arguments["command"])
     timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
     invocation = shell_invocation(command)
+    collector = CommandOutputCollector(command, context.emit_event)
     result = await SandboxRunner(cwd=context.cwd).run_async(
-        invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
+        invocation.args,
+        env=invocation.env,
+        on_stderr=collector.append_stderr,
+        on_stdout=collector.append_stdout,
+        timeout_seconds=timeout_seconds,
     )
     ok = result.exit_code == 0
     return ToolResult(
         result=command_tool_result(
             command=command,
             exit_code=result.exit_code,
-            stderr=result.stderr,
-            stdout=result.stdout,
+            output_chunks=collector.output_chunks,
+            stderr=result.stderr or collector.stderr,
+            stdout=result.stdout or collector.stdout,
         ),
         ok=ok,
         title=f"Ran {command}",

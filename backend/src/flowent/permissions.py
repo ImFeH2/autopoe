@@ -14,6 +14,7 @@ from flowent.patch import affected_paths
 from flowent.sandbox import SandboxError, SandboxRunner, path_is_within
 from flowent.shell import shell_invocation
 from flowent.tools import (
+    CommandOutputCollector,
     ToolContext,
     ToolResult,
     command_tool_result,
@@ -305,17 +306,25 @@ async def shell_command_with_writable_paths(
     command = str(arguments["command"])
     timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
     invocation = shell_invocation(command)
+    collector = CommandOutputCollector(command, context.emit_event)
     result = await SandboxRunner(
         cwd=context.cwd,
         writable_roots=writable_paths,
-    ).run_async(invocation.args, env=invocation.env, timeout_seconds=timeout_seconds)
+    ).run_async(
+        invocation.args,
+        env=invocation.env,
+        on_stderr=collector.append_stderr,
+        on_stdout=collector.append_stdout,
+        timeout_seconds=timeout_seconds,
+    )
     ok = result.exit_code == 0
     return ToolResult(
         result=command_tool_result(
             command=command,
             exit_code=result.exit_code,
-            stderr=result.stderr,
-            stdout=result.stdout,
+            output_chunks=collector.output_chunks,
+            stderr=result.stderr or collector.stderr,
+            stdout=result.stdout or collector.stdout,
         ),
         ok=ok,
         title=f"Ran {command}",

@@ -85,6 +85,25 @@ async def configure_provider_async(
     )
 
 
+async def start_workspace_response_from_message(
+    client: httpx.AsyncClient,
+    content: str,
+    *,
+    message_id: str = "message-user",
+) -> httpx.Response:
+    await client.put(
+        "/api/workspace/messages",
+        json={"messages": [{"author": "user", "content": content, "id": message_id}]},
+    )
+    response = await client.post(
+        f"/api/workspace/messages/{message_id}/edit",
+        json={"action": "resend", "content": content},
+    )
+    assert response.status_code == 200
+    assert response.json()["is_responding"] is True
+    return response
+
+
 def project_context_message(request: dict[str, object]) -> dict[str, object] | None:
     for message in request["messages"]:
         if str(message["content"]).startswith("# AGENTS.md instructions for "):
@@ -118,6 +137,23 @@ def stream_json_events(content: str) -> list[dict[str, object]]:
         {"event": event["event"], "data": json.loads(str(event["data"]))}
         for event in stream_events(content)
     ]
+
+
+async def wait_for_running_tool_result(
+    client: httpx.AsyncClient,
+    expected_chunks: int = 1,
+) -> tuple[dict[str, object], dict[str, object]]:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        state = (await client.get("/api/state")).json()
+        assistant = state["messages"][-1]
+        tool = assistant["tools"][0]
+        result = tool.get("result")
+        chunks = result.get("output_chunks") if isinstance(result, dict) else None
+        if isinstance(chunks, list) and len(chunks) >= expected_chunks:
+            return assistant, tool
+        await asyncio.sleep(0.01)
+    raise AssertionError("Running tool result was not persisted.")
 
 
 def tool_call_chunk(
@@ -1749,20 +1785,82 @@ async def test_workspace_persists_tool_start_during_stream(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         await configure_provider_async(client)
-        response_task = asyncio.create_task(
-            client.post("/api/workspace/respond", json={"content": "Read notes."})
-        )
+        response = await start_workspace_response_from_message(client, "Read notes.")
         await asyncio.wait_for(command_started.wait(), timeout=2)
         state = (await client.get("/api/state")).json()
         command_can_finish.set()
-        response = await response_task
+        stream_response = await client.get("/api/workspace/stream")
 
     assistant = state["messages"][-1]
     assert response.status_code == 200
+    assert stream_response.status_code == 200
     assert assistant["author"] == "assistant"
     assert assistant["status"] == "running"
     assert assistant["tools"][0]["name"] == "shell_command"
     assert assistant["tools"][0]["status"] == "running"
+
+
+@pytest.mark.anyio
+async def test_workspace_streams_shell_command_output_before_completion(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    command_output_sent = asyncio.Event()
+    command_can_finish = asyncio.Event()
+
+    async def fake_run_async(self, command, **kwargs):
+        await kwargs["on_stdout"]("Preparing\n")
+        await kwargs["on_stderr"]("Warning\n")
+        command_output_sent.set()
+        await asyncio.wait_for(command_can_finish.wait(), timeout=2)
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=0,
+            stderr="Warning\n",
+            stdout="Preparing\n",
+        )
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            if request["messages"][-1]["role"] == "user":
+                yield tool_call_chunk("shell_command", '{"command": "slow"}')
+            else:
+                yield {"choices": [{"delta": {"content": "Done."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider_async(client)
+        response = await start_workspace_response_from_message(client, "Run slow.")
+        await asyncio.wait_for(command_output_sent.wait(), timeout=2)
+        assistant, tool = await wait_for_running_tool_result(client)
+        command_can_finish.set()
+        stream_response = await client.get("/api/workspace/stream")
+
+    assert response.status_code == 200
+    assert stream_response.status_code == 200
+    assert assistant["status"] == "running"
+    assert tool["status"] == "running"
+    assert tool["result"]["stdout"] == "Preparing\n"
+    assert tool["result"]["output_chunks"][:1] == [
+        {"stream": "stdout", "content": "Preparing\n"},
+    ]
+    tool_updates = [
+        event["data"]
+        for event in stream_json_events(stream_response.text)
+        if event["event"] == "tool_update"
+    ]
+    assert tool_updates[-1]["result"]["output_chunks"] == [
+        {"stream": "stdout", "content": "Preparing\n"},
+        {"stream": "stderr", "content": "Warning\n"},
+    ]
+    assert tool_updates[-1]["result"]["stderr"] == "Warning\n"
 
 
 @pytest.mark.anyio

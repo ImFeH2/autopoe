@@ -8,7 +8,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +32,9 @@ class SandboxCommand:
 
 class SandboxError(RuntimeError):
     pass
+
+
+OutputCallback = Callable[[str], Awaitable[None]]
 
 
 SANDBOX_INSTALL_HINT = (
@@ -213,6 +216,29 @@ class SandboxRunner:
             return value.decode(errors="replace")
         return value
 
+    async def _read_stream(
+        self,
+        stream: asyncio.StreamReader | None,
+        callback: OutputCallback | None,
+    ) -> str:
+        if stream is None:
+            return ""
+        chunks: list[str] = []
+        remaining = self.output_limit
+        while True:
+            chunk = await stream.read(4096)
+            if not chunk:
+                break
+            text = self._text_output(chunk)
+            if remaining <= 0:
+                continue
+            limited = text[:remaining]
+            remaining -= len(limited)
+            chunks.append(limited)
+            if callback is not None and limited:
+                await callback(limited)
+        return "".join(chunks)
+
     def __init__(
         self,
         *,
@@ -334,6 +360,8 @@ class SandboxRunner:
         *,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        on_stderr: OutputCallback | None = None,
+        on_stdout: OutputCallback | None = None,
         timeout_seconds: float | None = None,
     ) -> CommandResult:
         process_env = build_shell_environment(env)
@@ -346,22 +374,26 @@ class SandboxRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        stdout_task = asyncio.create_task(self._read_stream(process.stdout, on_stdout))
+        stderr_task = asyncio.create_task(self._read_stream(process.stderr, on_stderr))
+        if input_text is not None and process.stdin is not None:
+            process.stdin.write(input_text.encode())
+            await process.stdin.drain()
+            process.stdin.close()
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(
-                    input_text.encode() if input_text is not None else None
-                ),
-                timeout=timeout_seconds or self.timeout_seconds,
+            await asyncio.wait_for(
+                process.wait(), timeout=timeout_seconds or self.timeout_seconds
             )
         except TimeoutError as error:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            stdout, stderr = await process.communicate()
+            await process.wait()
+            stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
             return CommandResult(
                 command=" ".join(command),
                 exit_code=124,
                 stderr=str(error) or "Command timed out.",
-                stdout=self._text_output(stdout)[: self.output_limit],
+                stdout=stdout,
             )
         except asyncio.CancelledError:
             with suppress(ProcessLookupError):
@@ -372,13 +404,16 @@ class SandboxRunner:
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
+            for task in [stdout_task, stderr_task]:
+                task.cancel()
             raise
 
+        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
         return CommandResult(
             command=" ".join(command),
             exit_code=process.returncode or 0,
-            stderr=self._text_output(stderr)[: self.output_limit],
-            stdout=self._text_output(stdout)[: self.output_limit],
+            stderr=stderr,
+            stdout=stdout,
         )
 
     async def run_async(
@@ -387,6 +422,8 @@ class SandboxRunner:
         *,
         env: dict[str, str] | None = None,
         input_text: str | None = None,
+        on_stderr: OutputCallback | None = None,
+        on_stdout: OutputCallback | None = None,
         timeout_seconds: float | None = None,
     ) -> CommandResult:
         sandbox_command = self.build_command(command)
@@ -405,22 +442,26 @@ class SandboxRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        stdout_task = asyncio.create_task(self._read_stream(process.stdout, on_stdout))
+        stderr_task = asyncio.create_task(self._read_stream(process.stderr, on_stderr))
+        if input_text is not None and process.stdin is not None:
+            process.stdin.write(input_text.encode())
+            await process.stdin.drain()
+            process.stdin.close()
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(
-                    input_text.encode() if input_text is not None else None
-                ),
-                timeout=timeout_seconds or self.timeout_seconds,
+            await asyncio.wait_for(
+                process.wait(), timeout=timeout_seconds or self.timeout_seconds
             )
         except TimeoutError as error:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            stdout, stderr = await process.communicate()
+            await process.wait()
+            stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
             return CommandResult(
                 command=" ".join(command),
                 exit_code=124,
                 stderr=str(error) or "Command timed out.",
-                stdout=self._text_output(stdout)[: self.output_limit],
+                stdout=stdout,
             )
         except asyncio.CancelledError:
             with suppress(ProcessLookupError):
@@ -431,14 +472,17 @@ class SandboxRunner:
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
+            for task in [stdout_task, stderr_task]:
+                task.cancel()
             raise
         finally:
             if sandbox_command.seccomp_file is not None:
                 sandbox_command.seccomp_file.close()
 
+        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
         return CommandResult(
             command=" ".join(command),
             exit_code=process.returncode or 0,
-            stderr=self._text_output(stderr)[: self.output_limit],
-            stdout=self._text_output(stdout)[: self.output_limit],
+            stderr=stderr,
+            stdout=stdout,
         )

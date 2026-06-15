@@ -945,6 +945,85 @@ const controlledToolTimelineResponse = (
   };
 };
 
+const controlledToolUpdateTimelineResponse = (
+  tool: TestTool,
+  update: Pick<TestTool, "id" | "result" | "status">,
+  content: string,
+  id = "message-assistant",
+) => {
+  const encoder = new TextEncoder();
+  const completeTool = deferred();
+  const finish = deferred();
+  const { output, result, ...startTool } = tool;
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(`event: start\ndata: ${JSON.stringify({ id })}\n\n`),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 1 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_start\ndata: ${JSON.stringify({
+            tool: { ...startTool, status: "running" },
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_update\ndata: ${JSON.stringify(update)}\n\n`,
+        ),
+      );
+      await completeTool.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: tool_done\ndata: ${JSON.stringify({
+            id: tool.id,
+            result: result ?? { text: output ?? "tool output", type: "text" },
+            status: tool.status ?? "success",
+            title: tool.title,
+          })}\n\n`,
+        ),
+      );
+      await finish.promise;
+      controller.enqueue(
+        encoder.encode(
+          `event: output_start\ndata: ${JSON.stringify({ index: 2 })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: delta\ndata: ${JSON.stringify({ content })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `event: done\ndata: ${JSON.stringify({
+            message: {
+              author: "assistant",
+              content,
+              id,
+            },
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  return {
+    completeTool: completeTool.resolve,
+    finish: finish.resolve,
+    response: new Response(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+      status: 200,
+    }),
+  };
+};
+
 const controlledToolTextStreamResponse = (
   tool: TestTool,
   firstChunk: string,
@@ -5245,6 +5324,98 @@ describe("App", () => {
     expect(resultBlock).toHaveTextContent("Exit code: 0");
     expect(resultBlock).toHaveTextContent("Output:");
     expect(resultBlock).toHaveTextContent("done");
+  });
+
+  it("streams shell command stdout and stderr into the open tool result", async () => {
+    const user = userEvent.setup();
+    const toolStream = controlledToolUpdateTimelineResponse(
+      {
+        arguments: { command: "pnpm test" },
+        result: {
+          command: "pnpm test",
+          exit_code: 0,
+          output: "Installing\nWarning\nDone\n",
+          output_chunks: [
+            { content: "Installing\n", stream: "stdout" },
+            { content: "Warning\n", stream: "stderr" },
+            { content: "Done\n", stream: "stdout" },
+          ],
+          stderr: "Warning\n",
+          stdout: "Installing\nDone\n",
+          type: "command",
+        },
+        id: "tool-1",
+        name: "shell_command",
+        title: "Ran pnpm test",
+      },
+      {
+        id: "tool-1",
+        result: {
+          command: "pnpm test",
+          output: "Installing\nWarning\n",
+          output_chunks: [
+            { content: "Installing\n", stream: "stdout" },
+            { content: "Warning\n", stream: "stderr" },
+          ],
+          stderr: "Warning\n",
+          stdout: "Installing\n",
+          type: "command",
+        },
+        status: "running",
+      },
+      "Command finished.",
+    );
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return toolStream.response;
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Run tests");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Ran pnpm test/,
+    });
+    await user.click(toolDetails);
+
+    expect(toolDetails).toHaveTextContent("Running");
+    const runningResultBlock = screen.getByText("RESULT").parentElement;
+    expect(runningResultBlock).not.toHaveTextContent("Exit code:");
+    expect(runningResultBlock).toHaveTextContent("STDOUT:");
+    expect(runningResultBlock).toHaveTextContent("Installing");
+    expect(runningResultBlock).toHaveTextContent("STDERR:");
+    expect(runningResultBlock).toHaveTextContent("Warning");
+
+    toolStream.completeTool();
+
+    await waitFor(() => expect(toolDetails).toHaveTextContent("Done"));
+    const finalResultBlock = screen.getByText("RESULT").parentElement;
+    expect(finalResultBlock).toHaveTextContent("Exit code: 0");
+    expect(finalResultBlock).toHaveTextContent("Done");
+    toolStream.finish();
+    await expectDocumentText("Command finished.");
   });
 
   it("shows content inside the tool result when no structured fields are returned", async () => {

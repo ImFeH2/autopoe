@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
@@ -315,6 +317,20 @@ async def run_agent_stream(
                 )
                 logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
                 yield AgentStreamEvent(event="tool_start", data={"tool": tool_item})
+                tool_event_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+                async def emit_tool_event(
+                    data: dict[str, object],
+                    *,
+                    queue: asyncio.Queue[dict[str, object]] = tool_event_queue,
+                    tool_id: str = str(tool_item["id"]),
+                ) -> None:
+                    yield_data = {
+                        "id": tool_id,
+                        **data,
+                    }
+                    await queue.put(yield_data)
+
                 extra_result = (
                     await extra_tool_runner(tool_call.name, arguments)
                     if extra_tool_runner is not None
@@ -324,8 +340,12 @@ async def run_agent_stream(
                     extra_result if isinstance(extra_result, ToolResult) else None
                 )
                 if tool_result is None:
-                    context = ToolContext(cwd=cwd, web_searcher=web_searcher)
-                    tool_result = await (
+                    context = ToolContext(
+                        cwd=cwd,
+                        emit_event=emit_tool_event,
+                        web_searcher=web_searcher,
+                    )
+                    tool_task: asyncio.Future[ToolResult] = asyncio.ensure_future(
                         tool_runner(
                             tool_call.name,
                             arguments,
@@ -338,6 +358,41 @@ async def run_agent_stream(
                             context,
                         )
                     )
+                    pending_event_task: asyncio.Future[dict[str, object]] | None = None
+                    try:
+                        while True:
+                            if pending_event_task is None:
+                                pending_event_task = asyncio.create_task(
+                                    tool_event_queue.get()
+                                )
+                            done, _ = await asyncio.wait(
+                                {
+                                    cast(asyncio.Future[object], tool_task),
+                                    cast(asyncio.Future[object], pending_event_task),
+                                },
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                            if pending_event_task in done:
+                                yield AgentStreamEvent(
+                                    event="tool_update",
+                                    data=pending_event_task.result(),
+                                )
+                                pending_event_task = None
+                            if tool_task in done:
+                                if pending_event_task is not None:
+                                    pending_event_task.cancel()
+                                break
+                    except asyncio.CancelledError:
+                        tool_task.cancel()
+                        if pending_event_task is not None:
+                            pending_event_task.cancel()
+                        raise
+                    tool_result = await tool_task
+                    while not tool_event_queue.empty():
+                        yield AgentStreamEvent(
+                            event="tool_update",
+                            data=tool_event_queue.get_nowait(),
+                        )
                 result_content = tool_result_model_content(tool_result)
                 logger.debug(
                     "Tool call finished name=%s id=%s ok=%s",

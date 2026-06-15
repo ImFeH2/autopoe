@@ -1317,6 +1317,11 @@ function formatCommandToolResult(result: Record<string, unknown>) {
   if (result.exit_code !== undefined) {
     sections.push(`Exit code: ${String(result.exit_code)}`);
   }
+  const outputChunks = commandOutputChunks(result.output_chunks);
+  if (outputChunks.length > 0) {
+    sections.push(formatCommandOutputChunks(outputChunks));
+    return sections.join("\n\n");
+  }
   const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
   const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
   const output = typeof result.output === "string" ? result.output.trim() : "";
@@ -1326,6 +1331,38 @@ function formatCommandToolResult(result: Record<string, unknown>) {
     sections.push(`Output:\n${output}`);
   }
   return sections.join("\n\n") || formatToolValue(result);
+}
+
+type CommandOutputChunk = {
+  content: string;
+  stream: "stderr" | "stdout";
+};
+
+function commandOutputChunks(value: unknown): CommandOutputChunk[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      !("content" in item) ||
+      !("stream" in item) ||
+      typeof item.content !== "string" ||
+      (item.stream !== "stdout" && item.stream !== "stderr")
+    ) {
+      return [];
+    }
+    return [{ content: item.content, stream: item.stream }];
+  });
+}
+
+function formatCommandOutputChunks(chunks: CommandOutputChunk[]) {
+  return chunks
+    .map(
+      (chunk) => `${chunk.stream.toUpperCase()}:\n${chunk.content.trimEnd()}`,
+    )
+    .join("\n\n");
 }
 
 function hasToolObjectPayload(

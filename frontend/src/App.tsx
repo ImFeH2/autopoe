@@ -301,6 +301,15 @@ type WorkspaceStreamEvent =
         status: ToolItem["status"];
         title?: string;
       };
+      event: "tool_update";
+    }
+  | {
+      data: {
+        id: string;
+        result?: Record<string, unknown>;
+        status: ToolItem["status"];
+        title?: string;
+      };
       event: "tool_done" | "tool_error";
     }
   | {
@@ -1898,6 +1907,7 @@ function FlowentApp() {
             handlers.onToolStart(streamEvent.data.tool);
           }
           if (
+            streamEvent.event === "tool_update" ||
             streamEvent.event === "tool_done" ||
             streamEvent.event === "tool_error"
           ) {
