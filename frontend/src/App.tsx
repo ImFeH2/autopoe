@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiMessage, ApiState } from "@/app/api-types";
 import {
   contextWindowFromLimit,
-  createEmptyTelegramBot,
   errorNotificationKeysFromState,
   mcpServerFromApi,
   providerFromApi,
@@ -12,23 +11,11 @@ import {
   workflowFromApi,
 } from "@/app/api-mappers";
 import {
-  approveTelegramSessionRequest,
-  saveTelegramBotRequest,
-} from "@/app/channel-requests";
-import {
-  addWritablePathRequest,
-  removeWritablePathRequest,
-} from "@/app/permission-requests";
-import {
   fetchProviderModelsRequest,
   ProviderModelFetchError,
   removeProviderRequest,
   saveProviderRequest,
 } from "@/app/provider-requests";
-import {
-  reloadSkillsRequest,
-  updateSkillEnabledRequest,
-} from "@/app/skill-requests";
 import {
   fetchAbout,
   fetchAppState,
@@ -61,6 +48,7 @@ import {
 } from "@/app/workspace-stream";
 import { useWorkflows } from "@/app/use-workflows";
 import { useMcpServers } from "@/app/use-mcp-servers";
+import { useSetupSections } from "@/app/use-setup-sections";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
@@ -83,10 +71,7 @@ import type {
   Provider,
   ReasoningEffort,
   RuntimeSettings,
-  Skill,
-  TelegramBot,
   ViewId,
-  WritablePath,
   WorkspaceCommand,
   WorkspaceCommandId,
 } from "@/components/flowent/types";
@@ -112,11 +97,6 @@ function FlowentApp() {
   const [usageInfo, setUsageInfo] = useState<ContextUsageInfo | null>(null);
   const usageInfoRef = useRef<ContextUsageInfo | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [activeSkillId, setActiveSkillId] = useState("");
-  const [telegramBot, setTelegramBot] = useState<TelegramBot>(() =>
-    createEmptyTelegramBot(),
-  );
   const [providerEditorId, setProviderEditorId] = useState("new");
   const [providerDraft, setProviderDraft] = useState<Provider>(() =>
     createEmptyProvider(),
@@ -124,7 +104,6 @@ function FlowentApp() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
   const [isRefiningContext, setIsRefiningContext] = useState(false);
-  const [writablePaths, setWritablePaths] = useState<WritablePath[]>([]);
   const [responseError, setResponseError] = useState("");
   const responseAbortRef = useRef<AbortController | null>(null);
   const responseEventIndexRef = useRef(0);
@@ -133,6 +112,23 @@ function FlowentApp() {
   const errorNotificationKeysRef = useRef<Set<string>>(new Set());
   const hasLoadedStateRef = useRef(false);
   const [streamReconnectKey, setStreamReconnectKey] = useState(0);
+  const {
+    activeSkill,
+    addWritablePath,
+    approveTelegramSession,
+    reloadSkills,
+    removeWritablePath,
+    replaceSkills,
+    replaceTelegramBot,
+    replaceWritablePaths,
+    saveTelegramBot,
+    selectSkill,
+    skills,
+    telegramBot,
+    toggleSkill,
+    updateTelegramBot,
+    writablePaths,
+  } = useSetupSections();
   const {
     importMcpServer,
     importingMcpServerId,
@@ -174,10 +170,6 @@ function FlowentApp() {
     [providers, selectedProviderId],
   );
   const isCreatingProvider = providerEditorId === "new";
-  const activeSkill = useMemo(
-    () => skills.find((skill) => skill.id === activeSkillId) ?? skills[0],
-    [activeSkillId, skills],
-  );
   const setTrackedUsageInfo = useCallback(
     (
       nextUsageInfo:
@@ -251,16 +243,17 @@ function FlowentApp() {
       const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
       replaceMcpServers(loadedMcpServers);
       const loadedSkills = state.skills ?? [];
-      setSkills(loadedSkills);
-      setActiveSkillId(loadedSkills[0]?.id ?? "");
+      replaceSkills(loadedSkills);
       setAgentPrompt(state.settings.agent_prompt ?? "");
       setSelectedProviderId(state.settings.selected_provider_id);
       setSelectedModel(state.settings.selected_model);
       setContextWindowLimit(state.settings.context_window_limit ?? null);
       setReasoningEffort(state.settings.reasoning_effort ?? "default");
       const loadedTelegramBot = telegramBotFromApi(state.telegram_bot);
-      setTelegramBot(loadedTelegramBot);
-      setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
+      replaceTelegramBot(loadedTelegramBot);
+      replaceWritablePaths(
+        (state.writable_paths ?? []).map(writablePathFromApi),
+      );
       replaceWorkflows((state.workflows ?? []).map(workflowFromApi));
       const shouldResumeResponse = Boolean(state.is_responding);
       responseEventIndexRef.current = state.response_event_index ?? 0;
@@ -280,7 +273,14 @@ function FlowentApp() {
         hasLoadedStateRef.current = true;
       }
     },
-    [replaceMcpServers, replaceWorkflows, setTrackedUsageInfo],
+    [
+      replaceMcpServers,
+      replaceSkills,
+      replaceTelegramBot,
+      replaceWorkflows,
+      replaceWritablePaths,
+      setTrackedUsageInfo,
+    ],
   );
 
   const refreshAppState = useCallback(async () => {
@@ -343,14 +343,6 @@ function FlowentApp() {
   const openNewProviderEditor = () => {
     setProviderEditorId("new");
     setProviderDraft(createEmptyProvider());
-  };
-
-  const updateTelegramBot = (updates: Partial<TelegramBot>) => {
-    setTelegramBot((current) => ({ ...current, ...updates }));
-  };
-
-  const selectSkill = (skill: Skill) => {
-    setActiveSkillId(skill.id);
   };
 
   const updateProviderDraft = (updates: Partial<Provider>) => {
@@ -522,74 +514,6 @@ function FlowentApp() {
         });
       }
     }
-  };
-
-  const saveTelegramBot = async () => {
-    const result = await saveTelegramBotRequest(telegramBot);
-    if (result) {
-      setTelegramBot(result);
-    }
-  };
-
-  const reloadSkills = async () => {
-    const reloadedSkills = await reloadSkillsRequest();
-
-    if (reloadedSkills) {
-      setSkills(reloadedSkills);
-      setActiveSkillId((currentSkillId) => {
-        if (reloadedSkills.some((skill) => skill.id === currentSkillId)) {
-          return currentSkillId;
-        }
-        return reloadedSkills[0]?.id ?? "";
-      });
-    }
-  };
-
-  const toggleSkill = async (skill: Skill, enabled: boolean) => {
-    const updatedSkill = await updateSkillEnabledRequest(skill.id, enabled);
-
-    if (updatedSkill) {
-      setSkills((currentSkills) =>
-        currentSkills.map((currentSkill) =>
-          currentSkill.id === updatedSkill.id ? updatedSkill : currentSkill,
-        ),
-      );
-    }
-  };
-
-  const approveTelegramSession = async (chatId: string) => {
-    const result = await approveTelegramSessionRequest(chatId);
-
-    if (result) {
-      setTelegramBot((current) => ({
-        ...current,
-        sessions: current.sessions.map((session) =>
-          session.chatId === result.chatId ? result : session,
-        ),
-      }));
-    }
-  };
-
-  const removeWritablePath = async (path: string) => {
-    const writablePaths = await removeWritablePathRequest(path);
-
-    if (writablePaths) {
-      setWritablePaths(writablePaths);
-    }
-  };
-
-  const addWritablePath = async (path: string) => {
-    const savedWritablePath = await addWritablePathRequest(path);
-    setWritablePaths((currentWritablePaths) => {
-      if (
-        currentWritablePaths.some(
-          (writablePath) => writablePath.path === savedWritablePath.path,
-        )
-      ) {
-        return currentWritablePaths;
-      }
-      return [...currentWritablePaths, savedWritablePath];
-    });
   };
 
   const showWorkspaceNotification = useCallback(
