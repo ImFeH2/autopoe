@@ -1,38 +1,49 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type {
-  ApiAbout,
-  ApiMcpImportPreview,
-  ApiMcpServer,
-  ApiMessage,
-  ApiState,
-  ApiTelegramBot,
-  ApiTelegramSession,
-  ApiWritablePath,
-  ApiWorkflow,
-  ApiWorkflowRunResult,
-  RequestResult,
-} from "@/app/api-types";
+import type { ApiMessage, ApiState, RequestResult } from "@/app/api-types";
 import {
   contextWindowFromLimit,
   createEmptyMcpServer,
   createEmptyTelegramBot,
-  errorMessageFromResponse,
   errorNotificationKeysFromState,
   mcpServerFromApi,
   mcpServerId,
-  mcpServerToApi,
   parseCommandLine,
   providerFromApi,
-  providerToApi,
   telegramBotFromApi,
-  telegramBotToApi,
-  telegramSessionFromApi,
   writablePathFromApi,
   workflowFromApi,
-  workflowRunResultFromApi,
-  workflowToApi,
 } from "@/app/api-mappers";
+import {
+  approveTelegramSessionRequest,
+  saveTelegramBotRequest,
+} from "@/app/channel-requests";
+import {
+  importMcpServerRequest,
+  previewMcpImportRequest,
+  reconnectMcpServerRequest,
+  removeMcpServerRequest,
+  saveMcpServerRequest,
+} from "@/app/mcp-requests";
+import {
+  addWritablePathRequest,
+  removeWritablePathRequest,
+} from "@/app/permission-requests";
+import {
+  fetchProviderModelsRequest,
+  ProviderModelFetchError,
+  removeProviderRequest,
+  saveProviderRequest,
+} from "@/app/provider-requests";
+import {
+  reloadSkillsRequest,
+  updateSkillEnabledRequest,
+} from "@/app/skill-requests";
+import {
+  fetchAbout,
+  fetchAppState,
+  saveRuntimeSettingsRequest,
+} from "@/app/state-requests";
 import { createWorkspaceStreamHandlers as createWorkspaceStreamHandlersForResponse } from "@/app/workspace-stream-handlers";
 import {
   clearWorkspace,
@@ -54,6 +65,11 @@ import {
   WorkspaceRequestError,
   WorkspaceStreamError,
 } from "@/app/workspace-messages";
+import {
+  deleteWorkflowRequest,
+  runWorkflowRequest,
+  saveWorkflowRequest,
+} from "@/app/workflow-requests";
 import {
   readWorkspaceStream,
   type WorkspaceStreamHandlers,
@@ -282,11 +298,10 @@ function FlowentApp() {
   );
 
   const refreshAppState = useCallback(async () => {
-    const response = await fetch("/api/state");
-    if (!response.ok) {
+    const state = await fetchAppState();
+    if (!state) {
       return null;
     }
-    const state = (await response.json()) as ApiState;
     applyLoadedState(state);
     return state;
   }, [applyLoadedState]);
@@ -296,16 +311,13 @@ function FlowentApp() {
 
     const loadState = async () => {
       try {
-        const [state, aboutResponse] = await Promise.all([
+        const [state, about] = await Promise.all([
           refreshAppState(),
-          fetch("/api/about"),
+          fetchAbout(),
         ]);
         if (!state) {
           return;
         }
-        const about = aboutResponse.ok
-          ? ((await aboutResponse.json()) as ApiAbout)
-          : {};
         if (!isMounted) {
           return;
         }
@@ -331,11 +343,10 @@ function FlowentApp() {
     let isMounted = true;
     const refreshMcpServers = async () => {
       try {
-        const response = await fetch("/api/state");
-        if (!response.ok || !isMounted) {
+        const state = await fetchAppState();
+        if (!state || !isMounted) {
           return;
         }
-        const state = (await response.json()) as ApiState;
         if (!isMounted) {
           return;
         }
@@ -431,18 +442,7 @@ function FlowentApp() {
   const previewMcpImport = async (source = mcpImportSource) => {
     setIsPreviewingMcpImport(true);
     try {
-      const response = await fetch("/api/mcp/import/preview", {
-        body: JSON.stringify({ source }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error("Scan could not be completed.");
-      }
-      const result = (await response.json()) as ApiMcpImportPreview;
-      const servers = (result.servers ?? []).map((server) =>
-        mcpServerFromApi(server),
-      );
+      const servers = await previewMcpImportRequest(source);
       setMcpImportPreview(servers);
     } catch {
       setMcpImportPreview([]);
@@ -460,19 +460,10 @@ function FlowentApp() {
 
     setImportingMcpServerId(serverId);
     try {
-      const response = await fetch("/api/mcp/import", {
-        body: JSON.stringify({
-          server_id: serverId,
-          source: mcpImportSource,
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
+      const importedServers = await importMcpServerRequest({
+        serverId,
+        source: mcpImportSource,
       });
-      if (!response.ok) {
-        throw new Error("Import could not be completed.");
-      }
-      const result = (await response.json()) as ApiMcpServer[];
-      const importedServers = result.map((server) => mcpServerFromApi(server));
       setMcpServers(importedServers);
       const nextServer =
         importedServers.find((server) => server.id === serverId) ??
@@ -499,22 +490,8 @@ function FlowentApp() {
     setProviderDraft((current) => ({ ...current, ...updates }));
   };
 
-  const persistSettings = async (settings: RuntimeSettings) => {
-    await fetch("/api/settings", {
-      body: JSON.stringify({
-        agent_prompt: settings.agentPrompt,
-        context_window_limit: settings.contextWindowLimit,
-        reasoning_effort: settings.reasoningEffort,
-        selected_model: settings.selectedModel,
-        selected_provider_id: settings.selectedProviderId,
-      }),
-      headers: { "Content-Type": "application/json" },
-      method: "PUT",
-    });
-  };
-
   const persistSettingsAndRefresh = async (settings: RuntimeSettings) => {
-    await persistSettings(settings);
+    await saveRuntimeSettingsRequest(settings);
     await refreshAppState();
   };
 
@@ -557,7 +534,7 @@ function FlowentApp() {
 
   const handleReasoningEffortChange = (value: ReasoningEffort) => {
     setReasoningEffort(value);
-    void persistSettings({
+    void saveRuntimeSettingsRequest({
       agentPrompt,
       contextWindowLimit,
       reasoningEffort: value,
@@ -578,75 +555,11 @@ function FlowentApp() {
     void persistSettingsAndRefresh(settings);
   };
 
-  const providerModelFetchFailureMessages = {
-    access_denied: {
-      description: "Check the key and account access.",
-      message: "Access denied.",
-    },
-    connection_failed: {
-      description: "Check the address and try again.",
-      message: "Connection failed.",
-    },
-    provider_unavailable: {
-      description: "The service is currently unreachable.",
-      message: "Provider unavailable.",
-    },
-    rate_limited: {
-      description: "Please wait a moment and try again.",
-      message: "Too many requests.",
-    },
-    request_failed: {
-      description: "Check the connection settings and try again.",
-      message: "Request failed.",
-    },
-  } as const;
-
-  type ProviderModelFetchFailure =
-    keyof typeof providerModelFetchFailureMessages;
-
-  const isProviderModelFetchFailure = (
-    value: unknown,
-  ): value is ProviderModelFetchFailure =>
-    typeof value === "string" && value in providerModelFetchFailureMessages;
-
-  const providerModelFetchFailureFromResponse = async (
-    response: Response,
-  ): Promise<ProviderModelFetchFailure> => {
-    try {
-      const result = (await response.json()) as { detail?: { code?: unknown } };
-      const code = result.detail?.code;
-      if (isProviderModelFetchFailure(code)) {
-        return code;
-      }
-    } catch {
-      return "request_failed";
-    }
-
-    return "request_failed";
-  };
-
   const fetchProviderModels = async () => {
     setIsFetchingModels(true);
 
     try {
-      const response = await fetch("/api/providers/models", {
-        body: JSON.stringify({
-          base_url: providerDraft.baseUrl,
-          provider: providerDraft.type,
-          secret_reference: providerDraft.apiKey,
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const failure = await providerModelFetchFailureFromResponse(response);
-        toast.error(providerModelFetchFailureMessages[failure]);
-        return;
-      }
-
-      const result = (await response.json()) as { models?: string[] };
-      const models = result.models ?? [];
+      const models = await fetchProviderModelsRequest(providerDraft);
       updateProviderDraft({ models });
 
       if (models.length === 0) {
@@ -655,8 +568,10 @@ function FlowentApp() {
           message: "No models found.",
         });
       }
-    } catch {
-      toast.error(providerModelFetchFailureMessages.connection_failed);
+    } catch (error) {
+      if (error instanceof ProviderModelFetchError) {
+        toast.error(error.notification);
+      }
     } finally {
       setIsFetchingModels(false);
     }
@@ -686,7 +601,7 @@ function FlowentApp() {
     if (!selectedProviderId) {
       setSelectedProviderId(savedProvider.id);
       setSelectedModel("");
-      void persistSettings({
+      void saveRuntimeSettingsRequest({
         agentPrompt,
         contextWindowLimit,
         reasoningEffort,
@@ -695,11 +610,7 @@ function FlowentApp() {
       });
     }
 
-    await fetch("/api/providers", {
-      body: JSON.stringify(providerToApi(savedProvider)),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
+    await saveProviderRequest(savedProvider);
   };
 
   const removeProvider = async () => {
@@ -708,12 +619,9 @@ function FlowentApp() {
     }
 
     const removedProviderId = providerDraft.id;
-    const response = await fetch(`/api/providers/${removedProviderId}`, {
-      headers: { "Content-Type": "application/json" },
-      method: "DELETE",
-    });
+    const wasRemoved = await removeProviderRequest(removedProviderId);
 
-    if (response.ok) {
+    if (wasRemoved) {
       const removedIndex = providers.findIndex(
         (provider) => provider.id === removedProviderId,
       );
@@ -738,7 +646,7 @@ function FlowentApp() {
         const nextModel = nextProvider?.models[0] ?? "";
         setSelectedProviderId(nextId);
         setSelectedModel(nextModel);
-        void persistSettings({
+        void saveRuntimeSettingsRequest({
           agentPrompt,
           contextWindowLimit,
           reasoningEffort,
@@ -750,16 +658,8 @@ function FlowentApp() {
   };
 
   const saveTelegramBot = async () => {
-    const response = await fetch("/api/telegram-bot", {
-      body: JSON.stringify(telegramBotToApi(telegramBot)),
-      headers: { "Content-Type": "application/json" },
-      method: "PUT",
-    });
-
-    if (response.ok) {
-      const result = telegramBotFromApi(
-        (await response.json()) as ApiTelegramBot,
-      );
+    const result = await saveTelegramBotRequest(telegramBot);
+    if (result) {
       setTelegramBot(result);
     }
   };
@@ -781,16 +681,9 @@ function FlowentApp() {
       tools: isCreatingMcpServer ? [] : mcpDraft.tools,
       url: mcpDraft.type === "url" ? mcpDraft.url : "",
     };
-    const response = await fetch("/api/mcp/servers", {
-      body: JSON.stringify(mcpServerToApi(nextServer)),
-      headers: { "Content-Type": "application/json" },
-      method: "PUT",
-    });
+    const savedServer = await saveMcpServerRequest(nextServer);
 
-    if (response.ok) {
-      const savedServer = mcpServerFromApi(
-        (await response.json()) as ApiMcpServer,
-      );
+    if (savedServer) {
       setMcpServers((currentServers) => {
         if (isCreatingMcpServer) {
           return [...currentServers, savedServer];
@@ -808,15 +701,9 @@ function FlowentApp() {
     if (isCreatingMcpServer) {
       return;
     }
-    const response = await fetch(`/api/mcp/servers/${mcpDraft.id}/reconnect`, {
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
+    const updatedServer = await reconnectMcpServerRequest(mcpDraft.id);
 
-    if (response.ok) {
-      const updatedServer = mcpServerFromApi(
-        (await response.json()) as ApiMcpServer,
-      );
+    if (updatedServer) {
       setMcpServers((currentServers) =>
         currentServers.map((server) =>
           server.id === updatedServer.id ? updatedServer : server,
@@ -830,12 +717,9 @@ function FlowentApp() {
     if (isCreatingMcpServer) {
       return;
     }
-    const response = await fetch(`/api/mcp/servers/${mcpDraft.id}`, {
-      headers: { "Content-Type": "application/json" },
-      method: "DELETE",
-    });
+    const wasRemoved = await removeMcpServerRequest(mcpDraft.id);
 
-    if (response.ok) {
+    if (wasRemoved) {
       const remainingServers = mcpServers.filter(
         (server) => server.id !== mcpDraft.id,
       );
@@ -851,13 +735,9 @@ function FlowentApp() {
   };
 
   const reloadSkills = async () => {
-    const response = await fetch("/api/skills/reload", {
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
+    const reloadedSkills = await reloadSkillsRequest();
 
-    if (response.ok) {
-      const reloadedSkills = (await response.json()) as Skill[];
+    if (reloadedSkills) {
       setSkills(reloadedSkills);
       setActiveSkillId((currentSkillId) => {
         if (reloadedSkills.some((skill) => skill.id === currentSkillId)) {
@@ -869,17 +749,9 @@ function FlowentApp() {
   };
 
   const toggleSkill = async (skill: Skill, enabled: boolean) => {
-    const response = await fetch(
-      `/api/skills/${encodeURIComponent(skill.id)}`,
-      {
-        body: JSON.stringify({ enabled }),
-        headers: { "Content-Type": "application/json" },
-        method: "PUT",
-      },
-    );
+    const updatedSkill = await updateSkillEnabledRequest(skill.id, enabled);
 
-    if (response.ok) {
-      const updatedSkill = (await response.json()) as Skill;
+    if (updatedSkill) {
       setSkills((currentSkills) =>
         currentSkills.map((currentSkill) =>
           currentSkill.id === updatedSkill.id ? updatedSkill : currentSkill,
@@ -889,16 +761,9 @@ function FlowentApp() {
   };
 
   const approveTelegramSession = async (chatId: string) => {
-    const response = await fetch("/api/telegram-bot/approve", {
-      body: JSON.stringify({ chat_id: chatId }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
+    const result = await approveTelegramSessionRequest(chatId);
 
-    if (response.ok) {
-      const result = telegramSessionFromApi(
-        (await response.json()) as ApiTelegramSession,
-      );
+    if (result) {
       setTelegramBot((current) => ({
         ...current,
         sessions: current.sessions.map((session) =>
@@ -909,34 +774,16 @@ function FlowentApp() {
   };
 
   const removeWritablePath = async (path: string) => {
-    const response = await fetch("/api/permissions/writable-paths", {
-      body: JSON.stringify({ path }),
-      headers: { "Content-Type": "application/json" },
-      method: "DELETE",
-    });
+    const writablePaths = await removeWritablePathRequest(path);
 
-    if (response.ok) {
-      const result = (await response.json()) as {
-        writable_paths?: ApiWritablePath[];
-      };
-      setWritablePaths((result.writable_paths ?? []).map(writablePathFromApi));
+    if (writablePaths) {
+      setWritablePaths(writablePaths);
     }
   };
 
   const addWritablePath = async (path: string) => {
-    const response = await fetch("/api/permissions/writable-paths", {
-      body: JSON.stringify({ path }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
-
-    if (!response.ok) {
-      throw new Error("Directory could not be added.");
-    }
-
-    const result = (await response.json()) as ApiWritablePath;
+    const savedWritablePath = await addWritablePathRequest(path);
     setWritablePaths((currentWritablePaths) => {
-      const savedWritablePath = writablePathFromApi(result);
       if (
         currentWritablePaths.some(
           (writablePath) => writablePath.path === savedWritablePath.path,
@@ -1469,25 +1316,11 @@ function FlowentApp() {
   const saveWorkflow = async (
     workflow: Workflow,
   ): Promise<RequestResult<Workflow>> => {
-    const response = await fetch("/api/workflows", {
-      body: JSON.stringify(workflowToApi(workflow)),
-      headers: { "Content-Type": "application/json" },
-      method: "PUT",
-    });
-
-    if (!response.ok) {
-      return {
-        data: null,
-        error: await errorMessageFromResponse(
-          response,
-          "Workflow could not be saved.",
-        ),
-      };
+    const result = await saveWorkflowRequest(workflow);
+    if (!result.data) {
+      return result;
     }
-
-    const savedWorkflow = workflowFromApi(
-      (await response.json()) as ApiWorkflow,
-    );
+    const savedWorkflow = result.data;
     setWorkflows((currentWorkflows) => {
       if (
         currentWorkflows.some(
@@ -1503,19 +1336,13 @@ function FlowentApp() {
       return [savedWorkflow, ...currentWorkflows];
     });
     setActiveWorkflowId(savedWorkflow.id);
-    return { data: savedWorkflow, error: "" };
+    return result;
   };
 
   const deleteWorkflow = async (workflowId: string) => {
-    const response = await fetch(
-      `/api/workflows/${encodeURIComponent(workflowId)}`,
-      {
-        headers: { "Content-Type": "application/json" },
-        method: "DELETE",
-      },
-    );
+    const wasDeleted = await deleteWorkflowRequest(workflowId);
 
-    if (!response.ok) {
+    if (!wasDeleted) {
       return false;
     }
 
@@ -1537,29 +1364,9 @@ function FlowentApp() {
     setRunningWorkflowId(workflowId);
     setWorkflowRunResult(null);
     try {
-      const response = await fetch(
-        `/api/workflows/${encodeURIComponent(workflowId)}/run`,
-        {
-          headers: { "Content-Type": "application/json" },
-          method: "POST",
-        },
-      );
-
-      if (!response.ok) {
-        return {
-          data: null,
-          error: await errorMessageFromResponse(
-            response,
-            "Run could not be completed.",
-          ),
-        };
-      }
-
-      const result = workflowRunResultFromApi(
-        (await response.json()) as ApiWorkflowRunResult,
-      );
-      setWorkflowRunResult(result);
-      return { data: result, error: "" };
+      const result = await runWorkflowRequest(workflowId);
+      setWorkflowRunResult(result.data);
+      return result;
     } finally {
       setRunningWorkflowId("");
     }
