@@ -3,12 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiMessage, ApiState } from "@/app/api-types";
 import {
   contextWindowFromLimit,
-  createEmptyMcpServer,
   createEmptyTelegramBot,
   errorNotificationKeysFromState,
   mcpServerFromApi,
-  mcpServerId,
-  parseCommandLine,
   providerFromApi,
   telegramBotFromApi,
   writablePathFromApi,
@@ -18,13 +15,6 @@ import {
   approveTelegramSessionRequest,
   saveTelegramBotRequest,
 } from "@/app/channel-requests";
-import {
-  importMcpServerRequest,
-  previewMcpImportRequest,
-  reconnectMcpServerRequest,
-  removeMcpServerRequest,
-  saveMcpServerRequest,
-} from "@/app/mcp-requests";
 import {
   addWritablePathRequest,
   removeWritablePathRequest,
@@ -70,6 +60,7 @@ import {
   type WorkspaceStreamHandlers,
 } from "@/app/workspace-stream";
 import { useWorkflows } from "@/app/use-workflows";
+import { useMcpServers } from "@/app/use-mcp-servers";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
@@ -85,8 +76,6 @@ import { viewPanelClassName } from "@/components/flowent/styles";
 import { FlowentToastProvider } from "@/components/flowent/toast";
 import { useFlowentToast } from "@/components/flowent/toast-context";
 import type {
-  McpImportSource,
-  McpServer,
   Message,
   ContextUsageInfo,
   MessageActionRequest,
@@ -123,19 +112,8 @@ function FlowentApp() {
   const [usageInfo, setUsageInfo] = useState<ContextUsageInfo | null>(null);
   const usageInfoRef = useRef<ContextUsageInfo | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [activeSkillId, setActiveSkillId] = useState("");
-  const [mcpEditorId, setMcpEditorId] = useState("new");
-  const [mcpDraft, setMcpDraft] = useState<McpServer>(() =>
-    createEmptyMcpServer(),
-  );
-  const [isMcpImportOpen, setIsMcpImportOpen] = useState(false);
-  const [mcpImportPreview, setMcpImportPreview] = useState<McpServer[]>([]);
-  const [mcpImportSource, setMcpImportSource] =
-    useState<McpImportSource>("claude_code");
-  const [isPreviewingMcpImport, setIsPreviewingMcpImport] = useState(false);
-  const [importingMcpServerId, setImportingMcpServerId] = useState("");
   const [telegramBot, setTelegramBot] = useState<TelegramBot>(() =>
     createEmptyTelegramBot(),
   );
@@ -155,6 +133,26 @@ function FlowentApp() {
   const errorNotificationKeysRef = useRef<Set<string>>(new Set());
   const hasLoadedStateRef = useRef(false);
   const [streamReconnectKey, setStreamReconnectKey] = useState(0);
+  const {
+    importMcpServer,
+    importingMcpServerId,
+    isCreatingMcpServer,
+    isMcpImportOpen,
+    isPreviewingMcpImport,
+    loadMcpEditor,
+    mcpDraft,
+    mcpImportPreview,
+    mcpImportSource,
+    mcpServers,
+    openMcpImport,
+    openNewMcpEditor,
+    reconnectMcpServer,
+    removeMcpServer,
+    replaceMcpServers,
+    saveMcpServer,
+    updateMcpDraft,
+    updateMcpImportSource,
+  } = useMcpServers({ showError: toast.error });
   const {
     activeWorkflow,
     activeWorkflowId,
@@ -176,14 +174,9 @@ function FlowentApp() {
     [providers, selectedProviderId],
   );
   const isCreatingProvider = providerEditorId === "new";
-  const isCreatingMcpServer = mcpEditorId === "new";
   const activeSkill = useMemo(
     () => skills.find((skill) => skill.id === activeSkillId) ?? skills[0],
     [activeSkillId, skills],
-  );
-  const hasStartingMcpServer = useMemo(
-    () => mcpServers.some((server) => server.status === "starting"),
-    [mcpServers],
   );
   const setTrackedUsageInfo = useCallback(
     (
@@ -256,11 +249,7 @@ function FlowentApp() {
         ),
       );
       const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
-      setMcpServers(loadedMcpServers);
-      if (loadedMcpServers[0]) {
-        setMcpEditorId(loadedMcpServers[0].id);
-        setMcpDraft(loadedMcpServers[0]);
-      }
+      replaceMcpServers(loadedMcpServers);
       const loadedSkills = state.skills ?? [];
       setSkills(loadedSkills);
       setActiveSkillId(loadedSkills[0]?.id ?? "");
@@ -291,7 +280,7 @@ function FlowentApp() {
         hasLoadedStateRef.current = true;
       }
     },
-    [replaceWorkflows, setTrackedUsageInfo],
+    [replaceMcpServers, replaceWorkflows, setTrackedUsageInfo],
   );
 
   const refreshAppState = useCallback(async () => {
@@ -333,55 +322,6 @@ function FlowentApp() {
   }, [refreshAppState]);
 
   useEffect(() => {
-    if (!hasStartingMcpServer) {
-      return;
-    }
-
-    let isMounted = true;
-    const refreshMcpServers = async () => {
-      try {
-        const state = await fetchAppState();
-        if (!state || !isMounted) {
-          return;
-        }
-        if (!isMounted) {
-          return;
-        }
-        const loadedMcpServers = (state.mcp_servers ?? []).map(
-          mcpServerFromApi,
-        );
-        setMcpServers(loadedMcpServers);
-        setMcpDraft((currentDraft) => {
-          const refreshedServer = loadedMcpServers.find(
-            (server) => server.id === currentDraft.id,
-          );
-          if (!refreshedServer) {
-            return currentDraft;
-          }
-          return {
-            ...currentDraft,
-            error: refreshedServer.error,
-            status: refreshedServer.status,
-            tools: refreshedServer.tools,
-          };
-        });
-      } catch {
-        // Keep showing the optimistic status until the next poll succeeds.
-      }
-    };
-
-    void refreshMcpServers();
-    const intervalId = window.setInterval(() => {
-      void refreshMcpServers();
-    }, 1000);
-
-    return () => {
-      isMounted = false;
-      window.clearInterval(intervalId);
-    };
-  }, [hasStartingMcpServer]);
-
-  useEffect(() => {
     if (!isRefiningContext) {
       return;
     }
@@ -409,78 +349,8 @@ function FlowentApp() {
     setTelegramBot((current) => ({ ...current, ...updates }));
   };
 
-  const loadMcpEditor = (server: McpServer) => {
-    setIsMcpImportOpen(false);
-    setMcpEditorId(server.id);
-    setMcpDraft(server);
-  };
-
-  const openNewMcpEditor = () => {
-    setIsMcpImportOpen(false);
-    setMcpEditorId("new");
-    setMcpDraft(createEmptyMcpServer());
-  };
-
-  const openMcpImport = () => {
-    setIsMcpImportOpen(true);
-    setMcpImportPreview([]);
-    setMcpImportSource("claude_code");
-    void previewMcpImport("claude_code");
-  };
-
   const selectSkill = (skill: Skill) => {
     setActiveSkillId(skill.id);
-  };
-
-  const updateMcpDraft = (updates: Partial<McpServer>) => {
-    setMcpDraft((current) => ({ ...current, ...updates }));
-  };
-
-  const previewMcpImport = async (source = mcpImportSource) => {
-    setIsPreviewingMcpImport(true);
-    try {
-      const servers = await previewMcpImportRequest(source);
-      setMcpImportPreview(servers);
-    } catch {
-      setMcpImportPreview([]);
-      toast.error("Scan could not be completed.");
-    } finally {
-      setIsPreviewingMcpImport(false);
-    }
-  };
-
-  const importMcpServer = async (serverId: string) => {
-    if (!mcpImportPreview.some((server) => server.id === serverId)) {
-      toast.error("No servers found.");
-      return;
-    }
-
-    setImportingMcpServerId(serverId);
-    try {
-      const importedServers = await importMcpServerRequest({
-        serverId,
-        source: mcpImportSource,
-      });
-      setMcpServers(importedServers);
-      const nextServer =
-        importedServers.find((server) => server.id === serverId) ??
-        importedServers[0];
-      if (nextServer) {
-        setIsMcpImportOpen(false);
-        setMcpEditorId(nextServer.id);
-        setMcpDraft(nextServer);
-      }
-    } catch {
-      toast.error("Import could not be completed.");
-    } finally {
-      setImportingMcpServerId("");
-    }
-  };
-
-  const updateMcpImportSource = (source: McpImportSource) => {
-    setMcpImportSource(source);
-    setMcpImportPreview([]);
-    void previewMcpImport(source);
   };
 
   const updateProviderDraft = (updates: Partial<Provider>) => {
@@ -658,76 +528,6 @@ function FlowentApp() {
     const result = await saveTelegramBotRequest(telegramBot);
     if (result) {
       setTelegramBot(result);
-    }
-  };
-
-  const saveMcpServer = async () => {
-    const parsedCommand =
-      mcpDraft.type === "command"
-        ? parseCommandLine(mcpDraft.commandLine)
-        : { args: [], command: "" };
-    const nextServer: McpServer = {
-      ...mcpDraft,
-      args: parsedCommand.args,
-      command: parsedCommand.command,
-      id:
-        isCreatingMcpServer || mcpDraft.id === "new"
-          ? mcpServerId(mcpDraft.name)
-          : mcpDraft.id,
-      name: mcpDraft.name.trim() || "Server",
-      tools: isCreatingMcpServer ? [] : mcpDraft.tools,
-      url: mcpDraft.type === "url" ? mcpDraft.url : "",
-    };
-    const savedServer = await saveMcpServerRequest(nextServer);
-
-    if (savedServer) {
-      setMcpServers((currentServers) => {
-        if (isCreatingMcpServer) {
-          return [...currentServers, savedServer];
-        }
-        return currentServers.map((server) =>
-          server.id === savedServer.id ? savedServer : server,
-        );
-      });
-      setMcpEditorId(savedServer.id);
-      setMcpDraft(savedServer);
-    }
-  };
-
-  const reconnectMcpServer = async () => {
-    if (isCreatingMcpServer) {
-      return;
-    }
-    const updatedServer = await reconnectMcpServerRequest(mcpDraft.id);
-
-    if (updatedServer) {
-      setMcpServers((currentServers) =>
-        currentServers.map((server) =>
-          server.id === updatedServer.id ? updatedServer : server,
-        ),
-      );
-      setMcpDraft(updatedServer);
-    }
-  };
-
-  const removeMcpServer = async () => {
-    if (isCreatingMcpServer) {
-      return;
-    }
-    const wasRemoved = await removeMcpServerRequest(mcpDraft.id);
-
-    if (wasRemoved) {
-      const remainingServers = mcpServers.filter(
-        (server) => server.id !== mcpDraft.id,
-      );
-      setMcpServers(remainingServers);
-      const nextServer = remainingServers[0];
-      if (nextServer) {
-        setMcpEditorId(nextServer.id);
-        setMcpDraft(nextServer);
-      } else {
-        openNewMcpEditor();
-      }
     }
   };
 
