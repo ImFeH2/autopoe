@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ApiMessage, ApiState, RequestResult } from "@/app/api-types";
+import type { ApiMessage, ApiState } from "@/app/api-types";
 import {
   contextWindowFromLimit,
   createEmptyMcpServer,
@@ -66,14 +66,10 @@ import {
   WorkspaceStreamError,
 } from "@/app/workspace-messages";
 import {
-  deleteWorkflowRequest,
-  runWorkflowRequest,
-  saveWorkflowRequest,
-} from "@/app/workflow-requests";
-import {
   readWorkspaceStream,
   type WorkspaceStreamHandlers,
 } from "@/app/workspace-stream";
+import { useWorkflows } from "@/app/use-workflows";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
@@ -101,8 +97,6 @@ import type {
   Skill,
   TelegramBot,
   ViewId,
-  Workflow,
-  WorkflowRunResult,
   WritablePath,
   WorkspaceCommand,
   WorkspaceCommandId,
@@ -161,12 +155,21 @@ function FlowentApp() {
   const errorNotificationKeysRef = useRef<Set<string>>(new Set());
   const hasLoadedStateRef = useRef(false);
   const [streamReconnectKey, setStreamReconnectKey] = useState(0);
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [workflowRunResult, setWorkflowRunResult] =
-    useState<WorkflowRunResult | null>(null);
-  const [runningWorkflowId, setRunningWorkflowId] = useState("");
-  const [activeWorkflowId, setActiveWorkflowId] = useState("");
-  const [newWorkflowKey, setNewWorkflowKey] = useState(0);
+  const {
+    activeWorkflow,
+    activeWorkflowId,
+    closeWorkflowEditor,
+    deleteWorkflow,
+    newWorkflowKey,
+    openNewWorkflow,
+    openWorkflow,
+    replaceWorkflows,
+    runWorkflow,
+    runningWorkflowId,
+    saveWorkflow,
+    workflowRunResult,
+    workflows,
+  } = useWorkflows({ setActiveView });
 
   const activeProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId),
@@ -182,12 +185,6 @@ function FlowentApp() {
     () => mcpServers.some((server) => server.status === "starting"),
     [mcpServers],
   );
-  const activeWorkflow = useMemo(
-    () =>
-      workflows.find((workflow) => workflow.id === activeWorkflowId) ?? null,
-    [activeWorkflowId, workflows],
-  );
-
   const setTrackedUsageInfo = useCallback(
     (
       nextUsageInfo:
@@ -275,7 +272,7 @@ function FlowentApp() {
       const loadedTelegramBot = telegramBotFromApi(state.telegram_bot);
       setTelegramBot(loadedTelegramBot);
       setWritablePaths((state.writable_paths ?? []).map(writablePathFromApi));
-      setWorkflows((state.workflows ?? []).map(workflowFromApi));
+      replaceWorkflows((state.workflows ?? []).map(workflowFromApi));
       const shouldResumeResponse = Boolean(state.is_responding);
       responseEventIndexRef.current = state.response_event_index ?? 0;
       setIsResponding(shouldResumeResponse);
@@ -294,7 +291,7 @@ function FlowentApp() {
         hasLoadedStateRef.current = true;
       }
     },
-    [setTrackedUsageInfo],
+    [replaceWorkflows, setTrackedUsageInfo],
   );
 
   const refreshAppState = useCallback(async () => {
@@ -1294,81 +1291,6 @@ function FlowentApp() {
       setMessages(previousMessages);
       setTrackedUsageInfo(previousUsageInfo);
       showWorkspaceNotification("Conversation could not be cleared.");
-    }
-  };
-
-  const openNewWorkflow = () => {
-    setActiveWorkflowId("");
-    setWorkflowRunResult(null);
-    setNewWorkflowKey((currentKey) => currentKey + 1);
-    setActiveView("workflows");
-  };
-
-  const openWorkflow = (workflowId: string) => {
-    setActiveWorkflowId(workflowId);
-    setActiveView("workflows");
-  };
-
-  const closeWorkflowEditor = () => {
-    setActiveView("workspace");
-  };
-
-  const saveWorkflow = async (
-    workflow: Workflow,
-  ): Promise<RequestResult<Workflow>> => {
-    const result = await saveWorkflowRequest(workflow);
-    if (!result.data) {
-      return result;
-    }
-    const savedWorkflow = result.data;
-    setWorkflows((currentWorkflows) => {
-      if (
-        currentWorkflows.some(
-          (currentWorkflow) => currentWorkflow.id === savedWorkflow.id,
-        )
-      ) {
-        return currentWorkflows.map((currentWorkflow) =>
-          currentWorkflow.id === savedWorkflow.id
-            ? savedWorkflow
-            : currentWorkflow,
-        );
-      }
-      return [savedWorkflow, ...currentWorkflows];
-    });
-    setActiveWorkflowId(savedWorkflow.id);
-    return result;
-  };
-
-  const deleteWorkflow = async (workflowId: string) => {
-    const wasDeleted = await deleteWorkflowRequest(workflowId);
-
-    if (!wasDeleted) {
-      return false;
-    }
-
-    setWorkflows((currentWorkflows) =>
-      currentWorkflows.filter((workflow) => workflow.id !== workflowId),
-    );
-    if (workflowRunResult?.workflowId === workflowId) {
-      setWorkflowRunResult(null);
-    }
-    if (activeWorkflowId === workflowId) {
-      setActiveWorkflowId("");
-    }
-    return true;
-  };
-
-  const runWorkflow = async (
-    workflowId: string,
-  ): Promise<RequestResult<WorkflowRunResult>> => {
-    setRunningWorkflowId(workflowId);
-    setWorkflowRunResult(null);
-    try {
-      const result = await runWorkflowRequest(workflowId);
-      setWorkflowRunResult(result.data);
-      return result;
-    } finally {
-      setRunningWorkflowId("");
     }
   };
 
