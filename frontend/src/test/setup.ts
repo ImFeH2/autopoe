@@ -36,4 +36,5 @@ if (!globalThis.ResizeObserver) {
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
 });

@@ -192,9 +192,37 @@ const selectedProviderState = () => ({
   workflows: [singleInputWorkflow()],
 });
 
+const mockAppFetch = (
+  handler?: (input: RequestInfo | URL, init?: RequestInit) => Response | null,
+) => {
+  vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+    const handledResponse = handler?.(input, init);
+    if (handledResponse) {
+      return handledResponse;
+    }
+    if (input === "/api/state") {
+      return new Response(JSON.stringify(selectedProviderState()), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    if (input === "/api/about") {
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    return new Response(JSON.stringify({}), {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    });
+  });
+};
+
 describe("workflow save regressions", () => {
   beforeEach(() => {
     reactFlowRenderMock.mockClear();
+    window.history.replaceState(null, "", "/");
   });
 
   afterEach(() => {
@@ -203,19 +231,7 @@ describe("workflow save regressions", () => {
 
   it("shows the specific run problem for a saved incomplete workflow draft", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
-      if (input === "/api/state") {
-        return new Response(JSON.stringify(selectedProviderState()), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (input === "/api/about") {
-        return new Response(JSON.stringify({}), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
+    mockAppFetch((input, init) => {
       if (input === "/api/workflows" && init?.method === "PUT") {
         return new Response(String(init.body), {
           headers: { "Content-Type": "application/json" },
@@ -235,10 +251,7 @@ describe("workflow save regressions", () => {
           },
         );
       }
-      return new Response(JSON.stringify({}), {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
+      return null;
     });
 
     render(<App />);
@@ -257,19 +270,7 @@ describe("workflow save regressions", () => {
   it("keeps node movement local while dragging and saves the dropped position", async () => {
     const user = userEvent.setup();
     const saveBodies: unknown[] = [];
-    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
-      if (input === "/api/state") {
-        return new Response(JSON.stringify(selectedProviderState()), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
-      if (input === "/api/about") {
-        return new Response(JSON.stringify({}), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
-      }
+    mockAppFetch((input, init) => {
       if (input === "/api/workflows" && init?.method === "PUT") {
         const body = JSON.parse(String(init.body));
         saveBodies.push(body);
@@ -278,10 +279,7 @@ describe("workflow save regressions", () => {
           status: 200,
         });
       }
-      return new Response(JSON.stringify({}), {
-        headers: { "Content-Type": "application/json" },
-        status: 200,
-      });
+      return null;
     });
 
     render(<App />);
@@ -321,5 +319,59 @@ describe("workflow save regressions", () => {
         }),
       }),
     );
+  });
+
+  it("reopens the selected workflow after a page refresh", async () => {
+    mockAppFetch();
+    window.history.replaceState(
+      null,
+      "",
+      "/?view=workflows&workflow=workflow-draft",
+    );
+
+    render(<App />);
+
+    expect(
+      await screen.findByDisplayValue("Draft Workflow"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Workflows" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Draft Workflow" })).toHaveClass(
+      "bg-[#2f2f2f]",
+    );
+  });
+
+  it("syncs workflow navigation with browser history", async () => {
+    const user = userEvent.setup();
+    mockAppFetch();
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("tab", { name: "Workspace" }),
+    ).toHaveAttribute("aria-selected", "true");
+
+    await user.click(screen.getByRole("button", { name: "Draft Workflow" }));
+
+    await waitFor(() => {
+      expect(window.location.search).toBe(
+        "?view=workflows&workflow=workflow-draft",
+      );
+    });
+    expect(screen.getByRole("tab", { name: "Workflows" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByDisplayValue("Draft Workflow")).toBeInTheDocument();
+
+    window.history.back();
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Workspace" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
   });
 });

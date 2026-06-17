@@ -6,22 +6,14 @@ import {
   saveWorkflowRequest,
 } from "@/app/api/workflow-requests";
 import type { RequestResult } from "@/app/api/types";
-import type {
-  ViewId,
-  Workflow,
-  WorkflowRunResult,
-} from "@/components/flowent/types";
+import type { Workflow, WorkflowRunResult } from "@/components/flowent/types";
 
-export const useWorkflows = ({
-  setActiveView,
-}: {
-  setActiveView: (view: ViewId) => void;
-}) => {
+export const useWorkflows = (initialWorkflowId = "") => {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [workflowRunResult, setWorkflowRunResult] =
     useState<WorkflowRunResult | null>(null);
   const [runningWorkflowId, setRunningWorkflowId] = useState("");
-  const [activeWorkflowId, setActiveWorkflowId] = useState("");
+  const [activeWorkflowId, setActiveWorkflowId] = useState(initialWorkflowId);
   const [newWorkflowKey, setNewWorkflowKey] = useState(0);
 
   const activeWorkflow = useMemo(
@@ -32,26 +24,27 @@ export const useWorkflows = ({
 
   const replaceWorkflows = useCallback((nextWorkflows: Workflow[]) => {
     setWorkflows(nextWorkflows);
+    setActiveWorkflowId((currentWorkflowId) =>
+      currentWorkflowId &&
+      !nextWorkflows.some((workflow) => workflow.id === currentWorkflowId)
+        ? ""
+        : currentWorkflowId,
+    );
   }, []);
 
   const openNewWorkflow = useCallback(() => {
     setActiveWorkflowId("");
     setWorkflowRunResult(null);
     setNewWorkflowKey((currentKey) => currentKey + 1);
-    setActiveView("workflows");
-  }, [setActiveView]);
+  }, []);
 
-  const openWorkflow = useCallback(
-    (workflowId: string) => {
-      setActiveWorkflowId(workflowId);
-      setActiveView("workflows");
-    },
-    [setActiveView],
-  );
+  const openWorkflow = useCallback((workflowId: string) => {
+    setActiveWorkflowId(workflowId);
+  }, []);
 
   const closeWorkflowEditor = useCallback(() => {
-    setActiveView("workspace");
-  }, [setActiveView]);
+    setActiveWorkflowId("");
+  }, []);
 
   const saveWorkflow = useCallback(
     async (workflow: Workflow): Promise<RequestResult<Workflow>> => {

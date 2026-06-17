@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ApiState } from "@/app/api/types";
 import { useWorkflows } from "@/app/controllers/use-workflows";
@@ -7,6 +7,10 @@ import { useSetupSections } from "@/app/controllers/use-setup-sections";
 import { useProviderSettings } from "@/app/controllers/use-provider-settings";
 import { useWorkspaceController } from "@/app/controllers/use-workspace-controller";
 import { useAppHydration } from "@/app/controllers/use-app-hydration";
+import {
+  readNavigationState,
+  writeNavigationState,
+} from "@/app/navigation-state";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
@@ -24,7 +28,10 @@ import { TabsContent } from "@/components/ui/tabs";
 
 function FlowentApp() {
   const toast = useFlowentToast();
-  const [activeView, setActiveView] = useState<ViewId>("workspace");
+  const initialNavigationState = useMemo(() => readNavigationState(), []);
+  const [activeView, setActiveView] = useState<ViewId>(
+    initialNavigationState.view,
+  );
   const refreshAppStateRef = useRef<(() => Promise<ApiState | null>) | null>(
     null,
   );
@@ -142,7 +149,7 @@ function FlowentApp() {
     saveWorkflow,
     workflowRunResult,
     workflows,
-  } = useWorkflows({ setActiveView });
+  } = useWorkflows(initialNavigationState.workflowId);
 
   const { appVersion, refreshAppState } = useAppHydration({
     loadWorkspaceState,
@@ -160,14 +167,62 @@ function FlowentApp() {
   });
   refreshAppStateRef.current = refreshAppState;
 
+  const updateNavigation = useCallback(
+    (view: ViewId, workflowId = "", options?: { replace?: boolean }) => {
+      setActiveView(view);
+      if (view === "workflows") {
+        if (workflowId) {
+          openWorkflow(workflowId);
+        } else {
+          openNewWorkflow();
+        }
+      }
+      writeNavigationState({ view, workflowId }, options);
+    },
+    [openNewWorkflow, openWorkflow],
+  );
+
+  useEffect(() => {
+    writeNavigationState(
+      {
+        view: activeView,
+        workflowId: activeView === "workflows" ? activeWorkflowId : "",
+      },
+      { replace: true },
+    );
+  }, [activeView, activeWorkflowId]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextNavigationState = readNavigationState();
+      setActiveView(nextNavigationState.view);
+      if (nextNavigationState.view === "workflows") {
+        if (nextNavigationState.workflowId) {
+          openWorkflow(nextNavigationState.workflowId);
+        } else {
+          openNewWorkflow();
+        }
+        return;
+      }
+      closeWorkflowEditor();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [closeWorkflowEditor, openNewWorkflow, openWorkflow]);
+
   return (
     <AppShell
       activeProviderName={activeProvider?.name}
       activeView={activeView}
       activeWorkflowId={activeWorkflowId}
-      onNewWorkflow={openNewWorkflow}
-      onViewChange={setActiveView}
-      onWorkflowSelect={openWorkflow}
+      onNewWorkflow={() => updateNavigation("workflows")}
+      onViewChange={(view) => updateNavigation(view)}
+      onWorkflowSelect={(workflowId) =>
+        updateNavigation("workflows", workflowId)
+      }
       workflows={workflows}
     >
       <TabsContent
@@ -208,7 +263,7 @@ function FlowentApp() {
           activeWorkflow={activeWorkflow}
           isRunningWorkflow={Boolean(runningWorkflowId)}
           newWorkflowKey={newWorkflowKey}
-          onCloseEditor={closeWorkflowEditor}
+          onCloseEditor={() => updateNavigation("workspace")}
           onDeleteWorkflow={deleteWorkflow}
           onRunWorkflow={runWorkflow}
           onSaveWorkflow={saveWorkflow}

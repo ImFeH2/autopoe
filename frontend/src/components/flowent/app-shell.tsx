@@ -160,7 +160,11 @@ export function AppShell({
             <NavigationTrigger item={workspaceNavigationItem} />
             <NavigationTrigger
               item={workflowsNavigationItem}
-              onClick={onNewWorkflow}
+              onClick={
+                activeView === "workflows" && activeWorkflowId
+                  ? onNewWorkflow
+                  : undefined
+              }
               suppressActiveStyle={
                 activeView === "workflows" && Boolean(activeWorkflowId)
               }
