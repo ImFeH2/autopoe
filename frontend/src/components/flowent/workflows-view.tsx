@@ -28,6 +28,8 @@ import {
   ReactFlow,
   ReactFlowProvider,
   addEdge,
+  applyEdgeChanges,
+  applyNodeChanges,
   useEdgesState,
   useNodesState,
   useReactFlow,
@@ -36,6 +38,8 @@ import {
   type Node,
   type NodeProps,
   type OnConnect,
+  type OnEdgesChange,
+  type OnNodesChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -337,13 +341,23 @@ function WorkflowCanvas({
   const previousWorkflowIdRef = useRef(draftWorkflow.id);
   const [selectedElement, setSelectedElement] =
     useState<SelectedElement | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowCanvasNode>(
+  const [nodes, setNodes] = useNodesState<WorkflowCanvasNode>(
     workflowToFlowNodes(draftWorkflow, runResult),
   );
-  const [edges, setEdges, onEdgesChange] = useEdgesState<WorkflowCanvasEdge>(
+  const [edges, setEdges] = useEdgesState<WorkflowCanvasEdge>(
     workflowToFlowEdges(draftWorkflow),
   );
   const [nodeSearch, setNodeSearch] = useState("");
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   useEffect(() => {
     setNodes(workflowToFlowNodes(draftWorkflow, runResult));
@@ -412,11 +426,52 @@ function WorkflowCanvas({
           markerEnd: { type: MarkerType.ArrowClosed },
         } satisfies WorkflowCanvasEdge;
         const nextEdges = addEdge<WorkflowCanvasEdge>(nextEdge, currentEdges);
-        commitGraph(nodes, nextEdges);
+        edgesRef.current = nextEdges;
+        commitGraph(nodesRef.current, nextEdges);
         return nextEdges;
       });
     },
-    [commitGraph, nodes, setEdges],
+    [commitGraph, setEdges],
+  );
+
+  const handleEdgesChange: OnEdgesChange<WorkflowCanvasEdge> = useCallback(
+    (changes) => {
+      setEdges((currentEdges) => {
+        const nextEdges = applyEdgeChanges(changes, currentEdges);
+        edgesRef.current = nextEdges;
+        if (changes.some((change) => change.type !== "select")) {
+          window.requestAnimationFrame(() => {
+            commitGraph(nodesRef.current, nextEdges);
+          });
+        }
+        return nextEdges;
+      });
+    },
+    [commitGraph, setEdges],
+  );
+
+  const handleNodesChange: OnNodesChange<WorkflowCanvasNode> = useCallback(
+    (changes) => {
+      setNodes((currentNodes) => {
+        const nextNodes = applyNodeChanges(changes, currentNodes);
+        nodesRef.current = nextNodes;
+        if (
+          changes.some(
+            (change) =>
+              change.type === "remove" ||
+              change.type === "add" ||
+              change.type === "replace" ||
+              (change.type === "position" && change.dragging !== true),
+          )
+        ) {
+          window.requestAnimationFrame(() => {
+            commitGraph(nextNodes, edgesRef.current);
+          });
+        }
+        return nextNodes;
+      });
+    },
+    [commitGraph, setNodes],
   );
 
   const addNode = useCallback(
@@ -654,39 +709,14 @@ function WorkflowCanvas({
           nodes={nodes}
           nodeTypes={nodeTypes}
           onConnect={onConnect}
-          onEdgesChange={(changes) => {
-            onEdgesChange(changes);
-            if (changes.some((change) => change.type !== "select")) {
-              window.requestAnimationFrame(() => {
-                setEdges((currentEdges) => {
-                  commitGraph(nodes, currentEdges);
-                  return currentEdges;
-                });
-              });
-            }
-          }}
+          onEdgesChange={handleEdgesChange}
           onEdgeClick={(_, edge) => {
             setSelectedElement({ id: edge.id, kind: "edge" });
           }}
           onNodeClick={(_, node) => {
             setSelectedElement({ id: node.id, kind: "node" });
           }}
-          onNodesChange={(changes) => {
-            onNodesChange(changes);
-            if (
-              changes.some(
-                (change) =>
-                  change.type !== "select" && change.type !== "dimensions",
-              )
-            ) {
-              window.requestAnimationFrame(() => {
-                setNodes((currentNodes) => {
-                  commitGraph(currentNodes, edges);
-                  return currentNodes;
-                });
-              });
-            }
-          }}
+          onNodesChange={handleNodesChange}
           onPaneClick={() => setSelectedElement(null)}
           proOptions={{ hideAttribution: true }}
         >

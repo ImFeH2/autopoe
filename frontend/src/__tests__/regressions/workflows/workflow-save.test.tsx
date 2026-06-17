@@ -1,8 +1,146 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { type ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
+
+type FlowNode = {
+  data: Record<string, unknown>;
+  id: string;
+  position: { x: number; y: number };
+  type?: string;
+};
+
+type FlowEdge = {
+  data?: Record<string, unknown>;
+  id: string;
+  label?: string;
+  markerEnd?: Record<string, unknown>;
+  source: string;
+  sourceHandle?: string;
+  target: string;
+  targetHandle?: string;
+};
+
+type NodeChange =
+  | {
+      dragging?: boolean;
+      id: string;
+      position: { x: number; y: number };
+      type: "position";
+    }
+  | {
+      id: string;
+      type: "remove" | "select";
+    };
+
+type EdgeChange = {
+  id: string;
+  type: "remove" | "select";
+};
+
+type ReactFlowMockProps = {
+  children?: ReactNode;
+  edges: FlowEdge[];
+  nodes: FlowNode[];
+  onNodesChange?: (changes: NodeChange[]) => void;
+};
+
+const { reactFlowRenderMock } = vi.hoisted(() => ({
+  reactFlowRenderMock: vi.fn(),
+}));
+
+vi.mock("@xyflow/react", async () => {
+  const React = await import("react");
+  return {
+    Background: () => <div data-testid="workflow-background" />,
+    Handle: () => <span data-testid="workflow-handle" />,
+    MarkerType: { ArrowClosed: "arrowclosed" },
+    Position: { Bottom: "bottom", Top: "top" },
+    ReactFlow: ({
+      children,
+      edges,
+      nodes,
+      onNodesChange,
+    }: ReactFlowMockProps) => {
+      reactFlowRenderMock({ edges, nodes });
+      return (
+        <div data-testid="workflow-flow">
+          {nodes.map((node) => (
+            <button
+              data-testid={`workflow-node-${node.id}`}
+              key={node.id}
+              onClick={() => {
+                onNodesChange?.([
+                  {
+                    dragging: true,
+                    id: node.id,
+                    position: { x: 480, y: 160 },
+                    type: "position",
+                  },
+                ]);
+              }}
+              onDoubleClick={() => {
+                onNodesChange?.([
+                  {
+                    dragging: false,
+                    id: node.id,
+                    position: { x: 480, y: 160 },
+                    type: "position",
+                  },
+                ]);
+              }}
+              type="button"
+            >
+              {String(node.data.label)}
+            </button>
+          ))}
+          {children}
+        </div>
+      );
+    },
+    ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
+    addEdge: (edge: FlowEdge, edges: FlowEdge[]) => [...edges, edge],
+    applyEdgeChanges: (changes: EdgeChange[], edges: FlowEdge[]) =>
+      edges.filter(
+        (edge) =>
+          !changes.some(
+            (change) => change.type === "remove" && change.id === edge.id,
+          ),
+      ),
+    applyNodeChanges: (changes: NodeChange[], nodes: FlowNode[]) =>
+      nodes
+        .filter(
+          (node) =>
+            !changes.some(
+              (change) => change.type === "remove" && change.id === node.id,
+            ),
+        )
+        .map((node) => {
+          const positionChange = changes.find(
+            (change) => change.type === "position" && change.id === node.id,
+          );
+          return positionChange?.type === "position"
+            ? { ...node, position: positionChange.position }
+            : node;
+        }),
+    useEdgesState: (initialEdges: FlowEdge[]) => {
+      const [edges, setEdges] = React.useState(initialEdges);
+      return [edges, setEdges];
+    },
+    useNodesState: (initialNodes: FlowNode[]) => {
+      const [nodes, setNodes] = React.useState(initialNodes);
+      return [nodes, setNodes];
+    },
+    useReactFlow: () => ({
+      fitView: vi.fn(),
+      screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
+      zoomIn: vi.fn(),
+      zoomOut: vi.fn(),
+    }),
+  };
+});
 
 const singleInputWorkflow = () => ({
   created_at: 1710000020,
@@ -55,6 +193,10 @@ const selectedProviderState = () => ({
 });
 
 describe("workflow save regressions", () => {
+  beforeEach(() => {
+    reactFlowRenderMock.mockClear();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -110,5 +252,74 @@ describe("workflow save regressions", () => {
       await screen.findByText("Workflow needs an output node."),
     ).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("Run could not be completed.");
+  });
+
+  it("keeps node movement local while dragging and saves the dropped position", async () => {
+    const user = userEvent.setup();
+    const saveBodies: unknown[] = [];
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workflows" && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body));
+        saveBodies.push(body);
+        return new Response(JSON.stringify(body), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Draft Workflow" }),
+    );
+    await user.click(screen.getByTestId("workflow-node-input"));
+
+    expect(screen.queryByText("Unsaved")).not.toBeInTheDocument();
+    expect(saveBodies).toHaveLength(0);
+    expect(
+      reactFlowRenderMock.mock.calls.some(([rendered]) => {
+        const inputNode = rendered.nodes.find(
+          (node: FlowNode) => node.id === "input",
+        );
+        return inputNode?.position.x === 480 && inputNode.position.y === 160;
+      }),
+    ).toBe(true);
+
+    await user.dblClick(screen.getByTestId("workflow-node-input"));
+    await waitFor(() => {
+      expect(screen.getByText("Unsaved")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(saveBodies).toHaveLength(1);
+    expect(saveBodies[0]).toEqual(
+      expect.objectContaining({
+        definition: expect.objectContaining({
+          nodes: [
+            expect.objectContaining({
+              id: "input",
+              position: { x: 480, y: 160 },
+            }),
+          ],
+        }),
+      }),
+    );
   });
 });
