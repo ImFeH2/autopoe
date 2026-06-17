@@ -1,20 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { ApiState } from "@/app/api/types";
-import {
-  errorNotificationKeysFromState,
-  mcpServerFromApi,
-  providerFromApi,
-  telegramBotFromApi,
-  writablePathFromApi,
-  workflowFromApi,
-} from "@/app/api/mappers";
-import { fetchAbout, fetchAppState } from "@/app/api/state-requests";
 import { useWorkflows } from "@/app/controllers/use-workflows";
 import { useMcpServers } from "@/app/controllers/use-mcp-servers";
 import { useSetupSections } from "@/app/controllers/use-setup-sections";
 import { useProviderSettings } from "@/app/controllers/use-provider-settings";
 import { useWorkspaceController } from "@/app/controllers/use-workspace-controller";
+import { useAppHydration } from "@/app/controllers/use-app-hydration";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
@@ -33,9 +25,6 @@ import { TabsContent } from "@/components/ui/tabs";
 function FlowentApp() {
   const toast = useFlowentToast();
   const [activeView, setActiveView] = useState<ViewId>("workspace");
-  const [appVersion, setAppVersion] = useState("");
-  const errorNotificationKeysRef = useRef<Set<string>>(new Set());
-  const hasLoadedStateRef = useRef(false);
   const refreshAppStateRef = useRef<(() => Promise<ApiState | null>) | null>(
     null,
   );
@@ -155,123 +144,21 @@ function FlowentApp() {
     workflows,
   } = useWorkflows({ setActiveView });
 
-  useEffect(() => {
-    const nextNotificationKeys = new Set<string>();
-
-    const notifyOnce = (key: string, message: string) => {
-      nextNotificationKeys.add(key);
-      if (errorNotificationKeysRef.current.has(key)) {
-        return;
-      }
-      toast.error(message);
-    };
-
-    if (telegramBot.status === "error" && telegramBot.error) {
-      notifyOnce(`channel:telegram:${telegramBot.error}`, telegramBot.error);
-    }
-
-    for (const server of mcpServers) {
-      if (server.status !== "error" || !server.error) {
-        continue;
-      }
-      notifyOnce(`mcp:${server.id}:${server.error}`, server.error);
-    }
-
-    for (const skill of skills) {
-      if (!skill.enabled || !skill.error) {
-        continue;
-      }
-      notifyOnce(`skill:${skill.id}:${skill.error}`, skill.error);
-    }
-
-    errorNotificationKeysRef.current = nextNotificationKeys;
-  }, [mcpServers, skills, telegramBot, toast]);
-
-  const applyLoadedState = useCallback(
-    (state: ApiState) => {
-      const loadedProviders = state.providers.map(providerFromApi);
-      replaceProviders(loadedProviders);
-      const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
-      replaceMcpServers(loadedMcpServers);
-      const loadedSkills = state.skills ?? [];
-      replaceSkills(loadedSkills);
-      replaceRuntimeSettings({
-        agentPrompt: state.settings.agent_prompt ?? "",
-        contextWindowLimit: state.settings.context_window_limit ?? null,
-        reasoningEffort: state.settings.reasoning_effort ?? "default",
-        selectedModel: state.settings.selected_model,
-        selectedProviderId: state.settings.selected_provider_id,
-      });
-      const loadedTelegramBot = telegramBotFromApi(state.telegram_bot);
-      replaceTelegramBot(loadedTelegramBot);
-      replaceWritablePaths(
-        (state.writable_paths ?? []).map(writablePathFromApi),
-      );
-      replaceWorkflows((state.workflows ?? []).map(workflowFromApi));
-      loadWorkspaceState(state, {
-        reconnectIfResponding: !hasLoadedStateRef.current,
-      });
-      if (!hasLoadedStateRef.current) {
-        errorNotificationKeysRef.current = new Set(
-          errorNotificationKeysFromState(
-            loadedTelegramBot,
-            loadedMcpServers,
-            loadedSkills,
-          ),
-        );
-        hasLoadedStateRef.current = true;
-      }
-    },
-    [
-      replaceMcpServers,
-      replaceProviders,
-      replaceRuntimeSettings,
-      replaceSkills,
-      replaceTelegramBot,
-      replaceWorkflows,
-      replaceWritablePaths,
-      loadWorkspaceState,
-    ],
-  );
-
-  const refreshAppState = useCallback(async () => {
-    const state = await fetchAppState();
-    if (!state) {
-      return null;
-    }
-    applyLoadedState(state);
-    return state;
-  }, [applyLoadedState]);
+  const { appVersion, refreshAppState } = useAppHydration({
+    loadWorkspaceState,
+    mcpServers,
+    replaceMcpServers,
+    replaceProviders,
+    replaceRuntimeSettings,
+    replaceSkills,
+    replaceTelegramBot,
+    replaceWorkflows,
+    replaceWritablePaths,
+    showError: toast.error,
+    skills,
+    telegramBot,
+  });
   refreshAppStateRef.current = refreshAppState;
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadState = async () => {
-      try {
-        const [state, about] = await Promise.all([
-          refreshAppState(),
-          fetchAbout(),
-        ]);
-        if (!state) {
-          return;
-        }
-        if (!isMounted) {
-          return;
-        }
-
-        setAppVersion(typeof about.version === "string" ? about.version : "");
-      } catch {
-        // Keep the local empty state when persistence is unavailable.
-      }
-    };
-
-    void loadState();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [refreshAppState]);
 
   return (
     <AppShell
