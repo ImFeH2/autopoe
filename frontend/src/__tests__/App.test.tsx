@@ -179,7 +179,7 @@ type TestWorkflowNode = {
     x: number;
     y: number;
   };
-  type: "agent" | "input" | "merge" | "output";
+  type: "agent" | "code" | "input" | "merge" | "output";
 };
 
 type TestWorkflowEdge = {
@@ -1878,6 +1878,46 @@ describe("App", () => {
         }),
       );
     });
+  });
+
+  it("adds a code node and saves its Python code", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Workflows" }));
+    await user.click(screen.getByRole("button", { name: "Code Python step" }));
+    const codeNodeLabel = screen
+      .getAllByText("Code")
+      .find((element) => element.closest(".react-flow__node"));
+    expect(codeNodeLabel).toBeTruthy();
+    fireEvent.click(codeNodeLabel!);
+    await user.clear(screen.getByLabelText("Python Code"));
+    await user.type(
+      screen.getByLabelText("Python Code"),
+      "output = input.upper()",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(window.fetch).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({
+          body: expect.stringContaining('"type":"code"'),
+          method: "PUT",
+        }),
+      );
+    });
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workflows",
+      expect.objectContaining({
+        body: expect.stringContaining('"code":"output = input.upper()"'),
+        method: "PUT",
+      }),
+    );
   });
 
   it("runs a saved workflow and shows node results", async () => {

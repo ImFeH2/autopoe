@@ -90,7 +90,7 @@ class StoredWorkflowNode(BaseModel):
     position: StoredWorkflowNodePosition = Field(
         default_factory=StoredWorkflowNodePosition
     )
-    type: Literal["input", "agent", "merge", "output"]
+    type: Literal["input", "agent", "merge", "code", "output"]
 
 
 class StoredWorkflowEdge(BaseModel):

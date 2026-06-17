@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Bot,
   ClipboardList,
+  Code2,
   GitMerge,
   Loader2,
   Maximize,
@@ -126,6 +127,12 @@ const nodeTemplates: NodeTemplate[] = [
     type: "merge",
   },
   {
+    description: "Python step",
+    icon: Code2,
+    label: "Code",
+    type: "code",
+  },
+  {
     description: "Final result",
     icon: ClipboardList,
     label: "Output",
@@ -135,6 +142,7 @@ const nodeTemplates: NodeTemplate[] = [
 
 const nodeIconByType = {
   agent: Bot,
+  code: Code2,
   input: Square,
   merge: GitMerge,
   output: ClipboardList,
@@ -179,6 +187,9 @@ const defaultNodeData = (type: WorkflowNodeType): Record<string, unknown> => {
   }
   if (type === "merge") {
     return { merge_strategy: "text" };
+  }
+  if (type === "code") {
+    return { code: "output = input" };
   }
   return { output_key: "final_result", transform: "" };
 };
@@ -729,6 +740,7 @@ function WorkflowCanvas({
             const Icon = template.icon;
             return (
               <Button
+                aria-label={`${template.label} ${template.description}`}
                 className="h-auto w-full justify-start gap-2 rounded-md border border-white/10 bg-input/30 px-2.5 py-2 text-left text-white shadow-none hover:bg-input/50"
                 draggable
                 key={template.type}
@@ -989,6 +1001,19 @@ function NodeProperties({
               <SelectItem value="json">JSON Merge</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+      ) : null}
+      {node.type === "code" ? (
+        <div className={fieldGroupClassName}>
+          <Label className={fieldLabelClassName} htmlFor={`${node.id}-code`}>
+            Python Code
+          </Label>
+          <Textarea
+            className="min-h-40 rounded-md border-white/10 bg-input/30 font-mono text-sm leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
+            id={`${node.id}-code`}
+            onChange={(event) => onNodeDataChange("code", event.target.value)}
+            value={String(node.data.code ?? "")}
+          />
         </div>
       ) : null}
       {node.type === "output" ? (

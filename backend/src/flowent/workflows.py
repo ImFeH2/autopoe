@@ -1,7 +1,10 @@
 import json
 import re
+import sys
+import tempfile
 from collections import defaultdict, deque
 from collections.abc import Mapping
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +14,7 @@ from flowent.llm import (
     ProviderConnection,
     complete_chat,
 )
+from flowent.sandbox import SandboxRunner
 from flowent.storage import (
     StoredWorkflow,
     StoredWorkflowDefinition,
@@ -38,6 +42,31 @@ class WorkflowRunResponse(BaseModel):
 
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z0-9_.-]+)\.output\s*\}\}")
+PYTHON_CODE_RUNNER = r"""
+import contextlib
+import io
+import json
+import sys
+
+payload = json.loads(sys.stdin.read() or "{}")
+namespace = {
+    "input": payload.get("input", ""),
+    "inputs": payload.get("inputs", []),
+    "output": "",
+}
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    exec(str(payload.get("code", "")), namespace)
+captured = stdout.getvalue()
+result = namespace.get("output")
+if result is None:
+    result = ""
+if result == "" and captured:
+    result = captured.rstrip("\n")
+if not isinstance(result, str):
+    result = json.dumps(result, ensure_ascii=False)
+print(result, end="")
+"""
 
 
 def validate_workflow(workflow: StoredWorkflow) -> StoredWorkflow:
@@ -220,9 +249,33 @@ async def run_node(
         if node_data_text(node, "merge_strategy") == "json":
             return merge_json_outputs(upstream)
         return "\n".join(output for output in upstream if output)
+    if node.type == "code":
+        return await run_code_node(node, upstream_outputs(incoming_edges, outputs))
     if node.type == "output":
         return joined_upstream_outputs(incoming_edges, outputs)
     raise ValueError("Node type is not supported.")
+
+
+async def run_code_node(node: StoredWorkflowNode, upstream: list[str]) -> str:
+    code = node_data_text(node, "code")
+    if not code.strip():
+        return joined_text(upstream)
+    with tempfile.TemporaryDirectory(prefix="flowent-workflow-code-") as code_dir:
+        result = await SandboxRunner(timeout_seconds=10, cwd=Path(code_dir)).run_async(
+            [sys.executable, "-I", "-c", PYTHON_CODE_RUNNER],
+            input_text=json.dumps(
+                {
+                    "code": code,
+                    "input": joined_text(upstream),
+                    "inputs": upstream,
+                },
+                ensure_ascii=False,
+            ),
+            timeout_seconds=10,
+        )
+    if result.exit_code != 0:
+        raise ValueError((result.stderr or result.stdout).strip() or "Code failed.")
+    return result.stdout
 
 
 def edges_by_target(
@@ -258,9 +311,11 @@ def joined_upstream_outputs(
     incoming_edges: list[StoredWorkflowEdge],
     outputs: Mapping[str, str],
 ) -> str:
-    return "\n".join(
-        output for output in upstream_outputs(incoming_edges, outputs) if output
-    )
+    return joined_text(upstream_outputs(incoming_edges, outputs))
+
+
+def joined_text(values: list[str]) -> str:
+    return "\n".join(value for value in values if value)
 
 
 def render_template(template: str, outputs: Mapping[str, str]) -> str:

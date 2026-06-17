@@ -216,7 +216,7 @@ export type RuntimeSettings = {
   selectedProviderId: string;
 };
 
-export type WorkflowNodeType = "input" | "agent" | "merge" | "output";
+export type WorkflowNodeType = "input" | "agent" | "merge" | "code" | "output";
 
 export type WorkflowNodePosition = {
   x: number;
