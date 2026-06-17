@@ -23,6 +23,7 @@ from flowent.routes.workspace import register_workspace_routes
 from flowent.sandbox import ensure_sandbox_available
 from flowent.storage import StateStore
 from flowent.system_tools import ensure_ripgrep_available
+from flowent.workflow_service import WorkflowService
 from flowent.workspace.runtime import WorkspaceRuntime
 
 logger = logging.getLogger("flowent.app")
@@ -57,6 +58,10 @@ def create_app(
     store = StateStore()
     compact_provider = LocalSummaryCompactProvider()
     mcp_manager = McpManager(store=store, transport=mcp_transport)
+    workflow_service = WorkflowService(
+        chat_completion=chat_completion,
+        store=store,
+    )
 
     static_dir = frontend_static_directory().resolve(strict=False)
     logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
@@ -69,6 +74,7 @@ def create_app(
         cwd=cwd,
         mcp_manager=mcp_manager,
         store=store,
+        workflow_service=workflow_service,
     )
 
     telegram_bot_manager = TelegramBotManager(
@@ -121,8 +127,7 @@ def create_app(
     )
     register_workflow_routes(
         app,
-        chat_completion=chat_completion,
-        store=store,
+        workflow_service=workflow_service,
     )
     register_permission_routes(app, cwd=cwd, store=store)
     register_workspace_routes(app, runtime=runtime, store=store)

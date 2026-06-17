@@ -165,6 +165,8 @@ async def run_workflow_definition(
     completion: CompletionCallable | None,
     connection: ProviderConnection | None,
     definition: StoredWorkflowDefinition,
+    default_input: str = "",
+    input_values: Mapping[str, str] | None = None,
     workflow_id: str,
 ) -> WorkflowRunResponse:
     ordered_ids = validate_workflow_definition(definition)
@@ -179,6 +181,7 @@ async def run_workflow_definition(
     }
     outputs: dict[str, str] = {}
     named_outputs: dict[str, str] = {}
+    remaining_default_input = default_input
 
     for node_id in ordered_ids:
         node = nodes[node_id]
@@ -187,10 +190,14 @@ async def run_workflow_definition(
             output = await run_node(
                 completion=completion,
                 connection=connection,
+                default_input=remaining_default_input,
+                input_values=input_values or {},
                 incoming_edges=incoming_edges[node.id],
                 node=node,
                 outputs=outputs,
             )
+            if node.type == "input" and remaining_default_input:
+                remaining_default_input = ""
         except Exception as error:
             results[node.id] = WorkflowNodeRunResult(
                 error=str(error) or "Node could not be completed.",
@@ -224,11 +231,17 @@ async def run_node(
     *,
     completion: CompletionCallable | None,
     connection: ProviderConnection | None,
+    default_input: str,
+    input_values: Mapping[str, str],
     incoming_edges: list[StoredWorkflowEdge],
     node: StoredWorkflowNode,
     outputs: Mapping[str, str],
 ) -> str:
     if node.type == "input":
+        if node.id in input_values:
+            return input_values[node.id]
+        if default_input:
+            return default_input
         return node_data_text(node, "default_value")
     if node.type == "agent":
         if connection is None:

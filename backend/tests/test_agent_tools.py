@@ -74,6 +74,46 @@ def configure_provider(client: TestClient) -> None:
     )
 
 
+def input_output_workflow(workflow_id: str = "workflow-1") -> dict[str, object]:
+    return {
+        "created_at": 0,
+        "definition": {
+            "edges": [
+                {
+                    "id": "edge-input-output",
+                    "label": "",
+                    "source": "input",
+                    "source_handle": "out",
+                    "target": "output",
+                    "target_handle": "in",
+                }
+            ],
+            "nodes": [
+                {
+                    "data": {"default_value": "saved input"},
+                    "description": "",
+                    "id": "input",
+                    "name": "Input",
+                    "position": {"x": 0, "y": 0},
+                    "type": "input",
+                },
+                {
+                    "data": {"output_key": "final_result"},
+                    "description": "",
+                    "id": "output",
+                    "name": "Output",
+                    "position": {"x": 260, "y": 0},
+                    "type": "output",
+                },
+            ],
+            "version": 1,
+        },
+        "id": workflow_id,
+        "name": "Launch Workflow",
+        "updated_at": 0,
+    }
+
+
 def tool_call_chunk(
     name: str, arguments: dict[str, object], call_id: str = "call-1"
 ) -> dict[str, object]:
@@ -112,6 +152,14 @@ def test_agent_prompt_treats_tool_calls_as_intermediate_work() -> None:
         FLOWENT_AGENT_SYSTEM_PROMPT
     )
     assert "If a tool fails, use the error as context" in FLOWENT_AGENT_SYSTEM_PROMPT
+
+
+def test_agent_prompt_explains_workflow_tool_rules() -> None:
+    assert "Use workflow tools when the user asks" in FLOWENT_AGENT_SYSTEM_PROMPT
+    assert "pass that content as the run_workflow input" in (
+        FLOWENT_AGENT_SYSTEM_PROMPT
+    )
+    assert "Do not delete workflows." in FLOWENT_AGENT_SYSTEM_PROMPT
 
 
 def test_workspace_response_streams_tool_process_and_final_text(
@@ -180,6 +228,120 @@ def test_workspace_response_streams_tool_process_and_final_text(
         "tool_call_id": "call-1",
         "content": "Launch notes",
     }
+
+
+def test_workspace_agent_can_run_workflow_with_current_message_input(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk(
+                    "run_workflow",
+                    {
+                        "workflow_id": "workflow-1",
+                        "input": "release blockers",
+                    },
+                    call_id="call-run",
+                )
+            else:
+                yield text_chunk("The workflow returned release blockers.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Run Launch Workflow for release blockers."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    tool_done = next(event for event in events if event["event"] == "tool_done")
+    assert tool_done["data"]["status"] == "success"
+    assert tool_done["data"]["result"]["type"] == "workflow_run"
+    assert tool_done["data"]["result"]["outputs"] == {
+        "final_result": "release blockers"
+    }
+    assert len(captured_requests) == 2
+    tool_names = {tool["function"]["name"] for tool in captured_requests[0]["tools"]}
+    assert "run_workflow" in tool_names
+    assert captured_requests[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-run",
+        "content": "Launch Workflow completed.\nfinal_result: release blockers",
+    }
+    assert events[-1]["data"]["message"]["content"] == (
+        "The workflow returned release blockers."
+    )
+
+
+def test_workspace_agent_rejects_invalid_workflow_update_without_saving(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+    invalid_workflow = input_output_workflow()
+    invalid_workflow["definition"]["edges"][0]["target"] = "missing"
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk(
+                    "update_workflow",
+                    {"workflow": invalid_workflow},
+                    call_id="call-update",
+                )
+            else:
+                yield text_chunk(
+                    "I could not save the workflow because an edge is invalid."
+                )
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Change Launch Workflow."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    tool_error = next(event for event in events if event["event"] == "tool_error")
+    assert tool_error["data"]["status"] == "failed"
+    assert tool_error["data"]["title"] == "Updating workflow"
+    assert tool_error["data"]["result"]["text"] == (
+        "Workflow edges must connect existing nodes."
+    )
+    assert captured_requests[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-update",
+        "content": "Workflow edges must connect existing nodes.",
+    }
+    state = client.get("/api/state").json()
+    assert state["workflows"][0]["definition"]["edges"][0]["target"] == "output"
+    assert events[-1]["data"]["message"]["content"] == (
+        "I could not save the workflow because an edge is invalid."
+    )
 
 
 def test_tools_can_read_paths_outside_workdir(tmp_path) -> None:

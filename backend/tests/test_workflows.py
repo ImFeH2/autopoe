@@ -1,7 +1,10 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from flowent.main import create_app
 from flowent.sandbox import CommandResult
+from flowent.storage import StoredWorkflow
+from flowent.workflows import run_workflow_definition
 
 
 def input_output_workflow(workflow_id: str = "workflow-1") -> dict[str, object]:
@@ -107,6 +110,21 @@ def test_workflow_run_returns_output_node_result(tmp_path, monkeypatch) -> None:
         "success",
         "success",
     ]
+
+
+@pytest.mark.anyio
+async def test_workflow_run_accepts_input_override() -> None:
+    workflow = StoredWorkflow.model_validate(input_output_workflow())
+
+    result = await run_workflow_definition(
+        completion=None,
+        connection=None,
+        default_input="release blockers",
+        definition=workflow.definition,
+        workflow_id=workflow.id,
+    )
+
+    assert result.outputs == {"final_result": "release blockers"}
 
 
 def test_workflow_run_uses_agent_node_completion(tmp_path, monkeypatch) -> None:
