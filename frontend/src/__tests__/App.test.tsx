@@ -1897,7 +1897,7 @@ describe("App", () => {
     expect(fetchWasCalledWith("/api/workflows/workflow-1/run", "POST")).toBe(
       true,
     );
-    expect(screen.getAllByText("success").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("success").length).toBeGreaterThan(0);
   });
 
   it("focuses the composer when tabbing from navigation into the Workspace", async () => {

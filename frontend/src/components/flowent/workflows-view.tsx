@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowRight,
   Bot,
-  CheckCircle,
   ClipboardList,
-  Clock,
   GitMerge,
   Loader2,
   Maximize,
@@ -16,7 +21,6 @@ import {
   Trash2,
   Undo,
   X,
-  XCircle,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -136,6 +140,36 @@ const nodeIconByType = {
   output: ClipboardList,
 } satisfies Record<WorkflowNodeType, typeof Square>;
 
+const workflowStatusClasses = {
+  failed: {
+    border: "border-[#ff7474]/45",
+    dot: "bg-[#ff7474]",
+    ring: "flowent-workflow-node-ring-failed",
+  },
+  pending: {
+    border: "border-white/10",
+    dot: "bg-[#777]",
+    ring: "flowent-workflow-node-ring-pending",
+  },
+  running: {
+    border: "border-[#7ddf89]/35",
+    dot: "bg-[#7ddf89]",
+    ring: "flowent-workflow-node-ring-running",
+  },
+  success: {
+    border: "border-[#7ddf89]/30",
+    dot: "bg-[#7ddf89]",
+    ring: "flowent-workflow-node-ring-success",
+  },
+} satisfies Record<
+  WorkflowNodeRunResult["status"],
+  {
+    border: string;
+    dot: string;
+    ring: string;
+  }
+>;
+
 const defaultNodeData = (type: WorkflowNodeType): Record<string, unknown> => {
   if (type === "input") {
     return { default_value: "", input_type: "text" };
@@ -213,58 +247,115 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const result = data.result;
   const status = result?.status ?? "pending";
   const isRunning = status === "running";
-  const StatusIcon =
-    status === "success"
-      ? CheckCircle
-      : status === "failed"
-        ? XCircle
-        : isRunning
-          ? Loader2
-          : Clock;
+  const nodeRef = useRef<HTMLDivElement>(null);
+  const statusClasses = workflowStatusClasses[status];
+
+  const updateMouseEffect = (clientX: number, clientY: number) => {
+    if (!nodeRef.current) {
+      return;
+    }
+    const rect = nodeRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const intensity = Math.max(0, 1 - distance / 220);
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+
+    nodeRef.current.style.setProperty("--mouse-angle", `${angle}deg`);
+    nodeRef.current.style.setProperty(
+      "--mouse-intensity",
+      intensity.toString(),
+    );
+  };
+
+  const resetMouseEffect = () => {
+    if (!nodeRef.current) {
+      return;
+    }
+    nodeRef.current.style.setProperty("--mouse-angle", "135deg");
+    nodeRef.current.style.setProperty("--mouse-intensity", "0");
+  };
 
   return (
     <div
+      ref={nodeRef}
       className={cn(
-        "min-h-[86px] w-[172px] rounded-md border bg-[#111] px-3 py-2 text-white shadow-[0_10px_28px_rgba(0,0,0,0.28)]",
-        selected ? "border-[#7c82ff]" : "border-white/15",
+        "group relative isolate flex h-14 w-max min-w-[120px] max-w-[260px] items-center gap-2 overflow-visible rounded-[10px] border bg-[#111]/95 px-2.5 py-2.5 text-white shadow-[0_10px_24px_rgba(0,0,0,0.24)] transition-[border-color] duration-300",
+        selected
+          ? "border-white/80 ring-1 ring-white/20"
+          : cn(statusClasses.border, "hover:border-white/25"),
       )}
+      onMouseEnter={(event) => updateMouseEffect(event.clientX, event.clientY)}
+      onMouseLeave={resetMouseEffect}
+      onMouseMove={(event) => updateMouseEffect(event.clientX, event.clientY)}
+      style={
+        {
+          "--mouse-angle": "135deg",
+          "--mouse-intensity": "0",
+        } as CSSProperties
+      }
     >
+      <div
+        aria-hidden="true"
+        className={cn("flowent-workflow-node-ring", statusClasses.ring)}
+      />
+      <div
+        aria-hidden="true"
+        className={cn(
+          "flowent-workflow-node-loading-border",
+          isRunning && "flowent-workflow-node-loading-border-active",
+        )}
+      />
       {data.workflowType !== "input" ? (
         <Handle
-          className="!size-2.5 !border-white/30 !bg-[#111]"
+          className="!z-10 !size-3.5 !border !border-black/80 !bg-white/20 !opacity-0 transition-[opacity,transform,box-shadow] duration-150 group-hover:!opacity-100"
           id="in"
           position={Position.Left}
           type="target"
         />
       ) : null}
-      <div className="flex items-start gap-2">
-        <div className="grid size-7 shrink-0 place-items-center rounded-md border border-white/10 bg-input/30">
-          <Icon className="size-4 text-white" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium leading-5">
-            {data.label}
-          </div>
-          <div className="truncate text-xs leading-4 text-[#9b9b9b]">
-            {data.workflowType}
-          </div>
+
+      <div className="relative z-10 grid size-8 shrink-0 place-items-center rounded-sm border border-white/10 bg-input/30 text-white">
+        <Icon className="size-4.5" aria-hidden="true" />
+      </div>
+
+      <div className="relative z-10 flex min-w-0 flex-1 items-center justify-between gap-2">
+        <span
+          className="-translate-y-px truncate text-[13px] leading-5 font-semibold text-white"
+          title={data.description || data.label}
+        >
+          {data.label}
+        </span>
+
+        <div
+          className="relative flex items-center pr-0.5"
+          title={status}
+          aria-label={status}
+        >
+          <span className="relative flex size-2.5">
+            {isRunning ? (
+              <span
+                className={cn(
+                  "absolute inline-flex size-full animate-ping rounded-full opacity-40",
+                  statusClasses.dot,
+                )}
+              />
+            ) : null}
+            <span
+              className={cn(
+                "relative inline-flex size-2.5 rounded-full border border-black/80 shadow-sm",
+                statusClasses.dot,
+              )}
+            />
+          </span>
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-1.5 border-t border-white/10 pt-2 text-xs text-[#9b9b9b]">
-        <StatusIcon
-          className={cn(
-            "size-3.5",
-            isRunning && "animate-spin",
-            status === "success" && "text-[#7ddf89]",
-            status === "failed" && "text-[#ff7474]",
-          )}
-          aria-hidden="true"
-        />
-        <span className="capitalize">{status}</span>
-      </div>
+
       {data.workflowType !== "output" ? (
         <Handle
-          className="!size-2.5 !border-white/30 !bg-[#111]"
+          className="!z-10 !size-3.5 !border !border-black/80 !bg-white/20 !opacity-0 transition-[opacity,transform,box-shadow] duration-150 group-hover:!opacity-100"
           id="out"
           position={Position.Right}
           type="source"
