@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ApiMessage, ApiState } from "@/app/api/types";
+import type { ApiState } from "@/app/api/types";
 import {
-  contextWindowFromLimit,
   errorNotificationKeysFromState,
   mcpServerFromApi,
   providerFromApi,
@@ -11,35 +10,11 @@ import {
   workflowFromApi,
 } from "@/app/api/mappers";
 import { fetchAbout, fetchAppState } from "@/app/api/state-requests";
-import { createWorkspaceStreamHandlers as createWorkspaceStreamHandlersForResponse } from "@/app/workspace/stream-handlers";
-import {
-  clearWorkspace,
-  compactWorkspaceRequest,
-  editWorkspaceMessage,
-  requestWorkspaceResponse,
-  retryWorkspaceError,
-  stopWorkspaceResponse,
-  streamWorkspaceResponse,
-} from "@/app/workspace/requests";
-import {
-  createWorkspaceErrorMessage,
-  createWorkspaceStreamErrorMessage,
-  isAbortError,
-  latestUsageInfoFromMessages,
-  messagesIncludeErrorBlockFrom,
-  previousUserMessage,
-  trimAssistantMessageAtError,
-  WorkspaceRequestError,
-  WorkspaceStreamError,
-} from "@/app/workspace/messages";
-import {
-  readWorkspaceStream,
-  type WorkspaceStreamHandlers,
-} from "@/app/workspace/stream";
 import { useWorkflows } from "@/app/controllers/use-workflows";
 import { useMcpServers } from "@/app/controllers/use-mcp-servers";
 import { useSetupSections } from "@/app/controllers/use-setup-sections";
 import { useProviderSettings } from "@/app/controllers/use-provider-settings";
+import { useWorkspaceController } from "@/app/controllers/use-workspace-controller";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
@@ -50,66 +25,55 @@ import { SkillsView } from "@/components/flowent/skills-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
 import { FlowentToastProvider } from "@/components/flowent/toast";
 import { useFlowentToast } from "@/components/flowent/toast-context";
-import type {
-  Message,
-  ContextUsageInfo,
-  MessageActionRequest,
-  MessageErrorRetryRequest,
-  ViewId,
-  WorkspaceCommand,
-  WorkspaceCommandId,
-} from "@/components/flowent/types";
+import type { ViewId } from "@/components/flowent/types";
 import { WorkflowsView } from "@/components/flowent/workflows-view";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
-import { createClientId } from "@/lib/utils";
 
 function FlowentApp() {
   const toast = useFlowentToast();
   const [activeView, setActiveView] = useState<ViewId>("workspace");
-  const [draft, setDraft] = useState("");
   const [appVersion, setAppVersion] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [usageInfo, setUsageInfo] = useState<ContextUsageInfo | null>(null);
-  const usageInfoRef = useRef<ContextUsageInfo | null>(null);
-  const [isResponding, setIsResponding] = useState(false);
-  const [isRefiningContext, setIsRefiningContext] = useState(false);
-  const [responseError, setResponseError] = useState("");
-  const responseAbortRef = useRef<AbortController | null>(null);
-  const responseEventIndexRef = useRef(0);
-  const messagesRef = useRef<Message[]>([]);
-  const responseRunRef = useRef(0);
   const errorNotificationKeysRef = useRef<Set<string>>(new Set());
   const hasLoadedStateRef = useRef(false);
-  const [streamReconnectKey, setStreamReconnectKey] = useState(0);
   const refreshAppStateRef = useRef<(() => Promise<ApiState | null>) | null>(
     null,
-  );
-  const setTrackedUsageInfo = useCallback(
-    (
-      nextUsageInfo:
-        | ContextUsageInfo
-        | null
-        | ((
-            currentUsageInfo: ContextUsageInfo | null,
-          ) => ContextUsageInfo | null),
-    ) => {
-      if (typeof nextUsageInfo !== "function") {
-        usageInfoRef.current = nextUsageInfo;
-        setUsageInfo(nextUsageInfo);
-        return;
-      }
-      setUsageInfo((currentUsageInfo) => {
-        const resolvedUsageInfo = nextUsageInfo(currentUsageInfo);
-        usageInfoRef.current = resolvedUsageInfo;
-        return resolvedUsageInfo;
-      });
-    },
-    [],
   );
   const refreshProviderSettingsState = useCallback(async () => {
     await refreshAppStateRef.current?.();
   }, []);
+  const refreshWorkspaceState = useCallback(
+    async () => refreshAppStateRef.current?.() ?? null,
+    [],
+  );
+  const {
+    commands: workspaceCommands,
+    draft,
+    editMessage,
+    handleCommandError: handleWorkspaceCommandError,
+    isRefiningContext,
+    isResponding,
+    loadState: loadWorkspaceState,
+    messages,
+    responseError,
+    retryError,
+    retryMessage,
+    runCommand: runWorkspaceCommand,
+    sendMessage,
+    setContextWindowLimit: setWorkspaceContextWindowLimit,
+    setDraft,
+    stopResponse,
+    usageInfo,
+  } = useWorkspaceController({
+    refreshAppState: refreshWorkspaceState,
+    showError: toast.error,
+  });
+  const handleWorkspaceContextWindowLimitChange = useCallback(
+    (nextContextWindowLimit: number | null) => {
+      setWorkspaceContextWindowLimit(nextContextWindowLimit);
+    },
+    [setWorkspaceContextWindowLimit],
+  );
   const {
     activeProvider,
     agentPrompt,
@@ -134,11 +98,7 @@ function FlowentApp() {
     selectedProviderId,
     updateProviderDraft,
   } = useProviderSettings({
-    onContextWindowLimitChange: (nextContextWindowLimit) => {
-      setTrackedUsageInfo((currentUsageInfo) =>
-        contextWindowFromLimit(currentUsageInfo, nextContextWindowLimit),
-      );
-    },
+    onContextWindowLimitChange: handleWorkspaceContextWindowLimitChange,
     refreshAppState: refreshProviderSettingsState,
     showError: toast.error,
   });
@@ -227,21 +187,10 @@ function FlowentApp() {
     errorNotificationKeysRef.current = nextNotificationKeys;
   }, [mcpServers, skills, telegramBot, toast]);
 
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
   const applyLoadedState = useCallback(
     (state: ApiState) => {
       const loadedProviders = state.providers.map(providerFromApi);
       replaceProviders(loadedProviders);
-      setMessages(state.messages);
-      setTrackedUsageInfo(
-        contextWindowFromLimit(
-          state.usage_info ?? latestUsageInfoFromMessages(state.messages),
-          state.settings.context_window_limit ?? null,
-        ),
-      );
       const loadedMcpServers = (state.mcp_servers ?? []).map(mcpServerFromApi);
       replaceMcpServers(loadedMcpServers);
       const loadedSkills = state.skills ?? [];
@@ -259,14 +208,10 @@ function FlowentApp() {
         (state.writable_paths ?? []).map(writablePathFromApi),
       );
       replaceWorkflows((state.workflows ?? []).map(workflowFromApi));
-      const shouldResumeResponse = Boolean(state.is_responding);
-      responseEventIndexRef.current = state.response_event_index ?? 0;
-      setIsResponding(shouldResumeResponse);
-      setIsRefiningContext(Boolean(state.is_compacting));
+      loadWorkspaceState(state, {
+        reconnectIfResponding: !hasLoadedStateRef.current,
+      });
       if (!hasLoadedStateRef.current) {
-        if (shouldResumeResponse) {
-          setStreamReconnectKey((current) => current + 1);
-        }
         errorNotificationKeysRef.current = new Set(
           errorNotificationKeysFromState(
             loadedTelegramBot,
@@ -285,7 +230,7 @@ function FlowentApp() {
       replaceTelegramBot,
       replaceWorkflows,
       replaceWritablePaths,
-      setTrackedUsageInfo,
+      loadWorkspaceState,
     ],
   );
 
@@ -327,522 +272,6 @@ function FlowentApp() {
       isMounted = false;
     };
   }, [refreshAppState]);
-
-  useEffect(() => {
-    if (!isRefiningContext) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void refreshAppState().catch(() => undefined);
-    }, 1000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [isRefiningContext, refreshAppState]);
-
-  const showWorkspaceNotification = useCallback(
-    (message: string) => {
-      toast.error(message);
-    },
-    [toast],
-  );
-
-  const createWorkspaceStreamHandlers = useCallback(
-    (baseMessages: Message[], responseRun: number): WorkspaceStreamHandlers =>
-      createWorkspaceStreamHandlersForResponse({
-        baseMessages,
-        messagesRef,
-        responseEventIndexRef,
-        responseRun,
-        responseRunRef,
-        setIsResponding,
-        setMessages,
-        setTrackedUsageInfo,
-        usageInfoRef,
-      }),
-    [setTrackedUsageInfo],
-  );
-
-  useEffect(() => {
-    if (streamReconnectKey === 0) {
-      return;
-    }
-
-    const responseRun = responseRunRef.current || 1;
-    responseRunRef.current = responseRun;
-    const responseAbortController = new AbortController();
-    responseAbortRef.current = responseAbortController;
-    setIsResponding(true);
-    setResponseError("");
-
-    const streamCurrentResponse = async () => {
-      const handlers = createWorkspaceStreamHandlers(
-        messagesRef.current,
-        responseRun,
-      );
-      try {
-        await streamWorkspaceResponse({
-          after: responseEventIndexRef.current,
-          handlers,
-          signal: responseAbortController.signal,
-        });
-      } catch (error) {
-        if (
-          responseRunRef.current !== responseRun ||
-          responseAbortController.signal.aborted
-        ) {
-          return;
-        }
-        const state = await refreshAppState().catch(() => null);
-        if (state?.is_responding) {
-          setStreamReconnectKey((current) => current + 1);
-          return;
-        }
-        responseEventIndexRef.current = 0;
-        setIsResponding(false);
-        setResponseError(
-          error instanceof Error ? error.message : "Message could not be sent.",
-        );
-      } finally {
-        if (responseRunRef.current === responseRun) {
-          responseAbortRef.current = null;
-        }
-      }
-    };
-
-    void streamCurrentResponse();
-
-    return () => {
-      responseAbortController.abort();
-    };
-  }, [createWorkspaceStreamHandlers, refreshAppState, streamReconnectKey]);
-
-  const compactWorkspace = async () => {
-    setResponseError("");
-    setIsRefiningContext(true);
-    const compactErrorStartIndex = messages.length;
-
-    const appendCompactMessage = (message: ApiMessage) => {
-      setMessages((currentMessages) =>
-        currentMessages.some(
-          (currentMessage) => currentMessage.id === message.id,
-        )
-          ? currentMessages
-          : [...currentMessages, message],
-      );
-    };
-    const appendCompactSnapshot = (message: ApiMessage) => {
-      setMessages((currentMessages) => {
-        const messageIndex = currentMessages.findIndex(
-          (currentMessage) => currentMessage.id === message.id,
-        );
-        if (messageIndex >= 0) {
-          return currentMessages.map((currentMessage, index) =>
-            index === messageIndex ? message : currentMessage,
-          );
-        }
-        return [...currentMessages, message];
-      });
-    };
-
-    try {
-      const response = await compactWorkspaceRequest();
-
-      await readWorkspaceStream(response, {
-        onEventIndex: () => undefined,
-        onContextOptimized: appendCompactMessage,
-        onDelta: () => undefined,
-        onDone: appendCompactMessage,
-        onError: () => undefined,
-        onOutputDone: () => undefined,
-        onOutputStart: () => undefined,
-        onSnapshot: appendCompactSnapshot,
-        onStart: () => undefined,
-        onThinkingDelta: () => undefined,
-        onToolDone: () => undefined,
-        onToolStart: () => undefined,
-        onUsage: setTrackedUsageInfo,
-      });
-      setIsRefiningContext(false);
-    } catch (error) {
-      if (isAbortError(error)) {
-        void refreshAppState().catch(() => undefined);
-        return;
-      }
-      if (error instanceof WorkspaceStreamError) {
-        setIsRefiningContext(false);
-        return;
-      }
-      const detail =
-        error instanceof Error
-          ? error.message
-          : "Context could not be compacted.";
-      setMessages((currentMessages) =>
-        messagesIncludeErrorBlockFrom(currentMessages, compactErrorStartIndex)
-          ? currentMessages
-          : [...currentMessages, createWorkspaceErrorMessage(detail)],
-      );
-      setIsRefiningContext(false);
-    }
-  };
-
-  const workspaceCommands: WorkspaceCommand[] = useMemo(
-    () => [
-      {
-        description: "Clear the conversation",
-        id: "clear",
-        label: "/clear",
-        name: "clear",
-      },
-      {
-        description: "Compact context",
-        id: "compact",
-        label: "/compact",
-        name: "compact",
-      },
-    ],
-    [],
-  );
-
-  const runWorkspaceCommand = (commandId: WorkspaceCommandId) => {
-    if (commandId === "clear") {
-      void clearMessages();
-      return true;
-    }
-    if (commandId === "compact") {
-      if (isResponding) {
-        showWorkspaceNotification(
-          "Compact is unavailable while Flowent is responding.",
-        );
-        return false;
-      }
-      void compactWorkspace();
-      return true;
-    }
-    return false;
-  };
-
-  const handleWorkspaceCommandError = (message: string) => {
-    showWorkspaceNotification(message);
-  };
-
-  const workspaceErrorDetail = (error: unknown, fallback: string) =>
-    error instanceof Error ? error.message : fallback;
-
-  const appendWorkspaceErrorMessage = (
-    baseMessages: Message[],
-    error: unknown,
-    fallback: string,
-  ) => [
-    ...baseMessages,
-    createWorkspaceErrorMessage(workspaceErrorDetail(error, fallback)),
-  ];
-
-  const stopResponse = () => {
-    if (isResponding) {
-      void stopWorkspaceResponse();
-    }
-    responseRunRef.current += 1;
-    responseEventIndexRef.current = 0;
-    responseAbortRef.current?.abort();
-    responseAbortRef.current = null;
-    setResponseError("");
-    setIsResponding(false);
-  };
-
-  const sendMessage = async (
-    submittedDraft = draft,
-    baseMessages = messages,
-    options: { clearDraft?: boolean } = {},
-  ) => {
-    if (submittedDraft.length === 0 || isResponding || isRefiningContext) {
-      return;
-    }
-    const shouldClearDraft = options.clearDraft ?? baseMessages === messages;
-
-    const responseRun = responseRunRef.current + 1;
-    const responseAbortController = new AbortController();
-    responseAbortRef.current = responseAbortController;
-    responseRunRef.current = responseRun;
-    responseEventIndexRef.current = 0;
-    const userContent = submittedDraft;
-    const userMessageId = createClientId("message");
-    const nextMessages: Message[] = [
-      ...baseMessages,
-      {
-        author: "user",
-        content: userContent,
-        id: userMessageId,
-      },
-    ];
-    setResponseError("");
-    setIsResponding(true);
-    setMessages(nextMessages);
-    if (shouldClearDraft) {
-      setDraft("");
-    }
-
-    try {
-      const handlers = createWorkspaceStreamHandlers(nextMessages, responseRun);
-      await requestWorkspaceResponse({
-        content: userContent,
-        handlers,
-        messageId: userMessageId,
-        signal: responseAbortController.signal,
-      });
-    } catch (error) {
-      if (responseRunRef.current !== responseRun) {
-        return;
-      }
-      if (
-        error instanceof DOMException &&
-        error.name === "AbortError" &&
-        responseAbortController.signal.aborted
-      ) {
-        return;
-      }
-      if (error instanceof Error && error.message === "Response in progress") {
-        setMessages(baseMessages);
-        if (shouldClearDraft) {
-          setDraft(userContent);
-        }
-        setIsResponding(false);
-        showWorkspaceNotification(error.message);
-        return;
-      }
-      if (!(error instanceof WorkspaceRequestError)) {
-        const state = await refreshAppState().catch(() => null);
-        if (state?.is_responding) {
-          setStreamReconnectKey((current) => current + 1);
-          return;
-        }
-        if (
-          state?.messages &&
-          messagesIncludeErrorBlockFrom(state.messages, baseMessages.length)
-        ) {
-          setMessages(state.messages);
-          setIsResponding(false);
-          return;
-        }
-      }
-      if (error instanceof WorkspaceStreamError) {
-        setMessages([
-          ...nextMessages,
-          error.errorMessage ??
-            createWorkspaceStreamErrorMessage(error.outputError),
-        ]);
-        setIsResponding(false);
-        return;
-      }
-      setMessages((currentMessages) =>
-        messagesIncludeErrorBlockFrom(currentMessages, baseMessages.length)
-          ? currentMessages
-          : appendWorkspaceErrorMessage(
-              nextMessages,
-              error,
-              "Message could not be sent.",
-            ),
-      );
-      setIsResponding(false);
-    } finally {
-      if (responseRunRef.current === responseRun) {
-        responseAbortRef.current = null;
-      }
-    }
-  };
-
-  const startEditedResponse = (nextMessages: Message[]) => {
-    responseRunRef.current += 1;
-    responseEventIndexRef.current = 0;
-    setMessages(nextMessages);
-    setIsResponding(true);
-    setStreamReconnectKey((current) => current + 1);
-  };
-
-  const retryMessage = async (messageId: string) => {
-    if (isResponding) {
-      return;
-    }
-
-    const messageIndex = messages.findIndex(
-      (message) => message.id === messageId,
-    );
-    if (messageIndex < 0) {
-      return;
-    }
-
-    const message = messages[messageIndex];
-    const userMessage =
-      message.author === "user"
-        ? message
-        : previousUserMessage(messages, messageIndex - 1);
-    if (!userMessage) {
-      return;
-    }
-    const userMessageIndex = messages.findIndex(
-      (currentMessage) => currentMessage.id === userMessage.id,
-    );
-
-    setResponseError("");
-    setIsResponding(true);
-
-    try {
-      const result = await editWorkspaceMessage({
-        action: "resend",
-        content: userMessage.content,
-        messageId: userMessage.id,
-      });
-      if (!result.is_responding) {
-        throw new Error("Message could not be sent.");
-      }
-      startEditedResponse(result.messages);
-    } catch (error) {
-      setMessages(
-        appendWorkspaceErrorMessage(
-          messages.slice(0, userMessageIndex + 1),
-          error,
-          "Message could not be updated.",
-        ),
-      );
-      setIsResponding(false);
-    }
-  };
-
-  const retryError = async ({
-    errorId,
-    messageId,
-  }: MessageErrorRetryRequest) => {
-    if (isResponding) {
-      return;
-    }
-
-    const messageIndex = messages.findIndex(
-      (message) => message.id === messageId,
-    );
-    if (messageIndex < 0 || messages[messageIndex].author !== "assistant") {
-      return;
-    }
-
-    const trimmedMessage = trimAssistantMessageAtError(
-      messages[messageIndex],
-      errorId,
-    );
-    if (!trimmedMessage) {
-      return;
-    }
-
-    const optimisticMessages = [
-      ...messages.slice(0, messageIndex),
-      trimmedMessage,
-    ];
-    setResponseError("");
-    setIsResponding(true);
-    setMessages(optimisticMessages);
-
-    try {
-      const result = await retryWorkspaceError({ errorId, messageId });
-      if (!result.is_responding) {
-        throw new Error("Message could not be sent.");
-      }
-      startEditedResponse(result.messages);
-    } catch (error) {
-      setMessages(
-        appendWorkspaceErrorMessage(
-          optimisticMessages,
-          error,
-          "Message could not be sent.",
-        ),
-      );
-      setIsResponding(false);
-    }
-  };
-
-  const editMessage = async ({
-    action,
-    content,
-    messageId,
-  }: MessageActionRequest) => {
-    if (isResponding) {
-      return;
-    }
-
-    const messageIndex = messages.findIndex(
-      (message) => message.id === messageId,
-    );
-    if (messageIndex < 0 || messages[messageIndex].author !== "user") {
-      return;
-    }
-
-    const previousMessages = messages;
-    setResponseError("");
-    if (action === "resend") {
-      setIsResponding(true);
-    }
-
-    try {
-      const result = await editWorkspaceMessage({ action, content, messageId });
-      if (action === "resend") {
-        if (!result.is_responding) {
-          throw new Error("Message could not be sent.");
-        }
-        startEditedResponse(result.messages);
-        return;
-      }
-      setMessages(result.messages);
-    } catch (error) {
-      setMessages(
-        action === "resend"
-          ? appendWorkspaceErrorMessage(
-              [
-                ...previousMessages.slice(0, messageIndex),
-                {
-                  ...previousMessages[messageIndex],
-                  content,
-                },
-              ],
-              error,
-              "Message could not be updated.",
-            )
-          : previousMessages,
-      );
-      if (action === "resend") {
-        setIsResponding(false);
-      }
-      if (action !== "resend") {
-        showWorkspaceNotification(
-          workspaceErrorDetail(error, "Message could not be updated."),
-        );
-      }
-    }
-  };
-
-  const clearMessages = async () => {
-    const previousMessages = messages;
-    const previousUsageInfo = usageInfo;
-
-    responseAbortRef.current?.abort();
-    responseAbortRef.current = null;
-    responseEventIndexRef.current = 0;
-    responseRunRef.current += 1;
-    setMessages([]);
-    setTrackedUsageInfo(null);
-    setResponseError("");
-    setIsResponding(false);
-
-    try {
-      const clearedState = await clearWorkspace();
-      if (Array.isArray(clearedState.messages)) {
-        setMessages(clearedState.messages);
-      }
-      setTrackedUsageInfo(clearedState.usage_info ?? null);
-    } catch {
-      setMessages(previousMessages);
-      setTrackedUsageInfo(previousUsageInfo);
-      showWorkspaceNotification("Conversation could not be cleared.");
-    }
-  };
 
   return (
     <AppShell
