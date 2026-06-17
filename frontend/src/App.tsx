@@ -10,17 +10,7 @@ import {
   writablePathFromApi,
   workflowFromApi,
 } from "@/app/api-mappers";
-import {
-  fetchProviderModelsRequest,
-  ProviderModelFetchError,
-  removeProviderRequest,
-  saveProviderRequest,
-} from "@/app/provider-requests";
-import {
-  fetchAbout,
-  fetchAppState,
-  saveRuntimeSettingsRequest,
-} from "@/app/state-requests";
+import { fetchAbout, fetchAppState } from "@/app/state-requests";
 import { createWorkspaceStreamHandlers as createWorkspaceStreamHandlersForResponse } from "@/app/workspace-stream-handlers";
 import {
   clearWorkspace,
@@ -49,13 +39,10 @@ import {
 import { useWorkflows } from "@/app/use-workflows";
 import { useMcpServers } from "@/app/use-mcp-servers";
 import { useSetupSections } from "@/app/use-setup-sections";
+import { useProviderSettings } from "@/app/use-provider-settings";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
-import {
-  createEmptyProvider,
-  providerOptions,
-} from "@/components/flowent/provider-options";
 import { PermissionsView } from "@/components/flowent/permissions-view";
 import { ProvidersView } from "@/components/flowent/providers-view";
 import { SettingsView } from "@/components/flowent/settings-view";
@@ -68,9 +55,6 @@ import type {
   ContextUsageInfo,
   MessageActionRequest,
   MessageErrorRetryRequest,
-  Provider,
-  ReasoningEffort,
-  RuntimeSettings,
   ViewId,
   WorkspaceCommand,
   WorkspaceCommandId,
@@ -84,24 +68,10 @@ function FlowentApp() {
   const toast = useFlowentToast();
   const [activeView, setActiveView] = useState<ViewId>("workspace");
   const [draft, setDraft] = useState("");
-  const [agentPrompt, setAgentPrompt] = useState("");
-  const [selectedProviderId, setSelectedProviderId] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [contextWindowLimit, setContextWindowLimit] = useState<number | null>(
-    null,
-  );
-  const [reasoningEffort, setReasoningEffort] =
-    useState<ReasoningEffort>("default");
   const [appVersion, setAppVersion] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [usageInfo, setUsageInfo] = useState<ContextUsageInfo | null>(null);
   const usageInfoRef = useRef<ContextUsageInfo | null>(null);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [providerEditorId, setProviderEditorId] = useState("new");
-  const [providerDraft, setProviderDraft] = useState<Provider>(() =>
-    createEmptyProvider(),
-  );
-  const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
   const [isRefiningContext, setIsRefiningContext] = useState(false);
   const [responseError, setResponseError] = useState("");
@@ -112,6 +82,66 @@ function FlowentApp() {
   const errorNotificationKeysRef = useRef<Set<string>>(new Set());
   const hasLoadedStateRef = useRef(false);
   const [streamReconnectKey, setStreamReconnectKey] = useState(0);
+  const refreshAppStateRef = useRef<(() => Promise<ApiState | null>) | null>(
+    null,
+  );
+  const setTrackedUsageInfo = useCallback(
+    (
+      nextUsageInfo:
+        | ContextUsageInfo
+        | null
+        | ((
+            currentUsageInfo: ContextUsageInfo | null,
+          ) => ContextUsageInfo | null),
+    ) => {
+      if (typeof nextUsageInfo !== "function") {
+        usageInfoRef.current = nextUsageInfo;
+        setUsageInfo(nextUsageInfo);
+        return;
+      }
+      setUsageInfo((currentUsageInfo) => {
+        const resolvedUsageInfo = nextUsageInfo(currentUsageInfo);
+        usageInfoRef.current = resolvedUsageInfo;
+        return resolvedUsageInfo;
+      });
+    },
+    [],
+  );
+  const refreshProviderSettingsState = useCallback(async () => {
+    await refreshAppStateRef.current?.();
+  }, []);
+  const {
+    activeProvider,
+    agentPrompt,
+    contextWindowLimit,
+    fetchProviderModels,
+    handleActiveModelChange,
+    handleActiveProviderChange,
+    handleReasoningEffortChange,
+    isCreatingProvider,
+    isFetchingModels,
+    loadProviderEditor,
+    openNewProviderEditor,
+    providerDraft,
+    providers,
+    reasoningEffort,
+    removeProvider,
+    replaceProviders,
+    replaceRuntimeSettings,
+    saveProvider,
+    saveRuntimeSettings,
+    selectedModel,
+    selectedProviderId,
+    updateProviderDraft,
+  } = useProviderSettings({
+    onContextWindowLimitChange: (nextContextWindowLimit) => {
+      setTrackedUsageInfo((currentUsageInfo) =>
+        contextWindowFromLimit(currentUsageInfo, nextContextWindowLimit),
+      );
+    },
+    refreshAppState: refreshProviderSettingsState,
+    showError: toast.error,
+  });
   const {
     activeSkill,
     addWritablePath,
@@ -165,34 +195,6 @@ function FlowentApp() {
     workflows,
   } = useWorkflows({ setActiveView });
 
-  const activeProvider = useMemo(
-    () => providers.find((provider) => provider.id === selectedProviderId),
-    [providers, selectedProviderId],
-  );
-  const isCreatingProvider = providerEditorId === "new";
-  const setTrackedUsageInfo = useCallback(
-    (
-      nextUsageInfo:
-        | ContextUsageInfo
-        | null
-        | ((
-            currentUsageInfo: ContextUsageInfo | null,
-          ) => ContextUsageInfo | null),
-    ) => {
-      if (typeof nextUsageInfo !== "function") {
-        usageInfoRef.current = nextUsageInfo;
-        setUsageInfo(nextUsageInfo);
-        return;
-      }
-      setUsageInfo((currentUsageInfo) => {
-        const resolvedUsageInfo = nextUsageInfo(currentUsageInfo);
-        usageInfoRef.current = resolvedUsageInfo;
-        return resolvedUsageInfo;
-      });
-    },
-    [],
-  );
-
   useEffect(() => {
     const nextNotificationKeys = new Set<string>();
 
@@ -232,7 +234,7 @@ function FlowentApp() {
   const applyLoadedState = useCallback(
     (state: ApiState) => {
       const loadedProviders = state.providers.map(providerFromApi);
-      setProviders(loadedProviders);
+      replaceProviders(loadedProviders);
       setMessages(state.messages);
       setTrackedUsageInfo(
         contextWindowFromLimit(
@@ -244,11 +246,13 @@ function FlowentApp() {
       replaceMcpServers(loadedMcpServers);
       const loadedSkills = state.skills ?? [];
       replaceSkills(loadedSkills);
-      setAgentPrompt(state.settings.agent_prompt ?? "");
-      setSelectedProviderId(state.settings.selected_provider_id);
-      setSelectedModel(state.settings.selected_model);
-      setContextWindowLimit(state.settings.context_window_limit ?? null);
-      setReasoningEffort(state.settings.reasoning_effort ?? "default");
+      replaceRuntimeSettings({
+        agentPrompt: state.settings.agent_prompt ?? "",
+        contextWindowLimit: state.settings.context_window_limit ?? null,
+        reasoningEffort: state.settings.reasoning_effort ?? "default",
+        selectedModel: state.settings.selected_model,
+        selectedProviderId: state.settings.selected_provider_id,
+      });
       const loadedTelegramBot = telegramBotFromApi(state.telegram_bot);
       replaceTelegramBot(loadedTelegramBot);
       replaceWritablePaths(
@@ -275,6 +279,8 @@ function FlowentApp() {
     },
     [
       replaceMcpServers,
+      replaceProviders,
+      replaceRuntimeSettings,
       replaceSkills,
       replaceTelegramBot,
       replaceWorkflows,
@@ -291,6 +297,7 @@ function FlowentApp() {
     applyLoadedState(state);
     return state;
   }, [applyLoadedState]);
+  refreshAppStateRef.current = refreshAppState;
 
   useEffect(() => {
     let isMounted = true;
@@ -334,187 +341,6 @@ function FlowentApp() {
       window.clearInterval(intervalId);
     };
   }, [isRefiningContext, refreshAppState]);
-
-  const loadProviderEditor = (provider: Provider) => {
-    setProviderEditorId(provider.id);
-    setProviderDraft(provider);
-  };
-
-  const openNewProviderEditor = () => {
-    setProviderEditorId("new");
-    setProviderDraft(createEmptyProvider());
-  };
-
-  const updateProviderDraft = (updates: Partial<Provider>) => {
-    setProviderDraft((current) => ({ ...current, ...updates }));
-  };
-
-  const persistSettingsAndRefresh = async (settings: RuntimeSettings) => {
-    await saveRuntimeSettingsRequest(settings);
-    await refreshAppState();
-  };
-
-  const handleActiveProviderChange = (value: string) => {
-    const nextProvider = providers.find((provider) => provider.id === value);
-    if (!nextProvider) {
-      setSelectedProviderId("");
-      setSelectedModel("");
-      void persistSettingsAndRefresh({
-        agentPrompt,
-        contextWindowLimit,
-        reasoningEffort,
-        selectedModel: "",
-        selectedProviderId: "",
-      });
-      return;
-    }
-
-    setSelectedProviderId(nextProvider.id);
-    setSelectedModel("");
-    void persistSettingsAndRefresh({
-      agentPrompt,
-      contextWindowLimit,
-      reasoningEffort,
-      selectedModel: "",
-      selectedProviderId: nextProvider.id,
-    });
-  };
-
-  const handleActiveModelChange = (value: string) => {
-    setSelectedModel(value);
-    void persistSettingsAndRefresh({
-      agentPrompt,
-      contextWindowLimit,
-      reasoningEffort,
-      selectedModel: value,
-      selectedProviderId,
-    });
-  };
-
-  const handleReasoningEffortChange = (value: ReasoningEffort) => {
-    setReasoningEffort(value);
-    void saveRuntimeSettingsRequest({
-      agentPrompt,
-      contextWindowLimit,
-      reasoningEffort: value,
-      selectedModel,
-      selectedProviderId,
-    });
-  };
-
-  const saveRuntimeSettings = (settings: RuntimeSettings) => {
-    setAgentPrompt(settings.agentPrompt);
-    setContextWindowLimit(settings.contextWindowLimit);
-    setTrackedUsageInfo((currentUsageInfo) =>
-      contextWindowFromLimit(currentUsageInfo, settings.contextWindowLimit),
-    );
-    setReasoningEffort(settings.reasoningEffort);
-    setSelectedModel(settings.selectedModel);
-    setSelectedProviderId(settings.selectedProviderId);
-    void persistSettingsAndRefresh(settings);
-  };
-
-  const fetchProviderModels = async () => {
-    setIsFetchingModels(true);
-
-    try {
-      const models = await fetchProviderModelsRequest(providerDraft);
-      updateProviderDraft({ models });
-
-      if (models.length === 0) {
-        toast.error({
-          description: "No models available for this provider.",
-          message: "No models found.",
-        });
-      }
-    } catch (error) {
-      if (error instanceof ProviderModelFetchError) {
-        toast.error(error.notification);
-      }
-    } finally {
-      setIsFetchingModels(false);
-    }
-  };
-
-  const saveProvider = async () => {
-    const savedProvider: Provider = {
-      ...providerDraft,
-      id: isCreatingProvider ? createClientId("provider") : providerDraft.id,
-      name:
-        providerDraft.name.trim() ||
-        providerOptions.find((type) => type.id === providerDraft.type)?.label ||
-        "Provider",
-    };
-
-    setProviders((currentProviders) => {
-      if (isCreatingProvider) {
-        return [...currentProviders, savedProvider];
-      }
-      return currentProviders.map((provider) =>
-        provider.id === savedProvider.id ? savedProvider : provider,
-      );
-    });
-    setProviderEditorId(savedProvider.id);
-    setProviderDraft(savedProvider);
-
-    if (!selectedProviderId) {
-      setSelectedProviderId(savedProvider.id);
-      setSelectedModel("");
-      void saveRuntimeSettingsRequest({
-        agentPrompt,
-        contextWindowLimit,
-        reasoningEffort,
-        selectedModel: "",
-        selectedProviderId: savedProvider.id,
-      });
-    }
-
-    await saveProviderRequest(savedProvider);
-  };
-
-  const removeProvider = async () => {
-    if (isCreatingProvider) {
-      return;
-    }
-
-    const removedProviderId = providerDraft.id;
-    const wasRemoved = await removeProviderRequest(removedProviderId);
-
-    if (wasRemoved) {
-      const removedIndex = providers.findIndex(
-        (provider) => provider.id === removedProviderId,
-      );
-      const remainingProviders = providers.filter(
-        (provider) => provider.id !== removedProviderId,
-      );
-
-      setProviders(remainingProviders);
-
-      const nextProvider =
-        remainingProviders[removedIndex] ||
-        remainingProviders[removedIndex - 1];
-
-      if (nextProvider) {
-        loadProviderEditor(nextProvider);
-      } else {
-        openNewProviderEditor();
-      }
-
-      if (selectedProviderId === removedProviderId) {
-        const nextId = nextProvider?.id ?? "";
-        const nextModel = nextProvider?.models[0] ?? "";
-        setSelectedProviderId(nextId);
-        setSelectedModel(nextModel);
-        void saveRuntimeSettingsRequest({
-          agentPrompt,
-          contextWindowLimit,
-          reasoningEffort,
-          selectedModel: nextModel,
-          selectedProviderId: nextId,
-        });
-      }
-    }
-  };
 
   const showWorkspaceNotification = useCallback(
     (message: string) => {
