@@ -12,6 +12,7 @@ import type {
   WorkflowEdge,
   WorkflowNode,
   WorkflowNodeRunResult,
+  WorkflowRunRequest,
   WorkflowRunResult,
 } from "@/components/flowent/types";
 
@@ -123,6 +124,12 @@ export type ApiWorkflowRunResult = {
   workflow_id: string;
 };
 
+export type ApiWorkflowRunRequest = {
+  input?: string;
+  inputs?: Record<string, string>;
+  timer_id?: string;
+};
+
 export type ApiMessage = Message;
 
 export type ApiState = {
@@ -169,3 +176,4 @@ export type DomainWorkflow = Workflow;
 export type DomainWorkflowDefinition = WorkflowDefinition;
 export type DomainWorkflowEdge = WorkflowEdge;
 export type DomainWorkflowNode = WorkflowNode;
+export type DomainWorkflowRunRequest = WorkflowRunRequest;

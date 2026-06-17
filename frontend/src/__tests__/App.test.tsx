@@ -179,7 +179,7 @@ type TestWorkflowNode = {
     x: number;
     y: number;
   };
-  type: "agent" | "code" | "input" | "merge" | "output";
+  type: "agent" | "code" | "input" | "merge" | "output" | "timer";
 };
 
 type TestWorkflowEdge = {
@@ -1459,22 +1459,35 @@ const mockInitialState = (
       const workflowId = input
         .replace("/api/workflows/", "")
         .replace("/run", "");
+      const request = init.body
+        ? (JSON.parse(String(init.body)) as {
+            inputs?: Record<string, string>;
+            timer_id?: string;
+          })
+        : {};
       const result: TestWorkflowRunResult = {
         node_results: [
           {
             error: "",
             id: "input",
-            output: "launch checklist",
+            output: request.inputs?.input || "launch checklist",
             status: "success",
           },
           {
             error: "",
             id: "output",
-            output: "Ready to ship.",
+            output: request.timer_id
+              ? "Timer fired."
+              : request.inputs?.input || "Ready to ship.",
             status: "success",
           },
         ],
-        outputs: { final_result: "Ready to ship." },
+        outputs: request.timer_id
+          ? { final_result: "Timer fired." }
+          : {
+              final_result: request.inputs?.input || "Ready to ship.",
+              summary: request.inputs?.["input-window"] || "Summary ready.",
+            },
         status: "success",
         workflow_id: workflowId,
       };
@@ -1920,6 +1933,54 @@ describe("App", () => {
     );
   });
 
+  it("adds a timer node and saves its schedule", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Workflows" }));
+    await user.click(
+      screen.getByRole("button", { name: "Timer Scheduled trigger" }),
+    );
+    const timerNodeLabel = screen
+      .getAllByText("Timer")
+      .find((element) => element.closest(".react-flow__node"));
+    expect(timerNodeLabel).toBeTruthy();
+    fireEvent.click(timerNodeLabel!);
+    await user.clear(screen.getByLabelText("Interval Seconds"));
+    await user.type(screen.getByLabelText("Interval Seconds"), "10");
+    await user.clear(screen.getByLabelText("Payload"));
+    await user.type(screen.getByLabelText("Payload"), "tick");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(window.fetch).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({
+          body: expect.stringContaining('"type":"timer"'),
+          method: "PUT",
+        }),
+      );
+    });
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workflows",
+      expect.objectContaining({
+        body: expect.stringContaining('"interval_seconds":"10"'),
+        method: "PUT",
+      }),
+    );
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workflows",
+      expect.objectContaining({
+        body: expect.stringContaining('"payload":"tick"'),
+        method: "PUT",
+      }),
+    );
+  });
+
   it("runs a saved workflow and shows node results", async () => {
     const user = userEvent.setup();
     mockInitialState({
@@ -1933,11 +1994,122 @@ describe("App", () => {
     );
     await user.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(await screen.findByText("Ready to ship.")).toBeInTheDocument();
+    expect(await screen.findByText("final_result")).toBeInTheDocument();
+    expect(screen.getByText("Ready to ship.")).toBeInTheDocument();
+    expect(screen.getByText("summary")).toBeInTheDocument();
     expect(fetchWasCalledWith("/api/workflows/workflow-1/run", "POST")).toBe(
       true,
     );
     expect(screen.getAllByLabelText("success").length).toBeGreaterThan(0);
+  });
+
+  it("collects multiple workflow inputs before running", async () => {
+    const user = userEvent.setup();
+    const workflow = savedWorkflow({
+      definition: {
+        ...savedWorkflow().definition,
+        nodes: [
+          ...savedWorkflow().definition.nodes,
+          {
+            data: { default_value: "default window", input_type: "text" },
+            description: "",
+            id: "input-window",
+            name: "Window",
+            position: { x: 0, y: 120 },
+            type: "input",
+          },
+        ],
+      },
+    });
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [workflow],
+    });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Launch Workflow/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByText("Workflow Input")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Input"), "release blockers");
+    await user.type(screen.getByLabelText("Window"), "next week");
+    await user.click(screen.getByRole("button", { name: "Start" }));
+
+    await screen.findByText("release blockers");
+    const runRequest = vi
+      .mocked(window.fetch)
+      .mock.calls.find(
+        ([input, init]) =>
+          input === "/api/workflows/workflow-1/run" && init?.method === "POST",
+      );
+    expect(runRequest).toBeDefined();
+    expect(JSON.parse(String(runRequest?.[1]?.body))).toMatchObject({
+      inputs: {
+        input: "release blockers",
+        "input-window": "next week",
+      },
+    });
+  });
+
+  it("keeps a timer workflow running until it is stopped", async () => {
+    const user = userEvent.setup();
+    const workflow = savedWorkflow({
+      definition: {
+        edges: [
+          {
+            id: "edge-timer-output",
+            label: "",
+            source: "timer",
+            source_handle: "out",
+            target: "output",
+            target_handle: "in",
+          },
+        ],
+        nodes: [
+          {
+            data: {
+              interval_seconds: 5,
+              mode: "interval",
+              payload: "Timer fired.",
+            },
+            description: "",
+            id: "timer",
+            name: "Timer",
+            position: { x: 0, y: 0 },
+            type: "timer",
+          },
+          {
+            data: { output_key: "final_result", transform: "" },
+            description: "",
+            id: "output",
+            name: "Output",
+            position: { x: 260, y: 0 },
+            type: "output",
+          },
+        ],
+        version: 1,
+      },
+    });
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [workflow],
+    });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Launch Workflow/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Stop" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Timer fired.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
+    });
   });
 
   it("focuses the composer when tabbing from navigation into the Workspace", async () => {

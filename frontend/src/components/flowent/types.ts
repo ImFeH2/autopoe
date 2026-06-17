@@ -216,7 +216,13 @@ export type RuntimeSettings = {
   selectedProviderId: string;
 };
 
-export type WorkflowNodeType = "input" | "agent" | "merge" | "code" | "output";
+export type WorkflowNodeType =
+  | "input"
+  | "agent"
+  | "merge"
+  | "code"
+  | "timer"
+  | "output";
 
 export type WorkflowNodePosition = {
   x: number;
@@ -267,4 +273,11 @@ export type WorkflowRunResult = {
   outputs: Record<string, string>;
   status: "failed" | "success";
   workflowId: string;
+};
+
+export type WorkflowRunRequest = {
+  input?: string;
+  inputs?: Record<string, string>;
+  signal?: AbortSignal;
+  timerId?: string;
 };

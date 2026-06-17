@@ -6,10 +6,15 @@ import type {
 import {
   errorMessageFromResponse,
   workflowFromApi,
+  workflowRunRequestToApi,
   workflowRunResultFromApi,
   workflowToApi,
 } from "@/app/api/mappers";
-import type { Workflow, WorkflowRunResult } from "@/components/flowent/types";
+import type {
+  Workflow,
+  WorkflowRunRequest,
+  WorkflowRunResult,
+} from "@/components/flowent/types";
 
 export const saveWorkflowRequest = async (
   workflow: Workflow,
@@ -48,12 +53,15 @@ export const deleteWorkflowRequest = async (workflowId: string) => {
 
 export const runWorkflowRequest = async (
   workflowId: string,
+  request: WorkflowRunRequest = {},
 ): Promise<RequestResult<WorkflowRunResult>> => {
   const response = await fetch(
     `/api/workflows/${encodeURIComponent(workflowId)}/run`,
     {
+      body: JSON.stringify(workflowRunRequestToApi(request)),
       headers: { "Content-Type": "application/json" },
       method: "POST",
+      signal: request.signal,
     },
   );
 

@@ -19,6 +19,7 @@ import {
   Save,
   Search,
   Square,
+  Timer,
   Trash2,
   Undo,
   X,
@@ -76,8 +77,18 @@ import type {
   WorkflowNode,
   WorkflowNodeRunResult,
   WorkflowNodeType,
+  WorkflowRunRequest,
   WorkflowRunResult,
 } from "@/components/flowent/types";
+import {
+  isAbortError,
+  normalizeRunInputs,
+  timerDelayMs,
+  waitForTimer,
+  workflowFailureMessage,
+  workflowInputNodes,
+  workflowTimerNodes,
+} from "@/components/flowent/workflow-run";
 import { cn, createClientId } from "@/lib/utils";
 
 type WorkflowCanvasNodeData = {
@@ -133,6 +144,12 @@ const nodeTemplates: NodeTemplate[] = [
     type: "code",
   },
   {
+    description: "Scheduled trigger",
+    icon: Timer,
+    label: "Timer",
+    type: "timer",
+  },
+  {
     description: "Final result",
     icon: ClipboardList,
     label: "Output",
@@ -146,6 +163,7 @@ const nodeIconByType = {
   input: Square,
   merge: GitMerge,
   output: ClipboardList,
+  timer: Timer,
 } satisfies Record<WorkflowNodeType, typeof Square>;
 
 const workflowStatusClasses = {
@@ -190,6 +208,14 @@ const defaultNodeData = (type: WorkflowNodeType): Record<string, unknown> => {
   }
   if (type === "code") {
     return { code: "output = input" };
+  }
+  if (type === "timer") {
+    return {
+      cron: "* * * * *",
+      interval_seconds: 5,
+      mode: "interval",
+      payload: "Timer fired.",
+    };
   }
   return { output_key: "final_result", transform: "" };
 };
@@ -319,7 +345,7 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
           isRunning && "flowent-workflow-node-loading-border-active",
         )}
       />
-      {data.workflowType !== "input" ? (
+      {data.workflowType !== "input" && data.workflowType !== "timer" ? (
         <Handle
           className="!z-10 !size-3.5 !border !border-black/80 !bg-white/20 !opacity-0 transition-[opacity,transform,box-shadow] duration-150 group-hover:!opacity-100"
           id="in"
@@ -529,7 +555,9 @@ function WorkflowCanvas({
         } satisfies WorkflowCanvasEdge;
         const nextEdges = addEdge<WorkflowCanvasEdge>(nextEdge, currentEdges);
         edgesRef.current = nextEdges;
-        commitGraph(nodesRef.current, nextEdges);
+        window.requestAnimationFrame(() => {
+          commitGraph(nodesRef.current, nextEdges);
+        });
         return nextEdges;
       });
     },
@@ -1016,6 +1044,78 @@ function NodeProperties({
           />
         </div>
       ) : null}
+      {node.type === "timer" ? (
+        <>
+          <div className={fieldGroupClassName}>
+            <Label className={fieldLabelClassName}>Mode</Label>
+            <Select
+              onValueChange={(value) => onNodeDataChange("mode", value)}
+              value={String(node.data.mode ?? "interval")}
+            >
+              <SelectTrigger className={fieldTriggerClassName}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="interval">Interval</SelectItem>
+                <SelectItem value="cron">Cron</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {String(node.data.mode ?? "interval") === "cron" ? (
+            <div className={fieldGroupClassName}>
+              <Label
+                className={fieldLabelClassName}
+                htmlFor={`${node.id}-cron`}
+              >
+                Cron
+              </Label>
+              <Input
+                className={fieldInputClassName}
+                id={`${node.id}-cron`}
+                onChange={(event) =>
+                  onNodeDataChange("cron", event.target.value)
+                }
+                value={String(node.data.cron ?? "")}
+              />
+            </div>
+          ) : (
+            <div className={fieldGroupClassName}>
+              <Label
+                className={fieldLabelClassName}
+                htmlFor={`${node.id}-interval`}
+              >
+                Interval Seconds
+              </Label>
+              <Input
+                className={fieldInputClassName}
+                id={`${node.id}-interval`}
+                min={1}
+                onChange={(event) =>
+                  onNodeDataChange("interval_seconds", event.target.value)
+                }
+                type="number"
+                value={String(node.data.interval_seconds ?? "5")}
+              />
+            </div>
+          )}
+          <div className={fieldGroupClassName}>
+            <Label
+              className={fieldLabelClassName}
+              htmlFor={`${node.id}-payload`}
+            >
+              Payload
+            </Label>
+            <Textarea
+              className="min-h-24 rounded-md border-white/10 bg-input/30 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
+              id={`${node.id}-payload`}
+              onChange={(event) =>
+                onNodeDataChange("payload", event.target.value)
+              }
+              value={String(node.data.payload ?? "")}
+            />
+          </div>
+        </>
+      ) : null}
       {node.type === "output" ? (
         <>
           <div className={fieldGroupClassName}>
@@ -1083,27 +1183,44 @@ function EdgeProperties({
 
 function WorkflowEditorView({
   draftWorkflow,
+  inputValues,
+  isInputFormOpen,
   isDirty,
   isRunning,
+  onCancelInputForm,
   onClose,
+  onConfirmInputForm,
   onDelete,
   onDraftChange,
+  onInputValueChange,
   onMarkDirty,
   onRun,
   onSave,
+  onStop,
   runResult,
 }: {
   draftWorkflow: Workflow;
+  inputValues: Record<string, string>;
+  isInputFormOpen: boolean;
   isDirty: boolean;
   isRunning: boolean;
+  onCancelInputForm: () => void;
   onClose: () => void;
+  onConfirmInputForm: () => void;
   onDelete: () => void;
   onDraftChange: (workflow: Workflow) => void;
+  onInputValueChange: (nodeId: string, value: string) => void;
   onMarkDirty: () => void;
   onRun: () => void;
   onSave: () => void;
+  onStop: () => void;
   runResult: WorkflowRunResult | null;
 }) {
+  const outputEntries = Object.entries(runResult?.outputs ?? {});
+  const inputNodes = workflowInputNodes(draftWorkflow);
+  const hasTimer = workflowTimerNodes(draftWorkflow).length > 0;
+  const canStop = isRunning && hasTimer;
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 bg-black px-3">
@@ -1152,17 +1269,20 @@ function WorkflowEditorView({
           </Button>
           <Button
             className="h-8 gap-1.5 px-2.5"
-            disabled={isRunning}
-            onClick={onRun}
+            disabled={isRunning && !canStop}
+            onClick={canStop ? onStop : onRun}
             size="sm"
             type="button"
+            variant={isRunning ? "outline" : "default"}
           >
-            {isRunning ? (
+            {canStop ? (
+              <Square className="size-4" aria-hidden="true" />
+            ) : isRunning ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             ) : (
               <Play className="size-4" aria-hidden="true" />
             )}
-            Run
+            {canStop ? "Stop" : "Run"}
           </Button>
           <Button
             aria-label="Delete workflow"
@@ -1186,12 +1306,40 @@ function WorkflowEditorView({
           </Button>
         </div>
       </div>
-      {runResult?.outputs ? (
-        <div className="flex min-h-9 shrink-0 items-center gap-2 border-b border-white/10 px-3 text-xs text-[#dedede]">
-          <ArrowRight className="size-4 text-[#7ddf89]" aria-hidden="true" />
-          <span className="truncate">
-            {Object.values(runResult.outputs)[0] || "Run completed."}
-          </span>
+      {isInputFormOpen ? (
+        <RunInputPanel
+          inputNodes={inputNodes}
+          inputValues={inputValues}
+          onCancel={onCancelInputForm}
+          onChange={onInputValueChange}
+          onStart={onConfirmInputForm}
+        />
+      ) : null}
+      {runResult ? (
+        <div className="grid shrink-0 gap-2 border-b border-white/10 px-3 py-2 text-xs text-[#dedede]">
+          <div className="flex items-center gap-2">
+            <ArrowRight className="size-4 text-[#7ddf89]" aria-hidden="true" />
+            <span>
+              {runResult.status === "success"
+                ? "Run completed."
+                : "Run failed."}
+            </span>
+          </div>
+          {outputEntries.length > 0 ? (
+            <div className="grid gap-1">
+              {outputEntries.map(([key, value]) => (
+                <div
+                  className="grid grid-cols-[minmax(72px,140px)_minmax(0,1fr)] gap-2"
+                  key={key}
+                >
+                  <span className="truncate text-[#9b9b9b]">{key}</span>
+                  <span className="min-w-0 whitespace-pre-wrap break-words text-white">
+                    {value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <ReactFlowProvider>
@@ -1207,12 +1355,80 @@ function WorkflowEditorView({
   );
 }
 
+function RunInputPanel({
+  inputNodes,
+  inputValues,
+  onCancel,
+  onChange,
+  onStart,
+}: {
+  inputNodes: WorkflowNode[];
+  inputValues: Record<string, string>;
+  onCancel: () => void;
+  onChange: (nodeId: string, value: string) => void;
+  onStart: () => void;
+}) {
+  return (
+    <div className="grid shrink-0 gap-3 border-b border-white/10 bg-black px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium text-white">Workflow Input</div>
+        <div className="flex gap-2">
+          <Button
+            className={cn(subtleButtonClassName, "px-2.5")}
+            onClick={onCancel}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            className="h-8 px-2.5"
+            onClick={onStart}
+            size="sm"
+            type="button"
+          >
+            Start
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {inputNodes.map((node) => {
+          const defaultValue = String(node.data.default_value ?? "");
+          return (
+            <div className={fieldGroupClassName} key={node.id}>
+              <Label
+                className={fieldLabelClassName}
+                htmlFor={`${node.id}-run-input`}
+              >
+                {node.name}
+              </Label>
+              <Textarea
+                className="min-h-20 rounded-md border-white/10 bg-input/30 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
+                id={`${node.id}-run-input`}
+                onChange={(event) => onChange(node.id, event.target.value)}
+                placeholder={
+                  defaultValue
+                    ? `Default: ${defaultValue}`
+                    : "Use default value"
+                }
+                value={inputValues[node.id] ?? ""}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function WorkflowsView({
   activeWorkflow,
   isRunningWorkflow,
   newWorkflowKey,
   onCloseEditor,
   onDeleteWorkflow,
+  onFinishWorkflowRun,
   onRunWorkflow,
   onSaveWorkflow,
   runningWorkflowId,
@@ -1223,7 +1439,11 @@ export function WorkflowsView({
   newWorkflowKey: number;
   onCloseEditor: () => void;
   onDeleteWorkflow: (workflowId: string) => Promise<boolean>;
-  onRunWorkflow: (workflowId: string) => Promise<{
+  onFinishWorkflowRun: (workflowId: string) => void;
+  onRunWorkflow: (
+    workflowId: string,
+    request?: WorkflowRunRequest,
+  ) => Promise<{
     data: WorkflowRunResult | null;
     error: string;
   }>;
@@ -1237,8 +1457,11 @@ export function WorkflowsView({
   const [draftWorkflow, setDraftWorkflow] = useState<Workflow>(() =>
     activeWorkflow ? cloneWorkflow(activeWorkflow) : createDraftWorkflow(),
   );
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  const [isInputFormOpen, setIsInputFormOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(!activeWorkflow);
   const toast = useFlowentToast();
+  const runAbortControllerRef = useRef<AbortController | null>(null);
   const editorKeyRef = useRef({
     newWorkflowKey,
     workflowId: activeWorkflow?.id ?? "",
@@ -1259,8 +1482,17 @@ export function WorkflowsView({
     setDraftWorkflow(
       activeWorkflow ? cloneWorkflow(activeWorkflow) : createDraftWorkflow(),
     );
+    setInputValues({});
+    setIsInputFormOpen(false);
     setIsDirty(!activeWorkflow);
   }, [activeWorkflow, newWorkflowKey]);
+
+  useEffect(
+    () => () => {
+      runAbortControllerRef.current?.abort();
+    },
+    [],
+  );
 
   const activeRunResult =
     workflowRunResult?.workflowId === draftWorkflow.id
@@ -1286,15 +1518,134 @@ export function WorkflowsView({
     return result.data;
   };
 
-  const runDraft = async () => {
+  const stopRun = () => {
+    runAbortControllerRef.current?.abort();
+    runAbortControllerRef.current = null;
+    onFinishWorkflowRun(draftWorkflow.id);
+  };
+
+  const runSavedWorkflow = async (
+    savedWorkflow: Workflow,
+    nextInputValues: Record<string, string>,
+  ) => {
+    const requestInputs = normalizeRunInputs(
+      workflowInputNodes(savedWorkflow),
+      nextInputValues,
+    );
+    const timerNodes = workflowTimerNodes(savedWorkflow);
+    if (timerNodes.length === 0) {
+      const result = await onRunWorkflow(savedWorkflow.id, {
+        inputs: requestInputs,
+      });
+      if (!result.data) {
+        toast.error(result.error);
+        return;
+      }
+      if (result.data.status === "failed") {
+        toast.error(workflowFailureMessage(result.data));
+      }
+      return;
+    }
+
+    const abortController = new AbortController();
+    runAbortControllerRef.current?.abort();
+    runAbortControllerRef.current = abortController;
+    try {
+      await runTimers(
+        savedWorkflow,
+        timerNodes,
+        requestInputs,
+        abortController,
+      );
+    } catch (error) {
+      if (!isAbortError(error)) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Run could not be completed.",
+        );
+      }
+    } finally {
+      if (runAbortControllerRef.current === abortController) {
+        runAbortControllerRef.current = null;
+      }
+      onFinishWorkflowRun(savedWorkflow.id);
+    }
+  };
+
+  const runTimers = async (
+    savedWorkflow: Workflow,
+    timerNodes: WorkflowNode[],
+    requestInputs: Record<string, string>,
+    abortController: AbortController,
+  ) => {
+    const signal = abortController.signal;
+    for (const timerNode of timerNodes) {
+      if (signal.aborted) {
+        throw new DOMException("Run stopped.", "AbortError");
+      }
+      const result = await onRunWorkflow(savedWorkflow.id, {
+        inputs: requestInputs,
+        signal,
+        timerId: timerNode.id,
+      });
+      if (!result.data) {
+        throw new Error(result.error);
+      }
+      if (result.data.status === "failed") {
+        throw new Error(workflowFailureMessage(result.data));
+      }
+    }
+
+    const scheduledTimers = timerNodes.map((timerNode) => ({
+      nextAt: Date.now() + timerDelayMs(timerNode),
+      timerNode,
+    }));
+
+    while (!signal.aborted) {
+      const nextTimer = scheduledTimers.sort((a, b) => a.nextAt - b.nextAt)[0];
+      if (!nextTimer) {
+        return;
+      }
+      await waitForTimer(Math.max(0, nextTimer.nextAt - Date.now()), signal);
+      const result = await onRunWorkflow(savedWorkflow.id, {
+        inputs: requestInputs,
+        signal,
+        timerId: nextTimer.timerNode.id,
+      });
+      if (!result.data) {
+        throw new Error(result.error);
+      }
+      if (result.data.status === "failed") {
+        throw new Error(workflowFailureMessage(result.data));
+      }
+      nextTimer.nextAt = Date.now() + timerDelayMs(nextTimer.timerNode);
+    }
+  };
+
+  const runDraftWithInputs = async (
+    nextInputValues: Record<string, string>,
+  ) => {
     const savedWorkflow = await saveDraft();
     if (!savedWorkflow) {
       return;
     }
-    const result = await onRunWorkflow(savedWorkflow.id);
-    if (!result.data) {
-      toast.error(result.error);
+    setIsInputFormOpen(false);
+    await runSavedWorkflow(savedWorkflow, nextInputValues);
+  };
+
+  const runDraft = async () => {
+    const inputNodes = workflowInputNodes(draftWorkflow);
+    if (inputNodes.length > 1) {
+      setInputValues(
+        Object.fromEntries(
+          inputNodes.map((node) => [node.id, inputValues[node.id] ?? ""]),
+        ),
+      );
+      setIsInputFormOpen(true);
+      return;
     }
+    await runDraftWithInputs(inputValues);
   };
 
   const deleteDraft = async () => {
@@ -1307,13 +1658,25 @@ export function WorkflowsView({
   return (
     <WorkflowEditorView
       draftWorkflow={draftWorkflow}
+      inputValues={inputValues}
+      isInputFormOpen={isInputFormOpen}
       isDirty={isDirty}
       isRunning={isRunning}
+      onCancelInputForm={() => setIsInputFormOpen(false)}
       onClose={closeEditor}
+      onConfirmInputForm={() => {
+        void runDraftWithInputs(inputValues);
+      }}
       onDelete={() => {
         void deleteDraft();
       }}
       onDraftChange={setDraftWorkflow}
+      onInputValueChange={(nodeId, value) =>
+        setInputValues((currentValues) => ({
+          ...currentValues,
+          [nodeId]: value,
+        }))
+      }
       onMarkDirty={() => setIsDirty(true)}
       onRun={() => {
         void runDraft();
@@ -1321,6 +1684,7 @@ export function WorkflowsView({
       onSave={() => {
         void saveDraft();
       }}
+      onStop={stopRun}
       runResult={activeRunResult}
     />
   );

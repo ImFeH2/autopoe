@@ -6,7 +6,11 @@ import {
   saveWorkflowRequest,
 } from "@/app/api/workflow-requests";
 import type { RequestResult } from "@/app/api/types";
-import type { Workflow, WorkflowRunResult } from "@/components/flowent/types";
+import type {
+  Workflow,
+  WorkflowRunRequest,
+  WorkflowRunResult,
+} from "@/components/flowent/types";
 
 export const useWorkflows = (initialWorkflowId = "") => {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -93,19 +97,32 @@ export const useWorkflows = (initialWorkflowId = "") => {
   }, []);
 
   const runWorkflow = useCallback(
-    async (workflowId: string): Promise<RequestResult<WorkflowRunResult>> => {
+    async (
+      workflowId: string,
+      request: WorkflowRunRequest = {},
+    ): Promise<RequestResult<WorkflowRunResult>> => {
       setRunningWorkflowId(workflowId);
-      setWorkflowRunResult(null);
+      if (!request.timerId) {
+        setWorkflowRunResult(null);
+      }
       try {
-        const result = await runWorkflowRequest(workflowId);
+        const result = await runWorkflowRequest(workflowId, request);
         setWorkflowRunResult(result.data);
         return result;
       } finally {
-        setRunningWorkflowId("");
+        if (!request.timerId) {
+          setRunningWorkflowId("");
+        }
       }
     },
     [],
   );
+
+  const finishWorkflowRun = useCallback((workflowId: string) => {
+    setRunningWorkflowId((currentWorkflowId) =>
+      currentWorkflowId === workflowId ? "" : currentWorkflowId,
+    );
+  }, []);
 
   return {
     activeWorkflow,
@@ -118,6 +135,7 @@ export const useWorkflows = (initialWorkflowId = "") => {
     replaceWorkflows,
     runWorkflow,
     runningWorkflowId,
+    finishWorkflowRun,
     saveWorkflow,
     workflowRunResult,
     workflows,

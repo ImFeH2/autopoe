@@ -41,6 +41,13 @@ class WorkflowRunResponse(BaseModel):
     workflow_id: str
 
 
+class WorkflowRunRequestValues(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_input: str = ""
+    input_values: dict[str, str] = Field(default_factory=dict)
+
+
 PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z0-9_.-]+)\.output\s*\}\}")
 PYTHON_CODE_RUNNER = r"""
 import contextlib
@@ -106,8 +113,8 @@ def validate_workflow_definition(definition: StoredWorkflowDefinition) -> list[s
         raise ValueError("Workflow node ids must not be empty.")
     if len(set(node_ids)) != len(node_ids):
         raise ValueError("Workflow node ids must be unique.")
-    if not any(node.type == "input" for node in definition.nodes):
-        raise ValueError("Workflow needs an input node.")
+    if not any(node.type in {"input", "timer"} for node in definition.nodes):
+        raise ValueError("Workflow needs an input or timer node.")
     if not any(node.type == "output" for node in definition.nodes):
         raise ValueError("Workflow needs an output node.")
 
@@ -127,6 +134,43 @@ def validate_workflow_definition(definition: StoredWorkflowDefinition) -> list[s
 
 def workflow_requires_connection(definition: StoredWorkflowDefinition) -> bool:
     return any(node.type == "agent" for node in definition.nodes)
+
+
+def timer_run_node_ids(
+    definition: StoredWorkflowDefinition, timer_node_id: str
+) -> set[str]:
+    nodes = {node.id: node for node in definition.nodes}
+    timer_node = nodes.get(timer_node_id)
+    if timer_node is None or timer_node.type != "timer":
+        raise ValueError("Timer node not found.")
+
+    outgoing: dict[str, list[str]] = defaultdict(list)
+    incoming: dict[str, list[str]] = defaultdict(list)
+    for edge in definition.edges:
+        outgoing[edge.source].append(edge.target)
+        incoming[edge.target].append(edge.source)
+
+    active = {timer_node_id}
+    queue = deque([timer_node_id])
+    while queue:
+        node_id = queue.popleft()
+        for target in outgoing[node_id]:
+            if target not in active:
+                active.add(target)
+                queue.append(target)
+
+    queue = deque(active)
+    while queue:
+        node_id = queue.popleft()
+        for source in incoming[node_id]:
+            source_node = nodes[source]
+            if source_node.type == "timer" and source != timer_node_id:
+                continue
+            if source not in active:
+                active.add(source)
+                queue.append(source)
+
+    return active
 
 
 def topological_node_ids(definition: StoredWorkflowDefinition) -> list[str]:
@@ -167,31 +211,61 @@ async def run_workflow_definition(
     definition: StoredWorkflowDefinition,
     default_input: str = "",
     input_values: Mapping[str, str] | None = None,
+    timer_node_id: str = "",
     workflow_id: str,
 ) -> WorkflowRunResponse:
     ordered_ids = validate_workflow_definition(definition)
     if workflow_requires_connection(definition) and connection is None:
         raise ValueError("Choose a provider and model before running.")
 
+    return await run_workflow_once(
+        completion=completion,
+        connection=connection,
+        definition=definition,
+        input_values=WorkflowRunRequestValues(
+            default_input=default_input,
+            input_values=dict(input_values or {}),
+        ),
+        ordered_ids=ordered_ids,
+        timer_node_id=timer_node_id,
+        workflow_id=workflow_id,
+    )
+
+
+async def run_workflow_once(
+    *,
+    completion: CompletionCallable | None,
+    connection: ProviderConnection | None,
+    definition: StoredWorkflowDefinition,
+    input_values: WorkflowRunRequestValues,
+    ordered_ids: list[str],
+    timer_node_id: str = "",
+    workflow_id: str,
+) -> WorkflowRunResponse:
     nodes = {node.id: node for node in definition.nodes}
     incoming_edges = edges_by_target(definition.edges)
+    active_node_ids = (
+        timer_run_node_ids(definition, timer_node_id) if timer_node_id else None
+    )
     results: dict[str, WorkflowNodeRunResult] = {
         node.id: WorkflowNodeRunResult(id=node.id, status="pending")
         for node in definition.nodes
     }
     outputs: dict[str, str] = {}
     named_outputs: dict[str, str] = {}
-    remaining_default_input = default_input
+    remaining_default_input = input_values.default_input
 
     for node_id in ordered_ids:
         node = nodes[node_id]
+        if active_node_ids is not None and node.id not in active_node_ids:
+            continue
         results[node.id] = WorkflowNodeRunResult(id=node.id, status="running")
         try:
             output = await run_node(
                 completion=completion,
                 connection=connection,
                 default_input=remaining_default_input,
-                input_values=input_values or {},
+                input_values=input_values.input_values,
                 incoming_edges=incoming_edges[node.id],
                 node=node,
                 outputs=outputs,
@@ -264,6 +338,8 @@ async def run_node(
         return "\n".join(output for output in upstream if output)
     if node.type == "code":
         return await run_code_node(node, upstream_outputs(incoming_edges, outputs))
+    if node.type == "timer":
+        return timer_payload(node)
     if node.type == "output":
         return joined_upstream_outputs(incoming_edges, outputs)
     raise ValueError("Node type is not supported.")
@@ -311,6 +387,10 @@ def node_data_text(node: StoredWorkflowNode, key: str) -> str:
 
 def node_output_key(node: StoredWorkflowNode) -> str:
     return node_data_text(node, "output_key") or node.id
+
+
+def timer_payload(node: StoredWorkflowNode) -> str:
+    return node_data_text(node, "payload") or "Timer fired."
 
 
 def upstream_outputs(

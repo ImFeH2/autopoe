@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from flowent.llm import ProviderFormat
 from flowent.storage import StoredMessage, StoredWritablePath
@@ -63,6 +63,14 @@ class WorkspaceClearResponse(BaseModel):
 
     messages: list[StoredMessage]
     usage_info: TokenUsageInfo | None = None
+
+
+class WorkflowRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input: str = ""
+    inputs: dict[str, str] = Field(default_factory=dict)
+    timer_id: str = ""
 
 
 class AboutResponse(BaseModel):

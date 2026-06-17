@@ -140,6 +140,7 @@ function FlowentApp() {
     activeWorkflowId,
     closeWorkflowEditor,
     deleteWorkflow,
+    finishWorkflowRun,
     newWorkflowKey,
     openNewWorkflow,
     openWorkflow,
@@ -265,6 +266,7 @@ function FlowentApp() {
           newWorkflowKey={newWorkflowKey}
           onCloseEditor={() => updateNavigation("workspace")}
           onDeleteWorkflow={deleteWorkflow}
+          onFinishWorkflowRun={finishWorkflowRun}
           onRunWorkflow={runWorkflow}
           onSaveWorkflow={saveWorkflow}
           runningWorkflowId={runningWorkflowId}

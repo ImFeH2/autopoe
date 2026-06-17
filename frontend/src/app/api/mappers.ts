@@ -23,6 +23,7 @@ import type {
   WorkflowDefinition,
   WorkflowEdge,
   WorkflowNode,
+  WorkflowRunRequest,
   WorkflowRunResult,
   WritablePath,
 } from "@/components/flowent/types";
@@ -218,6 +219,12 @@ export const workflowRunResultFromApi = (
   outputs: result.outputs,
   status: result.status,
   workflowId: result.workflow_id,
+});
+
+export const workflowRunRequestToApi = (request: WorkflowRunRequest) => ({
+  input: request.input ?? "",
+  inputs: request.inputs ?? {},
+  timer_id: request.timerId ?? "",
 });
 
 export const errorMessageFromResponse = async (

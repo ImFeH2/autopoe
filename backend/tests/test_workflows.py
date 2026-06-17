@@ -112,6 +112,234 @@ def test_workflow_run_returns_output_node_result(tmp_path, monkeypatch) -> None:
     ]
 
 
+def test_workflow_run_accepts_multiple_input_values(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    workflow = input_output_workflow()
+    workflow["definition"]["nodes"].insert(
+        1,
+        {
+            "data": {"default_value": "default window", "input_type": "text"},
+            "description": "",
+            "id": "input-window",
+            "name": "Window",
+            "position": {"x": 0, "y": 120},
+            "type": "input",
+        },
+    )
+    workflow["definition"]["nodes"].insert(
+        2,
+        {
+            "data": {"merge_strategy": "text"},
+            "description": "",
+            "id": "merge",
+            "name": "Merge",
+            "position": {"x": 260, "y": 0},
+            "type": "merge",
+        },
+    )
+    workflow["definition"]["nodes"][3]["position"] = {"x": 520, "y": 0}
+    workflow["definition"]["edges"] = [
+        {
+            "id": "edge-input-merge",
+            "label": "",
+            "source": "input",
+            "source_handle": "out",
+            "target": "merge",
+            "target_handle": "in",
+        },
+        {
+            "id": "edge-window-merge",
+            "label": "",
+            "source": "input-window",
+            "source_handle": "out",
+            "target": "merge",
+            "target_handle": "in",
+        },
+        {
+            "id": "edge-merge-output",
+            "label": "",
+            "source": "merge",
+            "source_handle": "out",
+            "target": "output",
+            "target_handle": "in",
+        },
+    ]
+    client.put("/api/workflows", json=workflow)
+
+    response = client.post(
+        "/api/workflows/workflow-1/run",
+        json={"inputs": {"input": "release blockers"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["outputs"] == {
+        "final_result": "release blockers\ndefault window"
+    }
+
+
+def test_workflow_run_returns_multiple_output_nodes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    workflow = input_output_workflow()
+    workflow["definition"]["nodes"].append(
+        {
+            "data": {"output_key": "summary"},
+            "description": "",
+            "id": "output-summary",
+            "name": "Summary",
+            "position": {"x": 260, "y": 120},
+            "type": "output",
+        }
+    )
+    workflow["definition"]["edges"].append(
+        {
+            "id": "edge-input-summary",
+            "label": "",
+            "source": "input",
+            "source_handle": "out",
+            "target": "output-summary",
+            "target_handle": "in",
+        }
+    )
+    client.put("/api/workflows", json=workflow)
+
+    response = client.post("/api/workflows/workflow-1/run")
+
+    assert response.status_code == 200
+    assert response.json()["outputs"] == {
+        "final_result": "launch checklist",
+        "summary": "launch checklist",
+    }
+
+
+def test_workflow_run_accepts_timer_node_without_input(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    workflow = {
+        "created_at": 0,
+        "definition": {
+            "edges": [
+                {
+                    "id": "edge-timer-output",
+                    "label": "",
+                    "source": "timer",
+                    "source_handle": "out",
+                    "target": "output",
+                    "target_handle": "in",
+                }
+            ],
+            "nodes": [
+                {
+                    "data": {
+                        "interval_seconds": 5,
+                        "mode": "interval",
+                        "payload": "tick",
+                    },
+                    "description": "",
+                    "id": "timer",
+                    "name": "Timer",
+                    "position": {"x": 0, "y": 0},
+                    "type": "timer",
+                },
+                {
+                    "data": {"output_key": "final_result"},
+                    "description": "",
+                    "id": "output",
+                    "name": "Output",
+                    "position": {"x": 260, "y": 0},
+                    "type": "output",
+                },
+            ],
+            "version": 1,
+        },
+        "id": "workflow-1",
+        "name": "Timer Workflow",
+        "updated_at": 0,
+    }
+    client.put("/api/workflows", json=workflow)
+
+    response = client.post("/api/workflows/workflow-1/run")
+
+    assert response.status_code == 200
+    assert response.json()["outputs"] == {"final_result": "tick"}
+
+
+def test_workflow_run_targets_single_timer_node(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    workflow = {
+        "created_at": 0,
+        "definition": {
+            "edges": [
+                {
+                    "id": "edge-a-output-a",
+                    "label": "",
+                    "source": "timer-a",
+                    "source_handle": "out",
+                    "target": "output-a",
+                    "target_handle": "in",
+                },
+                {
+                    "id": "edge-b-output-b",
+                    "label": "",
+                    "source": "timer-b",
+                    "source_handle": "out",
+                    "target": "output-b",
+                    "target_handle": "in",
+                },
+            ],
+            "nodes": [
+                {
+                    "data": {"mode": "interval", "payload": "alpha"},
+                    "description": "",
+                    "id": "timer-a",
+                    "name": "Timer A",
+                    "position": {"x": 0, "y": 0},
+                    "type": "timer",
+                },
+                {
+                    "data": {"mode": "interval", "payload": "beta"},
+                    "description": "",
+                    "id": "timer-b",
+                    "name": "Timer B",
+                    "position": {"x": 0, "y": 120},
+                    "type": "timer",
+                },
+                {
+                    "data": {"output_key": "alpha"},
+                    "description": "",
+                    "id": "output-a",
+                    "name": "Output A",
+                    "position": {"x": 260, "y": 0},
+                    "type": "output",
+                },
+                {
+                    "data": {"output_key": "beta"},
+                    "description": "",
+                    "id": "output-b",
+                    "name": "Output B",
+                    "position": {"x": 260, "y": 120},
+                    "type": "output",
+                },
+            ],
+            "version": 1,
+        },
+        "id": "workflow-1",
+        "name": "Timer Workflow",
+        "updated_at": 0,
+    }
+    client.put("/api/workflows", json=workflow)
+
+    response = client.post(
+        "/api/workflows/workflow-1/run",
+        json={"timer_id": "timer-b"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["outputs"] == {"beta": "beta"}
+
+
 @pytest.mark.anyio
 async def test_workflow_run_accepts_input_override() -> None:
     workflow = StoredWorkflow.model_validate(input_output_workflow())

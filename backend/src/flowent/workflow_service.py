@@ -54,6 +54,7 @@ class WorkflowService:
         *,
         default_input: str = "",
         input_values: Mapping[str, str] | None = None,
+        timer_node_id: str = "",
     ) -> WorkflowRunResponse:
         workflow = self.get_workflow(workflow_id)
         connection = (
@@ -67,6 +68,7 @@ class WorkflowService:
             default_input=default_input,
             definition=workflow.definition,
             input_values=input_values,
+            timer_node_id=timer_node_id,
             workflow_id=workflow.id,
         )
 
@@ -76,6 +78,7 @@ class WorkflowService:
         default_input: str = "",
         definition: StoredWorkflowDefinition,
         input_values: Mapping[str, str] | None = None,
+        timer_node_id: str = "",
         workflow_id: str,
     ) -> WorkflowRunResponse:
         connection = (
@@ -89,5 +92,6 @@ class WorkflowService:
             default_input=default_input,
             definition=definition,
             input_values=input_values,
+            timer_node_id=timer_node_id,
             workflow_id=workflow_id,
         )
