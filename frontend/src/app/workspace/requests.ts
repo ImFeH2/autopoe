@@ -1,9 +1,9 @@
-import type { ApiState, WorkspaceMessageEditResponse } from "@/app/api-types";
-import { WorkspaceRequestError } from "@/app/workspace-messages";
+import type { ApiState, WorkspaceMessageEditResponse } from "@/app/api/types";
+import { WorkspaceRequestError } from "@/app/workspace/messages";
 import {
   readWorkspaceStream,
   type WorkspaceStreamHandlers,
-} from "@/app/workspace-stream";
+} from "@/app/workspace/stream";
 import type {
   MessageActionRequest,
   MessageErrorRetryRequest,

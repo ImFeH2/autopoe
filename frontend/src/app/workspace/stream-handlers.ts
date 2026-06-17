@@ -1,10 +1,10 @@
-import type { ApiMessage } from "@/app/api-types";
+import type { ApiMessage } from "@/app/api/types";
 import {
   assistantGroupsFromMessage,
   countAssistantOutputItems,
   latestAssistantOutputItem,
-} from "@/app/workspace-messages";
-import type { WorkspaceStreamHandlers } from "@/app/workspace-stream";
+} from "@/app/workspace/messages";
+import type { WorkspaceStreamHandlers } from "@/app/workspace/stream";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,

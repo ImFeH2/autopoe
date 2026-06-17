@@ -1,4 +1,4 @@
-import { providerToApi } from "@/app/api-mappers";
+import { providerToApi } from "@/app/api/mappers";
 import type { Provider } from "@/components/flowent/types";
 
 const providerModelFetchFailureMessages = {

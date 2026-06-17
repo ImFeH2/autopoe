@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ApiMessage, ApiState } from "@/app/api-types";
+import type { ApiMessage, ApiState } from "@/app/api/types";
 import {
   contextWindowFromLimit,
   errorNotificationKeysFromState,
@@ -9,9 +9,9 @@ import {
   telegramBotFromApi,
   writablePathFromApi,
   workflowFromApi,
-} from "@/app/api-mappers";
-import { fetchAbout, fetchAppState } from "@/app/state-requests";
-import { createWorkspaceStreamHandlers as createWorkspaceStreamHandlersForResponse } from "@/app/workspace-stream-handlers";
+} from "@/app/api/mappers";
+import { fetchAbout, fetchAppState } from "@/app/api/state-requests";
+import { createWorkspaceStreamHandlers as createWorkspaceStreamHandlersForResponse } from "@/app/workspace/stream-handlers";
 import {
   clearWorkspace,
   compactWorkspaceRequest,
@@ -20,7 +20,7 @@ import {
   retryWorkspaceError,
   stopWorkspaceResponse,
   streamWorkspaceResponse,
-} from "@/app/workspace-requests";
+} from "@/app/workspace/requests";
 import {
   createWorkspaceErrorMessage,
   createWorkspaceStreamErrorMessage,
@@ -31,15 +31,15 @@ import {
   trimAssistantMessageAtError,
   WorkspaceRequestError,
   WorkspaceStreamError,
-} from "@/app/workspace-messages";
+} from "@/app/workspace/messages";
 import {
   readWorkspaceStream,
   type WorkspaceStreamHandlers,
-} from "@/app/workspace-stream";
-import { useWorkflows } from "@/app/use-workflows";
-import { useMcpServers } from "@/app/use-mcp-servers";
-import { useSetupSections } from "@/app/use-setup-sections";
-import { useProviderSettings } from "@/app/use-provider-settings";
+} from "@/app/workspace/stream";
+import { useWorkflows } from "@/app/controllers/use-workflows";
+import { useMcpServers } from "@/app/controllers/use-mcp-servers";
+import { useSetupSections } from "@/app/controllers/use-setup-sections";
+import { useProviderSettings } from "@/app/controllers/use-provider-settings";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";

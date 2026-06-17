@@ -1,9 +1,9 @@
-import type { ApiTelegramBot, ApiTelegramSession } from "@/app/api-types";
+import type { ApiTelegramBot, ApiTelegramSession } from "@/app/api/types";
 import {
   telegramBotFromApi,
   telegramBotToApi,
   telegramSessionFromApi,
-} from "@/app/api-mappers";
+} from "@/app/api/mappers";
 import type { TelegramBot } from "@/components/flowent/types";
 
 export const saveTelegramBotRequest = async (telegramBot: TelegramBot) => {

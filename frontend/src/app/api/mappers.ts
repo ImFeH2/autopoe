@@ -10,7 +10,7 @@ import type {
   ApiWorkflowEdge,
   ApiWorkflowNode,
   ApiWorkflowRunResult,
-} from "@/app/api-types";
+} from "@/app/api/types";
 import type {
   ContextUsageInfo,
   McpServer,

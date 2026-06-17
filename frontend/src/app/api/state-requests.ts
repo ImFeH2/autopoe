@@ -1,4 +1,4 @@
-import type { ApiAbout, ApiState } from "@/app/api-types";
+import type { ApiAbout, ApiState } from "@/app/api/types";
 import type { RuntimeSettings } from "@/components/flowent/types";
 
 export const fetchAppState = async () => {

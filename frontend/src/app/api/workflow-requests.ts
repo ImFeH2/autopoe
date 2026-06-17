@@ -2,13 +2,13 @@ import type {
   ApiWorkflow,
   ApiWorkflowRunResult,
   RequestResult,
-} from "@/app/api-types";
+} from "@/app/api/types";
 import {
   errorMessageFromResponse,
   workflowFromApi,
   workflowRunResultFromApi,
   workflowToApi,
-} from "@/app/api-mappers";
+} from "@/app/api/mappers";
 import type { Workflow, WorkflowRunResult } from "@/components/flowent/types";
 
 export const saveWorkflowRequest = async (

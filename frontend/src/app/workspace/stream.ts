@@ -1,9 +1,9 @@
-import type { ApiMessage } from "@/app/api-types";
+import type { ApiMessage } from "@/app/api/types";
 import {
   streamErrorFromMessage,
   WorkspaceStreamError,
   type WorkspaceToolUpdate,
-} from "@/app/workspace-messages";
+} from "@/app/workspace/messages";
 import type {
   AssistantOutputItem,
   ContextUsageInfo,

@@ -1,4 +1,4 @@
-import type { ApiMessage } from "@/app/api-types";
+import type { ApiMessage } from "@/app/api/types";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,

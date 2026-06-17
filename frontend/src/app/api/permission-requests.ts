@@ -1,5 +1,5 @@
-import type { ApiWritablePath } from "@/app/api-types";
-import { writablePathFromApi } from "@/app/api-mappers";
+import type { ApiWritablePath } from "@/app/api/types";
+import { writablePathFromApi } from "@/app/api/mappers";
 
 export const removeWritablePathRequest = async (path: string) => {
   const response = await fetch("/api/permissions/writable-paths", {

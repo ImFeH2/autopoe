@@ -1,18 +1,18 @@
 import { useCallback, useMemo, useState } from "react";
 
-import { createEmptyTelegramBot } from "@/app/api-mappers";
+import { createEmptyTelegramBot } from "@/app/api/mappers";
 import {
   approveTelegramSessionRequest,
   saveTelegramBotRequest,
-} from "@/app/channel-requests";
+} from "@/app/api/channel-requests";
 import {
   addWritablePathRequest,
   removeWritablePathRequest,
-} from "@/app/permission-requests";
+} from "@/app/api/permission-requests";
 import {
   reloadSkillsRequest,
   updateSkillEnabledRequest,
-} from "@/app/skill-requests";
+} from "@/app/api/skill-requests";
 import type {
   Skill,
   TelegramBot,

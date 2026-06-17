@@ -4,8 +4,8 @@ import {
   deleteWorkflowRequest,
   runWorkflowRequest,
   saveWorkflowRequest,
-} from "@/app/workflow-requests";
-import type { RequestResult } from "@/app/api-types";
+} from "@/app/api/workflow-requests";
+import type { RequestResult } from "@/app/api/types";
 import type {
   ViewId,
   Workflow,

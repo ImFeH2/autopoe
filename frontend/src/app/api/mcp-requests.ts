@@ -1,5 +1,5 @@
-import type { ApiMcpImportPreview, ApiMcpServer } from "@/app/api-types";
-import { mcpServerFromApi, mcpServerToApi } from "@/app/api-mappers";
+import type { ApiMcpImportPreview, ApiMcpServer } from "@/app/api/types";
+import { mcpServerFromApi, mcpServerToApi } from "@/app/api/mappers";
 import type { McpImportSource, McpServer } from "@/components/flowent/types";
 
 export const previewMcpImportRequest = async (source: McpImportSource) => {

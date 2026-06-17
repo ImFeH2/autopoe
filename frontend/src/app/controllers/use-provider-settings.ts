@@ -5,8 +5,8 @@ import {
   ProviderModelFetchError,
   removeProviderRequest,
   saveProviderRequest,
-} from "@/app/provider-requests";
-import { saveRuntimeSettingsRequest } from "@/app/state-requests";
+} from "@/app/api/provider-requests";
+import { saveRuntimeSettingsRequest } from "@/app/api/state-requests";
 import {
   createEmptyProvider,
   providerOptions,
