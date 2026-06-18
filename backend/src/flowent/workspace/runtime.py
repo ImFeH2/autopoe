@@ -10,14 +10,13 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from flowent.agent import AgentContextUpdate, run_agent_stream
-from flowent.approval import ApprovalReviewRequest, review_approval_request
+from flowent.agent import AgentContextUpdate
+from flowent.agent_runtime import FlowentAgentRuntime
 from flowent.compact import CompactInput, CompactProvider
 from flowent.context import runtime_context_messages
 from flowent.llm import ChatMessage, CompletionCallable, ProviderConnection
 from flowent.logging import TRACE_LEVEL
 from flowent.mcp import McpManager
-from flowent.permissions import run_tool_with_path_permissions
 from flowent.provider_connections import selected_connection
 from flowent.skills import explicit_skill_messages
 from flowent.storage import (
@@ -27,7 +26,7 @@ from flowent.storage import (
     StoredState,
     StoredToolItem,
 )
-from flowent.tools import ToolContext, ToolResult, text_tool_result, tool_specs
+from flowent.tools import text_tool_result
 from flowent.usage import (
     TokenUsage,
     TokenUsageInfo,
@@ -37,11 +36,6 @@ from flowent.usage import (
     recompute_context_usage,
 )
 from flowent.workflow_service import WorkflowService
-from flowent.workflow_tools import (
-    WorkflowAgentTools,
-    workflow_tool_specs,
-    workflow_tool_title,
-)
 from flowent.workspace.context import (
     COMPACTED_CONTEXT_MARKER,
     OPTIMIZED_CONTEXT_MARKER,
@@ -97,38 +91,27 @@ class WorkspaceRuntime:
         self.chat_completion = chat_completion
         self.compact_provider = compact_provider
         self.cwd = cwd
-        self.mcp_manager = mcp_manager
         self.store = store
         self.workflow_service = workflow_service
+        self.agent_runtime = FlowentAgentRuntime(
+            chat_completion=chat_completion,
+            cwd=cwd,
+            mcp_manager=mcp_manager,
+            store=store,
+            workflow_service=workflow_service,
+        )
         self.active_response: WorkspaceResponse | None = None
         self.generation = 0
         self.active_compact_task: WorkspaceCompactTask | None = None
 
     def extra_tool_specs(self) -> list[Mapping[str, object]]:
-        return [
-            *workflow_tool_specs(),
-            *list(self.mcp_manager.tool_specs()),
-        ]
+        return self.agent_runtime.extra_tool_specs()
 
     def model_tool_specs(self) -> list[Mapping[str, object]]:
-        return [*tool_specs(), *self.extra_tool_specs()]
-
-    def workflow_tools(self) -> WorkflowAgentTools:
-        return WorkflowAgentTools(self.workflow_service)
-
-    async def run_extra_tool(
-        self,
-        workflow_tools: WorkflowAgentTools,
-        name: str,
-        arguments: dict[str, object],
-    ) -> ToolResult | None:
-        workflow_result = await workflow_tools.run_tool(name, arguments)
-        if workflow_result is not None:
-            return workflow_result
-        return await self.mcp_manager.run_tool(name, arguments)
+        return self.agent_runtime.model_tool_specs()
 
     def extra_tool_title(self, name: str) -> str | None:
-        return workflow_tool_title(name) or self.mcp_manager.tool_title(name)
+        return self.agent_runtime.extra_tool_title(name)
 
     def request_messages_for_content(
         self,
@@ -263,7 +246,6 @@ class WorkspaceRuntime:
         )
         next_messages = [*state.messages, user_message]
         self.store.save_messages(next_messages)
-        extra_tool_specs = self.extra_tool_specs()
         model_tool_specs = self.model_tool_specs()
         model_history: list[ChatMessage | Mapping[str, object]] = [
             *runtime_context_messages(self.cwd, state.settings.agent_prompt),
@@ -297,49 +279,11 @@ class WorkspaceRuntime:
         current_output_index = 0
         latest_usage_output_index: int | None = None
 
-        async def review_tool_approval(request: ApprovalReviewRequest):
-            return await review_approval_request(
-                connection,
-                request.model_copy(
-                    update={
-                        "transcript": approval_transcript(next_messages),
-                        "user_request": content,
-                    }
-                ),
-                completion=self.chat_completion,
-            )
-
-        async def tool_runner(
-            name: str,
-            arguments: dict[str, object],
-            context: ToolContext,
-        ):
-            return await run_tool_with_path_permissions(
-                name,
-                arguments,
-                context,
-                review_approval=review_tool_approval,
-                writable_paths=[
-                    Path(path.path) for path in self.store.read_writable_paths()
-                ],
-            )
-
-        workflow_tools = self.workflow_tools()
-
-        async def extra_tool_runner(
-            name: str, arguments: dict[str, object]
-        ) -> ToolResult | None:
-            return await self.run_extra_tool(workflow_tools, name, arguments)
-
-        async for event in run_agent_stream(
-            completion=self.chat_completion,
+        async for event in self.agent_runtime.stream(
+            approval_transcript=approval_transcript(next_messages),
             connection=connection,
-            cwd=self.cwd,
-            extra_tool_runner=extra_tool_runner,
-            extra_tool_specs=extra_tool_specs,
-            extra_tool_title=self.extra_tool_title,
             messages=request_messages,
-            tool_runner=tool_runner,
+            user_request=content,
         ):
             if event.event == "start":
                 event_id = event.data.get("id")
@@ -770,7 +714,6 @@ class WorkspaceRuntime:
                 turn_usage_info: TokenUsageInfo | None = None
                 current_output_index = 0
                 latest_usage_output_index: int | None = None
-                extra_tool_specs = self.extra_tool_specs()
                 model_tool_specs = self.model_tool_specs()
                 if request_messages is None:
                     current_request_messages = self.request_messages_for_content(
@@ -853,33 +796,6 @@ class WorkspaceRuntime:
                     else current_request_messages
                 )
 
-                async def review_tool_approval(request: ApprovalReviewRequest):
-                    return await review_approval_request(
-                        connection,
-                        request.model_copy(
-                            update={
-                                "transcript": approval_transcript(next_messages),
-                                "user_request": content,
-                            }
-                        ),
-                        completion=self.chat_completion,
-                    )
-
-                async def tool_runner(
-                    name: str,
-                    arguments: dict[str, object],
-                    context: ToolContext,
-                ):
-                    return await run_tool_with_path_permissions(
-                        name,
-                        arguments,
-                        context,
-                        review_approval=review_tool_approval,
-                        writable_paths=[
-                            Path(path.path) for path in self.store.read_writable_paths()
-                        ],
-                    )
-
                 async def context_compactor(
                     conversation: Sequence[Mapping[str, object]],
                 ) -> AgentContextUpdate | None:
@@ -926,23 +842,12 @@ class WorkspaceRuntime:
                         },
                     )
 
-                workflow_tools = self.workflow_tools()
-
-                async def extra_tool_runner(
-                    name: str, arguments: dict[str, object]
-                ) -> ToolResult | None:
-                    return await self.run_extra_tool(workflow_tools, name, arguments)
-
-                async for event in run_agent_stream(
-                    completion=self.chat_completion,
+                async for event in self.agent_runtime.stream(
+                    approval_transcript=approval_transcript(next_messages),
                     connection=connection,
                     context_compactor=context_compactor,
-                    cwd=self.cwd,
-                    extra_tool_runner=extra_tool_runner,
-                    extra_tool_specs=extra_tool_specs,
-                    extra_tool_title=self.extra_tool_title,
                     messages=current_request_messages,
-                    tool_runner=tool_runner,
+                    user_request=content,
                 ):
                     if not is_current_generation() or response.discard_on_cancel:
                         raise asyncio.CancelledError

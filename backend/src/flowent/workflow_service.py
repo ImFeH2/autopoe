@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
+from flowent.agent_runtime import FlowentAgentRuntime
 from flowent.llm import CompletionCallable
+from flowent.mcp import McpManager
 from flowent.provider_connections import selected_connection
 from flowent.storage import StateStore, StoredWorkflow, StoredWorkflowDefinition
 from flowent.workflows import (
@@ -18,10 +21,21 @@ class WorkflowService:
         self,
         *,
         chat_completion: CompletionCallable | None,
+        cwd: Path,
+        mcp_manager: McpManager,
         store: StateStore,
     ) -> None:
         self.chat_completion = chat_completion
+        self.cwd = cwd
+        self.mcp_manager = mcp_manager
         self.store = store
+        self.agent_runtime = FlowentAgentRuntime(
+            chat_completion=chat_completion,
+            cwd=cwd,
+            mcp_manager=mcp_manager,
+            store=store,
+            workflow_service=self,
+        )
 
     def list_workflows(self) -> list[StoredWorkflow]:
         return self.store.read_workflows()
@@ -55,6 +69,7 @@ class WorkflowService:
         default_input: str = "",
         input_values: Mapping[str, str] | None = None,
         timer_node_id: str = "",
+        workflow_depth: int = 0,
     ) -> WorkflowRunResponse:
         workflow = self.get_workflow(workflow_id)
         connection = (
@@ -63,12 +78,13 @@ class WorkflowService:
             else None
         )
         return await run_workflow_definition(
-            completion=self.chat_completion,
             connection=connection,
             default_input=default_input,
             definition=workflow.definition,
             input_values=input_values,
+            runtime=self.agent_runtime,
             timer_node_id=timer_node_id,
+            workflow_depth=workflow_depth,
             workflow_id=workflow.id,
         )
 
@@ -79,6 +95,7 @@ class WorkflowService:
         definition: StoredWorkflowDefinition,
         input_values: Mapping[str, str] | None = None,
         timer_node_id: str = "",
+        workflow_depth: int = 0,
         workflow_id: str,
     ) -> WorkflowRunResponse:
         connection = (
@@ -87,11 +104,12 @@ class WorkflowService:
             else None
         )
         return await run_workflow_definition(
-            completion=self.chat_completion,
             connection=connection,
             default_input=default_input,
             definition=definition,
             input_values=input_values,
+            runtime=self.agent_runtime,
             timer_node_id=timer_node_id,
+            workflow_depth=workflow_depth,
             workflow_id=workflow_id,
         )

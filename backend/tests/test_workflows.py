@@ -1,10 +1,37 @@
-import pytest
+import json
+
 from fastapi.testclient import TestClient
 
 from flowent.main import create_app
 from flowent.sandbox import CommandResult
-from flowent.storage import StoredWorkflow
-from flowent.workflows import run_workflow_definition
+
+
+def tool_call_chunk(
+    name: str, arguments: dict[str, object], call_id: str = "call-1"
+) -> dict[str, object]:
+    return {
+        "choices": [
+            {
+                "delta": {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(arguments),
+                            },
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+
+def text_chunk(content: str) -> dict[str, object]:
+    return {"choices": [{"delta": {"content": content}}]}
 
 
 def input_output_workflow(workflow_id: str = "workflow-1") -> dict[str, object]:
@@ -340,37 +367,31 @@ def test_workflow_run_targets_single_timer_node(tmp_path, monkeypatch) -> None:
     assert response.json()["outputs"] == {"beta": "beta"}
 
 
-@pytest.mark.anyio
-async def test_workflow_run_accepts_input_override() -> None:
-    workflow = StoredWorkflow.model_validate(input_output_workflow())
+def test_workflow_run_accepts_input_override(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+    client.put("/api/workflows", json=input_output_workflow())
 
-    result = await run_workflow_definition(
-        completion=None,
-        connection=None,
-        default_input="release blockers",
-        definition=workflow.definition,
-        workflow_id=workflow.id,
+    response = client.post(
+        "/api/workflows/workflow-1/run",
+        json={"input": "release blockers"},
     )
 
-    assert result.outputs == {"final_result": "release blockers"}
+    assert response.status_code == 200
+    assert response.json()["outputs"] == {"final_result": "release blockers"}
 
 
-def test_workflow_run_uses_agent_node_completion(tmp_path, monkeypatch) -> None:
+def test_workflow_run_uses_agent_node_runtime(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     requests: list[dict[str, object]] = []
 
-    async def fake_completion(**request: object) -> dict[str, object]:
+    async def fake_completion(**request: object) -> object:
         requests.append(dict(request))
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "content": "Draft, review, ship.",
-                        "role": "assistant",
-                    }
-                }
-            ]
-        }
+
+        async def chunks() -> object:
+            yield text_chunk("Draft, review, ship.")
+
+        return chunks()
 
     client = TestClient(
         create_app(serve_frontend=False, chat_completion=fake_completion)
@@ -416,9 +437,163 @@ def test_workflow_run_uses_agent_node_completion(tmp_path, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["outputs"] == {"final_result": "Draft, review, ship."}
-    assert requests[0]["messages"] == [
-        {"content": "Create steps for launch checklist.", "role": "user"}
+    assert requests[0]["stream"] is True
+    assert requests[0]["messages"][-1] == {
+        "content": "Create steps for launch checklist.",
+        "role": "user",
+    }
+    assert requests[0]["tools"]
+
+
+def test_workflow_agent_node_continues_after_tool_result(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    (workdir / "notes.txt").write_text("Launch notes")
+    monkeypatch.chdir(workdir)
+    requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        requests.append(dict(request))
+
+        async def chunks() -> object:
+            if len(requests) == 1:
+                yield tool_call_chunk(
+                    "read_file", {"path": "notes.txt"}, call_id="call-read"
+                )
+            else:
+                yield text_chunk("The notes say: Launch notes.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(
+            serve_frontend=False,
+            chat_completion=fake_completion,
+            workdir=workdir,
+        )
+    )
+    configure_provider(client)
+    workflow = input_output_workflow()
+    workflow["definition"]["nodes"].insert(
+        1,
+        {
+            "data": {
+                "agent": "Default agent",
+                "prompt": "Read notes.txt and summarize {{input.output}}.",
+            },
+            "description": "",
+            "id": "agent",
+            "name": "Agent",
+            "position": {"x": 260, "y": 0},
+            "type": "agent",
+        },
+    )
+    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
+    workflow["definition"]["edges"] = [
+        {
+            "id": "edge-input-agent",
+            "label": "",
+            "source": "input",
+            "source_handle": "out",
+            "target": "agent",
+            "target_handle": "in",
+        },
+        {
+            "id": "edge-agent-output",
+            "label": "",
+            "source": "agent",
+            "source_handle": "out",
+            "target": "output",
+            "target_handle": "in",
+        },
     ]
+    client.put("/api/workflows", json=workflow)
+
+    response = client.post("/api/workflows/workflow-1/run")
+
+    assert response.status_code == 200
+    assert response.json()["outputs"] == {
+        "final_result": "The notes say: Launch notes."
+    }
+    assert len(requests) == 2
+    assert requests[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-read",
+        "content": "Launch notes",
+    }
+    assert requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == (
+        "read_file"
+    )
+
+
+def test_workflow_agent_node_cannot_call_workflow_recursively(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        requests.append(dict(request))
+
+        async def chunks() -> object:
+            if len(requests) < 5:
+                yield tool_call_chunk(
+                    "run_workflow", {"workflow_id": "workflow-1"}, call_id="call-run"
+                )
+            else:
+                yield text_chunk("Nested workflow stopped.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    workflow = input_output_workflow()
+    workflow["definition"]["nodes"].insert(
+        1,
+        {
+            "data": {
+                "agent": "Default agent",
+                "prompt": "Run this workflow again.",
+            },
+            "description": "",
+            "id": "agent",
+            "name": "Agent",
+            "position": {"x": 260, "y": 0},
+            "type": "agent",
+        },
+    )
+    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
+    workflow["definition"]["edges"] = [
+        {
+            "id": "edge-input-agent",
+            "label": "",
+            "source": "input",
+            "source_handle": "out",
+            "target": "agent",
+            "target_handle": "in",
+        },
+        {
+            "id": "edge-agent-output",
+            "label": "",
+            "source": "agent",
+            "source_handle": "out",
+            "target": "output",
+            "target_handle": "in",
+        },
+    ]
+    client.put("/api/workflows", json=workflow)
+
+    response = client.post("/api/workflows/workflow-1/run")
+
+    assert response.status_code == 200
+    assert response.json()["outputs"] == {"final_result": "Nested workflow stopped."}
+    assert any(
+        request["messages"][-1]["content"] == "Workflow nesting is too deep."
+        for request in requests
+    )
 
 
 def test_workflow_run_uses_code_node_python_output(tmp_path, monkeypatch) -> None:

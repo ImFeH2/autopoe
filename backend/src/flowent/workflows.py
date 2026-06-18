@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import re
 import sys
@@ -5,15 +7,12 @@ import tempfile
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from flowent.llm import (
-    ChatMessage,
-    CompletionCallable,
-    ProviderConnection,
-    complete_chat,
-)
+from flowent.context import runtime_context_messages
+from flowent.llm import ProviderConnection
 from flowent.sandbox import SandboxRunner
 from flowent.storage import (
     StoredWorkflow,
@@ -21,6 +20,9 @@ from flowent.storage import (
     StoredWorkflowEdge,
     StoredWorkflowNode,
 )
+
+if TYPE_CHECKING:
+    from flowent.agent_runtime import FlowentAgentRuntime
 
 
 class WorkflowNodeRunResult(BaseModel):
@@ -206,12 +208,13 @@ def topological_node_ids(definition: StoredWorkflowDefinition) -> list[str]:
 
 async def run_workflow_definition(
     *,
-    completion: CompletionCallable | None,
     connection: ProviderConnection | None,
     definition: StoredWorkflowDefinition,
     default_input: str = "",
     input_values: Mapping[str, str] | None = None,
+    runtime: FlowentAgentRuntime | None = None,
     timer_node_id: str = "",
+    workflow_depth: int = 0,
     workflow_id: str,
 ) -> WorkflowRunResponse:
     ordered_ids = validate_workflow_definition(definition)
@@ -219,7 +222,6 @@ async def run_workflow_definition(
         raise ValueError("Choose a provider and model before running.")
 
     return await run_workflow_once(
-        completion=completion,
         connection=connection,
         definition=definition,
         input_values=WorkflowRunRequestValues(
@@ -227,19 +229,22 @@ async def run_workflow_definition(
             input_values=dict(input_values or {}),
         ),
         ordered_ids=ordered_ids,
+        runtime=runtime,
         timer_node_id=timer_node_id,
+        workflow_depth=workflow_depth,
         workflow_id=workflow_id,
     )
 
 
 async def run_workflow_once(
     *,
-    completion: CompletionCallable | None,
     connection: ProviderConnection | None,
     definition: StoredWorkflowDefinition,
     input_values: WorkflowRunRequestValues,
     ordered_ids: list[str],
+    runtime: FlowentAgentRuntime | None = None,
     timer_node_id: str = "",
+    workflow_depth: int = 0,
     workflow_id: str,
 ) -> WorkflowRunResponse:
     nodes = {node.id: node for node in definition.nodes}
@@ -262,13 +267,14 @@ async def run_workflow_once(
         results[node.id] = WorkflowNodeRunResult(id=node.id, status="running")
         try:
             output = await run_node(
-                completion=completion,
                 connection=connection,
                 default_input=remaining_default_input,
                 input_values=input_values.input_values,
                 incoming_edges=incoming_edges[node.id],
                 node=node,
                 outputs=outputs,
+                runtime=runtime,
+                workflow_depth=workflow_depth,
             )
             if node.type == "input" and remaining_default_input:
                 remaining_default_input = ""
@@ -303,13 +309,14 @@ async def run_workflow_once(
 
 async def run_node(
     *,
-    completion: CompletionCallable | None,
     connection: ProviderConnection | None,
     default_input: str,
     input_values: Mapping[str, str],
     incoming_edges: list[StoredWorkflowEdge],
     node: StoredWorkflowNode,
     outputs: Mapping[str, str],
+    runtime: FlowentAgentRuntime | None = None,
+    workflow_depth: int = 0,
 ) -> str:
     if node.type == "input":
         if node.id in input_values:
@@ -320,17 +327,25 @@ async def run_node(
     if node.type == "agent":
         if connection is None:
             raise ValueError("Choose a provider and model before running.")
+        if runtime is None:
+            raise ValueError("Agent runtime is not available.")
         prompt = render_template(
             node_data_text(node, "prompt")
             or joined_upstream_outputs(incoming_edges, outputs),
             outputs,
         )
-        response = await complete_chat(
-            connection,
-            [ChatMessage(role="user", content=prompt)],
-            completion=completion,
+        result = await runtime.complete(
+            connection=connection,
+            messages=[
+                *runtime_context_messages(
+                    runtime.cwd, runtime.store.read_state().settings.agent_prompt
+                ),
+                {"role": "user", "content": prompt},
+            ],
+            user_request=prompt,
+            workflow_depth=workflow_depth,
         )
-        return response.content
+        return result.content
     if node.type == "merge":
         upstream = upstream_outputs(incoming_edges, outputs)
         if node_data_text(node, "merge_strategy") == "json":

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic import ValidationError
 
 from flowent.storage import StoredWorkflow
 from flowent.tools import ToolResult, text_tool_result
-from flowent.workflow_service import WorkflowService
 from flowent.workflows import WorkflowRunResponse
+
+if TYPE_CHECKING:
+    from flowent.workflow_service import WorkflowService
+
+MAX_WORKFLOW_TOOL_DEPTH = 3
 
 
 def workflow_tool_specs() -> list[dict[str, object]]:
@@ -92,8 +98,9 @@ def workflow_tool_title(name: str) -> str | None:
 
 
 class WorkflowAgentTools:
-    def __init__(self, service: WorkflowService) -> None:
+    def __init__(self, service: WorkflowService, *, workflow_depth: int = 0) -> None:
         self.service = service
+        self.workflow_depth = workflow_depth
 
     async def run_tool(
         self, name: str, arguments: dict[str, object]
@@ -157,12 +164,15 @@ class WorkflowAgentTools:
         )
 
     async def run_workflow(self, arguments: dict[str, object]) -> ToolResult:
+        if self.workflow_depth >= MAX_WORKFLOW_TOOL_DEPTH:
+            raise ValueError("Workflow nesting is too deep.")
         workflow_id = str(arguments["workflow_id"])
         workflow = self.service.get_workflow(workflow_id)
         result = await self.service.run_workflow(
             workflow_id,
             default_input=string_argument(arguments, "input"),
             input_values=string_map_argument(arguments, "inputs"),
+            workflow_depth=self.workflow_depth + 1,
         )
         output = workflow_run_output(workflow.name, result)
         return ToolResult(

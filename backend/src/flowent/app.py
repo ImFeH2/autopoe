@@ -60,6 +60,8 @@ def create_app(
     mcp_manager = McpManager(store=store, transport=mcp_transport)
     workflow_service = WorkflowService(
         chat_completion=chat_completion,
+        cwd=cwd,
+        mcp_manager=mcp_manager,
         store=store,
     )
 
