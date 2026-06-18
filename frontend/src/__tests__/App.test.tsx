@@ -5042,7 +5042,8 @@ describe("App", () => {
     expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).toHaveTextContent("done");
     expect(screen.getByText("STDERR")).toBeInTheDocument();
-    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
+    expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
+    expect(screen.getByText("Exit 0")).toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).not.toHaveTextContent(
       "Needed for cache writes.",
     );
@@ -5127,7 +5128,8 @@ describe("App", () => {
       "all tests passed",
     );
     expect(screen.getByText("STDERR")).toBeInTheDocument();
-    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
+    expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
+    expect(screen.getByText("Exit 0")).toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).not.toHaveTextContent(
       firstFailureOutput,
     );
@@ -5228,7 +5230,8 @@ describe("App", () => {
     expect(screen.getByText("STDERR").parentElement).toHaveTextContent(
       "Read-only file system",
     );
-    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("1");
+    expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
+    expect(screen.getByText("Exit 1")).toBeInTheDocument();
   });
 
   it("shows multiline sandbox failure output in review details", async () => {
@@ -5550,7 +5553,8 @@ describe("App", () => {
     expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).toHaveTextContent("done");
     expect(screen.getByText("STDERR")).toBeInTheDocument();
-    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
+    expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
+    expect(screen.getByText("Exit 0")).toBeInTheDocument();
   });
 
   it("streams shell command stdout and stderr into the open tool result", async () => {
@@ -5635,9 +5639,8 @@ describe("App", () => {
     expect(screen.getByText("STDERR").parentElement).toHaveTextContent(
       "Warning",
     );
-    expect(screen.getByText("EXIT CODE").parentElement).not.toHaveTextContent(
-      /\d/,
-    );
+    expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Exit /)).not.toBeInTheDocument();
 
     toolStream.completeTool();
 
@@ -5648,7 +5651,7 @@ describe("App", () => {
     expect(screen.getByText("STDERR").parentElement).toHaveTextContent(
       "Warning",
     );
-    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
+    expect(screen.getByText("Exit 0")).toBeInTheDocument();
     toolStream.finish();
     await expectDocumentText("Command finished.");
   });

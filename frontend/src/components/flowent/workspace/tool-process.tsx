@@ -52,8 +52,9 @@ export function ToolProcessItem({ tool }: { tool: ToolItem }) {
 function ToolProcessDetails({ tool }: { tool: ToolItem }) {
   const approval = toolApprovalData(tool.result);
   const hasArguments = hasToolObjectPayload(tool.arguments);
-  const payloads = toolResultPayloads(tool);
-  const hasResult = payloads.length > 0;
+  const resultDetails = toolResultDetails(tool);
+  const hasResult =
+    resultDetails.payloads.length > 0 || resultDetails.exitCode !== undefined;
 
   if (!hasArguments && !hasResult) {
     return null;
@@ -67,13 +68,16 @@ function ToolProcessDetails({ tool }: { tool: ToolItem }) {
           value={formatToolValue(tool.arguments)}
         />
       ) : null}
-      {payloads.map((payload) => (
+      {resultDetails.payloads.map((payload) => (
         <ToolProcessPayload
           key={payload.label}
           label={payload.label}
           value={payload.value}
         />
       ))}
+      {resultDetails.exitCode !== undefined ? (
+        <ToolProcessExitStatus exitCode={resultDetails.exitCode} />
+      ) : null}
       {approval ? <ToolProcessApproval approval={approval} /> : null}
     </div>
   );
@@ -82,6 +86,11 @@ function ToolProcessDetails({ tool }: { tool: ToolItem }) {
 type ToolProcessPayloadData = {
   label: string;
   value: string;
+};
+
+type ToolResultDetails = {
+  exitCode?: string;
+  payloads: ToolProcessPayloadData[];
 };
 
 type ToolApprovalData = {
@@ -152,6 +161,22 @@ function ToolProcessPayload({
   );
 }
 
+function ToolProcessExitStatus({ exitCode }: { exitCode: string }) {
+  const isSuccess = exitCode === "0";
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] font-medium leading-4 text-white/45">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "size-1.5 rounded-full",
+          isSuccess ? "bg-[#7ddf89]" : "bg-[#ff7474]",
+        )}
+      />
+      <span>Exit {exitCode}</span>
+    </div>
+  );
+}
+
 function formatToolValue(value: unknown) {
   if (typeof value === "string") {
     return value;
@@ -160,32 +185,34 @@ function formatToolValue(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
-function toolResultPayloads(tool: ToolItem): ToolProcessPayloadData[] {
+function toolResultDetails(tool: ToolItem): ToolResultDetails {
   const result = tool.result;
   if (!hasToolObjectPayload(result)) {
-    return [];
+    return { payloads: [] };
   }
   const visibleResult = Object.fromEntries(
     Object.entries(result).filter(([key]) => key !== "approval"),
   );
   if (typeof visibleResult.text === "string") {
-    return [{ label: "RESULT", value: visibleResult.text }];
+    return { payloads: [{ label: "RESULT", value: visibleResult.text }] };
   }
   if (visibleResult.type === "command") {
-    return commandToolResultPayloads(visibleResult);
+    return commandToolResultDetails(visibleResult);
   }
   if (typeof visibleResult.output === "string") {
-    return [{ label: "RESULT", value: visibleResult.output }];
+    return { payloads: [{ label: "RESULT", value: visibleResult.output }] };
   }
-  return [{ label: "RESULT", value: formatToolValue(visibleResult) }];
+  return {
+    payloads: [{ label: "RESULT", value: formatToolValue(visibleResult) }],
+  };
 }
 
-function commandToolResultPayloads(
+function commandToolResultDetails(
   result: Record<string, unknown>,
-): ToolProcessPayloadData[] {
+): ToolResultDetails {
   const outputChunks = commandOutputChunks(result.output_chunks);
   if (outputChunks.length > 0) {
-    return commandOutputPayloads({
+    return commandOutputDetails({
       exitCode: result.exit_code,
       stderr: commandOutputText(outputChunks, "stderr"),
       stdout: commandOutputText(outputChunks, "stdout"),
@@ -195,19 +222,19 @@ function commandToolResultPayloads(
   const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
   const output = typeof result.output === "string" ? result.output.trim() : "";
   if (stdout || stderr || result.exit_code !== undefined) {
-    return commandOutputPayloads({
+    return commandOutputDetails({
       exitCode: result.exit_code,
       stderr,
       stdout,
     });
   }
   if (output) {
-    return [{ label: "RESULT", value: output }];
+    return { payloads: [{ label: "RESULT", value: output }] };
   }
-  return [{ label: "RESULT", value: formatToolValue(result) }];
+  return { payloads: [{ label: "RESULT", value: formatToolValue(result) }] };
 }
 
-function commandOutputPayloads({
+function commandOutputDetails({
   exitCode,
   stderr,
   stdout,
@@ -215,15 +242,14 @@ function commandOutputPayloads({
   exitCode: unknown;
   stderr: string;
   stdout: string;
-}): ToolProcessPayloadData[] {
-  return [
-    { label: "STDOUT", value: stdout },
-    { label: "STDERR", value: stderr },
-    {
-      label: "EXIT CODE",
-      value: exitCode !== undefined ? String(exitCode) : "",
-    },
-  ];
+}): ToolResultDetails {
+  return {
+    exitCode: exitCode !== undefined ? String(exitCode) : undefined,
+    payloads: [
+      { label: "STDOUT", value: stdout },
+      { label: "STDERR", value: stderr },
+    ],
+  };
 }
 
 type CommandOutputChunk = {
