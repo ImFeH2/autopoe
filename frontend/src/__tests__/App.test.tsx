@@ -5039,12 +5039,16 @@ describe("App", () => {
     expect(screen.getByText("Needed for cache writes.")).toBeInTheDocument();
     expect(screen.getByText("/workspace/.cache/pnpm")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("FAILURE");
-    const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("STDOUT:");
-    expect(resultBlock).toHaveTextContent("done");
-    expect(resultBlock).toHaveTextContent("STDERR:");
-    expect(resultBlock).toHaveTextContent(/Exit code:\s*0/);
-    expect(resultBlock).not.toHaveTextContent("Needed for cache writes.");
+    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    expect(screen.getByText("STDOUT").parentElement).toHaveTextContent("done");
+    expect(screen.getByText("STDERR")).toBeInTheDocument();
+    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
+    expect(screen.getByText("STDOUT").parentElement).not.toHaveTextContent(
+      "Needed for cache writes.",
+    );
+    expect(screen.getByText("STDERR").parentElement).not.toHaveTextContent(
+      "Needed for cache writes.",
+    );
   });
 
   it("shows first sandbox failure output after a reviewed retry succeeds", async () => {
@@ -5118,12 +5122,18 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("FAILURE")).toBeInTheDocument();
     expect(screen.getByText(firstFailureOutput)).toBeInTheDocument();
-    const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("STDOUT:");
-    expect(resultBlock).toHaveTextContent("all tests passed");
-    expect(resultBlock).toHaveTextContent("STDERR:");
-    expect(resultBlock).toHaveTextContent(/Exit code:\s*0/);
-    expect(resultBlock).not.toHaveTextContent(firstFailureOutput);
+    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    expect(screen.getByText("STDOUT").parentElement).toHaveTextContent(
+      "all tests passed",
+    );
+    expect(screen.getByText("STDERR")).toBeInTheDocument();
+    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
+    expect(screen.getByText("STDOUT").parentElement).not.toHaveTextContent(
+      firstFailureOutput,
+    );
+    expect(screen.getByText("STDERR").parentElement).not.toHaveTextContent(
+      firstFailureOutput,
+    );
   });
 
   it("restores automatic review details from loaded tool result", async () => {
@@ -5213,11 +5223,12 @@ describe("App", () => {
     expect(
       screen.getByText("failed to write file: Read-only file system"),
     ).toBeInTheDocument();
-    const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("STDOUT:");
-    expect(resultBlock).toHaveTextContent("STDERR:");
-    expect(resultBlock).toHaveTextContent("Read-only file system");
-    expect(resultBlock).toHaveTextContent(/Exit code:\s*1/);
+    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    expect(screen.getByText("STDOUT")).toBeInTheDocument();
+    expect(screen.getByText("STDERR").parentElement).toHaveTextContent(
+      "Read-only file system",
+    );
+    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("1");
   });
 
   it("shows multiline sandbox failure output in review details", async () => {
@@ -5536,11 +5547,10 @@ describe("App", () => {
     await user.click(toolDetails);
 
     expect(screen.getByText("ARGS")).toBeInTheDocument();
-    const resultBlock = screen.getByText("RESULT").parentElement;
-    expect(resultBlock).toHaveTextContent("STDOUT:");
-    expect(resultBlock).toHaveTextContent("done");
-    expect(resultBlock).toHaveTextContent("STDERR:");
-    expect(resultBlock).toHaveTextContent(/Exit code:\s*0/);
+    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    expect(screen.getByText("STDOUT").parentElement).toHaveTextContent("done");
+    expect(screen.getByText("STDERR")).toBeInTheDocument();
+    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
   });
 
   it("streams shell command stdout and stderr into the open tool result", async () => {
@@ -5618,21 +5628,27 @@ describe("App", () => {
     await user.click(toolDetails);
 
     expect(toolDetails).toHaveTextContent("Running");
-    const runningResultBlock = screen.getByText("RESULT").parentElement;
-    expect(runningResultBlock).toHaveTextContent("STDOUT:");
-    expect(runningResultBlock).toHaveTextContent("Installing");
-    expect(runningResultBlock).toHaveTextContent("STDERR:");
-    expect(runningResultBlock).toHaveTextContent("Warning");
-    expect(runningResultBlock).toHaveTextContent(/Exit code:\s*$/);
+    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    expect(screen.getByText("STDOUT").parentElement).toHaveTextContent(
+      "Installing",
+    );
+    expect(screen.getByText("STDERR").parentElement).toHaveTextContent(
+      "Warning",
+    );
+    expect(screen.getByText("EXIT CODE").parentElement).not.toHaveTextContent(
+      /\d/,
+    );
 
     toolStream.completeTool();
 
     await waitFor(() => expect(toolDetails).toHaveTextContent("Done"));
-    const finalResultBlock = screen.getByText("RESULT").parentElement;
-    expect(finalResultBlock).toHaveTextContent(/STDOUT:\s*Installing\s*Done/);
-    expect(finalResultBlock).toHaveTextContent(/STDERR:\s*Warning/);
-    expect(finalResultBlock).toHaveTextContent(/Exit code:\s*0/);
-    expect(finalResultBlock).toHaveTextContent("Done");
+    expect(screen.getByText("STDOUT").parentElement).toHaveTextContent(
+      /Installing\s*Done/,
+    );
+    expect(screen.getByText("STDERR").parentElement).toHaveTextContent(
+      "Warning",
+    );
+    expect(screen.getByText("EXIT CODE").parentElement).toHaveTextContent("0");
     toolStream.finish();
     await expectDocumentText("Command finished.");
   });
