@@ -5041,13 +5041,10 @@ describe("App", () => {
     expect(document.body).not.toHaveTextContent("FAILURE");
     expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).toHaveTextContent("done");
-    expect(screen.getByText("STDERR")).toBeInTheDocument();
+    expect(screen.queryByText("STDERR")).not.toBeInTheDocument();
     expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
     expect(screen.getByText("Exit 0")).toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).not.toHaveTextContent(
-      "Needed for cache writes.",
-    );
-    expect(screen.getByText("STDERR").parentElement).not.toHaveTextContent(
       "Needed for cache writes.",
     );
   });
@@ -5127,13 +5124,10 @@ describe("App", () => {
     expect(screen.getByText("STDOUT").parentElement).toHaveTextContent(
       "all tests passed",
     );
-    expect(screen.getByText("STDERR")).toBeInTheDocument();
+    expect(screen.queryByText("STDERR")).not.toBeInTheDocument();
     expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
     expect(screen.getByText("Exit 0")).toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).not.toHaveTextContent(
-      firstFailureOutput,
-    );
-    expect(screen.getByText("STDERR").parentElement).not.toHaveTextContent(
       firstFailureOutput,
     );
   });
@@ -5226,7 +5220,7 @@ describe("App", () => {
       screen.getByText("failed to write file: Read-only file system"),
     ).toBeInTheDocument();
     expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
-    expect(screen.getByText("STDOUT")).toBeInTheDocument();
+    expect(screen.queryByText("STDOUT")).not.toBeInTheDocument();
     expect(screen.getByText("STDERR").parentElement).toHaveTextContent(
       "Read-only file system",
     );
@@ -5552,9 +5546,70 @@ describe("App", () => {
     expect(screen.getByText("ARGS")).toBeInTheDocument();
     expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
     expect(screen.getByText("STDOUT").parentElement).toHaveTextContent("done");
-    expect(screen.getByText("STDERR")).toBeInTheDocument();
+    expect(screen.queryByText("STDERR")).not.toBeInTheDocument();
     expect(screen.queryByText("EXIT CODE")).not.toBeInTheDocument();
     expect(screen.getByText("Exit 0")).toBeInTheDocument();
+  });
+
+  it("shows a compact exit status when command output is empty", async () => {
+    const user = userEvent.setup();
+    mockInitialState(selectedProviderState());
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/respond" && init?.method === "POST") {
+        return assistantToolStreamResponse(
+          {
+            arguments: { command: "true" },
+            result: {
+              command: "true",
+              exit_code: 0,
+              output: "",
+              stderr: "",
+              stdout: "",
+              type: "command",
+            },
+            id: "tool-1",
+            name: "shell_command",
+            output: "",
+            title: "Ran true",
+          },
+          "Command finished.",
+        );
+      }
+      if (input === "/api/state") {
+        return new Response(JSON.stringify(selectedProviderState()), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (input === "/api/workspace/messages" && init?.method === "PUT") {
+        return new Response(init.body, {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Message Flowent",
+    });
+    await user.type(composer, "Run the silent command");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const toolDetails = await screen.findByRole("button", {
+      name: /Ran true/,
+    });
+    await user.click(toolDetails);
+
+    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    expect(screen.queryByText("STDOUT")).not.toBeInTheDocument();
+    expect(screen.queryByText("STDERR")).not.toBeInTheDocument();
+    expect(screen.getByText("Exit 0")).toBeInTheDocument();
+    await expectDocumentText("Command finished.");
   });
 
   it("streams shell command stdout and stderr into the open tool result", async () => {

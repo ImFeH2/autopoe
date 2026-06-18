@@ -246,8 +246,8 @@ function commandOutputDetails({
   return {
     exitCode: exitCode !== undefined ? String(exitCode) : undefined,
     payloads: [
-      { label: "STDOUT", value: stdout },
-      { label: "STDERR", value: stderr },
+      ...(stdout.trim() ? [{ label: "STDOUT", value: stdout }] : []),
+      ...(stderr.trim() ? [{ label: "STDERR", value: stderr }] : []),
     ],
   };
 }
