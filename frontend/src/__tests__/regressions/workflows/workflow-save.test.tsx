@@ -335,7 +335,7 @@ describe("workflow save regressions", () => {
       "true",
     );
     expect(screen.getByRole("button", { name: "Draft Workflow" })).toHaveClass(
-      "bg-[#2f2f2f]",
+      "bg-[#202020]",
     );
   });
 

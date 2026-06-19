@@ -66,7 +66,7 @@ export function McpView({
 }) {
   return (
     <section className="grid h-full min-h-0 bg-black" aria-label="MCP">
-      <div className="grid h-full min-h-0 grid-cols-[260px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
+      <div className="grid h-full min-h-0 grid-cols-[232px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
         <McpSidebar
           activeServer={activeServer}
           isCreatingServer={isCreatingServer}
@@ -114,7 +114,7 @@ function McpSidebar({
   return (
     <aside
       className={cn(
-        "flex min-h-0 min-w-0 flex-col overflow-auto border-r border-white/10 bg-black p-4 max-[900px]:max-h-64 max-[900px]:border-r-0 max-[900px]:border-b",
+        "flex min-h-0 min-w-0 flex-col overflow-auto border-r border-white/10 bg-black p-3 max-[900px]:max-h-64 max-[900px]:border-r-0 max-[900px]:border-b",
         stableScrollbarClassName,
       )}
       aria-label="MCP servers"
@@ -140,7 +140,7 @@ function McpSidebar({
         <Upload aria-hidden="true" />
         Import
       </Button>
-      <div className="mt-4 -mx-2.5 grid gap-0">
+      <div className="mt-4 -mx-1 grid gap-0">
         {servers.length === 0 ? (
           <p className={emptyStateClassName}>No servers</p>
         ) : null}
@@ -152,9 +152,9 @@ function McpSidebar({
               aria-label={server.name}
               aria-pressed={isActive}
               className={cn(
-                "grid h-9 w-full cursor-pointer justify-start rounded-[10px] border border-transparent bg-transparent px-2.5 py-1.5 text-left text-white shadow-none transition-colors duration-100 hover:bg-[#171717]",
+                "flowent-navigation-item grid w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-left text-white/90 shadow-none transition-colors duration-100 hover:bg-[#151515] hover:text-white",
                 navigationLabelClassName,
-                isActive && "bg-[#2f2f2f]",
+                isActive && "bg-[#202020] text-white",
               )}
               key={server.id}
               onClick={() => onServerSelect(server)}

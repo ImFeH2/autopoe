@@ -103,15 +103,15 @@ textarea {
     "liga" 0,
     "calt" 0;
   font-variant-ligatures: none;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 400;
   letter-spacing: 0.01em;
   line-height: 20px;
 }
 
 .flowent-navigation-item {
-  height: 36px !important;
-  min-height: 36px !important;
+  height: 34px !important;
+  min-height: 34px !important;
 }
 
 .flowent-navigation-item:hover,
@@ -120,8 +120,8 @@ textarea {
 }
 
 .flowent-navigation-item > svg {
-  height: 18px;
-  width: 18px;
+  height: 17px;
+  width: 17px;
 }
 
 .flowent-navigation-text {
