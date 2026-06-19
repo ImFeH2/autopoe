@@ -103,8 +103,6 @@ function NavigationTrigger({
         navigationLabelClassName,
         sidebarTransitionClassName,
         "dark:hover:bg-[#151515] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#202020]",
-        isSidebarCollapsed &&
-          "justify-center gap-0 px-0 max-[900px]:justify-center max-[900px]:gap-2 max-[900px]:px-2",
         suppressActiveStyle &&
           "data-[state=active]:!bg-transparent data-[state=active]:!text-white dark:data-[state=active]:!bg-transparent",
       )}
@@ -230,11 +228,10 @@ export function AppShell({
     >
       <aside
         className={cn(
-          "relative flex min-h-0 flex-col border-r border-white/10 bg-black py-3 transition-[padding] max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3",
+          "relative flex min-h-0 flex-col border-r border-white/10 bg-black px-3 py-3 max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3",
           shouldReduceMotion
             ? "duration-0"
             : cn("duration-300", sidebarTransitionClassName),
-          isSidebarCollapsed ? "px-2" : "px-3",
         )}
       >
         <div
@@ -243,10 +240,10 @@ export function AppShell({
             shouldReduceMotion
               ? "duration-0"
               : cn("duration-300", sidebarTransitionClassName),
-            isSidebarCollapsed ? "justify-center gap-0" : "gap-2.5",
+            "gap-2.5",
           )}
         >
-          <div className="grid size-8 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
+          <div className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
             <img alt="" className="size-full object-cover" src="/flowent.png" />
           </div>
           <SidebarText
@@ -287,7 +284,7 @@ export function AppShell({
           <TabsList
             className={cn(
               "mt-4 flex w-auto flex-none flex-col items-stretch gap-0 p-0 max-[900px]:mt-3 max-[900px]:mx-0 max-[900px]:flex-row max-[560px]:justify-start max-[560px]:overflow-x-auto",
-              isSidebarCollapsed ? "mx-0" : "-mx-1",
+              "-mx-1",
             )}
             variant="line"
           >
@@ -351,6 +348,7 @@ export function AppShell({
             {isSidebarCollapsed ? (
               <motion.div
                 animate={{ opacity: 1 }}
+                className="-mx-1"
                 exit={{ opacity: 0 }}
                 initial={shouldReduceMotion ? false : { opacity: 0 }}
                 key="expand-sidebar-button"
@@ -379,8 +377,7 @@ export function AppShell({
           </AnimatePresence>
           <div
             className={cn(
-              "flowent-sidebar-status flex h-8 items-center gap-2",
-              isSidebarCollapsed ? "justify-center px-0" : "-mx-1 px-2",
+              "flowent-sidebar-status -mx-1 flex h-8 items-center gap-2 px-2",
             )}
             title={activeProviderName ?? "No provider"}
           >
@@ -426,10 +423,10 @@ function SidebarText({
     <AnimatePresence initial={false}>
       {isVisible ? (
         <motion.span
-          animate={{ opacity: 1, width: "auto" }}
+          animate={{ opacity: 1 }}
           className={cn("min-w-0 overflow-hidden", className)}
-          exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, width: 0 }}
-          initial={shouldReduceMotion ? false : { opacity: 0, width: 0 }}
+          exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0 }}
+          initial={shouldReduceMotion ? false : { opacity: 0 }}
           key="sidebar-text"
           transition={
             shouldReduceMotion
