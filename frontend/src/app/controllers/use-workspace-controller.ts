@@ -5,6 +5,7 @@ import type { ApiMessage, ApiState } from "@/app/api/types";
 import {
   createWorkspaceErrorMessage,
   createWorkspaceStreamErrorMessage,
+  appendWorkspaceErrorToMessage,
   isAbortError,
   latestUsageInfoFromMessages,
   messagesIncludeErrorBlockFrom,
@@ -356,6 +357,21 @@ export function useWorkspaceController({
     createWorkspaceErrorMessage(workspaceErrorDetail(error, fallback)),
   ];
 
+  const appendWorkspaceErrorToExistingMessage = (
+    baseMessages: Message[],
+    message: Message,
+    errorId: string,
+    error: unknown,
+    fallback: string,
+  ) => [
+    ...baseMessages,
+    appendWorkspaceErrorToMessage(
+      message,
+      workspaceErrorDetail(error, fallback),
+      errorId,
+    ),
+  ];
+
   const stopResponse = () => {
     if (isResponding) {
       void stopWorkspaceResponse();
@@ -565,8 +581,10 @@ export function useWorkspaceController({
       startEditedResponse(result.messages);
     } catch (error) {
       setMessages(
-        appendWorkspaceErrorMessage(
-          optimisticMessages,
+        appendWorkspaceErrorToExistingMessage(
+          messages.slice(0, messageIndex),
+          trimmedMessage,
+          errorId,
           error,
           "Message could not be sent.",
         ),

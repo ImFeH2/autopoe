@@ -600,16 +600,37 @@ class WorkspaceRuntime:
             *base_request_messages,
             *model_visible_assistant_output_messages(trimmed_message),
         ]
-        response = self._start_response_from_messages(
-            content=previous_user_message.content,
-            initial_assistant_message=trimmed_message,
-            next_messages=next_messages,
-            output_start_index=assistant_retry_output_start_index(trimmed_message),
-            request_messages=request_messages,
-            state=state_before_assistant,
-            usage_request_messages=base_request_messages,
-            user_message=previous_user_message,
-        )
+        try:
+            response = self._start_response_from_messages(
+                content=previous_user_message.content,
+                initial_assistant_message=trimmed_message,
+                next_messages=next_messages,
+                output_start_index=assistant_retry_output_start_index(trimmed_message),
+                request_messages=request_messages,
+                state=state_before_assistant,
+                usage_request_messages=base_request_messages,
+                user_message=previous_user_message,
+            )
+        except HTTPException as error:
+            error_detail = str(error.detail or "")
+            assistant_output = AssistantOutputBuilder.from_message(trimmed_message)
+            assistant_output.append_error(
+                run_error_output_item(trimmed_message.id, error_detail).model_copy(
+                    update={"id": error_id}
+                )
+            )
+            failed_message = StoredMessage(
+                author="assistant",
+                content=assistant_output.content,
+                groups=assistant_output.groups,
+                id=trimmed_message.id,
+                status="failed",
+                thinking=assistant_output.thinking,
+                tools=list(assistant_output.tools.values()),
+                usage_info=self.store.read_usage_info(),
+            )
+            self.store.save_messages([*previous_messages, failed_message])
+            raise
         return next_messages, response
 
     def _start_response_from_messages(

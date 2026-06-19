@@ -369,6 +369,85 @@ describe("error block retry regressions", () => {
     ).toBeEnabled();
   });
 
+  it("updates the same error block when repeated error retries cannot start", async () => {
+    const user = userEvent.setup();
+    const initialMessages = [
+      {
+        author: "user" as const,
+        content: "Read the notes.",
+        id: "message-user",
+      },
+      failedAssistantMessage(),
+    ];
+    const retryResponses = [
+      "Choose a provider and model before sending.",
+      "Add a key before sending.",
+    ];
+    const retryRequests: string[] = [];
+
+    vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/state") {
+        return new Response(
+          JSON.stringify(selectedProviderState(initialMessages)),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (input === "/api/about") {
+        return new Response(JSON.stringify({}), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (
+        input ===
+          "/api/workspace/messages/message-assistant/errors/message-assistant-error-1/retry" &&
+        init?.method === "POST"
+      ) {
+        retryRequests.push(input);
+        return new Response(
+          JSON.stringify({
+            detail: retryResponses.shift() ?? "Add a key before sending.",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+
+    render(<App />);
+
+    const alert = await screen.findByRole("alert");
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    const firstRetryAlert = await screen.findByRole("alert");
+    expect(firstRetryAlert).toHaveTextContent(
+      "Choose a provider and model before sending.",
+    );
+
+    await user.click(
+      within(firstRetryAlert).getByRole("button", { name: "Retry" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Add a key before sending.",
+      );
+    });
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(document.querySelectorAll(".flowent-message-row")).toHaveLength(2);
+    expect(document.body).not.toHaveTextContent("Message not found.");
+    expect(retryRequests).toHaveLength(2);
+  });
+
   it("keeps the error block Retry disabled while Flowent is responding", async () => {
     const holdStream = deferred<void>();
     const messages = [

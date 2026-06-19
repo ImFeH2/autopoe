@@ -140,6 +140,19 @@ export const streamErrorFromMessage = (
 export const requestFailedMessage =
   "Check the model connection settings and try again.";
 
+export const createWorkspaceErrorItem = (
+  detail: string,
+  id: string,
+): Extract<AssistantOutputItem, { type: "error" }> => ({
+  id,
+  message: requestFailedMessage,
+  title: "Request failed",
+  type: "error",
+  ...(detail && detail !== requestFailedMessage && detail !== "Request failed"
+    ? { detail }
+    : {}),
+});
+
 export const createWorkspaceErrorMessage = (
   detail: string,
   id = createClientId("message"),
@@ -149,22 +162,29 @@ export const createWorkspaceErrorMessage = (
   groups: [
     {
       id: `${id}-errors`,
-      items: [
-        {
-          id: `${id}-error-1`,
-          message: requestFailedMessage,
-          title: "Request failed",
-          type: "error",
-          ...(detail &&
-          detail !== requestFailedMessage &&
-          detail !== "Request failed"
-            ? { detail }
-            : {}),
-        },
-      ],
+      items: [createWorkspaceErrorItem(detail, `${id}-error-1`)],
     },
   ],
   id,
+  status: "failed",
+});
+
+export const appendWorkspaceErrorToMessage = (
+  message: Message,
+  detail: string,
+  errorId: string,
+): Message => ({
+  ...message,
+  active_output: null,
+  groups: [
+    ...(message.groups ?? []),
+    {
+      id: `${message.id}-errors`,
+      items: [createWorkspaceErrorItem(detail, errorId)],
+    },
+  ],
+  isStreamingText: false,
+  isStreamingThinking: false,
   status: "failed",
 });
 
