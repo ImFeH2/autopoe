@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -285,6 +286,56 @@ def test_workspace_agent_can_run_workflow_with_current_message_input(
     assert events[-1]["data"]["message"]["content"] == (
         "The workflow returned release blockers."
     )
+
+
+def test_workspace_agent_creates_workflow_with_generated_uuid(
+    tmp_path, monkeypatch
+) -> None:
+    fixed_uuid = UUID("00000000-0000-4000-8000-000000000000")
+    monkeypatch.setattr("flowent.workflow_tools.uuid4", lambda: fixed_uuid)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+    workflow = input_output_workflow("workflow-model-choice")
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk(
+                    "create_workflow",
+                    {"workflow": workflow},
+                    call_id="call-create",
+                )
+            else:
+                yield text_chunk("I created the workflow.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Create a workflow."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    tool_done = next(event for event in events if event["event"] == "tool_done")
+    assert tool_done["data"]["status"] == "success"
+    assert tool_done["data"]["result"]["workflow"]["id"] == str(fixed_uuid)
+    assert captured_requests[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-create",
+        "content": "Created Launch Workflow with 2 nodes and 1 edges.",
+    }
+    state = client.get("/api/state").json()
+    assert [workflow["id"] for workflow in state["workflows"]] == [str(fixed_uuid)]
+    assert events[-1]["data"]["message"]["content"] == "I created the workflow."
 
 
 def test_workspace_agent_rejects_invalid_workflow_update_without_saving(

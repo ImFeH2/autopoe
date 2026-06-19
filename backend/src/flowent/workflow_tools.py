@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -194,12 +195,9 @@ class WorkflowAgentTools:
 
     def create_workflow(self, arguments: dict[str, object]) -> ToolResult:
         workflow = workflow_argument(arguments)
-        try:
-            self.service.get_workflow(workflow.id)
-        except ValueError:
-            saved = self.service.save_workflow(workflow)
-        else:
-            raise ValueError("Workflow already exists.")
+        saved = self.service.save_workflow(
+            workflow.model_copy(update={"id": str(uuid4())})
+        )
         return saved_workflow_result(saved, "Created")
 
     def update_workflow(self, arguments: dict[str, object]) -> ToolResult:

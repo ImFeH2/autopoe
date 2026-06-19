@@ -89,7 +89,7 @@ import {
   workflowInputNodes,
   workflowTimerNodes,
 } from "@/components/flowent/workflow-run";
-import { cn, createClientId } from "@/lib/utils";
+import { cn, createClientId, createUuid } from "@/lib/utils";
 
 type WorkflowCanvasNodeData = {
   description: string;
@@ -229,7 +229,7 @@ const defaultWorkflowDefinition = (): WorkflowDefinition => ({
 const createDraftWorkflow = (): Workflow => ({
   createdAt: 0,
   definition: defaultWorkflowDefinition(),
-  id: createClientId("workflow"),
+  id: createUuid(),
   name: "Untitled Workflow",
   updatedAt: 0,
 });

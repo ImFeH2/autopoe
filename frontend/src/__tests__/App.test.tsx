@@ -215,6 +215,8 @@ type TestWorkflowRunResult = {
   workflow_id: string;
 };
 
+const workflowUuid = "00000000-0000-4000-8000-000000000000";
+
 type TestProvider = {
   api_key: string;
   base_url: string;
@@ -1860,6 +1862,38 @@ describe("App", () => {
         "Drag nodes from the palette to start building your workflow.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("saves new workflows with an unprefixed UUID", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(workflowUuid);
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Workflows" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe(`/workflows/${workflowUuid}`);
+    });
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workflows",
+      expect.objectContaining({
+        body: expect.stringContaining(`"id":"${workflowUuid}"`),
+        method: "PUT",
+      }),
+    );
+    expect(window.fetch).not.toHaveBeenCalledWith(
+      "/api/workflows",
+      expect.objectContaining({
+        body: expect.stringContaining(`"id":"workflow-${workflowUuid}"`),
+        method: "PUT",
+      }),
+    );
   });
 
   it("saves edited workflow node properties", async () => {

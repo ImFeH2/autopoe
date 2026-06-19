@@ -37,20 +37,24 @@ function warnMissingWebCryptoOnce() {
   console.warn("[client-id] Web Crypto is unavailable");
 }
 
-export function createClientId(
-  prefix = "id",
-  cryptoApi: CryptoLike | null = globalThis.crypto,
-) {
+export function createUuid(cryptoApi: CryptoLike | null = globalThis.crypto) {
   if (typeof cryptoApi?.randomUUID === "function") {
-    return `${prefix}-${cryptoApi.randomUUID()}`;
+    return cryptoApi.randomUUID();
   }
 
   if (typeof cryptoApi?.getRandomValues === "function") {
     const bytes = new Uint8Array(16);
     cryptoApi.getRandomValues(bytes);
-    return `${prefix}-${uuidFromBytes(bytes)}`;
+    return uuidFromBytes(bytes);
   }
 
   warnMissingWebCryptoOnce();
-  throw new Error("Web Crypto is required for client ID generation");
+  throw new Error("Web Crypto is required for UUID generation");
+}
+
+export function createClientId(
+  prefix = "id",
+  cryptoApi: CryptoLike | null = globalThis.crypto,
+) {
+  return `${prefix}-${createUuid(cryptoApi)}`;
 }
