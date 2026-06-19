@@ -91,9 +91,9 @@ function NavigationTrigger({
       value={item.id}
       onClick={onClick}
       className={cn(
-        "flowent-navigation-item cursor-pointer justify-start gap-2 rounded-lg border border-transparent bg-transparent px-2 py-1 text-white/90 shadow-none transition-colors duration-100 hover:bg-[#151515] hover:text-white data-[state=active]:bg-[#202020] data-[state=active]:text-white max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden [&_svg]:text-current",
+        "flowent-navigation-item cursor-pointer justify-start gap-2 rounded-lg border border-transparent bg-transparent px-2 py-1 shadow-none transition-colors duration-100 hover:bg-[#151515] data-[state=active]:bg-[#202020] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden",
         navigationLabelClassName,
-        "dark:hover:bg-[#151515] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#202020] dark:data-[state=active]:text-white",
+        "dark:hover:bg-[#151515] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#202020]",
         isSidebarCollapsed &&
           "justify-center gap-0 px-0 max-[900px]:justify-center max-[900px]:gap-2 max-[900px]:px-2",
         suppressActiveStyle &&
@@ -124,9 +124,9 @@ function WorkflowNavigationItem({
   return (
     <Button
       className={cn(
-        "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-left text-[13.5px] leading-5 font-normal text-white/80 shadow-none transition-colors duration-100 hover:bg-[#151515] hover:text-white max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
+        "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-left shadow-none transition-colors duration-100 hover:bg-[#151515] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
         navigationLabelClassName,
-        isActive && "bg-[#202020] text-white",
+        isActive && "flowent-workflow-history-item-active bg-[#202020]",
       )}
       onClick={() => onSelect(workflow.id)}
       title={workflow.name}
@@ -234,7 +234,7 @@ export function AppShell({
           {isSidebarCollapsed ? (
             <button
               aria-label="Expand sidebar from Flowent"
-              className="grid size-9 cursor-pointer place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30 transition-colors hover:bg-input/50"
+              className="grid size-8 cursor-pointer place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30 transition-colors hover:bg-input/50"
               onClick={() => setIsSidebarCollapsed(false)}
               title="Expand sidebar"
               type="button"
@@ -246,7 +246,7 @@ export function AppShell({
               />
             </button>
           ) : (
-            <div className="grid size-9 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
+            <div className="grid size-8 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
               <img
                 alt=""
                 className="size-full object-cover"
@@ -259,16 +259,14 @@ export function AppShell({
             isVisible={!isSidebarCollapsed}
             shouldReduceMotion={shouldReduceMotion}
           >
-            <div className="truncate text-[20px] font-medium leading-7 text-white">
-              Flowent
-            </div>
+            <div className="flowent-sidebar-brand truncate">Flowent</div>
           </SidebarText>
           <Button
             aria-label={
               isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
             }
             className={cn(
-              "size-8 cursor-pointer border border-transparent bg-transparent text-white/70 shadow-none hover:bg-[#151515] hover:text-white max-[900px]:hidden",
+              "flowent-sidebar-chrome-button size-8 cursor-pointer border border-transparent bg-transparent shadow-none hover:bg-[#151515] max-[900px]:hidden",
               isSidebarCollapsed && "size-7",
             )}
             onClick={toggleSidebar}
@@ -316,7 +314,7 @@ export function AppShell({
                 {!isSidebarCollapsed ? (
                   <div
                     aria-hidden="true"
-                    className="mt-4 mb-1 px-2 text-[11px] leading-4 font-medium text-white/45 max-[900px]:hidden"
+                    className="flowent-sidebar-section-label mt-4 mb-1 px-2 max-[900px]:hidden"
                   >
                     {group.label}
                   </div>
@@ -347,7 +345,7 @@ export function AppShell({
 
         <div
           className={cn(
-            "mt-auto flex h-8 items-center gap-2 text-xs text-[#9b9b9b] max-[900px]:hidden",
+            "flowent-sidebar-status mt-auto flex h-8 items-center gap-2 max-[900px]:hidden",
             isSidebarCollapsed ? "justify-center px-0" : "-mx-1 px-2",
           )}
           title={activeProviderName ?? "No provider"}
@@ -443,7 +441,9 @@ function WorkflowsNavigationSection({
           className={cn(
             "flowent-workflow-history-trigger mt-4 h-7 w-full cursor-pointer justify-between rounded-md border border-transparent bg-transparent px-2 py-0 text-[11px] leading-4 font-medium text-white/45 shadow-none transition-colors duration-100 hover:bg-transparent hover:text-white/70 aria-expanded:bg-transparent aria-expanded:text-white/45 dark:aria-expanded:bg-transparent dark:aria-expanded:text-white/45 max-[900px]:hidden",
             navigationLabelClassName,
-            hasActiveWorkflow && !isOpen && "text-white/75",
+            hasActiveWorkflow &&
+              !isOpen &&
+              "flowent-workflow-history-item-active",
           )}
           type="button"
           variant="ghost"
@@ -482,7 +482,7 @@ function WorkflowsNavigationSection({
               }
             >
               {workflows.length === 0 ? (
-                <div className="flex h-8 w-full items-center px-2 text-[11px] leading-4 font-medium text-white/35 max-[900px]:hidden">
+                <div className="flowent-sidebar-section-label flex h-8 w-full items-center px-2 max-[900px]:hidden">
                   <span>No workflow yet.</span>
                 </div>
               ) : (

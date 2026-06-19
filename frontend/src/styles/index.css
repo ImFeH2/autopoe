@@ -103,13 +103,46 @@ textarea {
     "liga" 0,
     "calt" 0;
   font-variant-ligatures: none;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 400;
   letter-spacing: 0.01em;
   line-height: 20px;
 }
 
+.flowent-sidebar-brand {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 20px;
+  color: #fff;
+}
+
+.flowent-sidebar-section-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 16px;
+  color: #fff;
+}
+
+.flowent-sidebar-status {
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 16px;
+  color: #fff;
+}
+
+.flowent-sidebar-chrome-button {
+  color: #fff;
+}
+
+.flowent-sidebar-chrome-button:hover {
+  color: #fff;
+}
+
 .flowent-navigation-item {
+  color: #fff !important;
   height: 34px !important;
   min-height: 34px !important;
 }
@@ -120,8 +153,14 @@ textarea {
 }
 
 .flowent-navigation-item > svg {
-  height: 17px;
-  width: 17px;
+  color: #fff;
+  height: 16px;
+  width: 16px;
+}
+
+.flowent-navigation-item:hover > svg,
+.flowent-navigation-item[data-state="active"] > svg {
+  color: #fff;
 }
 
 .flowent-navigation-text {
@@ -129,6 +168,44 @@ textarea {
   height: 20px;
   align-items: center;
   line-height: 20px;
+}
+
+.flowent-workflow-history-trigger {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0;
+  line-height: 16px !important;
+  color: #fff !important;
+}
+
+.flowent-workflow-history-trigger:hover,
+.flowent-workflow-history-trigger:focus-visible {
+  color: #fff !important;
+}
+
+.flowent-workflow-history-trigger > svg {
+  color: #fff;
+}
+
+.flowent-workflow-history-trigger:hover > svg,
+.flowent-workflow-history-trigger:focus-visible > svg {
+  color: #fff;
+}
+
+.flowent-workflow-history-item {
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.01em;
+  line-height: 20px !important;
+  color: #fff !important;
+}
+
+.flowent-workflow-history-item:hover {
+  color: #fff !important;
+}
+
+.flowent-workflow-history-item-active {
+  color: #fff !important;
 }
 
 .flowent-composer-textarea {
