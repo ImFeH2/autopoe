@@ -1876,8 +1876,13 @@ describe("App", () => {
     const workflowItem = await screen.findByRole("button", {
       name: "Launch Workflow",
     });
+    const workflowSection = screen.getByRole("button", { name: "Workflows" });
 
+    expect(workflowSection).toHaveClass("flowent-workflow-history-trigger");
+    expect(workflowSection).not.toHaveClass("flowent-navigation-item");
     expect(workflowItem.querySelector("svg")).toBeNull();
+    expect(workflowItem).toHaveClass("flowent-workflow-history-item");
+    expect(workflowItem).not.toHaveClass("flowent-navigation-item");
   });
 
   it("collapses and expands the Workflows history section", async () => {

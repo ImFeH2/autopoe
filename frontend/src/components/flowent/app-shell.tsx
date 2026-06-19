@@ -124,7 +124,7 @@ function WorkflowNavigationItem({
   return (
     <Button
       className={cn(
-        "flowent-navigation-item w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-white/90 shadow-none transition-colors duration-100 hover:bg-[#151515] hover:text-white max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
+        "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-left text-[13.5px] leading-5 font-normal text-white/80 shadow-none transition-colors duration-100 hover:bg-[#151515] hover:text-white max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
         navigationLabelClassName,
         isActive && "bg-[#202020] text-white",
       )}
@@ -441,23 +441,23 @@ function WorkflowsNavigationSection({
         <Button
           aria-label="Workflows"
           className={cn(
-            "flowent-navigation-item mt-4 w-full cursor-pointer justify-start gap-1.5 rounded-lg border border-transparent bg-transparent px-2 py-1 text-white/55 shadow-none transition-colors duration-100 hover:bg-[#151515] hover:text-white max-[900px]:hidden",
+            "flowent-workflow-history-trigger mt-4 h-7 w-full cursor-pointer justify-between rounded-md border border-transparent bg-transparent px-2 py-0 text-[11px] leading-4 font-medium text-white/45 shadow-none transition-colors duration-100 hover:bg-transparent hover:text-white/70 aria-expanded:bg-transparent aria-expanded:text-white/45 dark:aria-expanded:bg-transparent dark:aria-expanded:text-white/45 max-[900px]:hidden",
             navigationLabelClassName,
-            hasActiveWorkflow && !isOpen && "bg-[#202020] text-white",
+            hasActiveWorkflow && !isOpen && "text-white/75",
           )}
           type="button"
           variant="ghost"
         >
-          <ChevronRight
-            aria-hidden="true"
-            className={cn(
-              "size-3.5 shrink-0 transition-transform",
-              isOpen && "rotate-90",
-            )}
-          />
           <span className="flowent-navigation-text min-w-0 truncate">
             Workflows
           </span>
+          <ChevronRight
+            aria-hidden="true"
+            className={cn(
+              "size-3 shrink-0 text-white/35 transition-transform",
+              isOpen && "rotate-90",
+            )}
+          />
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent forceMount>
@@ -482,7 +482,7 @@ function WorkflowsNavigationSection({
               }
             >
               {workflows.length === 0 ? (
-                <div className="flowent-navigation-item flex w-full items-center px-2 text-[11px] leading-4 font-medium text-white/35 max-[900px]:hidden">
+                <div className="flex h-8 w-full items-center px-2 text-[11px] leading-4 font-medium text-white/35 max-[900px]:hidden">
                   <span>No workflow yet.</span>
                 </div>
               ) : (
