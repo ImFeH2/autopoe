@@ -1850,7 +1850,9 @@ describe("App", () => {
     });
     render(<App />);
 
-    expect(screen.getByText("Workflow")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Workflows" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("No workflow yet.")).toBeInTheDocument();
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
@@ -1861,6 +1863,99 @@ describe("App", () => {
       screen.getByText(
         "Drag nodes from the palette to start building your workflow.",
       ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows saved workflow rows as text-only history items", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    const workflowItem = await screen.findByRole("button", {
+      name: "Launch Workflow",
+    });
+
+    expect(workflowItem.querySelector("svg")).toBeNull();
+  });
+
+  it("collapses and expands the Workflows history section", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    expect(
+      await screen.findByRole("button", { name: "Launch Workflow" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Workflows" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Launch Workflow" }),
+      ).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Workflows" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Launch Workflow" }),
+    ).toBeInTheDocument();
+  });
+
+  it("collapses and expands the sidebar from the brand controls", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    expect(screen.getByText("Flowent")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Flowent")).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "Expand sidebar" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Workflows" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Expand sidebar from Flowent" }),
+    );
+
+    expect(screen.getByText("Flowent")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Collapse sidebar" }),
+    ).toBeInTheDocument();
+  });
+
+  it("toggles the sidebar with Control+B", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    fireEvent.keyDown(window, { code: "KeyB", ctrlKey: true });
+
+    expect(
+      await screen.findByRole("button", { name: "Expand sidebar" }),
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { code: "KeyB", ctrlKey: true });
+
+    expect(
+      await screen.findByRole("button", { name: "Collapse sidebar" }),
     ).toBeInTheDocument();
   });
 
@@ -2172,6 +2267,10 @@ describe("App", () => {
     });
 
     workspaceTab.focus();
+    await user.tab();
+
+    expect(screen.getByRole("button", { name: "Workflows" })).toHaveFocus();
+
     await user.tab();
 
     expect(composer).toHaveFocus();
