@@ -69,6 +69,14 @@ const navigationGroups = [
   },
 ] satisfies Array<{ label: string; items: NavigationItem[] }>;
 
+const sidebarTransitionClassName =
+  "[transition-timing-function:cubic-bezier(0.22,1,0.36,1)]";
+const sidebarMotionEase = [0.22, 1, 0.36, 1] as const;
+const sidebarMotionTransition = {
+  duration: 0.28,
+  ease: sidebarMotionEase,
+};
+
 function NavigationTrigger({
   isSidebarCollapsed,
   item,
@@ -91,8 +99,9 @@ function NavigationTrigger({
       value={item.id}
       onClick={onClick}
       className={cn(
-        "flowent-navigation-item cursor-pointer justify-start gap-2 rounded-lg border border-transparent bg-transparent px-2 py-1 shadow-none transition-colors duration-100 hover:bg-[#151515] data-[state=active]:bg-[#202020] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden",
+        "flowent-navigation-item cursor-pointer justify-start gap-2 rounded-lg border border-transparent bg-transparent px-2 py-1 shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] data-[state=active]:bg-[#202020] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden",
         navigationLabelClassName,
+        sidebarTransitionClassName,
         "dark:hover:bg-[#151515] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#202020]",
         isSidebarCollapsed &&
           "justify-center gap-0 px-0 max-[900px]:justify-center max-[900px]:gap-2 max-[900px]:px-2",
@@ -124,8 +133,9 @@ function WorkflowNavigationItem({
   return (
     <Button
       className={cn(
-        "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-left shadow-none transition-colors duration-100 hover:bg-[#151515] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
+        "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
         navigationLabelClassName,
+        sidebarTransitionClassName,
         isActive && "flowent-workflow-history-item-active bg-[#202020]",
       )}
       onClick={() => onSelect(workflow.id)}
@@ -209,8 +219,10 @@ export function AppShell({
       onValueChange={(value) => onViewChange(value as ViewId)}
       orientation="vertical"
       className={cn(
-        "grid h-[var(--flowent-viewport-height)] min-h-0 gap-0 overflow-hidden bg-black pt-[var(--flowent-safe-area-top)] pr-[var(--flowent-safe-area-right)] pb-[var(--flowent-safe-area-bottom)] pl-[var(--flowent-safe-area-left)] text-white transition-[grid-template-columns] ease-out max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]",
-        shouldReduceMotion ? "duration-0" : "duration-200",
+        "grid h-[var(--flowent-viewport-height)] min-h-0 gap-0 overflow-hidden bg-black pt-[var(--flowent-safe-area-top)] pr-[var(--flowent-safe-area-right)] pb-[var(--flowent-safe-area-bottom)] pl-[var(--flowent-safe-area-left)] text-white transition-[grid-template-columns] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]",
+        shouldReduceMotion
+          ? "duration-0"
+          : cn("duration-300", sidebarTransitionClassName),
         isSidebarCollapsed
           ? "grid-cols-[64px_minmax(0,1fr)]"
           : "grid-cols-[232px_minmax(0,1fr)]",
@@ -218,17 +230,20 @@ export function AppShell({
     >
       <aside
         className={cn(
-          "relative flex min-h-0 flex-col border-r border-white/10 bg-black py-3 transition-[padding] ease-out max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3",
-          shouldReduceMotion ? "duration-0" : "duration-200",
+          "relative flex min-h-0 flex-col border-r border-white/10 bg-black py-3 transition-[padding] max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3",
+          shouldReduceMotion
+            ? "duration-0"
+            : cn("duration-300", sidebarTransitionClassName),
           isSidebarCollapsed ? "px-2" : "px-3",
         )}
       >
         <div
           className={cn(
-            "flex min-h-10 items-center bg-black px-1 max-[560px]:min-h-10",
-            isSidebarCollapsed
-              ? "flex-col justify-center gap-2 max-[900px]:flex-row max-[900px]:justify-start"
-              : "gap-2.5",
+            "flex h-10 min-h-10 items-center bg-black px-1 transition-[gap] max-[560px]:min-h-10",
+            shouldReduceMotion
+              ? "duration-0"
+              : cn("duration-300", sidebarTransitionClassName),
+            isSidebarCollapsed ? "justify-center gap-0" : "gap-2.5",
           )}
         >
           <div className="grid size-8 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
@@ -241,19 +256,31 @@ export function AppShell({
           >
             <div className="flowent-sidebar-brand truncate">Flowent</div>
           </SidebarText>
-          {!isSidebarCollapsed ? (
-            <Button
-              aria-label="Collapse sidebar"
-              className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08] max-[900px]:hidden"
-              onClick={toggleSidebar}
-              size="icon"
-              title="Collapse sidebar"
-              type="button"
-              variant="ghost"
-            >
-              <ChevronsLeft aria-hidden="true" />
-            </Button>
-          ) : null}
+          <AnimatePresence initial={false}>
+            {!isSidebarCollapsed ? (
+              <motion.div
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                initial={shouldReduceMotion ? false : { opacity: 0 }}
+                key="collapse-sidebar-button"
+                transition={
+                  shouldReduceMotion ? { duration: 0 } : sidebarMotionTransition
+                }
+              >
+                <Button
+                  aria-label="Collapse sidebar"
+                  className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08] max-[900px]:hidden"
+                  onClick={toggleSidebar}
+                  size="icon"
+                  title="Collapse sidebar"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ChevronsLeft aria-hidden="true" />
+                </Button>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         </div>
 
         <nav aria-label="Primary navigation">
@@ -284,14 +311,14 @@ export function AppShell({
             />
             {navigationGroups.map((group) => (
               <Fragment key={group.label}>
-                {!isSidebarCollapsed ? (
-                  <div
-                    aria-hidden="true"
-                    className="flowent-sidebar-section-label mt-4 mb-1 px-2 max-[900px]:hidden"
-                  >
-                    {group.label}
-                  </div>
-                ) : null}
+                <SidebarBlock
+                  className="flowent-sidebar-section-label mt-4 mb-1 px-2 max-[900px]:hidden"
+                  isDecorative
+                  isVisible={!isSidebarCollapsed}
+                  shouldReduceMotion={shouldReduceMotion}
+                >
+                  {group.label}
+                </SidebarBlock>
                 {group.items.map((item) => (
                   <NavigationTrigger
                     isSidebarCollapsed={isSidebarCollapsed}
@@ -302,7 +329,10 @@ export function AppShell({
                 ))}
               </Fragment>
             ))}
-            {!isSidebarCollapsed ? (
+            <SidebarBlock
+              isVisible={!isSidebarCollapsed}
+              shouldReduceMotion={shouldReduceMotion}
+            >
               <WorkflowsNavigationSection
                 activeView={activeView}
                 activeWorkflowId={activeWorkflowId}
@@ -312,24 +342,41 @@ export function AppShell({
                 shouldReduceMotion={shouldReduceMotion}
                 workflows={workflows}
               />
-            ) : null}
+            </SidebarBlock>
           </TabsList>
         </nav>
 
         <div className="mt-auto flex flex-col gap-2 max-[900px]:hidden">
-          {isSidebarCollapsed ? (
-            <Button
-              aria-label="Expand sidebar"
-              className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
-              onClick={toggleSidebar}
-              size="icon"
-              title="Expand sidebar"
-              type="button"
-              variant="ghost"
-            >
-              <ChevronsRight aria-hidden="true" />
-            </Button>
-          ) : null}
+          <AnimatePresence initial={false}>
+            {isSidebarCollapsed ? (
+              <motion.div
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                initial={shouldReduceMotion ? false : { opacity: 0 }}
+                key="expand-sidebar-button"
+                transition={
+                  shouldReduceMotion
+                    ? { duration: 0 }
+                    : {
+                        ...sidebarMotionTransition,
+                        delay: 0.08,
+                      }
+                }
+              >
+                <Button
+                  aria-label="Expand sidebar"
+                  className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
+                  onClick={toggleSidebar}
+                  size="icon"
+                  title="Expand sidebar"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ChevronsRight aria-hidden="true" />
+                </Button>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
           <div
             className={cn(
               "flowent-sidebar-status flex h-8 items-center gap-2",
@@ -387,11 +434,53 @@ function SidebarText({
           transition={
             shouldReduceMotion
               ? { duration: 0 }
-              : { duration: 0.16, ease: [0.32, 0.72, 0, 1] }
+              : {
+                  ...sidebarMotionTransition,
+                  duration: 0.24,
+                }
           }
         >
           {children}
         </motion.span>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+function SidebarBlock({
+  children,
+  className,
+  isDecorative = false,
+  isVisible,
+  shouldReduceMotion,
+}: {
+  children: ReactNode;
+  className?: string;
+  isDecorative?: boolean;
+  isVisible: boolean;
+  shouldReduceMotion: boolean;
+}) {
+  return (
+    <AnimatePresence initial={false}>
+      {isVisible ? (
+        <motion.div
+          animate={{ height: "auto", opacity: 1 }}
+          aria-hidden={isDecorative ? true : undefined}
+          className={cn("min-w-0 overflow-hidden", className)}
+          exit={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0 }}
+          initial={shouldReduceMotion ? false : { height: 0, opacity: 0 }}
+          key="sidebar-block"
+          transition={
+            shouldReduceMotion
+              ? { duration: 0 }
+              : {
+                  ...sidebarMotionTransition,
+                  duration: 0.24,
+                }
+          }
+        >
+          {children}
+        </motion.div>
       ) : null}
     </AnimatePresence>
   );
@@ -466,7 +555,10 @@ function WorkflowsNavigationSection({
               transition={
                 shouldReduceMotion
                   ? { duration: 0 }
-                  : { duration: 0.18, ease: [0.32, 0.72, 0, 1] }
+                  : {
+                      ...sidebarMotionTransition,
+                      duration: 0.24,
+                    }
               }
             >
               {workflows.length === 0 ? (
