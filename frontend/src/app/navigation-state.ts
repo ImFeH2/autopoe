@@ -26,38 +26,87 @@ const normalizeView = (view: string | null): ViewId =>
     ? (view as ViewId)
     : defaultNavigationState.view;
 
-export const readNavigationState = (
-  location: Pick<Location, "search"> = window.location,
-): NavigationState => {
-  const params = new URLSearchParams(location.search);
+const decodePathSegment = (segment: string) => {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return "";
+  }
+};
+
+const readPathNavigationState = (pathname: string): NavigationState | null => {
+  const pathSegments = pathname
+    .split("/")
+    .filter(Boolean)
+    .map(decodePathSegment);
+  const [viewSegment, workflowId = ""] = pathSegments;
+
+  if (!viewSegment) {
+    return defaultNavigationState;
+  }
+
+  if (viewSegment === "workflows") {
+    return {
+      view: "workflows",
+      workflowId,
+    };
+  }
+
+  if (viewIds.has(viewSegment as ViewId)) {
+    return {
+      view: viewSegment as ViewId,
+      workflowId: "",
+    };
+  }
+
+  return null;
+};
+
+const readLegacySearchNavigationState = (search: string): NavigationState => {
+  const params = new URLSearchParams(search);
   const view = normalizeView(params.get("view"));
   const workflowId = view === "workflows" ? (params.get("workflow") ?? "") : "";
   return { view, workflowId };
 };
 
-export const navigationStateToSearch = ({
+export const readNavigationState = (
+  location: Pick<Location, "pathname" | "search"> = window.location,
+): NavigationState => {
+  const pathNavigationState = readPathNavigationState(location.pathname);
+  const hasLegacyView = new URLSearchParams(location.search).has("view");
+
+  if (
+    pathNavigationState &&
+    (!hasLegacyView || pathNavigationState.view !== defaultNavigationState.view)
+  ) {
+    return pathNavigationState;
+  }
+
+  return readLegacySearchNavigationState(location.search);
+};
+
+export const navigationStateToPath = ({
   view,
   workflowId,
 }: NavigationState): string => {
-  const params = new URLSearchParams();
+  if (view === "workflows") {
+    return workflowId
+      ? `/workflows/${encodeURIComponent(workflowId)}`
+      : "/workflows";
+  }
 
   if (view !== defaultNavigationState.view) {
-    params.set("view", view);
+    return `/${view}`;
   }
 
-  if (view === "workflows" && workflowId) {
-    params.set("workflow", workflowId);
-  }
-
-  const search = params.toString();
-  return search ? `?${search}` : "";
+  return "/";
 };
 
 export const writeNavigationState = (
   state: NavigationState,
   options: { replace?: boolean } = {},
 ) => {
-  const nextUrl = `${window.location.pathname}${navigationStateToSearch(state)}${window.location.hash}`;
+  const nextUrl = `${navigationStateToPath(state)}${window.location.hash}`;
   const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
   if (nextUrl === currentUrl) {

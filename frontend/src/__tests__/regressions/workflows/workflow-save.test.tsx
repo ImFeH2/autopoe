@@ -323,11 +323,7 @@ describe("workflow save regressions", () => {
 
   it("reopens the selected workflow after a page refresh", async () => {
     mockAppFetch();
-    window.history.replaceState(
-      null,
-      "",
-      "/?view=workflows&workflow=workflow-draft",
-    );
+    window.history.replaceState(null, "", "/workflows/workflow-draft");
 
     render(<App />);
 
@@ -356,9 +352,7 @@ describe("workflow save regressions", () => {
     await user.click(screen.getByRole("button", { name: "Draft Workflow" }));
 
     await waitFor(() => {
-      expect(window.location.search).toBe(
-        "?view=workflows&workflow=workflow-draft",
-      );
+      expect(window.location.pathname).toBe("/workflows/workflow-draft");
     });
     expect(screen.getByRole("tab", { name: "Workflows" })).toHaveAttribute(
       "aria-selected",
