@@ -8,11 +8,11 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import {
+  ChevronsLeft,
+  ChevronsRight,
   ChevronRight,
   KeyRound,
   MessageSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plug,
   PlusCircle,
   Radio,
@@ -231,29 +231,9 @@ export function AppShell({
               : "gap-2.5",
           )}
         >
-          {isSidebarCollapsed ? (
-            <button
-              aria-label="Expand sidebar from Flowent"
-              className="grid size-8 cursor-pointer place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30 transition-colors hover:bg-input/50"
-              onClick={() => setIsSidebarCollapsed(false)}
-              title="Expand sidebar"
-              type="button"
-            >
-              <img
-                alt=""
-                className="size-full object-cover"
-                src="/flowent.png"
-              />
-            </button>
-          ) : (
-            <div className="grid size-8 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
-              <img
-                alt=""
-                className="size-full object-cover"
-                src="/flowent.png"
-              />
-            </div>
-          )}
+          <div className="grid size-8 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
+            <img alt="" className="size-full object-cover" src="/flowent.png" />
+          </div>
           <SidebarText
             className="min-w-0 flex-1 self-center"
             isVisible={!isSidebarCollapsed}
@@ -261,26 +241,19 @@ export function AppShell({
           >
             <div className="flowent-sidebar-brand truncate">Flowent</div>
           </SidebarText>
-          <Button
-            aria-label={
-              isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
-            }
-            className={cn(
-              "flowent-sidebar-chrome-button size-8 cursor-pointer border border-transparent bg-transparent shadow-none hover:bg-[#151515] max-[900px]:hidden",
-              isSidebarCollapsed && "size-7",
-            )}
-            onClick={toggleSidebar}
-            size="icon"
-            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            type="button"
-            variant="ghost"
-          >
-            {isSidebarCollapsed ? (
-              <PanelLeftOpen aria-hidden="true" />
-            ) : (
-              <PanelLeftClose aria-hidden="true" />
-            )}
-          </Button>
+          {!isSidebarCollapsed ? (
+            <Button
+              aria-label="Collapse sidebar"
+              className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08] max-[900px]:hidden"
+              onClick={toggleSidebar}
+              size="icon"
+              title="Collapse sidebar"
+              type="button"
+              variant="ghost"
+            >
+              <ChevronsLeft aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
 
         <nav aria-label="Primary navigation">
@@ -343,23 +316,38 @@ export function AppShell({
           </TabsList>
         </nav>
 
-        <div
-          className={cn(
-            "flowent-sidebar-status mt-auto flex h-8 items-center gap-2 max-[900px]:hidden",
-            isSidebarCollapsed ? "justify-center px-0" : "-mx-1 px-2",
-          )}
-          title={activeProviderName ?? "No provider"}
-        >
+        <div className="mt-auto flex flex-col gap-2 max-[900px]:hidden">
+          {isSidebarCollapsed ? (
+            <Button
+              aria-label="Expand sidebar"
+              className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
+              onClick={toggleSidebar}
+              size="icon"
+              title="Expand sidebar"
+              type="button"
+              variant="ghost"
+            >
+              <ChevronsRight aria-hidden="true" />
+            </Button>
+          ) : null}
           <div
-            className="size-1.5 rounded-full bg-[#7ddf89]"
-            aria-hidden="true"
-          />
-          <SidebarText
-            isVisible={!isSidebarCollapsed}
-            shouldReduceMotion={shouldReduceMotion}
+            className={cn(
+              "flowent-sidebar-status flex h-8 items-center gap-2",
+              isSidebarCollapsed ? "justify-center px-0" : "-mx-1 px-2",
+            )}
+            title={activeProviderName ?? "No provider"}
           >
-            <span>{activeProviderName ?? "No provider"}</span>
-          </SidebarText>
+            <div
+              className="size-1.5 rounded-full bg-[#7ddf89]"
+              aria-hidden="true"
+            />
+            <SidebarText
+              isVisible={!isSidebarCollapsed}
+              shouldReduceMotion={shouldReduceMotion}
+            >
+              <span>{activeProviderName ?? "No provider"}</span>
+            </SidebarText>
+          </div>
         </div>
         <div
           aria-hidden="true"

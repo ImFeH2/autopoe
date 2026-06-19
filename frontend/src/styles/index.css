@@ -134,11 +134,17 @@ textarea {
 }
 
 .flowent-sidebar-chrome-button {
-  color: #fff;
+  color: rgb(158, 158, 158);
 }
 
 .flowent-sidebar-chrome-button:hover {
   color: #fff;
+}
+
+.flowent-sidebar-chrome-button > svg {
+  height: 18px;
+  width: 18px;
+  stroke-width: 2;
 }
 
 .flowent-navigation-item {

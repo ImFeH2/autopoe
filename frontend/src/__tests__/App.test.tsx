@@ -1931,12 +1931,13 @@ describe("App", () => {
       screen.getByRole("button", { name: "Expand sidebar" }),
     ).toBeInTheDocument();
     expect(
+      screen.queryByRole("button", { name: "Expand sidebar from Flowent" }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByRole("button", { name: "Workflows" }),
     ).not.toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Expand sidebar from Flowent" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
 
     expect(screen.getByText("Flowent")).toBeInTheDocument();
     expect(
