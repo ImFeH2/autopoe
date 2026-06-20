@@ -12,14 +12,19 @@ import {
   ChevronsRight,
   ChevronRight,
   Ellipsis,
+  ExternalLink,
   KeyRound,
   MessageSquare,
+  Pencil,
+  Pin,
+  PinOff,
   Plug,
   PlusCircle,
   Radio,
   ShieldCheck,
   Settings,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -229,18 +234,26 @@ function WorkflowNavigationItem({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" alignOffset={-84} sideOffset={2}>
           <DropdownMenuItem onSelect={() => onOpenNewTab(workflow.id)}>
+            <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
             Open new tab
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onRenameStart(workflow.id)}>
+            <Pencil className="size-4 shrink-0" aria-hidden="true" />
             Rename
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onTogglePin(workflow.id)}>
+            {isPinned ? (
+              <PinOff className="size-4 shrink-0" aria-hidden="true" />
+            ) : (
+              <Pin className="size-4 shrink-0" aria-hidden="true" />
+            )}
             {isPinned ? "Unpin" : "Pin"}
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => onDelete(workflow.id)}
             variant="destructive"
           >
+            <Trash2 className="size-4 shrink-0" aria-hidden="true" />
             Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
