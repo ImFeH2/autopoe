@@ -145,6 +145,7 @@ function FlowentApp() {
     openNewWorkflow,
     openWorkflow,
     replaceWorkflows,
+    renameWorkflow,
     runWorkflow,
     runningWorkflowId,
     saveWorkflow,
@@ -221,6 +222,16 @@ function FlowentApp() {
       activeWorkflowId={activeWorkflowId}
       onNewWorkflow={() => updateNavigation("workflows")}
       onViewChange={(view) => updateNavigation(view)}
+      onWorkflowDelete={(workflowId) => {
+        void deleteWorkflow(workflowId);
+      }}
+      onWorkflowRename={(workflowId, nextName) => {
+        void renameWorkflow(workflowId, nextName).then((result) => {
+          if (!result.data) {
+            toast.error(result.error);
+          }
+        });
+      }}
       onWorkflowSelect={(workflowId) =>
         updateNavigation("workflows", workflowId)
       }

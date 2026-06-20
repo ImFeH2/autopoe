@@ -96,6 +96,25 @@ export const useWorkflows = (initialWorkflowId = "") => {
     return true;
   }, []);
 
+  const renameWorkflow = useCallback(
+    async (
+      workflowId: string,
+      nextName: string,
+    ): Promise<RequestResult<Workflow>> => {
+      const workflow = workflows.find(
+        (currentWorkflow) => currentWorkflow.id === workflowId,
+      );
+      if (!workflow) {
+        return {
+          data: null,
+          error: "Workflow could not be renamed.",
+        };
+      }
+      return saveWorkflow({ ...workflow, name: nextName });
+    },
+    [saveWorkflow, workflows],
+  );
+
   const runWorkflow = useCallback(
     async (
       workflowId: string,
@@ -133,6 +152,7 @@ export const useWorkflows = (initialWorkflowId = "") => {
     openNewWorkflow,
     openWorkflow,
     replaceWorkflows,
+    renameWorkflow,
     runWorkflow,
     runningWorkflowId,
     finishWorkflowRun,

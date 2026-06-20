@@ -1514,6 +1514,7 @@ const mockSelectedProviderWorkspaceResponse = (response: Response) => {
 describe("App", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
   });
 
   it("opens the Workspace as the default chat view", () => {
@@ -1586,6 +1587,128 @@ describe("App", () => {
     expect(workflowItem.querySelector("svg")).toBeNull();
     expect(workflowItem).toHaveClass("flowent-workflow-history-item");
     expect(workflowItem).not.toHaveClass("flowent-navigation-item");
+  });
+
+  it("shows workflow history actions for opening, renaming, pinning, and deleting", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [
+        savedWorkflow(),
+        savedWorkflow({
+          id: "workflow-2",
+          name: "Second Workflow",
+          updated_at: 1710000040,
+        }),
+      ],
+    });
+    render(<App />);
+
+    const launchWorkflow = await screen.findByRole("button", {
+      name: "Launch Workflow",
+    });
+    const launchWorkflowRow = launchWorkflow.closest("div");
+    await user.hover(launchWorkflow);
+    await user.click(
+      within(launchWorkflowRow as HTMLElement).getByRole("button", {
+        name: "Options",
+      }),
+    );
+
+    expect(
+      screen.getByRole("menuitem", { name: "Open new tab" }),
+    ).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Pin" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+
+    await user.click(screen.getByRole("menuitem", { name: "Open new tab" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/workflows/workflow-1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    await user.click(
+      within(launchWorkflowRow as HTMLElement).getByRole("button", {
+        name: "Options",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+
+    const renameInput = screen.getByRole("textbox", {
+      name: "Rename Launch Workflow",
+    });
+    await user.clear(renameInput);
+    await user.type(renameInput, "Renamed Workflow");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(window.fetch).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({
+          body: expect.stringContaining('"name":"Renamed Workflow"'),
+          method: "PUT",
+        }),
+      );
+    });
+    expect(
+      await screen.findByRole("button", { name: "Renamed Workflow" }),
+    ).toBeInTheDocument();
+
+    const secondWorkflow = screen.getByRole("button", {
+      name: "Second Workflow",
+    });
+    const secondWorkflowRow = secondWorkflow.closest("div");
+    await user.hover(secondWorkflow);
+    await user.click(
+      within(secondWorkflowRow as HTMLElement).getByRole("button", {
+        name: "Options",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Pin" }));
+
+    const workflowRows = screen.getAllByRole("button", {
+      name: /Workflow$/,
+    });
+    expect(workflowRows.map((row) => row.textContent)).toEqual([
+      "Second Workflow",
+      "Renamed Workflow",
+    ]);
+    expect(window.localStorage.getItem("flowent:pinned-workflows")).toContain(
+      "workflow-2",
+    );
+
+    await user.click(
+      within(secondWorkflowRow as HTMLElement).getByRole("button", {
+        name: "Options",
+      }),
+    );
+    expect(screen.getByRole("menuitem", { name: "Unpin" })).toBeVisible();
+    await user.keyboard("{Escape}");
+
+    const renamedWorkflow = screen.getByRole("button", {
+      name: "Renamed Workflow",
+    });
+    const renamedWorkflowRow = renamedWorkflow.closest("div");
+    await user.hover(renamedWorkflow);
+    await user.click(
+      within(renamedWorkflowRow as HTMLElement).getByRole("button", {
+        name: "Options",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(fetchWasCalledWith("/api/workflows/workflow-1", "DELETE")).toBe(
+        true,
+      );
+    });
+    expect(
+      screen.queryByRole("button", { name: "Renamed Workflow" }),
+    ).not.toBeInTheDocument();
   });
 
   it("collapses and expands the Workflows history section", async () => {

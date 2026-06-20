@@ -11,6 +11,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronRight,
+  Ellipsis,
   KeyRound,
   MessageSquare,
   Plug,
@@ -27,8 +28,18 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { navigationLabelClassName } from "@/components/flowent/styles";
+import {
+  fieldInputClassName,
+  navigationLabelClassName,
+} from "@/components/flowent/styles";
 import type { ViewId, Workflow } from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +87,7 @@ const sidebarMotionTransition = {
   duration: 0.28,
   ease: sidebarMotionEase,
 };
+const pinnedWorkflowStorageKey = "flowent:pinned-workflows";
 
 function NavigationTrigger({
   isSidebarCollapsed,
@@ -121,30 +133,119 @@ function NavigationTrigger({
 
 function WorkflowNavigationItem({
   isActive,
+  isPinned,
+  isRenaming,
+  onDelete,
+  onOpenNewTab,
+  onRenameCancel,
+  onRenameCommit,
+  onRenameStart,
   onSelect,
+  onTogglePin,
   workflow,
 }: {
   isActive: boolean;
+  isPinned: boolean;
+  isRenaming: boolean;
+  onDelete: (workflowId: string) => void;
+  onOpenNewTab: (workflowId: string) => void;
+  onRenameCancel: () => void;
+  onRenameCommit: (workflowId: string, nextName: string) => void;
+  onRenameStart: (workflowId: string) => void;
   onSelect: (workflowId: string) => void;
+  onTogglePin: (workflowId: string) => void;
   workflow: Workflow;
 }) {
+  const [draftName, setDraftName] = useState(workflow.name);
+
+  useEffect(() => {
+    if (isRenaming) {
+      setDraftName(workflow.name);
+    }
+  }, [isRenaming, workflow.name]);
+
+  const commitRename = () => {
+    onRenameCommit(workflow.id, draftName);
+  };
+
+  if (isRenaming) {
+    return (
+      <div className="h-8 px-1 py-0.5">
+        <Input
+          aria-label={`Rename ${workflow.name}`}
+          autoFocus
+          className={cn(
+            fieldInputClassName,
+            "h-7 w-full rounded-lg px-2 text-sm leading-[21px]",
+          )}
+          onBlur={commitRename}
+          onChange={(event) => setDraftName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onRenameCancel();
+            }
+          }}
+          value={draftName}
+        />
+      </div>
+    );
+  }
+
   return (
-    <Button
-      className={cn(
-        "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
-        navigationLabelClassName,
-        sidebarTransitionClassName,
-        isActive && "flowent-workflow-history-item-active bg-[#202020]",
-      )}
-      onClick={() => onSelect(workflow.id)}
-      title={workflow.name}
-      type="button"
-      variant="ghost"
-    >
-      <span className="flowent-navigation-text min-w-0 truncate">
-        {workflow.name}
-      </span>
-    </Button>
+    <div className="group/workflow-menu-item relative h-8">
+      <Button
+        className={cn(
+          "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 pr-8 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
+          navigationLabelClassName,
+          sidebarTransitionClassName,
+          isActive && "flowent-workflow-history-item-active bg-[#202020]",
+        )}
+        onClick={() => onSelect(workflow.id)}
+        title={workflow.name}
+        type="button"
+        variant="ghost"
+      >
+        <span className="flowent-navigation-text min-w-0 truncate">
+          {workflow.name}
+        </span>
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label="Options"
+            className="absolute top-1 right-1 hidden size-6 cursor-pointer rounded-md border border-transparent bg-transparent p-0 text-white shadow-none hover:bg-white/[0.08] focus-visible:flex data-[state=open]:flex data-[state=open]:bg-white/[0.08] group-hover/workflow-menu-item:flex group-focus-within/workflow-menu-item:flex"
+            onClick={(event) => event.stopPropagation()}
+            size="icon"
+            title="Options"
+            type="button"
+            variant="ghost"
+          >
+            <Ellipsis className="size-4" aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" alignOffset={-84} sideOffset={2}>
+          <DropdownMenuItem onSelect={() => onOpenNewTab(workflow.id)}>
+            Open new tab
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onRenameStart(workflow.id)}>
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onTogglePin(workflow.id)}>
+            {isPinned ? "Unpin" : "Pin"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => onDelete(workflow.id)}
+            variant="destructive"
+          >
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 
@@ -154,6 +255,8 @@ export function AppShell({
   activeWorkflowId,
   children,
   onNewWorkflow,
+  onWorkflowDelete,
+  onWorkflowRename,
   onViewChange,
   onWorkflowSelect,
   workflows,
@@ -163,6 +266,8 @@ export function AppShell({
   activeWorkflowId?: string;
   children: ReactNode;
   onNewWorkflow: () => void;
+  onWorkflowDelete: (workflowId: string) => void;
+  onWorkflowRename: (workflowId: string, nextName: string) => void;
   onViewChange: (value: ViewId) => void;
   onWorkflowSelect: (workflowId: string) => void;
   workflows: Workflow[];
@@ -335,6 +440,8 @@ export function AppShell({
                 activeWorkflowId={activeWorkflowId}
                 isOpen={isWorkflowSectionOpen}
                 onOpenChange={setIsWorkflowSectionOpen}
+                onWorkflowDelete={onWorkflowDelete}
+                onWorkflowRename={onWorkflowRename}
                 onWorkflowSelect={onWorkflowSelect}
                 shouldReduceMotion={shouldReduceMotion}
                 workflows={workflows}
@@ -488,6 +595,8 @@ function WorkflowsNavigationSection({
   activeWorkflowId,
   isOpen,
   onOpenChange,
+  onWorkflowDelete,
+  onWorkflowRename,
   onWorkflowSelect,
   shouldReduceMotion,
   workflows,
@@ -496,12 +605,70 @@ function WorkflowsNavigationSection({
   activeWorkflowId?: string;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  onWorkflowDelete: (workflowId: string) => void;
+  onWorkflowRename: (workflowId: string, nextName: string) => void;
   onWorkflowSelect: (workflowId: string) => void;
   shouldReduceMotion: boolean;
   workflows: Workflow[];
 }) {
+  const [pinnedWorkflowIds, setPinnedWorkflowIds] = useState<string[]>(() =>
+    readPinnedWorkflowIds(),
+  );
+  const [renamingWorkflowId, setRenamingWorkflowId] = useState("");
   const hasActiveWorkflow =
     activeView === "workflows" && Boolean(activeWorkflowId);
+  const workflowIds = new Set(workflows.map((workflow) => workflow.id));
+  const cleanPinnedWorkflowIds = pinnedWorkflowIds.filter((workflowId) =>
+    workflowIds.has(workflowId),
+  );
+  const pinnedWorkflowIdSet = new Set(cleanPinnedWorkflowIds);
+  const sortedWorkflows = [
+    ...workflows.filter((workflow) => pinnedWorkflowIdSet.has(workflow.id)),
+    ...workflows.filter((workflow) => !pinnedWorkflowIdSet.has(workflow.id)),
+  ].sort((firstWorkflow, secondWorkflow) => {
+    const firstIndex = cleanPinnedWorkflowIds.indexOf(firstWorkflow.id);
+    const secondIndex = cleanPinnedWorkflowIds.indexOf(secondWorkflow.id);
+    if (firstIndex >= 0 && secondIndex >= 0) {
+      return firstIndex - secondIndex;
+    }
+    return 0;
+  });
+
+  useEffect(() => {
+    if (cleanPinnedWorkflowIds.length !== pinnedWorkflowIds.length) {
+      setPinnedWorkflowIds(cleanPinnedWorkflowIds);
+      writePinnedWorkflowIds(cleanPinnedWorkflowIds);
+    }
+  }, [cleanPinnedWorkflowIds, pinnedWorkflowIds.length]);
+
+  const setPinnedIds = (nextPinnedWorkflowIds: string[]) => {
+    setPinnedWorkflowIds(nextPinnedWorkflowIds);
+    writePinnedWorkflowIds(nextPinnedWorkflowIds);
+  };
+
+  const togglePin = (workflowId: string) => {
+    if (pinnedWorkflowIdSet.has(workflowId)) {
+      setPinnedIds(
+        cleanPinnedWorkflowIds.filter(
+          (pinnedWorkflowId) => pinnedWorkflowId !== workflowId,
+        ),
+      );
+      return;
+    }
+    setPinnedIds([workflowId, ...cleanPinnedWorkflowIds]);
+  };
+
+  const commitRename = (workflowId: string, nextName: string) => {
+    setRenamingWorkflowId("");
+    const trimmedName = nextName.trim();
+    const workflow = workflows.find(
+      (currentWorkflow) => currentWorkflow.id === workflowId,
+    );
+    if (!workflow || !trimmedName || trimmedName === workflow.name) {
+      return;
+    }
+    onWorkflowRename(workflowId, trimmedName);
+  };
 
   return (
     <Collapsible
@@ -563,14 +730,28 @@ function WorkflowsNavigationSection({
                   <span>No workflow yet.</span>
                 </div>
               ) : (
-                workflows.map((workflow) => (
+                sortedWorkflows.map((workflow) => (
                   <WorkflowNavigationItem
                     isActive={
                       activeView === "workflows" &&
                       activeWorkflowId === workflow.id
                     }
+                    isPinned={pinnedWorkflowIdSet.has(workflow.id)}
+                    isRenaming={renamingWorkflowId === workflow.id}
                     key={workflow.id}
+                    onDelete={onWorkflowDelete}
+                    onOpenNewTab={(workflowId) => {
+                      window.open(
+                        `/workflows/${encodeURIComponent(workflowId)}`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      );
+                    }}
+                    onRenameCancel={() => setRenamingWorkflowId("")}
+                    onRenameCommit={commitRename}
+                    onRenameStart={setRenamingWorkflowId}
                     onSelect={onWorkflowSelect}
+                    onTogglePin={togglePin}
                     workflow={workflow}
                   />
                 ))
@@ -580,5 +761,36 @@ function WorkflowsNavigationSection({
         </AnimatePresence>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+function readPinnedWorkflowIds() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const value = window.localStorage.getItem(pinnedWorkflowStorageKey);
+    if (!value) {
+      return [];
+    }
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (workflowId): workflowId is string => typeof workflowId === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writePinnedWorkflowIds(workflowIds: string[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(
+    pinnedWorkflowStorageKey,
+    JSON.stringify(workflowIds),
   );
 }
