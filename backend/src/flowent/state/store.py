@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
 
 from flowent.llm import ChatMessage, ReasoningEffort
@@ -171,6 +172,50 @@ class StateStore:
     def read_workflows(self) -> list[StoredWorkflow]:
         with self.connect() as connection:
             return self._read_workflows(connection)
+
+    def read_workflow_agent_history(
+        self, workflow_id: str, node_id: str
+    ) -> list[dict[str, object]]:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT messages
+                FROM workflow_agent_histories
+                WHERE workflow_id = ? AND node_id = ?
+                """,
+                (workflow_id, node_id),
+            ).fetchone()
+        if row is None:
+            return []
+        return workflow_agent_history_messages(row["messages"])
+
+    def save_workflow_agent_history(
+        self,
+        workflow_id: str,
+        node_id: str,
+        messages: list[Mapping[str, object]],
+    ) -> list[dict[str, object]]:
+        stored_messages = [dict(message) for message in messages]
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workflow_agent_histories (
+                    workflow_id,
+                    node_id,
+                    messages
+                )
+                VALUES (?, ?, ?)
+                ON CONFLICT(workflow_id, node_id) DO UPDATE SET
+                    messages = excluded.messages,
+                    updated_at = unixepoch()
+                """,
+                (
+                    workflow_id,
+                    node_id,
+                    json.dumps(stored_messages, ensure_ascii=False),
+                ),
+            )
+        return stored_messages
 
     def save_workflow(self, workflow: StoredWorkflow) -> StoredWorkflow:
         with self.connect() as connection:
@@ -1017,3 +1062,15 @@ class StateStore:
                 """
             )
         ]
+
+
+def workflow_agent_history_messages(value: str) -> list[dict[str, object]]:
+    parsed = json.loads(value or "[]")
+    if not isinstance(parsed, list):
+        raise ValueError("Workflow agent history must be a list.")
+    messages: list[dict[str, object]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("Workflow agent history messages must be objects.")
+        messages.append(dict(item))
+    return messages

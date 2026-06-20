@@ -527,6 +527,106 @@ def test_workflow_agent_node_continues_after_tool_result(tmp_path, monkeypatch) 
     )
 
 
+def test_workflow_agent_node_reuses_its_own_history(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    (workdir / "notes.txt").write_text("Launch notes")
+    monkeypatch.chdir(workdir)
+    requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        requests.append(dict(request))
+
+        async def chunks() -> object:
+            if len(requests) == 1:
+                yield tool_call_chunk(
+                    "read_file", {"path": "notes.txt"}, call_id="call-read"
+                )
+            elif len(requests) == 2:
+                yield text_chunk("First summary.")
+            else:
+                yield text_chunk("Second summary.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(
+            serve_frontend=False,
+            chat_completion=fake_completion,
+            workdir=workdir,
+        )
+    )
+    configure_provider(client)
+    workflow = input_output_workflow()
+    workflow["definition"]["nodes"].insert(
+        1,
+        {
+            "data": {
+                "agent": "Default agent",
+                "prompt": "Read notes.txt and summarize {{input.output}}.",
+            },
+            "description": "",
+            "id": "agent",
+            "name": "Agent",
+            "position": {"x": 260, "y": 0},
+            "type": "agent",
+        },
+    )
+    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
+    workflow["definition"]["edges"] = [
+        {
+            "id": "edge-input-agent",
+            "label": "",
+            "source": "input",
+            "source_handle": "out",
+            "target": "agent",
+            "target_handle": "in",
+        },
+        {
+            "id": "edge-agent-output",
+            "label": "",
+            "source": "agent",
+            "source_handle": "out",
+            "target": "output",
+            "target_handle": "in",
+        },
+    ]
+    client.put("/api/workflows", json=workflow)
+
+    first_response = client.post(
+        "/api/workflows/workflow-1/run", json={"input": "first launch"}
+    )
+    second_response = client.post(
+        "/api/workflows/workflow-1/run", json={"input": "second launch"}
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["outputs"] == {"final_result": "First summary."}
+    assert second_response.status_code == 200
+    assert second_response.json()["outputs"] == {"final_result": "Second summary."}
+    assert len(requests) == 3
+    second_run_messages = requests[2]["messages"]
+    assert second_run_messages[-5] == {
+        "role": "user",
+        "content": "Read notes.txt and summarize first launch.",
+    }
+    assert second_run_messages[-4]["tool_calls"][0]["function"]["name"] == "read_file"
+    assert second_run_messages[-3] == {
+        "role": "tool",
+        "tool_call_id": "call-read",
+        "content": "Launch notes",
+    }
+    assert second_run_messages[-2] == {
+        "role": "assistant",
+        "content": "First summary.",
+    }
+    assert second_run_messages[-1] == {
+        "role": "user",
+        "content": "Read notes.txt and summarize second launch.",
+    }
+
+
 def test_workflow_agent_node_cannot_call_workflow_recursively(
     tmp_path, monkeypatch
 ) -> None:

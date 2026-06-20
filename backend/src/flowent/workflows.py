@@ -275,6 +275,7 @@ async def run_workflow_once(
                 outputs=outputs,
                 runtime=runtime,
                 workflow_depth=workflow_depth,
+                workflow_id=workflow_id,
             )
             if node.type == "input" and remaining_default_input:
                 remaining_default_input = ""
@@ -317,6 +318,7 @@ async def run_node(
     outputs: Mapping[str, str],
     runtime: FlowentAgentRuntime | None = None,
     workflow_depth: int = 0,
+    workflow_id: str,
 ) -> str:
     if node.type == "input":
         if node.id in input_values:
@@ -334,16 +336,25 @@ async def run_node(
             or joined_upstream_outputs(incoming_edges, outputs),
             outputs,
         )
+        context_messages = runtime_context_messages(
+            runtime.cwd, runtime.store.read_state().settings.agent_prompt
+        )
+        history = runtime.store.read_workflow_agent_history(workflow_id, node.id)
+        current_message: Mapping[str, object] = {"role": "user", "content": prompt}
+        pending_history: list[Mapping[str, object]] = [*history, current_message]
+        runtime.store.save_workflow_agent_history(workflow_id, node.id, pending_history)
         result = await runtime.complete(
             connection=connection,
             messages=[
-                *runtime_context_messages(
-                    runtime.cwd, runtime.store.read_state().settings.agent_prompt
-                ),
-                {"role": "user", "content": prompt},
+                *context_messages,
+                *pending_history,
             ],
+            history_start_index=1 + len(context_messages),
             user_request=prompt,
             workflow_depth=workflow_depth,
+        )
+        runtime.store.save_workflow_agent_history(
+            workflow_id, node.id, list(result.history)
         )
         return result.content
     if node.type == "merge":

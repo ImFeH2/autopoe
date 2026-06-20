@@ -120,6 +120,8 @@ async def run_agent_stream(
     *,
     completion: CompletionCallable | None,
     connection: ProviderConnection,
+    conversation_recorder: Callable[[Sequence[Mapping[str, object]]], None]
+    | None = None,
     cwd: Path,
     messages: Sequence[Mapping[str, object]],
     extra_tool_runner: Callable[[str, dict[str, object]], Awaitable[ToolResult | None]]
@@ -252,6 +254,9 @@ async def run_agent_stream(
         if not tool_calls:
             if not final_content and not final_thinking:
                 raise RuntimeError(EMPTY_MODEL_RESPONSE_ERROR)
+            conversation.append({"role": "assistant", "content": final_content})
+            if conversation_recorder is not None:
+                conversation_recorder([dict(message) for message in conversation])
             logger.info(
                 "Agent response completed id=%s rounds=%s content_length=%s thinking_length=%s decision=final_response",
                 assistant_id,

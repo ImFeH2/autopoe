@@ -44,6 +44,7 @@ class AgentMcpManager(Protocol):
 @dataclass(frozen=True)
 class AgentRunResult:
     content: str
+    history: Sequence[Mapping[str, object]] = ()
     thinking: str = ""
 
 
@@ -124,6 +125,8 @@ class FlowentAgentRuntime:
         *,
         approval_transcript: Sequence[ApprovalTranscriptEntry] = (),
         connection: ProviderConnection,
+        conversation_recorder: Callable[[Sequence[Mapping[str, object]]], None]
+        | None = None,
         context_compactor: Callable[
             [Sequence[Mapping[str, object]]], Awaitable[AgentContextUpdate | None]
         ]
@@ -179,6 +182,7 @@ class FlowentAgentRuntime:
         async for event in run_agent_stream(
             completion=self.chat_completion,
             connection=connection,
+            conversation_recorder=conversation_recorder,
             context_compactor=context_compactor,
             cwd=self.cwd,
             extra_tool_runner=extra_tool_runner,
@@ -197,13 +201,22 @@ class FlowentAgentRuntime:
         approval_transcript: Sequence[ApprovalTranscriptEntry] = (),
         connection: ProviderConnection,
         include_workflow_tools: bool = True,
+        history_start_index: int = 0,
         messages: Sequence[ChatMessage | Mapping[str, object]],
         user_request: str,
         workflow_depth: int = 0,
     ) -> AgentRunResult:
+        recorded_conversation: list[Mapping[str, object]] = []
+
+        def record_conversation(
+            conversation: Sequence[Mapping[str, object]],
+        ) -> None:
+            recorded_conversation[:] = [dict(message) for message in conversation]
+
         async for event in self.stream(
             approval_transcript=approval_transcript,
             connection=connection,
+            conversation_recorder=record_conversation,
             include_workflow_tools=include_workflow_tools,
             messages=messages,
             user_request=user_request,
@@ -215,6 +228,7 @@ class FlowentAgentRuntime:
             if isinstance(message, Mapping):
                 return AgentRunResult(
                     content=str(message.get("content") or ""),
+                    history=recorded_conversation[history_start_index:],
                     thinking=str(message.get("thinking") or ""),
                 )
         raise RuntimeError("Agent did not return a final response.")

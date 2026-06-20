@@ -13,6 +13,14 @@ def migrate(connection: sqlite3.Connection) -> None:
             updated_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
 
+        CREATE TABLE IF NOT EXISTS workflow_agent_histories (
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            node_id TEXT NOT NULL,
+            messages TEXT NOT NULL DEFAULT '[]',
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY (workflow_id, node_id)
+        );
+
         CREATE TABLE IF NOT EXISTS mcp_servers (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
