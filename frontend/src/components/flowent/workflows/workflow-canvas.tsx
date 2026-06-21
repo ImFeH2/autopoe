@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -110,7 +111,17 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const status = result?.status ?? "pending";
   const isRunning = status === "running";
   const nodeRef = useRef<HTMLDivElement>(null);
+  const labelMeasureRef = useRef<HTMLSpanElement>(null);
+  const [nodeWidth, setNodeWidth] = useState(workflowNodeMinWidth);
   const statusClasses = workflowStatusClasses[status];
+
+  useLayoutEffect(() => {
+    const labelWidth =
+      labelMeasureRef.current?.getBoundingClientRect().width ?? 0;
+    setNodeWidth(
+      snapWorkflowNodeWidth(labelWidth + workflowNodeMeasuredChromeWidth),
+    );
+  }, [data.label]);
 
   const updateMouseEffect = (clientX: number, clientY: number) => {
     if (!nodeRef.current) {
@@ -144,7 +155,7 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
     <div
       ref={nodeRef}
       className={cn(
-        "group relative isolate flex h-14 w-max min-w-[120px] max-w-[260px] items-center gap-2 overflow-visible rounded-[10px] border bg-[#111]/95 px-2.5 py-2.5 text-white shadow-[0_10px_24px_rgba(0,0,0,0.24)] transition-[border-color] duration-300",
+        "group relative isolate flex h-[60px] items-center gap-2 overflow-visible rounded-[10px] border bg-[#111]/95 px-2.5 py-2.5 text-white shadow-[0_10px_24px_rgba(0,0,0,0.24)] transition-[border-color] duration-300",
         selected
           ? "border-white/80 ring-1 ring-white/20"
           : cn(statusClasses.border, "hover:border-white/25"),
@@ -156,9 +167,17 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
         {
           "--mouse-angle": "135deg",
           "--mouse-intensity": "0",
+          width: `${nodeWidth}px`,
         } as CSSProperties
       }
     >
+      <span
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute top-0 left-0 h-0 w-max max-w-none overflow-hidden whitespace-nowrap text-[13px] leading-5 font-semibold"
+        ref={labelMeasureRef}
+      >
+        {data.label}
+      </span>
       <div
         aria-hidden="true"
         className={cn("flowent-workflow-node-ring", statusClasses.ring)}
@@ -263,6 +282,9 @@ const workflowCanvasSnapGrid: [number, number] = [
   workflowCanvasGridSize,
   workflowCanvasGridSize,
 ];
+const workflowNodeMinWidth = 120;
+const workflowNodeMaxWidth = 260;
+const workflowNodeMeasuredChromeWidth = 88;
 const workflowLayoutStorageKey = "flowent:workflow-layout";
 const workflowLayoutPanelIds = {
   canvas: "workflow-canvas",
@@ -468,6 +490,16 @@ function snapWorkflowPosition(position: { x: number; y: number }) {
     x: Math.round(position.x / workflowCanvasGridSize) * workflowCanvasGridSize,
     y: Math.round(position.y / workflowCanvasGridSize) * workflowCanvasGridSize,
   };
+}
+
+function snapWorkflowNodeWidth(width: number) {
+  return Math.min(
+    workflowNodeMaxWidth,
+    Math.max(
+      workflowNodeMinWidth,
+      Math.ceil(width / workflowCanvasGridSize) * workflowCanvasGridSize,
+    ),
+  );
 }
 
 function snapWorkflowNodes(nodes: WorkflowCanvasNode[]) {
