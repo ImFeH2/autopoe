@@ -49,20 +49,6 @@ const AUTO_SAVE_DELAY_MS = 500;
 
 type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
 
-const autoSaveStatusLabel = {
-  error: "Could not save",
-  idle: "",
-  saved: "Saved",
-  saving: "Saving...",
-} satisfies Record<AutoSaveStatus, string>;
-
-const autoSaveStatusClassName = {
-  error: "text-[#ff8a8a]",
-  idle: "text-white/0",
-  saved: "text-white/60",
-  saving: "text-white/80",
-} satisfies Record<AutoSaveStatus, string>;
-
 function WorkflowEditorView({
   autoSaveStatus,
   draftWorkflow,
@@ -110,17 +96,6 @@ function WorkflowEditorView({
           }}
           value={draftWorkflow.name}
         />
-        {autoSaveStatus !== "idle" ? (
-          <span
-            aria-live="polite"
-            className={cn(
-              "shrink-0 text-xs leading-4",
-              autoSaveStatusClassName[autoSaveStatus],
-            )}
-          >
-            {autoSaveStatusLabel[autoSaveStatus]}
-          </span>
-        ) : null}
         <div className="ml-auto flex items-center gap-1.5">
           <Button
             className={cn(subtleButtonClassName, "gap-1.5 px-2.5")}
@@ -219,6 +194,7 @@ function WorkflowEditorView({
       ) : null}
       <ReactFlowProvider>
         <WorkflowCanvas
+          autoSaveStatus={autoSaveStatus}
           draftWorkflow={draftWorkflow}
           isRunning={isRunning}
           onChange={onDraftChange}
@@ -333,9 +309,7 @@ export function WorkflowsView({
   );
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [isInputFormOpen, setIsInputFormOpen] = useState(false);
-  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>(
-    activeWorkflow ? "saved" : "idle",
-  );
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("idle");
   const [saveRevision, setSaveRevision] = useState(0);
   const toast = useFlowentToast();
   const runAbortControllerRef = useRef<AbortController | null>(null);
@@ -481,7 +455,7 @@ export function WorkflowsView({
     setDraftWorkflow(nextWorkflow);
     setInputValues({});
     setIsInputFormOpen(false);
-    setAutoSaveStatus(activeWorkflow ? "saved" : "idle");
+    setAutoSaveStatus("idle");
     setSaveRevision(0);
   }, [activeWorkflow, clearAutoSaveTimer, newWorkflowKey, saveLatestDraft]);
 

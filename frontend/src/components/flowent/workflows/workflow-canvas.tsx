@@ -7,6 +7,8 @@ import {
   useState,
 } from "react";
 import {
+  AlertCircle,
+  Check,
   Loader2,
   Maximize,
   Search,
@@ -227,6 +229,34 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
 const nodeTypes = {
   workflowNode: CanvasNode,
 };
+
+type WorkflowAutoSaveStatus = "idle" | "saving" | "saved" | "error";
+
+const workflowAutoSaveStatusLabel = {
+  error: "Could not save",
+  idle: "",
+  saved: "Saved",
+  saving: "Saving...",
+} satisfies Record<WorkflowAutoSaveStatus, string>;
+
+const workflowAutoSaveStatusClasses = {
+  error: {
+    icon: "text-[#ff8a8a]",
+    text: "text-[#ffb3b3]",
+  },
+  idle: {
+    icon: "text-white/0",
+    text: "text-white/0",
+  },
+  saved: {
+    icon: "text-white/70",
+    text: "text-white/65",
+  },
+  saving: {
+    icon: "text-white/70",
+    text: "text-white/70",
+  },
+} satisfies Record<WorkflowAutoSaveStatus, { icon: string; text: string }>;
 const workflowLayoutStorageKey = "flowent:workflow-layout";
 const workflowLayoutPanelIds = {
   canvas: "workflow-canvas",
@@ -320,12 +350,121 @@ function CanvasControls() {
   );
 }
 
+function WorkflowAutoSaveStatusPill({
+  status,
+}: {
+  status: WorkflowAutoSaveStatus;
+}) {
+  const [renderedStatus, setRenderedStatus] =
+    useState<WorkflowAutoSaveStatus | null>(status === "idle" ? null : status);
+  const [isVisible, setIsVisible] = useState(status !== "idle");
+  const showFrameRef = useRef<number | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
+  const clearTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (showFrameRef.current) {
+      window.cancelAnimationFrame(showFrameRef.current);
+      showFrameRef.current = null;
+    }
+    if (hideTimerRef.current) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    if (clearTimerRef.current) {
+      window.clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = null;
+    }
+
+    if (status === "idle") {
+      setIsVisible(false);
+      clearTimerRef.current = window.setTimeout(() => {
+        setRenderedStatus(null);
+      }, 220);
+      return () => {
+        if (clearTimerRef.current) {
+          window.clearTimeout(clearTimerRef.current);
+          clearTimerRef.current = null;
+        }
+      };
+    }
+
+    setRenderedStatus(status);
+    showFrameRef.current = window.requestAnimationFrame(() => {
+      setIsVisible(true);
+      showFrameRef.current = null;
+    });
+
+    if (status === "saved") {
+      hideTimerRef.current = window.setTimeout(() => {
+        setIsVisible(false);
+        clearTimerRef.current = window.setTimeout(() => {
+          setRenderedStatus(null);
+        }, 220);
+      }, 1200);
+    }
+
+    return () => {
+      if (showFrameRef.current) {
+        window.cancelAnimationFrame(showFrameRef.current);
+        showFrameRef.current = null;
+      }
+      if (hideTimerRef.current) {
+        window.clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      if (clearTimerRef.current) {
+        window.clearTimeout(clearTimerRef.current);
+        clearTimerRef.current = null;
+      }
+    };
+  }, [status]);
+
+  if (!renderedStatus) {
+    return null;
+  }
+
+  const statusClasses = workflowAutoSaveStatusClasses[renderedStatus];
+  const label = workflowAutoSaveStatusLabel[renderedStatus];
+
+  return (
+    <div
+      aria-live="polite"
+      className={cn(
+        "pointer-events-none absolute bottom-3 left-3 z-20 flex h-7 select-none items-center gap-1.5 rounded-md border border-white/10 bg-black/75 px-2.5 text-xs leading-none shadow-[0_8px_24px_rgba(0,0,0,0.26)] backdrop-blur-sm transition-[opacity,transform] duration-200 ease-out",
+        isVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
+        renderedStatus === "error" ? "border-[#ff8a8a]/25" : "",
+      )}
+    >
+      {renderedStatus === "saving" ? (
+        <Loader2
+          className={cn("size-3.5 animate-spin", statusClasses.icon)}
+          aria-hidden="true"
+        />
+      ) : renderedStatus === "saved" ? (
+        <Check
+          className={cn("size-3.5", statusClasses.icon)}
+          aria-hidden="true"
+        />
+      ) : (
+        <AlertCircle
+          className={cn("size-3.5", statusClasses.icon)}
+          aria-hidden="true"
+        />
+      )}
+      <span className={statusClasses.text}>{label}</span>
+    </div>
+  );
+}
+
 export function WorkflowCanvas({
+  autoSaveStatus,
   draftWorkflow,
   isRunning,
   onChange,
   runResult,
 }: {
+  autoSaveStatus: WorkflowAutoSaveStatus;
   draftWorkflow: Workflow;
   isRunning: boolean;
   onChange: (workflow: Workflow) => void;
@@ -735,6 +874,7 @@ export function WorkflowCanvas({
       >
         <Background color="rgba(255,255,255,0.08)" gap={18} />
       </ReactFlow>
+      <WorkflowAutoSaveStatusPill status={autoSaveStatus} />
     </section>
   );
 

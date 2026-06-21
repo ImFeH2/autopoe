@@ -290,6 +290,7 @@ describe("workflow save regressions", () => {
     await user.click(screen.getByTestId("workflow-node-input"));
 
     expect(screen.queryByText("Unsaved")).not.toBeInTheDocument();
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Save" }),
     ).not.toBeInTheDocument();
