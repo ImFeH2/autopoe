@@ -45,16 +45,25 @@ type ReactFlowMockProps = {
   edges: FlowEdge[];
   nodes: FlowNode[];
   onNodesChange?: (changes: NodeChange[]) => void;
+  snapGrid?: [number, number];
+  snapToGrid?: boolean;
 };
 
-const { reactFlowRenderMock } = vi.hoisted(() => ({
-  reactFlowRenderMock: vi.fn(),
-}));
+const { reactFlowRenderMock, workflowBackgroundRenderMock } = vi.hoisted(
+  () => ({
+    reactFlowRenderMock: vi.fn(),
+    workflowBackgroundRenderMock: vi.fn(),
+  }),
+);
 
 vi.mock("@xyflow/react", async () => {
   const React = await import("react");
   return {
-    Background: () => <div data-testid="workflow-background" />,
+    Background: (props: Record<string, unknown>) => {
+      workflowBackgroundRenderMock(props);
+      return <div data-testid="workflow-background" />;
+    },
+    BackgroundVariant: { Cross: "cross", Dots: "dots", Lines: "lines" },
     Handle: () => <span data-testid="workflow-handle" />,
     MarkerType: { ArrowClosed: "arrowclosed" },
     Position: { Bottom: "bottom", Top: "top" },
@@ -63,8 +72,10 @@ vi.mock("@xyflow/react", async () => {
       edges,
       nodes,
       onNodesChange,
+      snapGrid,
+      snapToGrid,
     }: ReactFlowMockProps) => {
-      reactFlowRenderMock({ edges, nodes });
+      reactFlowRenderMock({ edges, nodes, snapGrid, snapToGrid });
       return (
         <div data-testid="workflow-flow">
           {nodes.map((node) => (
@@ -76,7 +87,7 @@ vi.mock("@xyflow/react", async () => {
                   {
                     dragging: true,
                     id: node.id,
-                    position: { x: 480, y: 160 },
+                    position: { x: 481.4, y: 159.6 },
                     type: "position",
                   },
                 ]);
@@ -86,7 +97,7 @@ vi.mock("@xyflow/react", async () => {
                   {
                     dragging: false,
                     id: node.id,
-                    position: { x: 480, y: 160 },
+                    position: { x: 481.4, y: 159.6 },
                     type: "position",
                   },
                 ]);
@@ -222,6 +233,7 @@ const mockAppFetch = (
 describe("workflow save regressions", () => {
   beforeEach(() => {
     reactFlowRenderMock.mockClear();
+    workflowBackgroundRenderMock.mockClear();
     window.history.replaceState(null, "", "/");
   });
 
@@ -294,6 +306,20 @@ describe("workflow save regressions", () => {
     expect(
       screen.queryByRole("button", { name: "Save" }),
     ).not.toBeInTheDocument();
+    expect(
+      workflowBackgroundRenderMock.mock.calls.some(([props]) => {
+        return props.gap === 20 && props.variant === "lines";
+      }),
+    ).toBe(true);
+    expect(
+      reactFlowRenderMock.mock.calls.some(([rendered]) => {
+        return (
+          rendered.snapToGrid === true &&
+          rendered.snapGrid[0] === 20 &&
+          rendered.snapGrid[1] === 20
+        );
+      }),
+    ).toBe(true);
     expect(saveBodies).toHaveLength(0);
     expect(
       reactFlowRenderMock.mock.calls.some(([rendered]) => {

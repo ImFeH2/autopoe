@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import {
   Background,
+  BackgroundVariant,
   Handle,
   MarkerType,
   Position,
@@ -257,6 +258,11 @@ const workflowAutoSaveStatusClasses = {
     text: "text-white/70",
   },
 } satisfies Record<WorkflowAutoSaveStatus, { icon: string; text: string }>;
+const workflowCanvasGridSize = 20;
+const workflowCanvasSnapGrid: [number, number] = [
+  workflowCanvasGridSize,
+  workflowCanvasGridSize,
+];
 const workflowLayoutStorageKey = "flowent:workflow-layout";
 const workflowLayoutPanelIds = {
   canvas: "workflow-canvas",
@@ -457,6 +463,20 @@ function WorkflowAutoSaveStatusPill({
   );
 }
 
+function snapWorkflowPosition(position: { x: number; y: number }) {
+  return {
+    x: Math.round(position.x / workflowCanvasGridSize) * workflowCanvasGridSize,
+    y: Math.round(position.y / workflowCanvasGridSize) * workflowCanvasGridSize,
+  };
+}
+
+function snapWorkflowNodes(nodes: WorkflowCanvasNode[]) {
+  return nodes.map((node) => ({
+    ...node,
+    position: snapWorkflowPosition(node.position),
+  }));
+}
+
 export function WorkflowCanvas({
   autoSaveStatus,
   draftWorkflow,
@@ -477,7 +497,7 @@ export function WorkflowCanvas({
   const [selectedElement, setSelectedElement] =
     useState<SelectedWorkflowElement | null>(null);
   const [nodes, setNodes] = useNodesState<WorkflowCanvasNode>(
-    workflowToFlowNodes(draftWorkflow, runResult),
+    snapWorkflowNodes(workflowToFlowNodes(draftWorkflow, runResult)),
   );
   const [edges, setEdges] = useEdgesState<WorkflowCanvasEdge>(
     workflowToFlowEdges(draftWorkflow),
@@ -498,7 +518,7 @@ export function WorkflowCanvas({
   }, [edges]);
 
   useEffect(() => {
-    setNodes(workflowToFlowNodes(draftWorkflow, runResult));
+    setNodes(snapWorkflowNodes(workflowToFlowNodes(draftWorkflow, runResult)));
     setEdges(workflowToFlowEdges(draftWorkflow));
     if (previousWorkflowIdRef.current !== draftWorkflow.id) {
       previousWorkflowIdRef.current = draftWorkflow.id;
@@ -536,12 +556,13 @@ export function WorkflowCanvas({
           edges: nextEdges.map(flowEdgeToWorkflowEdge),
           nodes: nextNodes.map((node) => {
             const currentNode = nodeById.get(node.id);
+            const position = snapWorkflowPosition(node.position);
             return {
               data: currentNode?.data ?? {},
               description: currentNode?.description ?? "",
               id: node.id,
               name: currentNode?.name ?? node.data.label,
-              position: node.position,
+              position,
               type: currentNode?.type ?? node.data.workflowType,
             };
           }),
@@ -592,7 +613,9 @@ export function WorkflowCanvas({
   const handleNodesChange: OnNodesChange<WorkflowCanvasNode> = useCallback(
     (changes) => {
       setNodes((currentNodes) => {
-        const nextNodes = applyNodeChanges(changes, currentNodes);
+        const nextNodes = snapWorkflowNodes(
+          applyNodeChanges(changes, currentNodes),
+        );
         nodesRef.current = nextNodes;
         if (
           changes.some(
@@ -620,12 +643,13 @@ export function WorkflowCanvas({
         return;
       }
       const nodeId = createClientId(type);
+      const snappedPosition = snapWorkflowPosition(position);
       const nextWorkflowNode: WorkflowNode = {
         data: defaultWorkflowNodeData(type),
         description: "",
         id: nodeId,
         name: template.label,
-        position,
+        position: snappedPosition,
         type,
       };
       const nextWorkflow = {
@@ -871,8 +895,15 @@ export function WorkflowCanvas({
         onNodesChange={handleNodesChange}
         onPaneClick={() => setSelectedElement(null)}
         proOptions={{ hideAttribution: true }}
+        snapGrid={workflowCanvasSnapGrid}
+        snapToGrid
       >
-        <Background color="rgba(255,255,255,0.08)" gap={18} />
+        <Background
+          color="rgba(255,255,255,0.08)"
+          gap={workflowCanvasGridSize}
+          lineWidth={1}
+          variant={BackgroundVariant.Lines}
+        />
       </ReactFlow>
       <WorkflowAutoSaveStatusPill status={autoSaveStatus} />
     </section>
