@@ -1842,6 +1842,59 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("resizes, remembers, and resets the desktop sidebar width", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    const boundary = screen.getByRole("button", {
+      name: "Toggle sidebar from boundary",
+    });
+    const appShell = boundary.closest('[data-slot="tabs"]');
+    expect(appShell).toHaveStyle({
+      gridTemplateColumns: "232px minmax(0, 1fr)",
+    });
+
+    fireEvent.pointerDown(boundary, { button: 0, clientX: 232 });
+    fireEvent.pointerMove(window, { clientX: 300 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(appShell).toHaveStyle({
+        gridTemplateColumns: "300px minmax(0, 1fr)",
+      });
+    });
+    expect(window.localStorage.getItem("flowent:sidebar-width")).toBe("300");
+
+    fireEvent.doubleClick(boundary);
+
+    await waitFor(() => {
+      expect(appShell).toHaveStyle({
+        gridTemplateColumns: "232px minmax(0, 1fr)",
+      });
+    });
+    expect(window.localStorage.getItem("flowent:sidebar-width")).toBe("232");
+  });
+
+  it("restores the saved desktop sidebar width on reload", () => {
+    window.localStorage.setItem("flowent:sidebar-width", "312");
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    const boundary = screen.getByRole("button", {
+      name: "Toggle sidebar from boundary",
+    });
+
+    expect(boundary.closest('[data-slot="tabs"]')).toHaveStyle({
+      gridTemplateColumns: "312px minmax(0, 1fr)",
+    });
+  });
+
   it("toggles the sidebar with Control+B", async () => {
     mockInitialState({
       ...selectedProviderState(),
@@ -1860,6 +1913,49 @@ describe("App", () => {
     expect(
       await screen.findByRole("button", { name: "Collapse sidebar" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows workflow resize handles and resets the saved workflow layout", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      "flowent:workflow-layout",
+      JSON.stringify({
+        "workflow-canvas": 48,
+        "workflow-nodes": 22,
+        "workflow-properties": 30,
+      }),
+    );
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Launch Workflow/ }),
+    );
+
+    const nodesHandle = await screen.findByRole("separator", {
+      name: "Resize workflow nodes",
+    });
+    const propertiesHandle = screen.getByRole("separator", {
+      name: "Resize workflow properties",
+    });
+
+    expect(nodesHandle).toHaveClass("max-[860px]:hidden");
+    expect(propertiesHandle).toHaveClass("max-[860px]:hidden");
+
+    fireEvent.doubleClick(nodesHandle);
+
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("flowent:workflow-layout") ?? "{}",
+      ),
+    ).toEqual({
+      "workflow-canvas": 58,
+      "workflow-nodes": 17,
+      "workflow-properties": 25,
+    });
   });
 
   it("saves new workflows with an unprefixed UUID", async () => {
@@ -1910,8 +2006,11 @@ describe("App", () => {
       .find((element) => element.closest(".react-flow__node"));
     expect(inputNodeLabel).toBeTruthy();
     fireEvent.click(inputNodeLabel!);
-    await user.clear(screen.getByLabelText("Default Value"));
-    await user.type(screen.getByLabelText("Default Value"), "release plan");
+    const defaultValueInput = screen.getByLabelText("Default Value");
+    await user.clear(defaultValueInput);
+    defaultValueInput.focus();
+    await user.type(defaultValueInput, "release plan", { skipClick: true });
+    expect(defaultValueInput).toHaveValue("release plan");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
@@ -1940,11 +2039,10 @@ describe("App", () => {
       .find((element) => element.closest(".react-flow__node"));
     expect(codeNodeLabel).toBeTruthy();
     fireEvent.click(codeNodeLabel!);
-    await user.clear(screen.getByLabelText("Python Code"));
-    await user.type(
-      screen.getByLabelText("Python Code"),
-      "output = input.upper()",
-    );
+    const codeInput = screen.getByLabelText("Python Code");
+    await user.clear(codeInput);
+    codeInput.focus();
+    await user.type(codeInput, "output = input.upper()", { skipClick: true });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
@@ -1982,10 +2080,14 @@ describe("App", () => {
       .find((element) => element.closest(".react-flow__node"));
     expect(timerNodeLabel).toBeTruthy();
     fireEvent.click(timerNodeLabel!);
-    await user.clear(screen.getByLabelText("Interval Seconds"));
-    await user.type(screen.getByLabelText("Interval Seconds"), "10");
-    await user.clear(screen.getByLabelText("Payload"));
-    await user.type(screen.getByLabelText("Payload"), "tick");
+    const intervalInput = screen.getByLabelText("Interval Seconds");
+    await user.clear(intervalInput);
+    intervalInput.focus();
+    await user.type(intervalInput, "10", { skipClick: true });
+    const payloadInput = screen.getByLabelText("Payload");
+    await user.clear(payloadInput);
+    payloadInput.focus();
+    await user.type(payloadInput, "tick", { skipClick: true });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
@@ -2064,8 +2166,12 @@ describe("App", () => {
     );
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(await screen.findByText("Workflow Input")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Input"), "release blockers");
-    await user.type(screen.getByLabelText("Window"), "next week");
+    const runInput = screen.getByLabelText("Input");
+    runInput.focus();
+    await user.type(runInput, "release blockers", { skipClick: true });
+    const windowInput = screen.getByLabelText("Window");
+    windowInput.focus();
+    await user.type(windowInput, "next week", { skipClick: true });
     await user.click(screen.getByRole("button", { name: "Start" }));
 
     await screen.findByText("release blockers");

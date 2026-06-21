@@ -1,8 +1,11 @@
 import {
   Fragment,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -93,6 +96,14 @@ const sidebarMotionTransition = {
   ease: sidebarMotionEase,
 };
 const pinnedWorkflowStorageKey = "flowent:pinned-workflows";
+const sidebarWidthStorageKey = "flowent:sidebar-width";
+const sidebarCollapsedWidth = 64;
+const sidebarDefaultWidth = 232;
+const sidebarMinWidth = 196;
+const sidebarMaxWidth = 360;
+const sidebarDragThreshold = 4;
+const sidebarClickDelayMs = 180;
+const sidebarNarrowLayoutQuery = "(max-width: 900px)";
 
 function NavigationTrigger({
   isSidebarCollapsed,
@@ -295,19 +306,109 @@ export function AppShell({
   workflows: Workflow[];
 }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarNarrowLayout, setIsSidebarNarrowLayout] = useState(() =>
+    isSidebarNarrowViewport(),
+  );
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    readStoredSidebarWidth(),
+  );
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [isWorkflowSectionOpen, setIsWorkflowSectionOpen] = useState(true);
+  const sidebarClickTimeoutRef = useRef<number | null>(null);
+  const sidebarDividerWasDraggedRef = useRef(false);
   const shouldReduceMotion = useReducedMotion() ?? false;
+  const clearSidebarClickTimeout = useCallback(() => {
+    if (sidebarClickTimeoutRef.current === null) {
+      return;
+    }
+    window.clearTimeout(sidebarClickTimeoutRef.current);
+    sidebarClickTimeoutRef.current = null;
+  }, []);
   const toggleSidebar = useCallback(() => {
     setIsSidebarCollapsed((current) => !current);
   }, []);
+
+  const handleSidebarDividerClick = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (sidebarDividerWasDraggedRef.current) {
+        event.preventDefault();
+        sidebarDividerWasDraggedRef.current = false;
+        return;
+      }
+      if (event.detail > 1) {
+        return;
+      }
+      clearSidebarClickTimeout();
+      sidebarClickTimeoutRef.current = window.setTimeout(() => {
+        sidebarClickTimeoutRef.current = null;
+        toggleSidebar();
+      }, sidebarClickDelayMs);
+    },
+    [clearSidebarClickTimeout, toggleSidebar],
+  );
+
+  const handleSidebarDividerDoubleClick = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      clearSidebarClickTimeout();
+      setSidebarWidth(sidebarDefaultWidth);
+      writeStoredSidebarWidth(sidebarDefaultWidth);
+      setIsSidebarCollapsed(false);
+    },
+    [clearSidebarClickTimeout],
+  );
+
+  const handleSidebarDividerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0 || isSidebarCollapsed) {
+        return;
+      }
+
+      const startX = event.clientX;
+      const startWidth = sidebarWidth;
+      let latestWidth = startWidth;
+      let isDragging = false;
+      const originalCursor = document.body.style.cursor;
+
+      const handlePointerMove = (pointerEvent: PointerEvent) => {
+        const deltaX = pointerEvent.clientX - startX;
+        if (!isDragging && Math.abs(deltaX) < sidebarDragThreshold) {
+          return;
+        }
+        if (!isDragging) {
+          isDragging = true;
+          sidebarDividerWasDraggedRef.current = true;
+          setIsSidebarResizing(true);
+          document.body.style.cursor = "ew-resize";
+        }
+        latestWidth = clampSidebarWidth(startWidth + deltaX);
+        setSidebarWidth(latestWidth);
+      };
+
+      const handlePointerUp = () => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+        document.body.style.cursor = originalCursor;
+        setIsSidebarResizing(false);
+        if (isDragging) {
+          writeStoredSidebarWidth(latestWidth);
+        }
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+    },
+    [isSidebarCollapsed, sidebarWidth],
+  );
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") {
       return;
     }
 
-    const mediaQuery = window.matchMedia("(max-width: 900px)");
+    const mediaQuery = window.matchMedia(sidebarNarrowLayoutQuery);
     const handleChange = () => {
+      setIsSidebarNarrowLayout(mediaQuery.matches);
       if (mediaQuery.matches) {
         setIsSidebarCollapsed(false);
       }
@@ -338,6 +439,13 @@ export function AppShell({
     };
   }, [toggleSidebar]);
 
+  useEffect(
+    () => () => {
+      clearSidebarClickTimeout();
+    },
+    [clearSidebarClickTimeout],
+  );
+
   return (
     <Tabs
       value={activeView}
@@ -345,13 +453,19 @@ export function AppShell({
       orientation="vertical"
       className={cn(
         "grid h-[var(--flowent-viewport-height)] min-h-0 gap-0 overflow-hidden bg-black pt-[var(--flowent-safe-area-top)] pr-[var(--flowent-safe-area-right)] pb-[var(--flowent-safe-area-bottom)] pl-[var(--flowent-safe-area-left)] text-white transition-[grid-template-columns] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]",
-        shouldReduceMotion
+        shouldReduceMotion || isSidebarResizing
           ? "duration-0"
           : cn("duration-300", sidebarTransitionClassName),
-        isSidebarCollapsed
-          ? "grid-cols-[64px_minmax(0,1fr)]"
-          : "grid-cols-[232px_minmax(0,1fr)]",
       )}
+      style={
+        isSidebarNarrowLayout
+          ? undefined
+          : {
+              gridTemplateColumns: isSidebarCollapsed
+                ? `${sidebarCollapsedWidth}px minmax(0, 1fr)`
+                : `${sidebarWidth}px minmax(0, 1fr)`,
+            }
+      }
     >
       <aside
         className={cn(
@@ -538,15 +652,22 @@ export function AppShell({
             </SidebarText>
           </div>
         </div>
-        <Button
-          aria-label="Toggle sidebar from boundary"
-          className="absolute top-0 right-[-4px] z-10 hidden h-full w-2 cursor-ew-resize rounded-none border-0 bg-transparent p-0 shadow-none transition-colors hover:bg-transparent focus-visible:bg-transparent active:bg-transparent active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-transparent dark:focus-visible:bg-transparent max-[900px]:hidden sm:block"
-          onClick={toggleSidebar}
-          tabIndex={-1}
-          title="Toggle sidebar"
-          type="button"
-          variant="ghost"
-        />
+        {!isSidebarNarrowLayout ? (
+          <Button
+            aria-label="Toggle sidebar from boundary"
+            className={cn(
+              "absolute top-0 right-[-4px] z-10 hidden h-full w-2 rounded-none border-0 bg-transparent p-0 shadow-none transition-colors hover:bg-transparent focus-visible:bg-transparent active:bg-transparent active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-transparent dark:focus-visible:bg-transparent sm:block",
+              isSidebarCollapsed ? "cursor-pointer" : "cursor-ew-resize",
+            )}
+            onClick={handleSidebarDividerClick}
+            onDoubleClick={handleSidebarDividerDoubleClick}
+            onPointerDown={handleSidebarDividerPointerDown}
+            tabIndex={-1}
+            title="Toggle sidebar"
+            type="button"
+            variant="ghost"
+          />
+        ) : null}
       </aside>
 
       <main className="min-h-0 min-w-0 overflow-hidden bg-black">
@@ -835,5 +956,42 @@ function writePinnedWorkflowIds(workflowIds: string[]) {
   window.localStorage.setItem(
     pinnedWorkflowStorageKey,
     JSON.stringify(workflowIds),
+  );
+}
+
+function clampSidebarWidth(width: number) {
+  return Math.min(sidebarMaxWidth, Math.max(sidebarMinWidth, width));
+}
+
+function readStoredSidebarWidth() {
+  if (typeof window === "undefined") {
+    return sidebarDefaultWidth;
+  }
+  const storedValue = window.localStorage.getItem(sidebarWidthStorageKey);
+  if (!storedValue) {
+    return sidebarDefaultWidth;
+  }
+  const storedWidth = Number(storedValue);
+  if (!Number.isFinite(storedWidth)) {
+    return sidebarDefaultWidth;
+  }
+  return clampSidebarWidth(storedWidth);
+}
+
+function writeStoredSidebarWidth(width: number) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(
+    sidebarWidthStorageKey,
+    String(clampSidebarWidth(width)),
+  );
+}
+
+function isSidebarNarrowViewport() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(sidebarNarrowLayoutQuery).matches
   );
 }

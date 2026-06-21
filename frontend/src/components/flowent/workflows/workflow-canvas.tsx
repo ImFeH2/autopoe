@@ -32,9 +32,15 @@ import {
   type OnEdgesChange,
   type OnNodesChange,
 } from "@xyflow/react";
+import type { GroupImperativeHandle, Layout } from "react-resizable-panels";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import {
   emptyStateClassName,
   fieldInputClassName,
@@ -221,6 +227,53 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
 const nodeTypes = {
   workflowNode: CanvasNode,
 };
+const workflowLayoutStorageKey = "flowent:workflow-layout";
+const workflowLayoutPanelIds = {
+  canvas: "workflow-canvas",
+  nodes: "workflow-nodes",
+  properties: "workflow-properties",
+} as const;
+const defaultWorkflowLayout = {
+  [workflowLayoutPanelIds.nodes]: 17,
+  [workflowLayoutPanelIds.canvas]: 58,
+  [workflowLayoutPanelIds.properties]: 25,
+} satisfies Layout;
+const workflowResizeHandleClassName =
+  "w-2 bg-transparent before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-white/10 before:content-[''] after:w-full focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none max-[860px]:hidden";
+
+function WorkflowResizeHandle({
+  ariaLabel,
+  onReset,
+}: {
+  ariaLabel: string;
+  onReset: () => void;
+}) {
+  const handleRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handle = handleRef.current;
+    if (!handle) {
+      return;
+    }
+    const handleDoubleClick = (event: MouseEvent) => {
+      event.preventDefault();
+      onReset();
+    };
+    handle.addEventListener("dblclick", handleDoubleClick);
+    return () => {
+      handle.removeEventListener("dblclick", handleDoubleClick);
+    };
+  }, [onReset]);
+
+  return (
+    <ResizableHandle
+      aria-label={ariaLabel}
+      className={workflowResizeHandleClassName}
+      disableDoubleClick
+      elementRef={handleRef}
+    />
+  );
+}
 
 function CanvasControls() {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
@@ -281,6 +334,7 @@ export function WorkflowCanvas({
   runResult: WorkflowRunResult | null;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const workflowLayoutGroupRef = useRef<GroupImperativeHandle | null>(null);
   const { screenToFlowPosition } = useReactFlow();
   const previousWorkflowIdRef = useRef(draftWorkflow.id);
   const [selectedElement, setSelectedElement] =
@@ -292,6 +346,9 @@ export function WorkflowCanvas({
     workflowToFlowEdges(draftWorkflow),
   );
   const [nodeSearch, setNodeSearch] = useState("");
+  const [workflowLayout, setWorkflowLayout] = useState(() =>
+    readStoredWorkflowLayout(),
+  );
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
 
@@ -558,161 +615,260 @@ export function WorkflowCanvas({
     template.label.toLowerCase().includes(nodeSearch.trim().toLowerCase()),
   );
 
-  return (
-    <div className="grid min-h-0 flex-1 grid-cols-[200px_minmax(0,1fr)_300px] max-[1100px]:grid-cols-[180px_minmax(0,1fr)_280px] max-[860px]:grid-cols-1 max-[860px]:grid-rows-[auto_minmax(420px,1fr)_auto]">
-      <aside className="min-h-0 border-r border-white/10 bg-black p-3 max-[860px]:border-r-0 max-[860px]:border-b">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className={sectionTitleClassName}>Nodes</h3>
-        </div>
-        <div className="relative mt-3">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[#777]"
-            aria-hidden="true"
-          />
-          <Input
-            className={cn(fieldInputClassName, "pl-8")}
-            onChange={(event) => setNodeSearch(event.target.value)}
-            placeholder="Search nodes..."
-            value={nodeSearch}
-          />
-        </div>
-        <div className="mt-4 space-y-2">
-          <div className="text-[11px] leading-4 font-medium text-white/45">
-            Core
-          </div>
-          {filteredTemplates.map((template) => {
-            const Icon = template.icon;
-            return (
-              <Button
-                aria-label={`${template.label} ${template.description}`}
-                className="h-auto w-full justify-start gap-2 rounded-md border border-white/10 bg-input/30 px-2.5 py-2 text-left text-white shadow-none hover:bg-input/50"
-                draggable
-                key={template.type}
-                onClick={() => addNode(template.type)}
-                onDragStart={(event) => {
-                  event.dataTransfer.setData(
-                    "application/flowent-node",
-                    template.type,
-                  );
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                type="button"
-                variant="ghost"
-              >
-                <Icon className="size-4 shrink-0" aria-hidden="true" />
-                <span className="min-w-0">
-                  <span className="block text-sm leading-5">
-                    {template.label}
-                  </span>
-                  <span className="block truncate text-xs leading-4 text-[#9b9b9b]">
-                    {template.description}
-                  </span>
-                </span>
-              </Button>
-            );
-          })}
-        </div>
-      </aside>
+  const saveWorkflowLayout = (layout: Layout) => {
+    if (!isWorkflowLayout(layout)) {
+      return;
+    }
+    setWorkflowLayout(layout);
+    writeStoredWorkflowLayout(layout);
+  };
 
-      <section
-        className="relative min-h-0 min-w-0 bg-black"
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "move";
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          const type = event.dataTransfer.getData(
-            "application/flowent-node",
-          ) as WorkflowNodeType;
-          if (
-            !workflowNodeTemplates.some((template) => template.type === type)
-          ) {
-            return;
-          }
-          const position = screenToFlowPosition({
-            x: event.clientX,
-            y: event.clientY,
-          });
-          addNode(type, position);
-        }}
-        ref={wrapperRef}
-      >
-        {nodes.length === 0 ? (
-          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-sm text-[#9b9b9b]">
-            Drag nodes from the palette to start building your workflow.
-          </div>
-        ) : null}
-        {isRunning ? (
-          <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-md border border-white/10 bg-black/80 px-2.5 py-1.5 text-xs text-[#dedede]">
-            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-            Workflow running...
-          </div>
-        ) : null}
-        <CanvasControls />
-        <ReactFlow
-          className="flowent-workflow-canvas"
-          deleteKeyCode={["Backspace", "Delete"]}
-          edges={edges}
-          fitView
-          nodes={nodes}
-          nodeTypes={nodeTypes}
-          onConnect={onConnect}
-          onEdgesChange={handleEdgesChange}
-          onEdgeClick={(_, edge) => {
-            setSelectedElement({ id: edge.id, kind: "edge" });
-          }}
-          onNodeClick={(_, node) => {
-            setSelectedElement({ id: node.id, kind: "node" });
-          }}
-          onNodesChange={handleNodesChange}
-          onPaneClick={() => setSelectedElement(null)}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background color="rgba(255,255,255,0.08)" gap={18} />
-        </ReactFlow>
-      </section>
+  const resetWorkflowLayout = () => {
+    setWorkflowLayout(defaultWorkflowLayout);
+    writeStoredWorkflowLayout(defaultWorkflowLayout);
+    workflowLayoutGroupRef.current?.setLayout(defaultWorkflowLayout);
+  };
 
-      <aside className="min-h-0 overflow-y-auto border-l border-white/10 bg-black p-3 max-[860px]:border-l-0 max-[860px]:border-t">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className={sectionTitleClassName}>Properties</h3>
-          {selectedElement ? (
+  const renderNodesPanel = () => (
+    <aside className="flex h-full min-h-0 flex-col bg-black p-3 max-[860px]:h-auto max-[860px]:border-b max-[860px]:border-white/10">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className={sectionTitleClassName}>Nodes</h3>
+      </div>
+      <div className="relative mt-3">
+        <Search
+          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[#777]"
+          aria-hidden="true"
+        />
+        <Input
+          className={cn(fieldInputClassName, "pl-8")}
+          onChange={(event) => setNodeSearch(event.target.value)}
+          placeholder="Search nodes..."
+          value={nodeSearch}
+        />
+      </div>
+      <div className="mt-4 space-y-2">
+        <div className="text-[11px] leading-4 font-medium text-white/45">
+          Core
+        </div>
+        {filteredTemplates.map((template) => {
+          const Icon = template.icon;
+          return (
             <Button
-              aria-label="Remove selection"
-              className="size-7 p-0 text-[#ff8a8a]"
-              onClick={removeSelected}
-              size="icon"
+              aria-label={`${template.label} ${template.description}`}
+              className="h-auto w-full justify-start gap-2 rounded-md border border-white/10 bg-input/30 px-2.5 py-2 text-left text-white shadow-none hover:bg-input/50"
+              draggable
+              key={template.type}
+              onClick={() => addNode(template.type)}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(
+                  "application/flowent-node",
+                  template.type,
+                );
+                event.dataTransfer.effectAllowed = "move";
+              }}
               type="button"
               variant="ghost"
             >
-              <Trash2 className="size-4" aria-hidden="true" />
+              <Icon className="size-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-sm leading-5">
+                  {template.label}
+                </span>
+                <span className="block truncate text-xs leading-4 text-[#9b9b9b]">
+                  {template.description}
+                </span>
+              </span>
             </Button>
-          ) : null}
-        </div>
-
-        {!selectedNode && !selectedEdge ? (
-          <p className={cn(emptyStateClassName, "mt-3")}>
-            Select a node or edge to view its properties.
-          </p>
-        ) : null}
-
-        {selectedNode ? (
-          <WorkflowNodeProperties
-            node={selectedNode}
-            onNodeChange={(updates) => updateNode(selectedNode.id, updates)}
-            onNodeDataChange={(key, value) =>
-              updateNodeData(selectedNode.id, key, value)
-            }
-          />
-        ) : null}
-
-        {selectedEdge ? (
-          <WorkflowEdgeProperties
-            edge={selectedEdge}
-            onEdgeChange={(updates) => updateEdge(selectedEdge.id, updates)}
-          />
-        ) : null}
-      </aside>
-    </div>
+          );
+        })}
+      </div>
+    </aside>
   );
+
+  const renderCanvasPanel = () => (
+    <section
+      className="relative h-full min-h-0 min-w-0 bg-black max-[860px]:min-h-[420px]"
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        const type = event.dataTransfer.getData(
+          "application/flowent-node",
+        ) as WorkflowNodeType;
+        if (!workflowNodeTemplates.some((template) => template.type === type)) {
+          return;
+        }
+        const position = screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        addNode(type, position);
+      }}
+      ref={wrapperRef}
+    >
+      {nodes.length === 0 ? (
+        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-sm text-[#9b9b9b]">
+          Drag nodes from the palette to start building your workflow.
+        </div>
+      ) : null}
+      {isRunning ? (
+        <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-md border border-white/10 bg-black/80 px-2.5 py-1.5 text-xs text-[#dedede]">
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          Workflow running...
+        </div>
+      ) : null}
+      <CanvasControls />
+      <ReactFlow
+        className="flowent-workflow-canvas"
+        deleteKeyCode={["Backspace", "Delete"]}
+        edges={edges}
+        fitView
+        nodes={nodes}
+        nodeTypes={nodeTypes}
+        onConnect={onConnect}
+        onEdgesChange={handleEdgesChange}
+        onEdgeClick={(_, edge) => {
+          setSelectedElement({ id: edge.id, kind: "edge" });
+        }}
+        onNodeClick={(_, node) => {
+          setSelectedElement({ id: node.id, kind: "node" });
+        }}
+        onNodesChange={handleNodesChange}
+        onPaneClick={() => setSelectedElement(null)}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background color="rgba(255,255,255,0.08)" gap={18} />
+      </ReactFlow>
+    </section>
+  );
+
+  const renderPropertiesPanel = () => (
+    <aside className="h-full min-h-0 overflow-y-auto bg-black p-3 max-[860px]:h-auto max-[860px]:border-t max-[860px]:border-white/10">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className={sectionTitleClassName}>Properties</h3>
+        {selectedElement ? (
+          <Button
+            aria-label="Remove selection"
+            className="size-7 p-0 text-[#ff8a8a]"
+            onClick={removeSelected}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <Trash2 className="size-4" aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
+
+      {!selectedNode && !selectedEdge ? (
+        <p className={cn(emptyStateClassName, "mt-3")}>
+          Select a node or edge to view its properties.
+        </p>
+      ) : null}
+
+      {selectedNode ? (
+        <WorkflowNodeProperties
+          node={selectedNode}
+          onNodeChange={(updates) => updateNode(selectedNode.id, updates)}
+          onNodeDataChange={(key, value) =>
+            updateNodeData(selectedNode.id, key, value)
+          }
+        />
+      ) : null}
+
+      {selectedEdge ? (
+        <WorkflowEdgeProperties
+          edge={selectedEdge}
+          onEdgeChange={(updates) => updateEdge(selectedEdge.id, updates)}
+        />
+      ) : null}
+    </aside>
+  );
+
+  return (
+    <ResizablePanelGroup
+      className="min-h-0 flex-1 max-[860px]:!grid max-[860px]:!grid-cols-1 max-[860px]:!grid-rows-[auto_minmax(420px,1fr)_auto]"
+      defaultLayout={workflowLayout}
+      groupRef={workflowLayoutGroupRef}
+      id="flowent-workflow-layout"
+      onLayoutChanged={saveWorkflowLayout}
+      orientation="horizontal"
+      resizeTargetMinimumSize={{ coarse: 32, fine: 8 }}
+    >
+      <ResizablePanel
+        className="min-h-0"
+        defaultSize={`${defaultWorkflowLayout[workflowLayoutPanelIds.nodes]}%`}
+        groupResizeBehavior="preserve-pixel-size"
+        id={workflowLayoutPanelIds.nodes}
+        maxSize="280px"
+        minSize="160px"
+      >
+        {renderNodesPanel()}
+      </ResizablePanel>
+      <WorkflowResizeHandle
+        ariaLabel="Resize workflow nodes"
+        onReset={resetWorkflowLayout}
+      />
+      <ResizablePanel
+        className="min-h-0"
+        defaultSize={`${defaultWorkflowLayout[workflowLayoutPanelIds.canvas]}%`}
+        id={workflowLayoutPanelIds.canvas}
+        minSize="360px"
+      >
+        {renderCanvasPanel()}
+      </ResizablePanel>
+      <WorkflowResizeHandle
+        ariaLabel="Resize workflow properties"
+        onReset={resetWorkflowLayout}
+      />
+      <ResizablePanel
+        className="min-h-0"
+        defaultSize={`${defaultWorkflowLayout[workflowLayoutPanelIds.properties]}%`}
+        groupResizeBehavior="preserve-pixel-size"
+        id={workflowLayoutPanelIds.properties}
+        maxSize="420px"
+        minSize="240px"
+      >
+        {renderPropertiesPanel()}
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
+}
+
+function readStoredWorkflowLayout() {
+  if (typeof window === "undefined") {
+    return defaultWorkflowLayout;
+  }
+  try {
+    const value = window.localStorage.getItem(workflowLayoutStorageKey);
+    if (!value) {
+      return defaultWorkflowLayout;
+    }
+    const parsed = JSON.parse(value) as unknown;
+    if (!isWorkflowLayout(parsed)) {
+      return defaultWorkflowLayout;
+    }
+    return parsed;
+  } catch {
+    return defaultWorkflowLayout;
+  }
+}
+
+function writeStoredWorkflowLayout(layout: Layout) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(workflowLayoutStorageKey, JSON.stringify(layout));
+}
+
+function isWorkflowLayout(layout: unknown): layout is Layout {
+  if (!layout || typeof layout !== "object") {
+    return false;
+  }
+  return Object.values(workflowLayoutPanelIds).every((panelId) => {
+    const value = (layout as Record<string, unknown>)[panelId];
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
+  });
 }
