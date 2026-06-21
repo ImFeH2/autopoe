@@ -290,6 +290,9 @@ describe("workflow save regressions", () => {
     await user.click(screen.getByTestId("workflow-node-input"));
 
     expect(screen.queryByText("Unsaved")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
     expect(saveBodies).toHaveLength(0);
     expect(
       reactFlowRenderMock.mock.calls.some(([rendered]) => {
@@ -301,12 +304,14 @@ describe("workflow save regressions", () => {
     ).toBe(true);
 
     await user.dblClick(screen.getByTestId("workflow-node-input"));
-    await waitFor(() => {
-      expect(screen.getByText("Unsaved")).toBeInTheDocument();
-    });
-    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(saveBodies).toHaveLength(1);
+    await waitFor(
+      () => {
+        expect(saveBodies).toHaveLength(1);
+      },
+      { timeout: 2000 },
+    );
+    expect(screen.getByText("Saved")).toBeInTheDocument();
     expect(saveBodies[0]).toEqual(
       expect.objectContaining({
         definition: expect.objectContaining({
@@ -319,6 +324,42 @@ describe("workflow save regressions", () => {
         }),
       }),
     );
+  });
+
+  it("does not run a workflow when it could not be saved first", async () => {
+    const user = userEvent.setup();
+    const runRequests: string[] = [];
+    mockAppFetch((input, init) => {
+      if (input === "/api/workflows" && init?.method === "PUT") {
+        return new Response(
+          JSON.stringify({ detail: "Workflow could not be saved." }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+      if (
+        typeof input === "string" &&
+        input === "/api/workflows/workflow-draft/run" &&
+        init?.method === "POST"
+      ) {
+        runRequests.push(input);
+      }
+      return null;
+    });
+    window.history.replaceState(null, "", "/workflows");
+
+    render(<App />);
+
+    await screen.findByRole("textbox", { name: "Workflow name" });
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(await screen.findByText("Could not save")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Workflow could not be saved.",
+    );
+    expect(runRequests).toHaveLength(0);
   });
 
   it("reopens the selected workflow after a page refresh", async () => {

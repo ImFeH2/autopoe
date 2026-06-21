@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Loader2,
   Play,
   Redo,
-  Save,
   Square,
   Trash2,
   Undo,
@@ -46,11 +45,29 @@ import {
 } from "@/components/flowent/workflow-run";
 import { cn } from "@/lib/utils";
 
+const AUTO_SAVE_DELAY_MS = 500;
+
+type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
+
+const autoSaveStatusLabel = {
+  error: "Could not save",
+  idle: "",
+  saved: "Saved",
+  saving: "Saving...",
+} satisfies Record<AutoSaveStatus, string>;
+
+const autoSaveStatusClassName = {
+  error: "text-[#ff8a8a]",
+  idle: "text-white/0",
+  saved: "text-white/60",
+  saving: "text-white/80",
+} satisfies Record<AutoSaveStatus, string>;
+
 function WorkflowEditorView({
+  autoSaveStatus,
   draftWorkflow,
   inputValues,
   isInputFormOpen,
-  isDirty,
   isRunning,
   onCancelInputForm,
   onClose,
@@ -58,16 +75,14 @@ function WorkflowEditorView({
   onDelete,
   onDraftChange,
   onInputValueChange,
-  onMarkDirty,
   onRun,
-  onSave,
   onStop,
   runResult,
 }: {
+  autoSaveStatus: AutoSaveStatus;
   draftWorkflow: Workflow;
   inputValues: Record<string, string>;
   isInputFormOpen: boolean;
-  isDirty: boolean;
   isRunning: boolean;
   onCancelInputForm: () => void;
   onClose: () => void;
@@ -75,9 +90,7 @@ function WorkflowEditorView({
   onDelete: () => void;
   onDraftChange: (workflow: Workflow) => void;
   onInputValueChange: (nodeId: string, value: string) => void;
-  onMarkDirty: () => void;
   onRun: () => void;
-  onSave: () => void;
   onStop: () => void;
   runResult: WorkflowRunResult | null;
 }) {
@@ -94,12 +107,19 @@ function WorkflowEditorView({
           className={cn(fieldInputClassName, "max-w-[360px]")}
           onChange={(event) => {
             onDraftChange({ ...draftWorkflow, name: event.target.value });
-            onMarkDirty();
           }}
           value={draftWorkflow.name}
         />
-        {isDirty ? (
-          <span className="text-xs text-[#9b9b9b]">Unsaved</span>
+        {autoSaveStatus !== "idle" ? (
+          <span
+            aria-live="polite"
+            className={cn(
+              "shrink-0 text-xs leading-4",
+              autoSaveStatusClassName[autoSaveStatus],
+            )}
+          >
+            {autoSaveStatusLabel[autoSaveStatus]}
+          </span>
         ) : null}
         <div className="ml-auto flex items-center gap-1.5">
           <Button
@@ -121,16 +141,6 @@ function WorkflowEditorView({
           >
             <Redo className="size-4" aria-hidden="true" />
             Redo
-          </Button>
-          <Button
-            className={cn(subtleButtonClassName, "gap-1.5 px-2.5")}
-            onClick={onSave}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <Save className="size-4" aria-hidden="true" />
-            Save
           </Button>
           <Button
             className="h-8 gap-1.5 px-2.5"
@@ -212,7 +222,6 @@ function WorkflowEditorView({
           draftWorkflow={draftWorkflow}
           isRunning={isRunning}
           onChange={onDraftChange}
-          onDirty={onMarkDirty}
           runResult={runResult}
         />
       </ReactFlowProvider>
@@ -324,13 +333,110 @@ export function WorkflowsView({
   );
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [isInputFormOpen, setIsInputFormOpen] = useState(false);
-  const [isDirty, setIsDirty] = useState(!activeWorkflow);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>(
+    activeWorkflow ? "saved" : "idle",
+  );
+  const [saveRevision, setSaveRevision] = useState(0);
   const toast = useFlowentToast();
   const runAbortControllerRef = useRef<AbortController | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const savePromiseRef = useRef<Promise<Workflow | null> | null>(null);
+  const latestDraftRef = useRef(draftWorkflow);
+  const latestRevisionRef = useRef(0);
+  const savedRevisionRef = useRef(0);
+  const isPersistedRef = useRef(Boolean(activeWorkflow));
+  const editorSessionRef = useRef(0);
   const editorKeyRef = useRef({
     newWorkflowKey,
     workflowId: activeWorkflow?.id ?? "",
   });
+
+  const clearAutoSaveTimer = useCallback(() => {
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  }, []);
+
+  const saveLatestDraft = useCallback(
+    async (options: { force?: boolean } = {}) => {
+      clearAutoSaveTimer();
+      const shouldSave =
+        latestRevisionRef.current > savedRevisionRef.current ||
+        (options.force === true && !isPersistedRef.current);
+      if (!shouldSave) {
+        return latestDraftRef.current;
+      }
+
+      if (savePromiseRef.current) {
+        await savePromiseRef.current;
+        const stillNeedsSave =
+          latestRevisionRef.current > savedRevisionRef.current ||
+          (options.force === true && !isPersistedRef.current);
+        if (!stillNeedsSave) {
+          return latestDraftRef.current;
+        }
+      }
+
+      const workflowToSave = latestDraftRef.current;
+      const requestRevision = latestRevisionRef.current;
+      const requestSession = editorSessionRef.current;
+      setAutoSaveStatus("saving");
+
+      const savePromise = onSaveWorkflow(workflowToSave)
+        .then((result) => {
+          const isCurrentSession = editorSessionRef.current === requestSession;
+          const isCurrentRevision =
+            latestRevisionRef.current === requestRevision;
+
+          if (!result.data) {
+            if (isCurrentSession) {
+              setAutoSaveStatus(isCurrentRevision ? "error" : "saving");
+            }
+            if ((isCurrentSession && isCurrentRevision) || !isCurrentSession) {
+              toast.error(result.error);
+            }
+            return null;
+          }
+
+          const savedWorkflow = result.data;
+
+          if (isCurrentSession) {
+            isPersistedRef.current = true;
+            savedRevisionRef.current = Math.max(
+              savedRevisionRef.current,
+              requestRevision,
+            );
+            if (isCurrentRevision) {
+              latestDraftRef.current = savedWorkflow;
+              setDraftWorkflow(savedWorkflow);
+              setAutoSaveStatus("saved");
+            } else {
+              setAutoSaveStatus("saving");
+            }
+          }
+
+          return savedWorkflow;
+        })
+        .finally(() => {
+          if (savePromiseRef.current === savePromise) {
+            savePromiseRef.current = null;
+          }
+        });
+
+      savePromiseRef.current = savePromise;
+      return savePromise;
+    },
+    [clearAutoSaveTimer, onSaveWorkflow, toast],
+  );
+
+  const updateDraftWorkflow = useCallback((workflow: Workflow) => {
+    latestDraftRef.current = workflow;
+    latestRevisionRef.current += 1;
+    setDraftWorkflow(workflow);
+    setAutoSaveStatus("saving");
+    setSaveRevision(latestRevisionRef.current);
+  }, []);
 
   useEffect(() => {
     const nextWorkflowId = activeWorkflow?.id ?? "";
@@ -340,24 +446,63 @@ export function WorkflowsView({
     ) {
       return;
     }
+    if (
+      !editorKeyRef.current.workflowId &&
+      nextWorkflowId &&
+      nextWorkflowId === latestDraftRef.current.id &&
+      editorKeyRef.current.newWorkflowKey === newWorkflowKey
+    ) {
+      editorKeyRef.current = {
+        newWorkflowKey,
+        workflowId: nextWorkflowId,
+      };
+      isPersistedRef.current = true;
+      return;
+    }
+
+    if (latestRevisionRef.current > savedRevisionRef.current) {
+      void saveLatestDraft();
+    }
+
+    clearAutoSaveTimer();
+    editorSessionRef.current += 1;
+    savePromiseRef.current = null;
+    const nextWorkflow = activeWorkflow
+      ? cloneWorkflow(activeWorkflow)
+      : createDraftWorkflow();
     editorKeyRef.current = {
       newWorkflowKey,
       workflowId: nextWorkflowId,
     };
-    setDraftWorkflow(
-      activeWorkflow ? cloneWorkflow(activeWorkflow) : createDraftWorkflow(),
-    );
+    latestDraftRef.current = nextWorkflow;
+    latestRevisionRef.current = 0;
+    savedRevisionRef.current = 0;
+    isPersistedRef.current = Boolean(activeWorkflow);
+    setDraftWorkflow(nextWorkflow);
     setInputValues({});
     setIsInputFormOpen(false);
-    setIsDirty(!activeWorkflow);
-  }, [activeWorkflow, newWorkflowKey]);
+    setAutoSaveStatus(activeWorkflow ? "saved" : "idle");
+    setSaveRevision(0);
+  }, [activeWorkflow, clearAutoSaveTimer, newWorkflowKey, saveLatestDraft]);
 
   useEffect(
     () => () => {
+      clearAutoSaveTimer();
       runAbortControllerRef.current?.abort();
     },
-    [],
+    [clearAutoSaveTimer],
   );
+
+  useEffect(() => {
+    if (saveRevision <= savedRevisionRef.current) {
+      return;
+    }
+    clearAutoSaveTimer();
+    saveTimerRef.current = window.setTimeout(() => {
+      void saveLatestDraft();
+    }, AUTO_SAVE_DELAY_MS);
+    return clearAutoSaveTimer;
+  }, [clearAutoSaveTimer, saveLatestDraft, saveRevision]);
 
   const activeRunResult =
     workflowRunResult?.workflowId === draftWorkflow.id
@@ -365,22 +510,13 @@ export function WorkflowsView({
       : null;
   const isRunning = runningWorkflowId === draftWorkflow.id && isRunningWorkflow;
 
-  const closeEditor = () => {
-    if (isDirty && !window.confirm("Unsaved changes will be lost. Continue?")) {
+  const closeEditor = async () => {
+    const shouldSaveBeforeClose =
+      latestRevisionRef.current > savedRevisionRef.current;
+    if (shouldSaveBeforeClose && !(await saveLatestDraft())) {
       return;
     }
     onCloseEditor();
-  };
-
-  const saveDraft = async () => {
-    const result = await onSaveWorkflow(draftWorkflow);
-    if (!result.data) {
-      toast.error(result.error);
-      return null;
-    }
-    setDraftWorkflow(result.data);
-    setIsDirty(false);
-    return result.data;
   };
 
   const stopRun = () => {
@@ -491,7 +627,7 @@ export function WorkflowsView({
   const runDraftWithInputs = async (
     nextInputValues: Record<string, string>,
   ) => {
-    const savedWorkflow = await saveDraft();
+    const savedWorkflow = await saveLatestDraft({ force: true });
     if (!savedWorkflow) {
       return;
     }
@@ -500,7 +636,11 @@ export function WorkflowsView({
   };
 
   const runDraft = async () => {
-    const inputNodes = workflowInputNodes(draftWorkflow);
+    const savedWorkflow = await saveLatestDraft({ force: true });
+    if (!savedWorkflow) {
+      return;
+    }
+    const inputNodes = workflowInputNodes(savedWorkflow);
     if (inputNodes.length > 1) {
       setInputValues(
         Object.fromEntries(
@@ -510,7 +650,7 @@ export function WorkflowsView({
       setIsInputFormOpen(true);
       return;
     }
-    await runDraftWithInputs(inputValues);
+    await runSavedWorkflow(savedWorkflow, inputValues);
   };
 
   const deleteDraft = async () => {
@@ -522,32 +662,30 @@ export function WorkflowsView({
 
   return (
     <WorkflowEditorView
+      autoSaveStatus={autoSaveStatus}
       draftWorkflow={draftWorkflow}
       inputValues={inputValues}
       isInputFormOpen={isInputFormOpen}
-      isDirty={isDirty}
       isRunning={isRunning}
       onCancelInputForm={() => setIsInputFormOpen(false)}
-      onClose={closeEditor}
+      onClose={() => {
+        void closeEditor();
+      }}
       onConfirmInputForm={() => {
         void runDraftWithInputs(inputValues);
       }}
       onDelete={() => {
         void deleteDraft();
       }}
-      onDraftChange={setDraftWorkflow}
+      onDraftChange={updateDraftWorkflow}
       onInputValueChange={(nodeId, value) =>
         setInputValues((currentValues) => ({
           ...currentValues,
           [nodeId]: value,
         }))
       }
-      onMarkDirty={() => setIsDirty(true)}
       onRun={() => {
         void runDraft();
-      }}
-      onSave={() => {
-        void saveDraft();
       }}
       onStop={stopRun}
       runResult={activeRunResult}

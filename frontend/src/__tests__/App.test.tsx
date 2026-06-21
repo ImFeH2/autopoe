@@ -1958,7 +1958,7 @@ describe("App", () => {
     });
   });
 
-  it("saves new workflows with an unprefixed UUID", async () => {
+  it("automatically saves new workflows with an unprefixed UUID", async () => {
     const user = userEvent.setup();
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(workflowUuid);
     mockInitialState({
@@ -1968,11 +1968,18 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.clear(screen.getByRole("textbox", { name: "Workflow name" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Workflow name" }),
+      "Launch Workflow",
+    );
 
-    await waitFor(() => {
-      expect(window.location.pathname).toBe(`/workflows/${workflowUuid}`);
-    });
+    await waitFor(
+      () => {
+        expect(window.location.pathname).toBe(`/workflows/${workflowUuid}`);
+      },
+      { timeout: 2000 },
+    );
 
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workflows",
@@ -2011,17 +2018,19 @@ describe("App", () => {
     defaultValueInput.focus();
     await user.type(defaultValueInput, "release plan", { skipClick: true });
     expect(defaultValueInput).toHaveValue("release plan");
-    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => {
-      expect(window.fetch).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({
-          body: expect.stringContaining('"default_value":"release plan"'),
-          method: "PUT",
-        }),
-      );
-    });
+    await waitFor(
+      () => {
+        expect(window.fetch).toHaveBeenCalledWith(
+          "/api/workflows",
+          expect.objectContaining({
+            body: expect.stringContaining('"default_value":"release plan"'),
+            method: "PUT",
+          }),
+        );
+      },
+      { timeout: 2000 },
+    );
   });
 
   it("adds a code node and saves its Python code", async () => {
@@ -2043,23 +2052,25 @@ describe("App", () => {
     await user.clear(codeInput);
     codeInput.focus();
     await user.type(codeInput, "output = input.upper()", { skipClick: true });
-    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => {
-      expect(window.fetch).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({
-          body: expect.stringContaining('"type":"code"'),
-          method: "PUT",
-        }),
-      );
-    });
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workflows",
-      expect.objectContaining({
-        body: expect.stringContaining('"code":"output = input.upper()"'),
-        method: "PUT",
-      }),
+    await waitFor(
+      () => {
+        expect(window.fetch).toHaveBeenCalledWith(
+          "/api/workflows",
+          expect.objectContaining({
+            body: expect.stringContaining('"type":"code"'),
+            method: "PUT",
+          }),
+        );
+        expect(window.fetch).toHaveBeenCalledWith(
+          "/api/workflows",
+          expect.objectContaining({
+            body: expect.stringContaining('"code":"output = input.upper()"'),
+            method: "PUT",
+          }),
+        );
+      },
+      { timeout: 2000 },
     );
   });
 
@@ -2088,30 +2099,32 @@ describe("App", () => {
     await user.clear(payloadInput);
     payloadInput.focus();
     await user.type(payloadInput, "tick", { skipClick: true });
-    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => {
-      expect(window.fetch).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({
-          body: expect.stringContaining('"type":"timer"'),
-          method: "PUT",
-        }),
-      );
-    });
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workflows",
-      expect.objectContaining({
-        body: expect.stringContaining('"interval_seconds":"10"'),
-        method: "PUT",
-      }),
-    );
-    expect(window.fetch).toHaveBeenCalledWith(
-      "/api/workflows",
-      expect.objectContaining({
-        body: expect.stringContaining('"payload":"tick"'),
-        method: "PUT",
-      }),
+    await waitFor(
+      () => {
+        expect(window.fetch).toHaveBeenCalledWith(
+          "/api/workflows",
+          expect.objectContaining({
+            body: expect.stringContaining('"type":"timer"'),
+            method: "PUT",
+          }),
+        );
+        expect(window.fetch).toHaveBeenCalledWith(
+          "/api/workflows",
+          expect.objectContaining({
+            body: expect.stringContaining('"interval_seconds":"10"'),
+            method: "PUT",
+          }),
+        );
+        expect(window.fetch).toHaveBeenCalledWith(
+          "/api/workflows",
+          expect.objectContaining({
+            body: expect.stringContaining('"payload":"tick"'),
+            method: "PUT",
+          }),
+        );
+      },
+      { timeout: 2000 },
     );
   });
 

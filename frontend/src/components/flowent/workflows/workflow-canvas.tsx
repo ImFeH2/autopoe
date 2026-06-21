@@ -324,13 +324,11 @@ export function WorkflowCanvas({
   draftWorkflow,
   isRunning,
   onChange,
-  onDirty,
   runResult,
 }: {
   draftWorkflow: Workflow;
   isRunning: boolean;
   onChange: (workflow: Workflow) => void;
-  onDirty: () => void;
   runResult: WorkflowRunResult | null;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -411,9 +409,8 @@ export function WorkflowCanvas({
         },
       };
       onChange(nextWorkflow);
-      onDirty();
     },
-    [draftWorkflow, onChange, onDirty],
+    [draftWorkflow, onChange],
   );
 
   const onConnect: OnConnect = useCallback(
@@ -500,7 +497,6 @@ export function WorkflowCanvas({
         },
       };
       onChange(nextWorkflow);
-      onDirty();
       setNodes((currentNodes) => [
         ...currentNodes,
         ...workflowToFlowNodes(
@@ -516,7 +512,7 @@ export function WorkflowCanvas({
       ]);
       setSelectedElement({ id: nodeId, kind: "node" });
     },
-    [draftWorkflow, onChange, onDirty, runResult, setNodes],
+    [draftWorkflow, onChange, runResult, setNodes],
   );
 
   const updateNode = (nodeId: string, updates: Partial<WorkflowNode>) => {
@@ -530,7 +526,6 @@ export function WorkflowCanvas({
       },
     };
     onChange(nextWorkflow);
-    onDirty();
     setNodes((currentNodes) =>
       currentNodes.map((node) =>
         node.id === nodeId
@@ -574,7 +569,6 @@ export function WorkflowCanvas({
       },
     };
     onChange(nextWorkflow);
-    onDirty();
     setEdges((currentEdges) =>
       currentEdges.map((edge) =>
         edge.id === edgeId
