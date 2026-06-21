@@ -1711,6 +1711,27 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("opens workflow history actions from the row context menu", async () => {
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    const launchWorkflow = await screen.findByRole("button", {
+      name: "Launch Workflow",
+    });
+
+    fireEvent.contextMenu(launchWorkflow);
+
+    expect(
+      await screen.findByRole("menuitem", { name: "Open new tab" }),
+    ).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Pin" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+  });
+
   it("collapses and expands the Workflows history section", async () => {
     const user = userEvent.setup();
     mockInitialState({

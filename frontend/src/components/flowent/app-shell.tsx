@@ -162,6 +162,7 @@ function WorkflowNavigationItem({
   workflow: Workflow;
 }) {
   const [draftName, setDraftName] = useState(workflow.name);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
     if (isRenaming) {
@@ -201,7 +202,13 @@ function WorkflowNavigationItem({
   }
 
   return (
-    <div className="group/workflow-menu-item relative h-8">
+    <div
+      className="group/workflow-menu-item relative h-8"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setIsMenuOpen(true);
+      }}
+    >
       <Button
         className={cn(
           "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 pr-8 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
@@ -218,7 +225,7 @@ function WorkflowNavigationItem({
           {workflow.name}
         </span>
       </Button>
-      <DropdownMenu>
+      <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
         <DropdownMenuTrigger asChild>
           <Button
             aria-label="Options"
