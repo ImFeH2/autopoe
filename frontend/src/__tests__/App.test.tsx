@@ -1774,6 +1774,11 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.queryByText("Flowent")).not.toBeInTheDocument();
     });
+    expect(screen.getByRole("tab", { name: "Workspace" })).toHaveClass(
+      "flowent-sidebar-rail-item",
+    );
+    expect(document.querySelector(".flowent-sidebar-rail-logo")).toBeTruthy();
+    expect(document.querySelector(".flowent-sidebar-rail-status")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Expand sidebar" }),
     ).toBeInTheDocument();
@@ -1787,6 +1792,11 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
 
     expect(screen.getByText("Flowent")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Workspace" })).not.toHaveClass(
+      "flowent-sidebar-rail-item",
+    );
+    expect(document.querySelector(".flowent-sidebar-rail-logo")).toBeNull();
+    expect(document.querySelector(".flowent-sidebar-rail-status")).toBeNull();
     expect(
       screen.getByRole("button", { name: "Collapse sidebar" }),
     ).toBeInTheDocument();

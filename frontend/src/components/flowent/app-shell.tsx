@@ -119,6 +119,8 @@ function NavigationTrigger({
         "flowent-navigation-item cursor-pointer justify-start gap-2 rounded-lg border border-transparent bg-transparent px-2 py-1 shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] data-[state=active]:bg-[#202020] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden",
         navigationLabelClassName,
         sidebarTransitionClassName,
+        isSidebarCollapsed &&
+          "flowent-sidebar-rail-item !w-10 !flex-none pl-[11px] pr-0 group-data-vertical/tabs:!w-10",
         "dark:hover:bg-[#151515] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#202020]",
         suppressActiveStyle &&
           "data-[state=active]:!bg-transparent data-[state=active]:!text-white dark:data-[state=active]:!bg-transparent",
@@ -368,7 +370,15 @@ export function AppShell({
             "gap-2.5",
           )}
         >
-          <div className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30">
+          <div
+            className={cn(
+              "grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30 transition-transform",
+              shouldReduceMotion
+                ? "duration-0"
+                : cn("duration-300", sidebarTransitionClassName),
+              isSidebarCollapsed && "flowent-sidebar-rail-logo -translate-x-1",
+            )}
+          >
             <img alt="" className="size-full object-cover" src="/flowent.png" />
           </div>
           <SidebarText
@@ -504,7 +514,12 @@ export function AppShell({
           </AnimatePresence>
           <div
             className={cn(
-              "flowent-sidebar-status -mx-1 flex h-8 items-center gap-2 px-2",
+              "flowent-sidebar-status -mx-1 flex h-8 items-center gap-2 px-2 transition-[padding,color]",
+              shouldReduceMotion
+                ? "duration-0"
+                : cn("duration-300", sidebarTransitionClassName),
+              isSidebarCollapsed &&
+                "flowent-sidebar-rail-status pl-[17px] pr-0",
             )}
             title={activeProviderName ?? "No provider"}
           >
