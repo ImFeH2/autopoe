@@ -444,10 +444,11 @@ export function AppShell({
             {navigationGroups.map((group) => (
               <Fragment key={group.label}>
                 <SidebarBlock
-                  className="flowent-sidebar-section-label mt-4 mb-1 px-2 max-[900px]:hidden"
+                  className="flowent-sidebar-section-label px-2 pt-4 pb-1"
                   isDecorative
                   isVisible={!isSidebarCollapsed}
                   shouldReduceMotion={shouldReduceMotion}
+                  wrapperClassName="max-[900px]:hidden"
                 >
                   {group.label}
                 </SidebarBlock>
@@ -462,8 +463,10 @@ export function AppShell({
               </Fragment>
             ))}
             <SidebarBlock
+              className="pt-4"
               isVisible={!isSidebarCollapsed}
               shouldReduceMotion={shouldReduceMotion}
+              wrapperClassName="max-[900px]:hidden"
             >
               <WorkflowsNavigationSection
                 activeView={activeView}
@@ -578,7 +581,7 @@ function SidebarText({
               ? { duration: 0 }
               : {
                   ...sidebarMotionTransition,
-                  duration: 0.24,
+                  duration: sidebarMotionTransition.duration,
                 }
           }
         >
@@ -595,12 +598,14 @@ function SidebarBlock({
   isDecorative = false,
   isVisible,
   shouldReduceMotion,
+  wrapperClassName,
 }: {
   children: ReactNode;
   className?: string;
   isDecorative?: boolean;
   isVisible: boolean;
   shouldReduceMotion: boolean;
+  wrapperClassName?: string;
 }) {
   return (
     <AnimatePresence initial={false}>
@@ -608,7 +613,7 @@ function SidebarBlock({
         <motion.div
           animate={{ height: "auto", opacity: 1 }}
           aria-hidden={isDecorative ? true : undefined}
-          className={cn("min-w-0 overflow-hidden", className)}
+          className={cn("min-w-0 overflow-hidden", wrapperClassName)}
           exit={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0 }}
           initial={shouldReduceMotion ? false : { height: 0, opacity: 0 }}
           key="sidebar-block"
@@ -617,11 +622,11 @@ function SidebarBlock({
               ? { duration: 0 }
               : {
                   ...sidebarMotionTransition,
-                  duration: 0.24,
+                  duration: sidebarMotionTransition.duration,
                 }
           }
         >
-          {children}
+          <div className={className}>{children}</div>
         </motion.div>
       ) : null}
     </AnimatePresence>
@@ -718,7 +723,7 @@ function WorkflowsNavigationSection({
         <Button
           aria-label="Workflows"
           className={cn(
-            "flowent-workflow-history-trigger mt-4 h-7 w-full cursor-pointer justify-between rounded-md border border-transparent bg-transparent px-2 py-0 text-[11px] leading-4 font-medium text-white/45 shadow-none transition-colors duration-100 hover:bg-transparent hover:text-white/70 aria-expanded:bg-transparent aria-expanded:text-white/45 dark:aria-expanded:bg-transparent dark:aria-expanded:text-white/45 max-[900px]:hidden",
+            "flowent-workflow-history-trigger h-7 w-full cursor-pointer justify-between rounded-md border border-transparent bg-transparent px-2 py-0 text-[11px] leading-4 font-medium text-white/45 shadow-none transition-colors duration-100 hover:bg-transparent hover:text-white/70 aria-expanded:bg-transparent aria-expanded:text-white/45 dark:aria-expanded:bg-transparent dark:aria-expanded:text-white/45 max-[900px]:hidden",
             navigationLabelClassName,
             hasActiveWorkflow &&
               !isOpen &&
@@ -759,7 +764,7 @@ function WorkflowsNavigationSection({
                   ? { duration: 0 }
                   : {
                       ...sidebarMotionTransition,
-                      duration: 0.24,
+                      duration: sidebarMotionTransition.duration,
                     }
               }
             >

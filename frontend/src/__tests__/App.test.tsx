@@ -1768,6 +1768,11 @@ describe("App", () => {
     render(<App />);
 
     expect(screen.getByText("Flowent")).toBeInTheDocument();
+    expect(screen.getByText("Tools")).toHaveClass("pt-4", "pb-1");
+    expect(screen.getByText("Tools")).not.toHaveClass("mt-4", "mb-1");
+    expect(screen.getByRole("button", { name: "Workflows" })).not.toHaveClass(
+      "mt-4",
+    );
 
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
 
