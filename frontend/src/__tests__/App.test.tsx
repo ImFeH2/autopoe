@@ -1792,6 +1792,31 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("toggles the sidebar from the sidebar boundary", async () => {
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+    render(<App />);
+
+    const boundary = screen.getByRole("button", {
+      name: "Toggle sidebar from boundary",
+    });
+
+    await user.click(boundary);
+
+    expect(
+      await screen.findByRole("button", { name: "Expand sidebar" }),
+    ).toBeInTheDocument();
+
+    await user.click(boundary);
+
+    expect(
+      await screen.findByRole("button", { name: "Collapse sidebar" }),
+    ).toBeInTheDocument();
+  });
+
   it("toggles the sidebar with Control+B", async () => {
     mockInitialState({
       ...selectedProviderState(),
