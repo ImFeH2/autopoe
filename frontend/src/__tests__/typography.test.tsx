@@ -97,6 +97,19 @@ describe("typography", () => {
     expect(viewport).not.toContain("user-scalable=no");
   });
 
+  it("limits drag selection to editable and readable content", async () => {
+    const stylesPath = join(process.cwd(), "src/styles/index.css");
+    const styles = await readFile(stylesPath, "utf8");
+
+    expect(styles).toContain("user-select: none;");
+    expect(styles).toContain("-webkit-user-select: none;");
+    expect(styles).toContain("input,\ntextarea,");
+    expect(styles).toContain(".flowent-markdown-message");
+    expect(styles).toContain(".flowent-selectable-text");
+    expect(styles).toContain("user-select: text;");
+    expect(styles).toContain("-webkit-user-select: text;");
+  });
+
   it("uses 16px sizing for shared Flowent form controls", () => {
     render(<Textarea aria-label="Prompt" className={fieldInputClassName} />);
 

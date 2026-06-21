@@ -85,6 +85,8 @@ body {
   font-family: var(--font-sans);
   font-size: 16px;
   letter-spacing: 0;
+  user-select: none;
+  -webkit-user-select: none;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -92,6 +94,22 @@ button,
 input,
 textarea {
   font: inherit;
+}
+
+body * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.flowent-markdown-message,
+.flowent-markdown-message *,
+.flowent-selectable-text,
+.flowent-selectable-text * {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .flowent-navigation-label {
