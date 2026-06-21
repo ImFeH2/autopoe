@@ -4016,6 +4016,40 @@ describe("App", () => {
     }
   });
 
+  it("does not smooth-scroll after loading existing workspace history", async () => {
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      mockInitialState({
+        ...selectedProviderState(),
+        messages: [
+          {
+            author: "user",
+            content: "Earlier request",
+            id: "message-user-existing-history",
+          },
+          {
+            author: "assistant",
+            content: "Newest existing reply",
+            id: "message-assistant-existing-history",
+          },
+        ],
+      });
+      render(<App />);
+
+      await screen.findByText("Newest existing reply");
+
+      expect(scrollIntoView).not.toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "end",
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it("requests a workspace reply and appends the assistant message", async () => {
     const user = userEvent.setup();
     mockInitialState(

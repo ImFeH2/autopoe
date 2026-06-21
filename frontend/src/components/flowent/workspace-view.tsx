@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Check,
@@ -131,7 +138,10 @@ function MessageList({
   onRetryMessage: (messageId: string) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  const initialPositionedMessageIdRef = useRef("");
+  const hasPositionedInitialHistoryRef = useRef(false);
   const shouldFollowRef = useRef(true);
+  const shouldSkipNextFollowScrollRef = useRef(false);
   const scrollMarkerRef = useRef<HTMLDivElement>(null);
   const latestMessage = messages.at(-1);
   const latestMessageAuthor = latestMessage?.author ?? "";
@@ -153,6 +163,26 @@ function MessageList({
   const streamingMessageId =
     isResponding && latestMessageAuthor === "assistant" ? latestMessageId : "";
 
+  useLayoutEffect(() => {
+    if (
+      hasPositionedInitialHistoryRef.current ||
+      displayMessages.length === 0
+    ) {
+      return;
+    }
+
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+
+    hasPositionedInitialHistoryRef.current = true;
+    initialPositionedMessageIdRef.current = latestMessageId;
+    shouldFollowRef.current = true;
+    shouldSkipNextFollowScrollRef.current = true;
+    list.scrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+  }, [displayMessages.length, latestMessageId]);
+
   useEffect(() => {
     if (latestMessageId !== lastMessageIdRef.current) {
       lastMessageIdRef.current = latestMessageId;
@@ -165,11 +195,37 @@ function MessageList({
     if (!shouldFollowRef.current) {
       return;
     }
+    if (shouldSkipNextFollowScrollRef.current) {
+      shouldSkipNextFollowScrollRef.current = false;
+      return;
+    }
+    if (initialPositionedMessageIdRef.current === latestMessageId) {
+      return;
+    }
     scrollMarkerRef.current?.scrollIntoView({
       block: "end",
       behavior: "smooth",
     });
   }, [displayMessages, latestMessageAuthor, latestMessageId]);
+
+  useEffect(() => {
+    if (
+      !latestMessageId ||
+      initialPositionedMessageIdRef.current !== latestMessageId
+    ) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (initialPositionedMessageIdRef.current === latestMessageId) {
+        initialPositionedMessageIdRef.current = "";
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [latestMessageId]);
 
   const updateFollowState = () => {
     const list = listRef.current;
