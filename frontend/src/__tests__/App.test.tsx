@@ -1818,6 +1818,16 @@ describe("App", () => {
     const boundary = screen.getByRole("button", {
       name: "Toggle sidebar from boundary",
     });
+    expect(boundary).toHaveClass(
+      "hover:bg-transparent",
+      "focus-visible:bg-transparent",
+      "active:bg-transparent",
+      "dark:hover:bg-transparent",
+    );
+    expect(boundary).not.toHaveClass(
+      "hover:bg-white/10",
+      "focus-visible:bg-white/10",
+    );
 
     await user.click(boundary);
 

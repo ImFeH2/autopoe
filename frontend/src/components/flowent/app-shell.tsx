@@ -540,7 +540,7 @@ export function AppShell({
         </div>
         <Button
           aria-label="Toggle sidebar from boundary"
-          className="absolute top-0 right-[-4px] z-10 hidden h-full w-2 cursor-ew-resize rounded-none border-0 bg-transparent p-0 shadow-none transition-colors hover:bg-white/10 focus-visible:bg-white/10 active:not-aria-[haspopup]:translate-y-0 max-[900px]:hidden sm:block"
+          className="absolute top-0 right-[-4px] z-10 hidden h-full w-2 cursor-ew-resize rounded-none border-0 bg-transparent p-0 shadow-none transition-colors hover:bg-transparent focus-visible:bg-transparent active:bg-transparent active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-transparent dark:focus-visible:bg-transparent max-[900px]:hidden sm:block"
           onClick={toggleSidebar}
           tabIndex={-1}
           title="Toggle sidebar"
