@@ -132,9 +132,8 @@ describe("path navigation", () => {
     await waitFor(() => {
       expect(window.location.pathname).toBe("/workflows/workflow-draft");
     });
-    expect(
-      await screen.findByDisplayValue("Draft Workflow"),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Workflow name" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Run" })).toBeVisible();
 
     window.history.back();
 

@@ -1,24 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ArrowRight,
-  Loader2,
-  Play,
-  Redo,
-  Square,
-  Trash2,
-  Undo,
-  X,
-} from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   fieldGroupClassName,
-  fieldInputClassName,
   fieldLabelClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
@@ -56,9 +45,7 @@ function WorkflowEditorView({
   isInputFormOpen,
   isRunning,
   onCancelInputForm,
-  onClose,
   onConfirmInputForm,
-  onDelete,
   onDraftChange,
   onInputValueChange,
   onRun,
@@ -71,9 +58,7 @@ function WorkflowEditorView({
   isInputFormOpen: boolean;
   isRunning: boolean;
   onCancelInputForm: () => void;
-  onClose: () => void;
   onConfirmInputForm: () => void;
-  onDelete: () => void;
   onDraftChange: (workflow: Workflow) => void;
   onInputValueChange: (nodeId: string, value: string) => void;
   onRun: () => void;
@@ -87,75 +72,6 @@ function WorkflowEditorView({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 bg-black px-3">
-        <Input
-          aria-label="Workflow name"
-          className={cn(fieldInputClassName, "max-w-[360px]")}
-          onChange={(event) => {
-            onDraftChange({ ...draftWorkflow, name: event.target.value });
-          }}
-          value={draftWorkflow.name}
-        />
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button
-            className={cn(subtleButtonClassName, "gap-1.5 px-2.5")}
-            disabled
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <Undo className="size-4" aria-hidden="true" />
-            Undo
-          </Button>
-          <Button
-            className={cn(subtleButtonClassName, "gap-1.5 px-2.5")}
-            disabled
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <Redo className="size-4" aria-hidden="true" />
-            Redo
-          </Button>
-          <Button
-            className="h-8 gap-1.5 px-2.5"
-            disabled={isRunning && !canStop}
-            onClick={canStop ? onStop : onRun}
-            size="sm"
-            type="button"
-            variant={isRunning ? "outline" : "default"}
-          >
-            {canStop ? (
-              <Square className="size-4" aria-hidden="true" />
-            ) : isRunning ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Play className="size-4" aria-hidden="true" />
-            )}
-            {canStop ? "Stop" : "Run"}
-          </Button>
-          <Button
-            aria-label="Delete workflow"
-            className="size-8 p-0 text-[#ff8a8a]"
-            onClick={onDelete}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <Trash2 className="size-4" aria-hidden="true" />
-          </Button>
-          <Button
-            aria-label="Close editor"
-            className="size-8 p-0"
-            onClick={onClose}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <X className="size-4" aria-hidden="true" />
-          </Button>
-        </div>
-      </div>
       {isInputFormOpen ? (
         <RunInputPanel
           inputNodes={inputNodes}
@@ -197,8 +113,13 @@ function WorkflowEditorView({
           autoSaveStatus={autoSaveStatus}
           draftWorkflow={draftWorkflow}
           isRunning={isRunning}
+          onRun={canStop ? onStop : onRun}
           onChange={onDraftChange}
           runResult={runResult}
+          runControlLabel={canStop ? "Stop" : "Run"}
+          runControlState={
+            canStop ? "stoppable" : isRunning ? "running" : "ready"
+          }
         />
       </ReactFlowProvider>
     </div>
@@ -276,8 +197,6 @@ export function WorkflowsView({
   activeWorkflow,
   isRunningWorkflow,
   newWorkflowKey,
-  onCloseEditor,
-  onDeleteWorkflow,
   onFinishWorkflowRun,
   onRunWorkflow,
   onSaveWorkflow,
@@ -287,8 +206,6 @@ export function WorkflowsView({
   activeWorkflow: Workflow | null;
   isRunningWorkflow: boolean;
   newWorkflowKey: number;
-  onCloseEditor: () => void;
-  onDeleteWorkflow: (workflowId: string) => Promise<boolean>;
   onFinishWorkflowRun: (workflowId: string) => void;
   onRunWorkflow: (
     workflowId: string,
@@ -484,15 +401,6 @@ export function WorkflowsView({
       : null;
   const isRunning = runningWorkflowId === draftWorkflow.id && isRunningWorkflow;
 
-  const closeEditor = async () => {
-    const shouldSaveBeforeClose =
-      latestRevisionRef.current > savedRevisionRef.current;
-    if (shouldSaveBeforeClose && !(await saveLatestDraft())) {
-      return;
-    }
-    onCloseEditor();
-  };
-
   const stopRun = () => {
     runAbortControllerRef.current?.abort();
     runAbortControllerRef.current = null;
@@ -627,13 +535,6 @@ export function WorkflowsView({
     await runSavedWorkflow(savedWorkflow, inputValues);
   };
 
-  const deleteDraft = async () => {
-    const deleted = await onDeleteWorkflow(draftWorkflow.id);
-    if (deleted) {
-      onCloseEditor();
-    }
-  };
-
   return (
     <WorkflowEditorView
       autoSaveStatus={autoSaveStatus}
@@ -642,14 +543,8 @@ export function WorkflowsView({
       isInputFormOpen={isInputFormOpen}
       isRunning={isRunning}
       onCancelInputForm={() => setIsInputFormOpen(false)}
-      onClose={() => {
-        void closeEditor();
-      }}
       onConfirmInputForm={() => {
         void runDraftWithInputs(inputValues);
-      }}
-      onDelete={() => {
-        void deleteDraft();
       }}
       onDraftChange={updateDraftWorkflow}
       onInputValueChange={(nodeId, value) =>

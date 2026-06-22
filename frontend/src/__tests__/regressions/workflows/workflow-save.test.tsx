@@ -379,8 +379,7 @@ describe("workflow save regressions", () => {
 
     render(<App />);
 
-    await screen.findByRole("textbox", { name: "Workflow name" });
-    await user.click(screen.getByRole("button", { name: "Run" }));
+    await user.click(await screen.findByRole("button", { name: "Run" }));
 
     expect(await screen.findByText("Could not save")).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -395,9 +394,8 @@ describe("workflow save regressions", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByDisplayValue("Draft Workflow"),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Workflow name" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Run" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "Workflows" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -426,7 +424,8 @@ describe("workflow save regressions", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.getByDisplayValue("Draft Workflow")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Workflow name" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeVisible();
 
     window.history.back();
     await waitFor(() => {

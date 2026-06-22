@@ -1561,7 +1561,10 @@ describe("App", () => {
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
 
-    expect(screen.getByDisplayValue("Untitled Workflow")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "Workflow name" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
     expect(screen.queryByText("My Workflows")).not.toBeInTheDocument();
     expect(
       screen.getByText(
@@ -1968,10 +1971,8 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.clear(screen.getByRole("textbox", { name: "Workflow name" }));
-    await user.type(
-      screen.getByRole("textbox", { name: "Workflow name" }),
-      "Launch Workflow",
+    await user.click(
+      screen.getByRole("button", { name: "Input Data entry point" }),
     );
 
     await waitFor(
@@ -1985,6 +1986,13 @@ describe("App", () => {
       "/api/workflows",
       expect.objectContaining({
         body: expect.stringContaining(`"id":"${workflowUuid}"`),
+        method: "PUT",
+      }),
+    );
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/workflows",
+      expect.objectContaining({
+        body: expect.stringContaining('"type":"input"'),
         method: "PUT",
       }),
     );

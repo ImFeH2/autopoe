@@ -275,8 +275,6 @@ function FlowentApp() {
           activeWorkflow={activeWorkflow}
           isRunningWorkflow={Boolean(runningWorkflowId)}
           newWorkflowKey={newWorkflowKey}
-          onCloseEditor={() => updateNavigation("workspace")}
-          onDeleteWorkflow={deleteWorkflow}
           onFinishWorkflowRun={finishWorkflowRun}
           onRunWorkflow={runWorkflow}
           onSaveWorkflow={saveWorkflow}

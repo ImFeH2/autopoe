@@ -12,7 +12,9 @@ import {
   Check,
   Loader2,
   Maximize,
+  Play,
   Search,
+  Square,
   Trash2,
   ZoomIn,
   ZoomOut,
@@ -251,6 +253,7 @@ const nodeTypes = {
 };
 
 type WorkflowAutoSaveStatus = "idle" | "saving" | "saved" | "error";
+type WorkflowRunControlState = "ready" | "running" | "stoppable";
 
 const workflowAutoSaveStatusLabel = {
   error: "Could not save",
@@ -337,7 +340,7 @@ function CanvasControls() {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
 
   return (
-    <div className="absolute top-3 right-3 z-10 flex gap-1 rounded-md border border-white/10 bg-black/80 p-1">
+    <div className="flex gap-1 rounded-md border border-white/10 bg-black/80 p-1">
       <Button
         aria-label="Zoom in"
         className="size-7 p-0"
@@ -375,6 +378,38 @@ function CanvasControls() {
         <Maximize className="size-4" aria-hidden="true" />
       </Button>
     </div>
+  );
+}
+
+function WorkflowRunControl({
+  isDisabled,
+  label,
+  onRun,
+  state,
+}: {
+  isDisabled: boolean;
+  label: string;
+  onRun: () => void;
+  state: WorkflowRunControlState;
+}) {
+  return (
+    <Button
+      className="h-9 gap-1.5 rounded-md border-white/10 bg-black/80 px-3 text-white shadow-none hover:bg-input/50"
+      disabled={isDisabled}
+      onClick={onRun}
+      size="sm"
+      type="button"
+      variant={state === "ready" ? "default" : "outline"}
+    >
+      {state === "stoppable" ? (
+        <Square className="size-4" aria-hidden="true" />
+      ) : state === "running" ? (
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <Play className="size-4" aria-hidden="true" />
+      )}
+      {label}
+    </Button>
   );
 }
 
@@ -514,13 +549,19 @@ export function WorkflowCanvas({
   draftWorkflow,
   isRunning,
   onChange,
+  onRun,
   runResult,
+  runControlLabel,
+  runControlState,
 }: {
   autoSaveStatus: WorkflowAutoSaveStatus;
   draftWorkflow: Workflow;
   isRunning: boolean;
   onChange: (workflow: Workflow) => void;
+  onRun: () => void;
   runResult: WorkflowRunResult | null;
+  runControlLabel: string;
+  runControlState: WorkflowRunControlState;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const workflowLayoutGroupRef = useRef<GroupImperativeHandle | null>(null);
@@ -908,7 +949,15 @@ export function WorkflowCanvas({
           Workflow running...
         </div>
       ) : null}
-      <CanvasControls />
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+        <WorkflowRunControl
+          isDisabled={runControlState === "running"}
+          label={runControlLabel}
+          onRun={onRun}
+          state={runControlState}
+        />
+        <CanvasControls />
+      </div>
       <ReactFlow
         className="flowent-workflow-canvas"
         deleteKeyCode={["Backspace", "Delete"]}
