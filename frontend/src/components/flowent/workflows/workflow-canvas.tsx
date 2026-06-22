@@ -9,11 +9,13 @@ import {
 } from "react";
 import {
   AlertCircle,
+  ChevronRight,
   Check,
   Loader2,
   Maximize,
   Play,
   Plus,
+  Search,
   Square,
   Trash2,
   ZoomIn,
@@ -53,6 +55,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -76,6 +79,7 @@ import {
   type SelectedWorkflowElement,
   type WorkflowCanvasEdge,
   type WorkflowCanvasNode,
+  type WorkflowNodeTemplate,
   workflowNodeIconByType,
   workflowNodeTemplates,
   workflowToFlowEdges,
@@ -299,6 +303,14 @@ const workflowNodeMinWidth = 120;
 const workflowNodeMaxWidth = 260;
 const workflowNodeMeasuredChromeWidth = 88;
 const workflowLayoutStorageKey = "flowent:workflow-layout";
+const workflowNodeTemplateGroups: Array<{
+  label: string;
+  types: WorkflowNodeType[];
+}> = [
+  { label: "Triggers", types: ["input", "timer"] },
+  { label: "Actions", types: ["agent", "merge", "code"] },
+  { label: "Outputs", types: ["output"] },
+];
 const workflowLayoutPanelIds = {
   canvas: "workflow-canvas",
   properties: "workflow-properties",
@@ -421,30 +433,165 @@ function WorkflowRunControl({
   );
 }
 
-function WorkflowNodeMenuItems({
+function WorkflowNodePickerContent({
   Item,
   onAddNode,
 }: {
   Item: typeof ContextMenuItem | typeof DropdownMenuItem;
   onAddNode: (type: WorkflowNodeType) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [previewTemplate, setPreviewTemplate] =
+    useState<WorkflowNodeTemplate | null>(workflowNodeTemplates[0] ?? null);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredTemplates = workflowNodeTemplates.filter((template) => {
+    if (!normalizedQuery) {
+      return true;
+    }
+    return (
+      template.label.toLowerCase().includes(normalizedQuery) ||
+      template.description.toLowerCase().includes(normalizedQuery)
+    );
+  });
+  const filteredTemplateByType = new Map(
+    filteredTemplates.map((template) => [template.type, template]),
+  );
+  const hasMatches = filteredTemplates.length > 0;
+
+  useEffect(() => {
+    if (!previewTemplate || !filteredTemplateByType.has(previewTemplate.type)) {
+      setPreviewTemplate(filteredTemplates[0] ?? null);
+    }
+  }, [filteredTemplateByType, filteredTemplates, previewTemplate]);
+
   return (
-    <>
-      {workflowNodeTemplates.map((template) => {
-        const Icon = template.icon;
-        return (
-          <Item key={template.type} onSelect={() => onAddNode(template.type)}>
-            <Icon className="size-4 shrink-0" aria-hidden="true" />
-            <span className="min-w-0">
-              <span className="block text-sm leading-5">{template.label}</span>
-              <span className="block truncate text-xs leading-4 text-[#9b9b9b]">
-                {template.description}
-              </span>
-            </span>
-          </Item>
-        );
-      })}
-    </>
+    <div className="flex w-[390px] gap-1.5">
+      <div className="min-w-0 flex-1">
+        <div className="relative p-1">
+          <Search
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-white/45"
+            aria-hidden="true"
+          />
+          <Input
+            aria-label="Search nodes"
+            autoComplete="off"
+            className="h-8 rounded-xl border-white/10 bg-black/35 pr-2 pl-8 text-sm text-white shadow-none placeholder:text-white/35 focus-visible:border-white/20 focus-visible:ring-0"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+            placeholder="Search nodes..."
+            value={query}
+          />
+        </div>
+        <div className="max-h-[330px] overflow-y-auto px-1 pb-1">
+          {hasMatches ? (
+            workflowNodeTemplateGroups.map((group) => {
+              const groupTemplates = group.types
+                .map((type) => filteredTemplateByType.get(type))
+                .filter((template): template is WorkflowNodeTemplate =>
+                  Boolean(template),
+                );
+
+              if (groupTemplates.length === 0) {
+                return null;
+              }
+
+              return (
+                <div className="pt-2 first:pt-1" key={group.label}>
+                  <div className="px-2 pb-1 text-[11px] leading-4 font-medium text-white/45">
+                    {group.label}
+                  </div>
+                  <div className="grid gap-0.5">
+                    {groupTemplates.map((template) => {
+                      const Icon = template.icon;
+                      return (
+                        <Item
+                          className="h-9 rounded-xl px-2"
+                          key={template.type}
+                          onFocus={() => setPreviewTemplate(template)}
+                          onMouseEnter={() => setPreviewTemplate(template)}
+                          onSelect={() => onAddNode(template.type)}
+                        >
+                          <Icon
+                            className="size-4 shrink-0"
+                            aria-hidden="true"
+                          />
+                          <span className="min-w-0 truncate">
+                            {template.label}
+                          </span>
+                        </Item>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="px-2 py-6 text-center text-sm text-white/45">
+              No nodes found.
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="w-36 border-l border-white/10 p-2">
+        {previewTemplate ? (
+          <div className="rounded-xl border border-white/10 bg-black/35 p-3 shadow-sm">
+            <div className="flex items-center gap-2">
+              {(() => {
+                const PreviewIcon = previewTemplate.icon;
+                return (
+                  <PreviewIcon
+                    className="size-4 shrink-0 text-white"
+                    aria-hidden="true"
+                  />
+                );
+              })()}
+              <div className="min-w-0 truncate text-sm leading-5 font-medium text-white">
+                {previewTemplate.label}
+              </div>
+            </div>
+            <p className="mt-2 text-xs leading-4 text-white/55">
+              {previewTemplate.description}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-white/10 bg-black/35 p-3 text-xs leading-4 text-white/45">
+            Hover a node to preview it.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkflowCanvasContextAddMenu({
+  onAddNode,
+}: {
+  onAddNode: (type: WorkflowNodeType) => void;
+}) {
+  const [isNodePickerOpen, setIsNodePickerOpen] = useState(false);
+
+  return (
+    <div className="relative" onMouseEnter={() => setIsNodePickerOpen(true)}>
+      <ContextMenuItem
+        className="min-w-40"
+        onSelect={(event) => {
+          event.preventDefault();
+          setIsNodePickerOpen(true);
+        }}
+      >
+        <Plus className="size-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1">Add Node</span>
+        <ChevronRight className="size-4 shrink-0 text-white/45" />
+      </ContextMenuItem>
+      {isNodePickerOpen ? (
+        <div className="absolute top-0 left-[calc(100%+6px)] z-[160] rounded-2xl border border-white/10 bg-[#161616] p-1 text-white shadow-md shadow-black/20">
+          <WorkflowNodePickerContent
+            Item={ContextMenuItem}
+            onAddNode={onAddNode}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -940,11 +1087,11 @@ export function WorkflowCanvas({
               variant="outline"
             >
               <Plus className="size-4" aria-hidden="true" />
-              Add
+              Add Node
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-52">
-            <WorkflowNodeMenuItems
+          <DropdownMenuContent align="end" className="p-1">
+            <WorkflowNodePickerContent
               Item={DropdownMenuItem}
               onAddNode={addNodeAtViewportCenter}
             />
@@ -1001,12 +1148,8 @@ export function WorkflowCanvas({
             </ReactFlow>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-52">
-          <div className="px-2 py-1.5 text-[11px] leading-4 font-medium text-white/45">
-            Add node
-          </div>
-          <WorkflowNodeMenuItems
-            Item={ContextMenuItem}
+        <ContextMenuContent className="min-w-44">
+          <WorkflowCanvasContextAddMenu
             onAddNode={addNodeAtContextMenuPosition}
           />
         </ContextMenuContent>

@@ -1970,8 +1970,8 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    await user.click(await screen.findByRole("menuitem", { name: /Input/ }));
+    await user.click(screen.getByRole("button", { name: "Add Node" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Input$/ }));
 
     await waitFor(
       () => {
@@ -2048,8 +2048,20 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    await user.click(await screen.findByRole("menuitem", { name: /Code/ }));
+    await user.click(screen.getByRole("button", { name: "Add Node" }));
+    expect(await screen.findByText("Triggers")).toBeInTheDocument();
+    expect(screen.getByText("Actions")).toBeInTheDocument();
+    expect(screen.getByText("Outputs")).toBeInTheDocument();
+
+    const searchInput = screen.getByRole("textbox", { name: "Search nodes" });
+    await user.type(searchInput, "cod");
+    expect(screen.queryByRole("menuitem", { name: /^Input$/ })).toBeNull();
+    const codeMenuItem = await screen.findByRole("menuitem", {
+      name: /^Code$/,
+    });
+    await user.hover(codeMenuItem);
+    expect(screen.getByText("Python step")).toBeVisible();
+    await user.click(codeMenuItem);
     const codeNodeLabel = screen
       .getAllByText("Code")
       .find((element) => element.closest(".react-flow__node"));
@@ -2090,8 +2102,8 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    await user.click(await screen.findByRole("menuitem", { name: /Timer/ }));
+    await user.click(screen.getByRole("button", { name: "Add Node" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Timer$/ }));
     const timerNodeLabel = screen
       .getAllByText("Timer")
       .find((element) => element.closest(".react-flow__node"));

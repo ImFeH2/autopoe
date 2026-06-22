@@ -380,7 +380,8 @@ describe("workflow save regressions", () => {
       clientX: 143,
       clientY: 86,
     });
-    await user.click(await screen.findByRole("menuitem", { name: /Code/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "Add Node" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Code$/ }));
 
     await waitFor(
       () => {
