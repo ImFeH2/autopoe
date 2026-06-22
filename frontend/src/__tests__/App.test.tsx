@@ -1568,7 +1568,7 @@ describe("App", () => {
     expect(screen.queryByText("My Workflows")).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "Drag nodes from the palette to start building your workflow.",
+        "Right-click the canvas or use Add to create your first node.",
       ),
     ).toBeInTheDocument();
   });
@@ -1923,8 +1923,7 @@ describe("App", () => {
     window.localStorage.setItem(
       "flowent:workflow-layout",
       JSON.stringify({
-        "workflow-canvas": 48,
-        "workflow-nodes": 22,
+        "workflow-canvas": 70,
         "workflow-properties": 30,
       }),
     );
@@ -1938,26 +1937,26 @@ describe("App", () => {
       await screen.findByRole("button", { name: /Launch Workflow/ }),
     );
 
-    const nodesHandle = await screen.findByRole("separator", {
-      name: "Resize workflow nodes",
-    });
-    const propertiesHandle = screen.getByRole("separator", {
+    const propertiesHandle = await screen.findByRole("separator", {
       name: "Resize workflow properties",
     });
 
-    expect(nodesHandle).toHaveClass("max-[860px]:hidden");
+    expect(
+      screen.queryByRole("separator", {
+        name: "Resize workflow nodes",
+      }),
+    ).not.toBeInTheDocument();
     expect(propertiesHandle).toHaveClass("max-[860px]:hidden");
 
-    fireEvent.doubleClick(nodesHandle);
+    fireEvent.doubleClick(propertiesHandle);
 
     expect(
       JSON.parse(
         window.localStorage.getItem("flowent:workflow-layout") ?? "{}",
       ),
     ).toEqual({
-      "workflow-canvas": 58,
-      "workflow-nodes": 17,
-      "workflow-properties": 25,
+      "workflow-canvas": 72,
+      "workflow-properties": 28,
     });
   });
 
@@ -1971,9 +1970,8 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.click(
-      screen.getByRole("button", { name: "Input Data entry point" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Input/ }));
 
     await waitFor(
       () => {
@@ -2050,7 +2048,8 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.click(screen.getByRole("button", { name: "Code Python step" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Code/ }));
     const codeNodeLabel = screen
       .getAllByText("Code")
       .find((element) => element.closest(".react-flow__node"));
@@ -2091,9 +2090,8 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Workflows" }));
-    await user.click(
-      screen.getByRole("button", { name: "Timer Scheduled trigger" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Timer/ }));
     const timerNodeLabel = screen
       .getAllByText("Timer")
       .find((element) => element.closest(".react-flow__node"));

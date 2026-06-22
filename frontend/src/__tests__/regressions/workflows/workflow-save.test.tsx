@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,6 +44,7 @@ type ReactFlowMockProps = {
   children?: ReactNode;
   edges: FlowEdge[];
   nodes: FlowNode[];
+  onPaneContextMenu?: (event: React.MouseEvent<Element>) => void;
   onNodesChange?: (changes: NodeChange[]) => void;
   snapGrid?: [number, number];
   snapToGrid?: boolean;
@@ -71,13 +72,17 @@ vi.mock("@xyflow/react", async () => {
       children,
       edges,
       nodes,
+      onPaneContextMenu,
       onNodesChange,
       snapGrid,
       snapToGrid,
     }: ReactFlowMockProps) => {
       reactFlowRenderMock({ edges, nodes, snapGrid, snapToGrid });
       return (
-        <div data-testid="workflow-flow">
+        <div
+          data-testid="workflow-flow"
+          onContextMenu={(event) => onPaneContextMenu?.(event)}
+        >
           {nodes.map((node) => (
             <button
               data-testid={`workflow-node-${node.id}`}
@@ -346,6 +351,50 @@ describe("workflow save regressions", () => {
             expect.objectContaining({
               id: "input",
               position: { x: 480, y: 160 },
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("adds workflow nodes from the canvas context menu at the clicked grid position", async () => {
+    const user = userEvent.setup();
+    const saveBodies: unknown[] = [];
+    mockAppFetch((input, init) => {
+      if (input === "/api/workflows" && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body));
+        saveBodies.push(body);
+        return new Response(JSON.stringify(body), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      return null;
+    });
+    window.history.replaceState(null, "", "/workflows");
+
+    render(<App />);
+
+    fireEvent.contextMenu(await screen.findByTestId("workflow-flow"), {
+      clientX: 143,
+      clientY: 86,
+    });
+    await user.click(await screen.findByRole("menuitem", { name: /Code/ }));
+
+    await waitFor(
+      () => {
+        expect(saveBodies).toHaveLength(1);
+      },
+      { timeout: 2000 },
+    );
+    expect(saveBodies[0]).toEqual(
+      expect.objectContaining({
+        definition: expect.objectContaining({
+          nodes: [
+            expect.objectContaining({
+              position: { x: 140, y: 80 },
+              type: "code",
             }),
           ],
         }),
