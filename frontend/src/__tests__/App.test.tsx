@@ -44,6 +44,36 @@ globalThis.ResizeObserver =
   globalThis.ResizeObserver ??
   (TestResizeObserver as unknown as typeof ResizeObserver);
 
+const mockNarrowSidebarViewport = () => {
+  const originalMatchMedia = window.matchMedia;
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: query.includes("max-width: 900px"),
+      media: query,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn(),
+    })),
+    writable: true,
+  });
+
+  return () => {
+    if (originalMatchMedia) {
+      Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        value: originalMatchMedia,
+        writable: true,
+      });
+      return;
+    }
+    delete (window as Partial<Window>).matchMedia;
+  };
+};
+
 const assistantStreamResponse = (
   content: string,
   id = "message-assistant",
@@ -1747,6 +1777,88 @@ describe("App", () => {
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Pin" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+  });
+
+  it("shows the mobile sidebar as an overlay drawer", async () => {
+    const restoreViewport = mockNarrowSidebarViewport();
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+
+    try {
+      render(<App />);
+
+      await user.click(await screen.findByRole("button", { name: "Menu" }));
+
+      const dialog = await screen.findByRole("dialog", {
+        name: "Navigation",
+      });
+      const mobileNavigation = within(dialog).getByRole("navigation", {
+        name: "Mobile navigation",
+      });
+
+      expect(
+        within(mobileNavigation).getByRole("tab", { name: "Workspace" }),
+      ).toBeInTheDocument();
+      expect(
+        within(mobileNavigation).getByRole("tab", { name: "Skills" }),
+      ).toBeInTheDocument();
+      expect(within(mobileNavigation).getByText("Tools")).toBeInTheDocument();
+      expect(within(mobileNavigation).getByText("Setup")).toBeInTheDocument();
+      expect(
+        within(mobileNavigation).getByRole("button", {
+          name: "Launch Workflow",
+        }),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByText("OpenAI")).toBeInTheDocument();
+
+      await user.click(
+        within(mobileNavigation).getByRole("tab", { name: "Skills" }),
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: "Menu" }));
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+    } finally {
+      restoreViewport();
+    }
+  });
+
+  it("closes the mobile sidebar after selecting a workflow", async () => {
+    const restoreViewport = mockNarrowSidebarViewport();
+    const user = userEvent.setup();
+    mockInitialState({
+      ...selectedProviderState(),
+      workflows: [savedWorkflow()],
+    });
+
+    try {
+      render(<App />);
+
+      await user.click(await screen.findByRole("button", { name: "Menu" }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "Navigation",
+      });
+      await user.click(
+        within(dialog).getByRole("button", { name: "Launch Workflow" }),
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      expect(window.location.pathname).toBe("/workflows/workflow-1");
+    } finally {
+      restoreViewport();
+    }
   });
 
   it("collapses and expands the Workflows history section", async () => {

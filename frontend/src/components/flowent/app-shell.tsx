@@ -17,6 +17,7 @@ import {
   Ellipsis,
   ExternalLink,
   KeyRound,
+  Menu,
   MessageSquare,
   Pencil,
   Pin,
@@ -42,6 +43,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -106,12 +108,14 @@ const sidebarClickDelayMs = 180;
 const sidebarNarrowLayoutQuery = "(max-width: 900px)";
 
 function NavigationTrigger({
+  isMobileDrawer = false,
   isSidebarCollapsed,
   item,
   onClick,
   shouldReduceMotion,
   suppressActiveStyle = false,
 }: {
+  isMobileDrawer?: boolean;
   isSidebarCollapsed: boolean;
   item: NavigationItem;
   onClick?: () => void;
@@ -127,9 +131,12 @@ function NavigationTrigger({
       value={item.id}
       onClick={onClick}
       className={cn(
-        "flowent-navigation-item cursor-pointer justify-start gap-2 rounded-lg border border-transparent bg-transparent px-2 py-1 shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] data-[state=active]:bg-[#202020] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden",
+        "flowent-navigation-item cursor-pointer justify-start gap-2 rounded-lg border border-transparent bg-transparent px-2 py-1 shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] data-[state=active]:bg-[#202020]",
         navigationLabelClassName,
         sidebarTransitionClassName,
+        !isMobileDrawer &&
+          "max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2 max-[560px]:[&_svg]:hidden",
+        isMobileDrawer && "w-full justify-start",
         isSidebarCollapsed &&
           "flowent-sidebar-rail-item !w-10 !flex-none pl-[11px] pr-0 group-data-vertical/tabs:!w-10",
         "dark:hover:bg-[#151515] dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-[#202020]",
@@ -151,6 +158,7 @@ function NavigationTrigger({
 
 function WorkflowNavigationItem({
   isActive,
+  isMobileDrawer = false,
   isPinned,
   isRenaming,
   onDelete,
@@ -163,6 +171,7 @@ function WorkflowNavigationItem({
   workflow,
 }: {
   isActive: boolean;
+  isMobileDrawer?: boolean;
   isPinned: boolean;
   isRenaming: boolean;
   onDelete: (workflowId: string) => void;
@@ -224,9 +233,12 @@ function WorkflowNavigationItem({
     >
       <Button
         className={cn(
-          "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 pr-8 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515] max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
+          "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 pr-8 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515]",
           navigationLabelClassName,
           sidebarTransitionClassName,
+          !isMobileDrawer &&
+            "max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
+          isMobileDrawer && "min-w-0 flex-none justify-start px-2",
           isActive && "flowent-workflow-history-item-active bg-[#202020]",
         )}
         onClick={() => onSelect(workflow.id)}
@@ -288,6 +300,274 @@ function WorkflowNavigationItem({
   );
 }
 
+function SidebarPanel({
+  activeProviderName,
+  activeView,
+  activeWorkflowId,
+  isMobileDrawer = false,
+  isSidebarCollapsed,
+  isWorkflowSectionOpen,
+  onCloseMobileSidebar,
+  onNewWorkflow,
+  onWorkflowDelete,
+  onWorkflowRename,
+  onWorkflowSectionOpenChange,
+  onWorkflowSelect,
+  shouldReduceMotion,
+  toggleSidebar,
+  workflows,
+}: {
+  activeProviderName?: string;
+  activeView: ViewId;
+  activeWorkflowId?: string;
+  isMobileDrawer?: boolean;
+  isSidebarCollapsed: boolean;
+  isWorkflowSectionOpen: boolean;
+  onCloseMobileSidebar?: () => void;
+  onNewWorkflow: () => void;
+  onWorkflowDelete: (workflowId: string) => void;
+  onWorkflowRename: (workflowId: string, nextName: string) => void;
+  onWorkflowSectionOpenChange: (open: boolean) => void;
+  onWorkflowSelect: (workflowId: string) => void;
+  shouldReduceMotion: boolean;
+  toggleSidebar: () => void;
+  workflows: Workflow[];
+}) {
+  const isCollapsed = isMobileDrawer ? false : isSidebarCollapsed;
+  const closeMobileSidebar = () => {
+    if (isMobileDrawer) {
+      onCloseMobileSidebar?.();
+    }
+  };
+  const handleWorkflowSelect = (workflowId: string) => {
+    onWorkflowSelect(workflowId);
+    closeMobileSidebar();
+  };
+  const handleWorkflowsNavigationClick = () => {
+    if (activeView === "workflows" && activeWorkflowId) {
+      onNewWorkflow();
+    }
+    closeMobileSidebar();
+  };
+
+  return (
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col border-r border-white/10 bg-black px-3 py-3",
+        isMobileDrawer && "w-full",
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-10 min-h-10 items-center bg-black px-1 transition-[gap] max-[560px]:min-h-10",
+          shouldReduceMotion
+            ? "duration-0"
+            : cn("duration-300", sidebarTransitionClassName),
+          "gap-2.5",
+        )}
+      >
+        <div
+          className={cn(
+            "grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30 transition-transform",
+            shouldReduceMotion
+              ? "duration-0"
+              : cn("duration-300", sidebarTransitionClassName),
+            isCollapsed && "flowent-sidebar-rail-logo -translate-x-1",
+          )}
+        >
+          <img alt="" className="size-full object-cover" src="/flowent.png" />
+        </div>
+        <SidebarText
+          className="min-w-0 flex-1 self-center"
+          isVisible={!isCollapsed}
+          shouldReduceMotion={shouldReduceMotion}
+        >
+          <div className="flowent-sidebar-brand truncate">Flowent</div>
+        </SidebarText>
+        {isMobileDrawer ? (
+          <Button
+            aria-label="Close sidebar"
+            className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
+            onClick={onCloseMobileSidebar}
+            size="icon"
+            title="Close sidebar"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronsLeft aria-hidden="true" />
+          </Button>
+        ) : (
+          <AnimatePresence initial={false}>
+            {!isCollapsed ? (
+              <motion.div
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                initial={shouldReduceMotion ? false : { opacity: 0 }}
+                key="collapse-sidebar-button"
+                transition={
+                  shouldReduceMotion ? { duration: 0 } : sidebarMotionTransition
+                }
+              >
+                <Button
+                  aria-label="Collapse sidebar"
+                  className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
+                  onClick={toggleSidebar}
+                  size="icon"
+                  title="Collapse sidebar"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ChevronsLeft aria-hidden="true" />
+                </Button>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        )}
+      </div>
+
+      <nav
+        aria-label={isMobileDrawer ? "Mobile navigation" : "Primary navigation"}
+      >
+        <TabsList
+          className={cn(
+            "mt-4 flex w-auto flex-none flex-col items-stretch gap-0 p-0",
+            "-mx-1",
+            !isMobileDrawer &&
+              "max-[900px]:mt-3 max-[900px]:mx-0 max-[900px]:flex-row max-[560px]:justify-start max-[560px]:overflow-x-auto",
+          )}
+          variant="line"
+        >
+          <NavigationTrigger
+            isMobileDrawer={isMobileDrawer}
+            isSidebarCollapsed={isCollapsed}
+            item={workspaceNavigationItem}
+            onClick={closeMobileSidebar}
+            shouldReduceMotion={shouldReduceMotion}
+          />
+          <NavigationTrigger
+            isMobileDrawer={isMobileDrawer}
+            isSidebarCollapsed={isCollapsed}
+            item={workflowsNavigationItem}
+            onClick={
+              isMobileDrawer || (activeView === "workflows" && activeWorkflowId)
+                ? handleWorkflowsNavigationClick
+                : undefined
+            }
+            shouldReduceMotion={shouldReduceMotion}
+            suppressActiveStyle={
+              activeView === "workflows" && Boolean(activeWorkflowId)
+            }
+          />
+          {navigationGroups.map((group) => (
+            <Fragment key={group.label}>
+              <SidebarBlock
+                className="flowent-sidebar-section-label px-2 pt-4 pb-1"
+                isDecorative
+                isVisible={!isCollapsed}
+                shouldReduceMotion={shouldReduceMotion}
+                wrapperClassName={cn(!isMobileDrawer && "max-[900px]:hidden")}
+              >
+                {group.label}
+              </SidebarBlock>
+              {group.items.map((item) => (
+                <NavigationTrigger
+                  isMobileDrawer={isMobileDrawer}
+                  isSidebarCollapsed={isCollapsed}
+                  key={item.id}
+                  item={item}
+                  onClick={closeMobileSidebar}
+                  shouldReduceMotion={shouldReduceMotion}
+                />
+              ))}
+            </Fragment>
+          ))}
+          <SidebarBlock
+            className="pt-4"
+            isVisible={!isCollapsed}
+            shouldReduceMotion={shouldReduceMotion}
+            wrapperClassName={cn(!isMobileDrawer && "max-[900px]:hidden")}
+          >
+            <WorkflowsNavigationSection
+              activeView={activeView}
+              activeWorkflowId={activeWorkflowId}
+              isMobileDrawer={isMobileDrawer}
+              isOpen={isWorkflowSectionOpen}
+              onOpenChange={onWorkflowSectionOpenChange}
+              onWorkflowDelete={onWorkflowDelete}
+              onWorkflowRename={onWorkflowRename}
+              onWorkflowSelect={handleWorkflowSelect}
+              shouldReduceMotion={shouldReduceMotion}
+              workflows={workflows}
+            />
+          </SidebarBlock>
+        </TabsList>
+      </nav>
+
+      <div
+        className={cn(
+          "mt-auto flex flex-col gap-2",
+          !isMobileDrawer && "max-[900px]:hidden",
+        )}
+      >
+        {!isMobileDrawer ? (
+          <AnimatePresence initial={false}>
+            {isCollapsed ? (
+              <motion.div
+                animate={{ opacity: 1 }}
+                className="-mx-1"
+                exit={{ opacity: 0 }}
+                initial={shouldReduceMotion ? false : { opacity: 0 }}
+                key="expand-sidebar-button"
+                transition={
+                  shouldReduceMotion
+                    ? { duration: 0 }
+                    : {
+                        ...sidebarMotionTransition,
+                        delay: 0.08,
+                      }
+                }
+              >
+                <Button
+                  aria-label="Expand sidebar"
+                  className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
+                  onClick={toggleSidebar}
+                  size="icon"
+                  title="Expand sidebar"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ChevronsRight aria-hidden="true" />
+                </Button>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        ) : null}
+        <div
+          className={cn(
+            "flowent-sidebar-status -mx-1 flex h-8 items-center gap-2 px-2 transition-[padding,color]",
+            shouldReduceMotion
+              ? "duration-0"
+              : cn("duration-300", sidebarTransitionClassName),
+            isCollapsed && "flowent-sidebar-rail-status pl-[17px] pr-0",
+          )}
+          title={activeProviderName ?? "No provider"}
+        >
+          <div
+            className="size-1.5 rounded-full bg-[#7ddf89]"
+            aria-hidden="true"
+          />
+          <SidebarText
+            isVisible={!isCollapsed}
+            shouldReduceMotion={shouldReduceMotion}
+          >
+            <span>{activeProviderName ?? "No provider"}</span>
+          </SidebarText>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AppShell({
   activeProviderName,
   activeView,
@@ -315,6 +595,7 @@ export function AppShell({
   const [isSidebarNarrowLayout, setIsSidebarNarrowLayout] = useState(() =>
     isSidebarNarrowViewport(),
   );
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredSidebarWidth(),
   );
@@ -417,7 +698,9 @@ export function AppShell({
       setIsSidebarNarrowLayout(mediaQuery.matches);
       if (mediaQuery.matches) {
         setIsSidebarCollapsed(false);
+        return;
       }
+      setIsMobileSidebarOpen(false);
     };
 
     handleChange();
@@ -436,6 +719,10 @@ export function AppShell({
         return;
       }
       event.preventDefault();
+      if (isSidebarNarrowLayout) {
+        setIsMobileSidebarOpen((current) => !current);
+        return;
+      }
       toggleSidebar();
     };
 
@@ -443,7 +730,7 @@ export function AppShell({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [toggleSidebar]);
+  }, [isSidebarNarrowLayout, toggleSidebar]);
 
   useEffect(
     () => () => {
@@ -473,9 +760,49 @@ export function AppShell({
             }
       }
     >
+      <Dialog open={isMobileSidebarOpen} onOpenChange={setIsMobileSidebarOpen}>
+        <div className="hidden h-14 min-h-14 items-center border-b border-white/10 bg-black px-3 max-[900px]:flex">
+          <Button
+            aria-label="Menu"
+            className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
+            onClick={() => setIsMobileSidebarOpen(true)}
+            size="icon"
+            title="Menu"
+            type="button"
+            variant="ghost"
+          >
+            <Menu aria-hidden="true" />
+          </Button>
+        </div>
+        <DialogContent
+          aria-describedby={undefined}
+          className="top-0 left-0 flex h-[var(--flowent-viewport-height)] max-h-none w-[257px] max-w-[calc(100vw-64px)] translate-x-0 translate-y-0 rounded-none border-0 bg-black p-0 text-white ring-0 shadow-none sm:max-w-[257px] data-closed:slide-out-to-left-2 data-open:slide-in-from-left-2"
+          overlayClassName="bg-white/10 backdrop-blur-[1px]"
+          showCloseButton={false}
+        >
+          <DialogTitle className="sr-only">Navigation</DialogTitle>
+          <SidebarPanel
+            activeProviderName={activeProviderName}
+            activeView={activeView}
+            activeWorkflowId={activeWorkflowId}
+            isMobileDrawer
+            isSidebarCollapsed={false}
+            isWorkflowSectionOpen={isWorkflowSectionOpen}
+            onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
+            onNewWorkflow={onNewWorkflow}
+            onWorkflowDelete={onWorkflowDelete}
+            onWorkflowRename={onWorkflowRename}
+            onWorkflowSectionOpenChange={setIsWorkflowSectionOpen}
+            onWorkflowSelect={onWorkflowSelect}
+            shouldReduceMotion={shouldReduceMotion}
+            toggleSidebar={toggleSidebar}
+            workflows={workflows}
+          />
+        </DialogContent>
+      </Dialog>
       <aside
         className={cn(
-          "relative flex min-h-0 flex-col border-r border-white/10 bg-black px-3 py-3 max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3",
+          "relative flex min-h-0 flex-col border-r border-white/10 bg-black px-3 py-3 max-[900px]:hidden max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3",
           shouldReduceMotion
             ? "duration-0"
             : cn("duration-300", sidebarTransitionClassName),
@@ -763,6 +1090,7 @@ function SidebarBlock({
 function WorkflowsNavigationSection({
   activeView,
   activeWorkflowId,
+  isMobileDrawer = false,
   isOpen,
   onOpenChange,
   onWorkflowDelete,
@@ -773,6 +1101,7 @@ function WorkflowsNavigationSection({
 }: {
   activeView: ViewId;
   activeWorkflowId?: string;
+  isMobileDrawer?: boolean;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onWorkflowDelete: (workflowId: string) => void;
@@ -842,7 +1171,7 @@ function WorkflowsNavigationSection({
 
   return (
     <Collapsible
-      className="max-[900px]:hidden"
+      className={cn(!isMobileDrawer && "max-[900px]:hidden")}
       open={isOpen}
       onOpenChange={onOpenChange}
     >
@@ -850,8 +1179,9 @@ function WorkflowsNavigationSection({
         <Button
           aria-label="Workflows"
           className={cn(
-            "flowent-workflow-history-trigger h-7 w-full cursor-pointer justify-between rounded-md border border-transparent bg-transparent px-2 py-0 text-[11px] leading-4 font-medium text-white/45 shadow-none transition-colors duration-100 hover:bg-transparent hover:text-white/70 aria-expanded:bg-transparent aria-expanded:text-white/45 dark:aria-expanded:bg-transparent dark:aria-expanded:text-white/45 max-[900px]:hidden",
+            "flowent-workflow-history-trigger h-7 w-full cursor-pointer justify-between rounded-md border border-transparent bg-transparent px-2 py-0 text-[11px] leading-4 font-medium text-white/45 shadow-none transition-colors duration-100 hover:bg-transparent hover:text-white/70 aria-expanded:bg-transparent aria-expanded:text-white/45 dark:aria-expanded:bg-transparent dark:aria-expanded:text-white/45",
             navigationLabelClassName,
+            !isMobileDrawer && "max-[900px]:hidden",
             hasActiveWorkflow &&
               !isOpen &&
               "flowent-workflow-history-item-active",
@@ -896,7 +1226,12 @@ function WorkflowsNavigationSection({
               }
             >
               {workflows.length === 0 ? (
-                <div className="flowent-sidebar-section-label flex h-8 w-full items-center px-2 max-[900px]:hidden">
+                <div
+                  className={cn(
+                    "flowent-sidebar-section-label flex h-8 w-full items-center px-2",
+                    !isMobileDrawer && "max-[900px]:hidden",
+                  )}
+                >
                   <span>No workflow yet.</span>
                 </div>
               ) : (
@@ -906,6 +1241,7 @@ function WorkflowsNavigationSection({
                       activeView === "workflows" &&
                       activeWorkflowId === workflow.id
                     }
+                    isMobileDrawer={isMobileDrawer}
                     isPinned={pinnedWorkflowIdSet.has(workflow.id)}
                     isRenaming={renamingWorkflowId === workflow.id}
                     key={workflow.id}
