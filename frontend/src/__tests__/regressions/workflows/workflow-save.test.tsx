@@ -380,8 +380,12 @@ describe("workflow save regressions", () => {
       clientX: 143,
       clientY: 86,
     });
-    await user.click(await screen.findByRole("menuitem", { name: "Add Node" }));
-    await user.click(await screen.findByRole("menuitem", { name: /^Code$/ }));
+    await user.hover(await screen.findByRole("menuitem", { name: "Add Node" }));
+    const codeMenuItem = await screen.findByRole("menuitem", {
+      name: /^Code$/,
+    });
+    codeMenuItem.focus();
+    await user.keyboard("{Enter}");
 
     await waitFor(
       () => {
@@ -401,6 +405,34 @@ describe("workflow save regressions", () => {
         }),
       }),
     );
+  });
+
+  it("keeps the canvas context submenu out of the parent menu scroll area", async () => {
+    const user = userEvent.setup();
+    mockAppFetch();
+    window.history.replaceState(null, "", "/workflows");
+
+    render(<App />);
+
+    fireEvent.contextMenu(await screen.findByTestId("workflow-flow"), {
+      clientX: 143,
+      clientY: 86,
+    });
+
+    const addNodeItem = await screen.findByRole("menuitem", {
+      name: "Add Node",
+    });
+    await user.hover(addNodeItem);
+    expect(
+      await screen.findByRole("menuitem", { name: /^Code$/ }),
+    ).toBeInTheDocument();
+
+    const parentMenu = addNodeItem.closest('[role="menu"]');
+    expect(parentMenu).toBeTruthy();
+    expect(parentMenu).toHaveTextContent("Add Node");
+    expect(parentMenu).not.toHaveTextContent("Code");
+    expect(parentMenu).not.toHaveTextContent("Input");
+    expect(parentMenu).not.toHaveTextContent("Output");
   });
 
   it("does not run a workflow when it could not be saved first", async () => {

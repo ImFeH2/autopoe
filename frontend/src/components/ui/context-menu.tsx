@@ -56,4 +56,54 @@ function ContextMenuItem({
   );
 }
 
-export { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger };
+function ContextMenuSub({
+  ...props
+}: React.ComponentProps<typeof ContextMenuPrimitive.Sub>) {
+  return <ContextMenuPrimitive.Sub data-slot="context-menu-sub" {...props} />;
+}
+
+function ContextMenuSubTrigger({
+  className,
+  ...props
+}: React.ComponentProps<typeof ContextMenuPrimitive.SubTrigger>) {
+  return (
+    <ContextMenuPrimitive.SubTrigger
+      className={cn(
+        "relative flex h-[33px] cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1.5 text-sm leading-[21px] text-white outline-none transition-colors duration-100 focus:bg-white/[0.08] data-[state=open]:bg-white/[0.08] data-disabled:pointer-events-none data-disabled:opacity-50",
+        className,
+      )}
+      data-slot="context-menu-sub-trigger"
+      {...props}
+    />
+  );
+}
+
+function ContextMenuSubContent({
+  className,
+  sideOffset = 6,
+  ...props
+}: React.ComponentProps<typeof ContextMenuPrimitive.SubContent>) {
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.SubContent
+        className={cn(
+          "z-[160] min-w-36 overflow-auto rounded-2xl border border-white/10 bg-[#161616] p-1 text-white shadow-md shadow-black/20 outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          className,
+        )}
+        data-slot="context-menu-sub-content"
+        sideOffset={sideOffset}
+        {...props}
+      />
+    </ContextMenuPrimitive.Portal>
+  );
+}
+
+export {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+};

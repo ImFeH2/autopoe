@@ -47,6 +47,9 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
@@ -571,10 +574,10 @@ function WorkflowCanvasContextAddMenu({
   const [isNodePickerOpen, setIsNodePickerOpen] = useState(false);
 
   return (
-    <div className="relative" onMouseEnter={() => setIsNodePickerOpen(true)}>
-      <ContextMenuItem
+    <ContextMenuSub open={isNodePickerOpen} onOpenChange={setIsNodePickerOpen}>
+      <ContextMenuSubTrigger
         className="min-w-40"
-        onSelect={(event) => {
+        onClick={(event) => {
           event.preventDefault();
           setIsNodePickerOpen(true);
         }}
@@ -582,16 +585,14 @@ function WorkflowCanvasContextAddMenu({
         <Plus className="size-4 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1">Add Node</span>
         <ChevronRight className="size-4 shrink-0 text-white/45" />
-      </ContextMenuItem>
-      {isNodePickerOpen ? (
-        <div className="absolute top-0 left-[calc(100%+6px)] z-[160] rounded-2xl border border-white/10 bg-[#161616] p-1 text-white shadow-md shadow-black/20">
-          <WorkflowNodePickerContent
-            Item={ContextMenuItem}
-            onAddNode={onAddNode}
-          />
-        </div>
-      ) : null}
-    </div>
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent>
+        <WorkflowNodePickerContent
+          Item={ContextMenuItem}
+          onAddNode={onAddNode}
+        />
+      </ContextMenuSubContent>
+    </ContextMenuSub>
   );
 }
 
