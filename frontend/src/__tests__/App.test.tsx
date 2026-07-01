@@ -1649,14 +1649,21 @@ describe("App", () => {
       }),
     );
 
+    const openNewTabItem = screen.getByRole("menuitem", {
+      name: "Open new tab",
+    });
+    expect(openNewTabItem).toBeVisible();
     expect(
-      screen.getByRole("menuitem", { name: "Open new tab" }),
-    ).toBeVisible();
+      openNewTabItem.closest('[data-slot="dropdown-menu-content"]'),
+    ).not.toBeNull();
+    expect(
+      openNewTabItem.closest('[data-slot="context-menu-content"]'),
+    ).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Pin" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeVisible();
 
-    await user.click(screen.getByRole("menuitem", { name: "Open new tab" }));
+    await user.click(openNewTabItem);
 
     expect(openSpy).toHaveBeenCalledWith(
       "/workflows/workflow-1",
@@ -1769,11 +1776,18 @@ describe("App", () => {
       name: "Launch Workflow",
     });
 
-    fireEvent.contextMenu(launchWorkflow);
+    fireEvent.contextMenu(launchWorkflow, { clientX: 120, clientY: 240 });
 
+    const openNewTabItem = await screen.findByRole("menuitem", {
+      name: "Open new tab",
+    });
+    expect(openNewTabItem).toBeVisible();
     expect(
-      await screen.findByRole("menuitem", { name: "Open new tab" }),
-    ).toBeVisible();
+      openNewTabItem.closest('[data-slot="context-menu-content"]'),
+    ).not.toBeNull();
+    expect(
+      openNewTabItem.closest('[data-slot="dropdown-menu-content"]'),
+    ).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Pin" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeVisible();

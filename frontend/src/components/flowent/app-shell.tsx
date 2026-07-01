@@ -43,6 +43,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -156,6 +162,49 @@ function NavigationTrigger({
   );
 }
 
+function WorkflowNavigationMenuItems({
+  isPinned,
+  Item,
+  onDelete,
+  onOpenNewTab,
+  onRenameStart,
+  onTogglePin,
+  workflow,
+}: {
+  isPinned: boolean;
+  Item: typeof ContextMenuItem | typeof DropdownMenuItem;
+  onDelete: (workflowId: string) => void;
+  onOpenNewTab: (workflowId: string) => void;
+  onRenameStart: (workflowId: string) => void;
+  onTogglePin: (workflowId: string) => void;
+  workflow: Workflow;
+}) {
+  return (
+    <>
+      <Item onSelect={() => onOpenNewTab(workflow.id)}>
+        <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
+        Open new tab
+      </Item>
+      <Item onSelect={() => onRenameStart(workflow.id)}>
+        <Pencil className="size-4 shrink-0" aria-hidden="true" />
+        Rename
+      </Item>
+      <Item onSelect={() => onTogglePin(workflow.id)}>
+        {isPinned ? (
+          <PinOff className="size-4 shrink-0" aria-hidden="true" />
+        ) : (
+          <Pin className="size-4 shrink-0" aria-hidden="true" />
+        )}
+        {isPinned ? "Unpin" : "Pin"}
+      </Item>
+      <Item onSelect={() => onDelete(workflow.id)} variant="destructive">
+        <Trash2 className="size-4 shrink-0" aria-hidden="true" />
+        Delete
+      </Item>
+    </>
+  );
+}
+
 function WorkflowNavigationItem({
   isActive,
   isMobileDrawer = false,
@@ -185,6 +234,7 @@ function WorkflowNavigationItem({
 }) {
   const [draftName, setDraftName] = useState(workflow.name);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
 
   useEffect(() => {
     if (isRenaming) {
@@ -224,79 +274,77 @@ function WorkflowNavigationItem({
   }
 
   return (
-    <div
-      className="group/workflow-menu-item relative h-8"
-      onContextMenu={(event) => {
-        event.preventDefault();
-        setIsMenuOpen(true);
-      }}
-    >
-      <Button
-        className={cn(
-          "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 pr-8 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515]",
-          navigationLabelClassName,
-          sidebarTransitionClassName,
-          !isMobileDrawer &&
-            "max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
-          isMobileDrawer && "min-w-0 flex-none justify-start px-2",
-          isActive && "flowent-workflow-history-item-active bg-[#202020]",
-        )}
-        onClick={() => onSelect(workflow.id)}
-        title={workflow.name}
-        type="button"
-        variant="ghost"
-      >
-        <span className="flowent-navigation-text min-w-0 truncate">
-          {workflow.name}
-        </span>
-        {isPinned ? (
-          <Pin
-            className="ml-auto size-3.5 shrink-0 text-white/60"
-            aria-hidden="true"
-          />
-        ) : null}
-      </Button>
-      <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-        <DropdownMenuTrigger asChild>
+    <ContextMenu onOpenChange={setIsContextMenuOpen}>
+      <ContextMenuTrigger asChild>
+        <div className="group/workflow-menu-item relative h-8">
           <Button
-            aria-label="Options"
-            className="absolute top-1 right-1 hidden size-6 cursor-pointer rounded-md border border-transparent bg-transparent p-0 text-white shadow-none hover:bg-white/[0.08] focus-visible:flex data-[state=open]:flex data-[state=open]:bg-white/[0.08] group-hover/workflow-menu-item:flex group-focus-within/workflow-menu-item:flex"
-            onClick={(event) => event.stopPropagation()}
-            size="icon"
-            title="Options"
+            className={cn(
+              "flowent-workflow-history-item h-8 w-full cursor-pointer justify-start rounded-lg border border-transparent bg-transparent px-2 py-1 pr-8 text-left shadow-none transition-[width,height,padding,color,background-color] duration-300 hover:bg-[#151515]",
+              navigationLabelClassName,
+              sidebarTransitionClassName,
+              !isMobileDrawer &&
+                "max-[900px]:justify-center max-[560px]:min-w-fit max-[560px]:flex-none max-[560px]:px-2",
+              isMobileDrawer && "min-w-0 flex-none justify-start px-2",
+              isActive && "flowent-workflow-history-item-active bg-[#202020]",
+            )}
+            onClick={() => onSelect(workflow.id)}
+            title={workflow.name}
             type="button"
             variant="ghost"
           >
-            <Ellipsis className="size-4" aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" alignOffset={-84} sideOffset={2}>
-          <DropdownMenuItem onSelect={() => onOpenNewTab(workflow.id)}>
-            <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
-            Open new tab
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onRenameStart(workflow.id)}>
-            <Pencil className="size-4 shrink-0" aria-hidden="true" />
-            Rename
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onTogglePin(workflow.id)}>
+            <span className="flowent-navigation-text min-w-0 truncate">
+              {workflow.name}
+            </span>
             {isPinned ? (
-              <PinOff className="size-4 shrink-0" aria-hidden="true" />
-            ) : (
-              <Pin className="size-4 shrink-0" aria-hidden="true" />
-            )}
-            {isPinned ? "Unpin" : "Pin"}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => onDelete(workflow.id)}
-            variant="destructive"
-          >
-            <Trash2 className="size-4 shrink-0" aria-hidden="true" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+              <Pin
+                className="ml-auto size-3.5 shrink-0 text-white/60"
+                aria-hidden="true"
+              />
+            ) : null}
+          </Button>
+          <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label="Options"
+                className={cn(
+                  "absolute top-1 right-1 hidden size-6 cursor-pointer rounded-md border border-transparent bg-transparent p-0 text-white shadow-none hover:bg-white/[0.08] focus-visible:flex data-[state=open]:flex data-[state=open]:bg-white/[0.08] group-hover/workflow-menu-item:flex group-focus-within/workflow-menu-item:flex",
+                  isContextMenuOpen && "flex",
+                )}
+                onClick={(event) => event.stopPropagation()}
+                size="icon"
+                title="Options"
+                type="button"
+                variant="ghost"
+              >
+                <Ellipsis className="size-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" alignOffset={-84} sideOffset={2}>
+              <WorkflowNavigationMenuItems
+                isPinned={isPinned}
+                Item={DropdownMenuItem}
+                onDelete={onDelete}
+                onOpenNewTab={onOpenNewTab}
+                onRenameStart={onRenameStart}
+                onTogglePin={onTogglePin}
+                workflow={workflow}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <WorkflowNavigationMenuItems
+          isPinned={isPinned}
+          Item={ContextMenuItem}
+          onDelete={onDelete}
+          onOpenNewTab={onOpenNewTab}
+          onRenameStart={onRenameStart}
+          onTogglePin={onTogglePin}
+          workflow={workflow}
+        />
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
