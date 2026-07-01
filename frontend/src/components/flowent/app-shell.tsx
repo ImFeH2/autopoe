@@ -237,6 +237,12 @@ function WorkflowNavigationItem({
         <span className="flowent-navigation-text min-w-0 truncate">
           {workflow.name}
         </span>
+        {isPinned ? (
+          <Pin
+            className="ml-auto size-3.5 shrink-0 text-white/60"
+            aria-hidden="true"
+          />
+        ) : null}
       </Button>
       <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
         <DropdownMenuTrigger asChild>

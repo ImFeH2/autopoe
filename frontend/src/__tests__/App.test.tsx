@@ -1680,6 +1680,20 @@ describe("App", () => {
       "Second Workflow",
       "Renamed Workflow",
     ]);
+    expect(
+      screen
+        .getByRole("button", {
+          name: "Second Workflow",
+        })
+        .querySelector("svg"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("button", {
+          name: "Renamed Workflow",
+        })
+        .querySelector("svg"),
+    ).toBeNull();
     expect(window.localStorage.getItem("flowent:pinned-workflows")).toContain(
       "workflow-2",
     );
