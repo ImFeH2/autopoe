@@ -123,6 +123,42 @@ async def test_review_approval_request_uses_streaming_completion(tmp_path) -> No
     assert decision.decision == "approved"
     assert captured_request["stream"] is True
     assert captured_request["stream_options"] == {"include_usage": True}
+    assert captured_request["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "approval_review",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "risk_level": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "risk_score": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                    },
+                    "rationale": {"type": "string"},
+                    "evidence": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "message": {"type": "string"},
+                                "why": {"type": "string"},
+                            },
+                            "required": ["message", "why"],
+                        },
+                    },
+                },
+                "required": ["risk_level", "risk_score", "rationale", "evidence"],
+            },
+            "strict": True,
+        },
+    }
 
 
 @pytest.mark.anyio

@@ -83,6 +83,36 @@ def test_build_litellm_request_uses_flowent_user_agent() -> None:
     assert request["extra_headers"] == {"User-Agent": flowent_user_agent()}
 
 
+def test_build_litellm_request_includes_response_format() -> None:
+    connection = ProviderConnection(
+        name="Primary",
+        provider=ProviderFormat.OPENAI,
+        model="gpt-5.1",
+        secret_reference="connection-primary",
+    )
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "approval_review",
+            "schema": {
+                "type": "object",
+                "properties": {"risk_score": {"type": "integer"}},
+                "required": ["risk_score"],
+                "additionalProperties": False,
+            },
+            "strict": True,
+        },
+    }
+
+    request = build_litellm_request(
+        connection,
+        [ChatMessage(role="user", content="Review this request.")],
+        response_format=response_format,
+    )
+
+    assert request["response_format"] == response_format
+
+
 def test_build_litellm_request_appends_default_api_version_to_base_url() -> None:
     connection = ProviderConnection(
         name="OpenAI Compatible",

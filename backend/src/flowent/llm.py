@@ -335,6 +335,7 @@ def build_litellm_request(
     *,
     stream: bool = False,
     tools: Sequence[Mapping[str, Any]] | None = None,
+    response_format: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     request_messages = normalize_system_messages(
         [
@@ -351,6 +352,8 @@ def build_litellm_request(
     }
     if tools:
         request["tools"] = list(tools)
+    if response_format is not None:
+        request["response_format"] = dict(response_format)
     if stream:
         request["stream"] = True
         request["stream_options"] = {"include_usage": True}
@@ -363,12 +366,13 @@ def build_litellm_request(
         request["reasoning_effort"] = connection.reasoning_effort.value
     logger.log(
         TRACE_LEVEL,
-        "Built LiteLLM request provider=%s model=%s base_url=%s stream=%s tools=%s reasoning_effort=%s messages=%r",
+        "Built LiteLLM request provider=%s model=%s base_url=%s stream=%s tools=%s response_format=%s reasoning_effort=%s messages=%r",
         connection.provider,
         connection.model,
         normalized_base_url or "",
         stream,
         bool(tools),
+        bool(response_format),
         connection.reasoning_effort,
         request_messages,
     )
@@ -379,18 +383,19 @@ def record_litellm_request_diagnostic(
     connection: ProviderConnection,
     request: Mapping[str, Any],
 ) -> None:
-    write_llm_request_diagnostic(
-        {
-            "base_url": request.get("api_base"),
-            "litellm_model": request["model"],
-            "messages": request["messages"],
-            "model": connection.model,
-            "provider": connection.provider.value,
-            "reasoning_effort": connection.reasoning_effort.value,
-            "stream": request.get("stream", False),
-            "tools": request.get("tools", []),
-        }
-    )
+    diagnostic = {
+        "base_url": request.get("api_base"),
+        "litellm_model": request["model"],
+        "messages": request["messages"],
+        "model": connection.model,
+        "provider": connection.provider.value,
+        "reasoning_effort": connection.reasoning_effort.value,
+        "stream": request.get("stream", False),
+        "tools": request.get("tools", []),
+    }
+    if "response_format" in request:
+        diagnostic["response_format"] = request["response_format"]
+    write_llm_request_diagnostic(diagnostic)
 
 
 async def complete_chat(
@@ -399,6 +404,7 @@ async def complete_chat(
     *,
     completion: CompletionCallable | None = None,
     tools: Sequence[Mapping[str, Any]] | None = None,
+    response_format: Mapping[str, Any] | None = None,
 ) -> ChatMessage:
     return (
         await complete_chat_with_usage(
@@ -406,6 +412,7 @@ async def complete_chat(
             messages,
             completion=completion,
             tools=tools,
+            response_format=response_format,
         )
     ).message
 
@@ -416,6 +423,7 @@ async def complete_chat_with_usage(
     *,
     completion: CompletionCallable | None = None,
     tools: Sequence[Mapping[str, Any]] | None = None,
+    response_format: Mapping[str, Any] | None = None,
 ) -> ChatCompletionResult:
     if completion is None:
         from litellm import acompletion
@@ -428,7 +436,9 @@ async def complete_chat_with_usage(
         connection.provider,
         connection.model,
     )
-    request = build_litellm_request(connection, messages, tools=tools)
+    request = build_litellm_request(
+        connection, messages, tools=tools, response_format=response_format
+    )
     record_litellm_request_diagnostic(connection, request)
     response = await request_litellm_completion(completion, request)
     logger.log(TRACE_LEVEL, "LLM completion response=%r", response)
@@ -534,6 +544,7 @@ async def stream_chat_chunks(
     *,
     completion: CompletionCallable | None = None,
     tools: Sequence[Mapping[str, Any]] | None = None,
+    response_format: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[Any]:
     if completion is None:
         from litellm import acompletion
@@ -547,7 +558,13 @@ async def stream_chat_chunks(
         connection.provider,
         connection.model,
     )
-    request = build_litellm_request(connection, messages, stream=True, tools=tools)
+    request = build_litellm_request(
+        connection,
+        messages,
+        stream=True,
+        tools=tools,
+        response_format=response_format,
+    )
     record_litellm_request_diagnostic(connection, request)
     for attempt_number in range(LLM_RETRY_LIMIT + 1):
         yielded_chunk = False
@@ -570,8 +587,14 @@ async def stream_chat(
     messages: Sequence[ChatMessage | Mapping[str, Any]],
     *,
     completion: CompletionCallable | None = None,
+    response_format: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[str]:
-    async for chunk in stream_chat_chunks(connection, messages, completion=completion):
+    async for chunk in stream_chat_chunks(
+        connection,
+        messages,
+        completion=completion,
+        response_format=response_format,
+    ):
         content = chunk_delta_content(chunk)
         if content:
             yield content

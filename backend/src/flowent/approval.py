@@ -37,6 +37,44 @@ Return strict JSON only:
 """
 
 
+APPROVAL_REVIEW_RESPONSE_FORMAT: dict[str, object] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "approval_review",
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "risk_level": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                },
+                "risk_score": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+                "rationale": {"type": "string"},
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "message": {"type": "string"},
+                            "why": {"type": "string"},
+                        },
+                        "required": ["message", "why"],
+                    },
+                },
+            },
+            "required": ["risk_level", "risk_score", "rationale", "evidence"],
+        },
+        "strict": True,
+    },
+}
+
+
 class ApprovalTranscriptEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -143,6 +181,7 @@ async def review_approval_request(
                 ),
             ],
             completion=completion,
+            response_format=APPROVAL_REVIEW_RESPONSE_FORMAT,
         ):
             content += delta
         return parse_review_decision(content)
