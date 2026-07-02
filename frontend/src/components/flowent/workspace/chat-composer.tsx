@@ -532,6 +532,7 @@ export function ChatComposer({
               aria-label="Message Flowent"
               className="flowent-composer-textarea max-h-[216px] min-h-9 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-white shadow-none placeholder:text-[#9b9b9b] focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
               enterKeyHint="send"
+              rows={1}
               ref={textareaRef}
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
