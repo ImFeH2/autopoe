@@ -5515,6 +5515,7 @@ describe("App", () => {
                   action: "sandbox_failure",
                   decision: "denied",
                   reason: "Outside the task scope.",
+                  reviewer_output: "approved",
                   tool_name: "shell_command",
                   tool_result: "failed to write file: Read-only file system",
                   write_paths: [],
@@ -5574,6 +5575,8 @@ describe("App", () => {
     expect(screen.getByText("REVIEW")).toBeInTheDocument();
     expect(screen.getByText("Denied")).toBeInTheDocument();
     expect(screen.getByText("Outside the task scope.")).toBeInTheDocument();
+    expect(screen.getByText("Reviewer output")).toBeInTheDocument();
+    expect(screen.getByText("approved")).toBeInTheDocument();
     expect(screen.getByText("FAILURE")).toBeInTheDocument();
     expect(
       screen.getByText("failed to write file: Read-only file system"),

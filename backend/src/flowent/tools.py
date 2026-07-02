@@ -120,8 +120,52 @@ def tool_result_model_content(result: ToolResult | dict[str, object]) -> str:
     for key in ("text", "output"):
         value = payload.get(key)
         if value is not None:
-            return str(value)
+            return tool_result_content_with_review(str(value), payload)
     return json.dumps(payload, ensure_ascii=False)
+
+
+def tool_result_content_with_review(content: str, payload: dict[str, object]) -> str:
+    approval_content = approval_model_content(payload.get("approval"))
+    if not approval_content or approval_content in content:
+        return content
+    return f"{content}\n\n{approval_content}"
+
+
+def approval_model_content(approval: object) -> str:
+    if not isinstance(approval, dict):
+        return ""
+    lines: list[str] = []
+    reason = approval.get("reason")
+    if isinstance(reason, str) and reason:
+        lines.append(f"Review reason: {reason}")
+    risk_level = approval.get("risk_level")
+    risk_score = approval.get("risk_score")
+    if isinstance(risk_level, str) and isinstance(risk_score, int):
+        lines.append(f"Risk: {risk_level} ({risk_score}/100)")
+    write_paths = approval.get("write_paths")
+    if isinstance(write_paths, list):
+        paths = [path for path in write_paths if isinstance(path, str)]
+        if paths:
+            lines.append("Affected paths:")
+            lines.extend(f"- {path}" for path in paths)
+    evidence = approval.get("evidence")
+    if isinstance(evidence, list):
+        evidence_lines = []
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            message = item.get("message")
+            why = item.get("why")
+            if isinstance(message, str) and isinstance(why, str):
+                evidence_lines.append(f"- {message}: {why}")
+        if evidence_lines:
+            lines.append("Evidence:")
+            lines.extend(evidence_lines)
+    reviewer_output = approval.get("reviewer_output")
+    if isinstance(reviewer_output, str) and reviewer_output:
+        lines.append("Reviewer output:")
+        lines.append(reviewer_output)
+    return "\n".join(lines)
 
 
 def tool_specs() -> list[dict[str, object]]:

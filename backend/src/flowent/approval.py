@@ -79,6 +79,7 @@ class ApprovalReviewDecision(BaseModel):
 
     decision: Literal["approved", "denied"]
     reason: str
+    reviewer_output: str = Field(default="", exclude_if=lambda value: value == "")
     risk_level: Literal["low", "medium", "high"] | None = None
     risk_score: int | None = None
     evidence: list[ApprovalReviewEvidence] = Field(default_factory=list)
@@ -116,6 +117,9 @@ def parse_review_decision(content: str) -> ApprovalReviewDecision:
         ),
         evidence=assessment.evidence,
         reason=assessment.rationale,
+        reviewer_output=content
+        if assessment.risk_score >= APPROVAL_RISK_THRESHOLD
+        else "",
         risk_level=assessment.risk_level,
         risk_score=assessment.risk_score,
     )
@@ -127,8 +131,8 @@ async def review_approval_request(
     *,
     completion: CompletionCallable | None = None,
 ) -> ApprovalReviewDecision:
+    content = ""
     try:
-        content = ""
         async for delta in stream_chat(
             connection,
             [
@@ -147,4 +151,5 @@ async def review_approval_request(
         return ApprovalReviewDecision(
             decision="denied",
             reason=f"Approval reviewer failed: {error}",
+            reviewer_output=content,
         )

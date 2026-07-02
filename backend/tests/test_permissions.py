@@ -182,7 +182,17 @@ async def test_denied_declared_write_path_returns_failed_result_before_running_c
 
     async def deny(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
         return ApprovalReviewDecision(
-            decision="denied", reason="Outside the task scope."
+            decision="denied",
+            evidence=[
+                {
+                    "message": "User asked only to inspect files.",
+                    "why": "The command writes outside that task.",
+                }
+            ],
+            reason="Outside the task scope.",
+            reviewer_output='{"risk_level":"high","risk_score":92}',
+            risk_level="high",
+            risk_score=92,
         )
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
@@ -203,9 +213,19 @@ async def test_denied_declared_write_path_returns_failed_result_before_running_c
     result_content = tool_result_model_content(result)
     assert "Automatic approval review denied this action" in result_content
     assert "Outside the task scope." in result_content
+    assert "Risk: high (92/100)" in result_content
+    assert "User asked only to inspect files." in result_content
+    assert "The command writes outside that task." in result_content
+    assert str(cache_dir) in result_content
+    assert '{"risk_level":"high","risk_score":92}' in result_content
+    assert result_content.count("Risk: high (92/100)") == 1
+    assert result_content.count("Reviewer output:") == 1
     assert "must not work around" in result_content
     assert result.result["approval"]["decision"] == "denied"
     assert result.result["approval"]["reason"] == "Outside the task scope."
+    assert result.result["approval"]["reviewer_output"] == (
+        '{"risk_level":"high","risk_score":92}'
+    )
     assert calls == 0
 
 

@@ -97,6 +97,7 @@ type ToolApprovalData = {
   action?: string;
   decision?: string;
   reason?: string;
+  reviewerOutput?: string;
   toolResult?: string;
   toolName?: string;
   writePaths?: string[];
@@ -117,6 +118,16 @@ function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
         <div className="font-medium text-white">{decision}</div>
         {approval.reason ? (
           <div className="break-words text-white/60">{approval.reason}</div>
+        ) : null}
+        {approval.reviewerOutput?.trim() ? (
+          <div className="mt-1.5 border-t border-white/5 pt-1.5">
+            <div className="mb-0.5 text-[10px] font-medium leading-4 text-white/40">
+              Reviewer output
+            </div>
+            <div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-white/50">
+              {approval.reviewerOutput}
+            </div>
+          </div>
         ) : null}
         {firstFailureOutput ? (
           <div className="mt-1.5 border-t border-white/5 pt-1.5">
@@ -305,6 +316,10 @@ function toolApprovalData(
     action: typeof value.action === "string" ? value.action : undefined,
     decision: typeof value.decision === "string" ? value.decision : undefined,
     reason: typeof value.reason === "string" ? value.reason : undefined,
+    reviewerOutput:
+      typeof value.reviewer_output === "string"
+        ? value.reviewer_output
+        : undefined,
     toolResult:
       typeof value.tool_result === "string" ? value.tool_result : undefined,
     toolName: typeof value.tool_name === "string" ? value.tool_name : undefined,

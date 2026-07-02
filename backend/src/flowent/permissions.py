@@ -80,13 +80,33 @@ def validate_additional_permissions(arguments: dict[str, object]) -> ToolResult 
     return None
 
 
-def approval_denial_content(decision: ApprovalReviewDecision) -> str:
-    return (
-        "Automatic approval review denied this action as high risk: "
-        f"{decision.reason} The agent must not work around this denial; choose a "
-        "safer alternative or ask the user for explicit approval after explaining "
-        "the concrete risk."
+def approval_denial_content(
+    decision: ApprovalReviewDecision,
+    request: ApprovalReviewRequest,
+) -> str:
+    lines = [
+        "Automatic approval review denied this action as high risk.",
+        f"Review reason: {decision.reason}",
+    ]
+    if decision.risk_level is not None and decision.risk_score is not None:
+        lines.append(f"Risk: {decision.risk_level} ({decision.risk_score}/100)")
+    if request.write_paths:
+        lines.append("Affected paths:")
+        lines.extend(f"- {path}" for path in request.write_paths)
+    if decision.evidence:
+        lines.append("Evidence:")
+        lines.extend(f"- {item.message}: {item.why}" for item in decision.evidence)
+    if decision.reviewer_output:
+        lines.append("Reviewer output:")
+        lines.append(decision.reviewer_output)
+    if request.tool_result:
+        lines.append("Tool output:")
+        lines.append(request.tool_result)
+    lines.append(
+        "The agent must not work around this denial; choose a safer alternative "
+        "or ask the user for explicit approval after explaining the concrete risk."
     )
+    return "\n".join(lines)
 
 
 def approved_writable_roots(
@@ -135,7 +155,7 @@ async def review_missing_write_paths(
             effective_paths,
             ToolResult(
                 result=text_tool_result(
-                    approval_denial_content(decision),
+                    approval_denial_content(decision, review_request),
                     **review_data,
                 ),
                 ok=False,
@@ -217,7 +237,7 @@ async def run_shell_command_with_permissions(
     if decision.decision == "denied":
         return ToolResult(
             result=text_tool_result(
-                approval_denial_content(decision),
+                approval_denial_content(decision, review_request),
                 previous_result=result.result,
                 **review_data,
             ),
@@ -420,6 +440,8 @@ def approval_result_data(
         approval["risk_score"] = decision.risk_score
     if decision.evidence:
         approval["evidence"] = [item.model_dump() for item in decision.evidence]
+    if decision.reviewer_output:
+        approval["reviewer_output"] = decision.reviewer_output
     return {
         "approval": approval,
     }

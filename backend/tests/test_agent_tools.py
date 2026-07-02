@@ -1547,7 +1547,21 @@ async def test_approval_denial_result_is_sent_to_agent(tmp_path) -> None:
             result=text_tool_result(
                 "Automatic approval review denied this action as high risk: "
                 "The command can delete broad data. The agent must not work around "
-                "this denial."
+                "this denial.",
+                approval={
+                    "decision": "denied",
+                    "evidence": [
+                        {
+                            "message": "The command targets /important.",
+                            "why": "It can remove broad user data.",
+                        }
+                    ],
+                    "reason": "The command can delete broad data.",
+                    "reviewer_output": '{"risk_level":"high","risk_score":96}',
+                    "risk_level": "high",
+                    "risk_score": 96,
+                    "write_paths": ["/important"],
+                },
             ),
             ok=False,
             title="Denied by reviewer",
@@ -1575,6 +1589,13 @@ async def test_approval_denial_result_is_sent_to_agent(tmp_path) -> None:
         captured_requests[1]["messages"][-1]["content"]
     )
     assert "must not work around" in str(
+        captured_requests[1]["messages"][-1]["content"]
+    )
+    assert "Risk: high (96/100)" in str(captured_requests[1]["messages"][-1]["content"])
+    assert "The command targets /important." in str(
+        captured_requests[1]["messages"][-1]["content"]
+    )
+    assert '{"risk_level":"high","risk_score":96}' in str(
         captured_requests[1]["messages"][-1]["content"]
     )
     assert next(

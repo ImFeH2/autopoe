@@ -319,6 +319,7 @@ async def test_invalid_reviewer_json_is_denied(tmp_path) -> None:
 
     assert decision.decision == "denied"
     assert "valid JSON" in decision.reason
+    assert decision.reviewer_output == "approved"
 
 
 @pytest.mark.anyio
