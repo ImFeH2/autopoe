@@ -6,23 +6,41 @@
 @custom-variant hover-only (@media (hover: hover));
 
 :root {
+  --background: #000;
   --background: oklch(0 0 0);
+  --foreground: #fafafa;
   --foreground: oklch(0.985 0 0);
+  --card: #1b1b1b;
   --card: oklch(0.155 0 0);
+  --card-foreground: #fafafa;
   --card-foreground: oklch(0.985 0 0);
+  --popover: #1d1d1d;
   --popover: oklch(0.17 0 0);
+  --popover-foreground: #fafafa;
   --popover-foreground: oklch(0.985 0 0);
+  --primary: #f2f2f2;
   --primary: oklch(0.96 0 0);
+  --primary-foreground: #080808;
   --primary-foreground: oklch(0.08 0 0);
+  --secondary: #2a2a2a;
   --secondary: oklch(0.205 0 0);
+  --secondary-foreground: #fafafa;
   --secondary-foreground: oklch(0.98 0 0);
+  --muted: #292929;
   --muted: oklch(0.2 0 0);
+  --muted-foreground: #b3b3b3;
   --muted-foreground: oklch(0.72 0 0);
+  --accent: #333;
   --accent: oklch(0.245 0 0);
+  --accent-foreground: #fff;
   --accent-foreground: oklch(0.99 0 0);
+  --destructive: #d83d3d;
   --destructive: oklch(0.58 0.2 25);
+  --border: #3d3d3d;
   --border: oklch(0.28 0 0);
+  --input: #343434;
   --input: oklch(0.25 0 0);
+  --ring: #d0d0d0;
   --ring: oklch(0.82 0 0);
   --radius: 0.45rem;
   --font-sans: "Geist Variable", sans-serif;
@@ -329,29 +347,9 @@ textarea,
 .flowent-workflow-node-loading-border {
   position: absolute;
   inset: -2px;
+  border: 2px solid rgba(125, 223, 137, 0.86);
   border-radius: inherit;
   pointer-events: none;
-  padding: 2px;
-  background: conic-gradient(
-    from var(--workflow-node-border-angle) at 50% 50%,
-    transparent 0%,
-    transparent 36%,
-    rgba(125, 223, 137, 0.08) 45%,
-    rgba(125, 223, 137, 0.2) 54%,
-    rgba(125, 223, 137, 0.38) 63%,
-    rgba(125, 223, 137, 0.62) 72%,
-    #7ddf89 82%,
-    rgba(217, 255, 222, 0.84) 89%,
-    rgba(125, 223, 137, 0.2) 95%,
-    transparent 100%
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: flowent-workflow-node-border-rotate 2s linear infinite;
-  animation-play-state: paused;
   opacity: 0;
   transition: opacity 0.4s ease;
 }
@@ -364,22 +362,9 @@ textarea,
 .flowent-workflow-node-ring {
   position: absolute;
   inset: -1px;
-  border: 1px solid transparent;
+  border: 1px solid var(--workflow-node-ring-border, rgba(255, 255, 255, 0.18));
   border-radius: inherit;
   pointer-events: none;
-  --workflow-node-ring-gradient: conic-gradient(
-    from calc(var(--mouse-angle, 135deg) - 180deg),
-    transparent 0deg 120deg,
-    color-mix(in srgb, var(--workflow-node-status-color) 50%, transparent)
-      150deg,
-    color-mix(in srgb, var(--workflow-node-status-color) 100%, white 20%) 180deg,
-    color-mix(in srgb, var(--workflow-node-status-color) 50%, transparent)
-      210deg,
-    transparent 240deg 360deg
-  );
-  background:
-    linear-gradient(rgba(17, 17, 17, 0.96), rgba(17, 17, 17, 0.96)) padding-box,
-    var(--workflow-node-ring-gradient) border-box;
   box-shadow:
     0 0 calc(8px + 10px * var(--mouse-intensity, 0)) 0
     var(--workflow-node-ring-shadow),
@@ -394,6 +379,7 @@ textarea,
 
 .flowent-workflow-node-ring-pending {
   --workflow-node-status-color: rgba(255, 255, 255, 0.72);
+  --workflow-node-ring-border: rgba(255, 255, 255, 0.2);
   --workflow-node-ring-shadow: rgba(255, 255, 255, 0.08);
   --workflow-node-ring-shadow-soft: rgba(255, 255, 255, 0.04);
   --workflow-node-base-ring-opacity: 0.2;
@@ -403,6 +389,7 @@ textarea,
 .flowent-workflow-node-ring-running,
 .flowent-workflow-node-ring-success {
   --workflow-node-status-color: #7ddf89;
+  --workflow-node-ring-border: rgba(125, 223, 137, 0.58);
   --workflow-node-ring-shadow: rgba(125, 223, 137, 0.24);
   --workflow-node-ring-shadow-soft: rgba(125, 223, 137, 0.1);
   --workflow-node-base-ring-opacity: 0.4;
@@ -411,10 +398,63 @@ textarea,
 
 .flowent-workflow-node-ring-failed {
   --workflow-node-status-color: #ff7474;
+  --workflow-node-ring-border: rgba(255, 116, 116, 0.62);
   --workflow-node-ring-shadow: rgba(255, 116, 116, 0.26);
   --workflow-node-ring-shadow-soft: rgba(255, 116, 116, 0.1);
   --workflow-node-base-ring-opacity: 0.42;
   --workflow-node-hover-ring-opacity: 0.45;
+}
+
+@supports ((-webkit-mask-composite: xor) or (mask-composite: exclude)) {
+  .flowent-workflow-node-loading-border {
+    border: 0;
+    padding: 2px;
+    background: conic-gradient(
+      from var(--workflow-node-border-angle) at 50% 50%,
+      transparent 0%,
+      transparent 36%,
+      rgba(125, 223, 137, 0.08) 45%,
+      rgba(125, 223, 137, 0.2) 54%,
+      rgba(125, 223, 137, 0.38) 63%,
+      rgba(125, 223, 137, 0.62) 72%,
+      #7ddf89 82%,
+      rgba(217, 255, 222, 0.84) 89%,
+      rgba(125, 223, 137, 0.2) 95%,
+      transparent 100%
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: flowent-workflow-node-border-rotate 2s linear infinite;
+    animation-play-state: paused;
+  }
+
+  .flowent-workflow-node-loading-border-active {
+    animation-play-state: running;
+  }
+}
+
+@supports (color: color-mix(in srgb, white, black)) {
+  .flowent-workflow-node-ring {
+    border-color: transparent;
+    --workflow-node-ring-gradient: conic-gradient(
+      from calc(var(--mouse-angle, 135deg) - 180deg),
+      transparent 0deg 120deg,
+      color-mix(in srgb, var(--workflow-node-status-color) 50%, transparent)
+        150deg,
+      color-mix(in srgb, var(--workflow-node-status-color) 100%, white 20%)
+        180deg,
+      color-mix(in srgb, var(--workflow-node-status-color) 50%, transparent)
+        210deg,
+      transparent 240deg 360deg
+    );
+    background:
+      linear-gradient(rgba(17, 17, 17, 0.96), rgba(17, 17, 17, 0.96))
+      padding-box,
+      var(--workflow-node-ring-gradient) border-box;
+  }
 }
 
 .flowent-mobile-sidebar-drawer,

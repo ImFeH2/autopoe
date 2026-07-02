@@ -32,4 +32,19 @@ describe("vite config", () => {
       }
     }
   });
+
+  it("sets an explicit modern browser support target", async () => {
+    const loadedConfig = await loadConfigFromFile(
+      { command: "build", mode: "production" },
+      "vite.config.ts",
+    );
+
+    expect(loadedConfig?.config.build?.target).toEqual([
+      "chrome111",
+      "edge111",
+      "firefox114",
+      "safari16.4",
+      "ios16.4",
+    ]);
+  });
 });

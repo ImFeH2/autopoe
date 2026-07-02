@@ -110,6 +110,34 @@ describe("typography", () => {
     expect(styles).toContain("-webkit-user-select: text;");
   });
 
+  it("keeps readable dark colors before modern color declarations", async () => {
+    const stylesPath = join(process.cwd(), "src/styles/index.css");
+    const styles = await readFile(stylesPath, "utf8");
+
+    expect(styles).toMatch(/--background:\s*#000;\s*--background:\s*oklch/);
+    expect(styles).toMatch(/--foreground:\s*#fafafa;\s*--foreground:\s*oklch/);
+    expect(styles).toMatch(/--popover:\s*#1d1d1d;\s*--popover:\s*oklch/);
+    expect(styles).toMatch(/--input:\s*#343434;\s*--input:\s*oklch/);
+  });
+
+  it("keeps workflow node status visible without advanced border effects", async () => {
+    const stylesPath = join(process.cwd(), "src/styles/index.css");
+    const styles = await readFile(stylesPath, "utf8");
+
+    expect(styles).toContain(
+      "border: 1px solid var(--workflow-node-ring-border",
+    );
+    expect(styles).toContain("--workflow-node-ring-border: rgba(255, 255, 255");
+    expect(styles).toContain("--workflow-node-ring-border: rgba(125, 223, 137");
+    expect(styles).toContain("--workflow-node-ring-border: rgba(255, 116, 116");
+    expect(styles).toContain(
+      "@supports ((-webkit-mask-composite: xor) or (mask-composite: exclude))",
+    );
+    expect(styles).toContain(
+      "@supports (color: color-mix(in srgb, white, black))",
+    );
+  });
+
   it("uses 16px sizing for shared Flowent form controls", () => {
     render(<Textarea aria-label="Prompt" className={fieldInputClassName} />);
 
