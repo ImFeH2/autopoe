@@ -1809,6 +1809,18 @@ describe("App", () => {
       const dialog = await screen.findByRole("dialog", {
         name: "Navigation",
       });
+      expect(dialog.className).toContain(
+        "data-[state=open]:slide-in-from-left-full",
+      );
+      expect(dialog.className).toContain(
+        "data-[state=closed]:slide-out-to-left-full",
+      );
+      expect(dialog).toHaveClass("flowent-mobile-sidebar-drawer");
+      expect(dialog).toHaveClass("duration-300");
+      expect(
+        document.querySelector('[data-slot="dialog-overlay"]'),
+      ).toHaveClass("flowent-mobile-sidebar-overlay", "duration-300");
+
       const mobileNavigation = within(dialog).getByRole("navigation", {
         name: "Mobile navigation",
       });

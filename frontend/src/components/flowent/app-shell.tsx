@@ -824,8 +824,8 @@ export function AppShell({
         </div>
         <DialogContent
           aria-describedby={undefined}
-          className="top-0 left-0 flex h-[var(--flowent-viewport-height)] max-h-none w-[257px] max-w-[calc(100vw-64px)] translate-x-0 translate-y-0 rounded-none border-0 bg-black p-0 text-white ring-0 shadow-none sm:max-w-[257px] data-closed:slide-out-to-left-2 data-open:slide-in-from-left-2"
-          overlayClassName="bg-white/10 backdrop-blur-[1px]"
+          className="flowent-mobile-sidebar-drawer top-0 left-0 flex h-[var(--flowent-viewport-height)] max-h-none w-[257px] max-w-[calc(100vw-64px)] translate-x-0 translate-y-0 rounded-none border-0 bg-black p-0 text-white ring-0 shadow-none duration-300 sm:max-w-[257px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-left-full data-[state=closed]:zoom-out-100 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-left-full data-[state=open]:zoom-in-100"
+          overlayClassName="flowent-mobile-sidebar-overlay bg-white/10 backdrop-blur-[1px] duration-300 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
           showCloseButton={false}
         >
           <DialogTitle className="sr-only">Navigation</DialogTitle>

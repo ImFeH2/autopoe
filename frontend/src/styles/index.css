@@ -417,6 +417,11 @@ textarea,
   --workflow-node-hover-ring-opacity: 0.45;
 }
 
+.flowent-mobile-sidebar-drawer,
+.flowent-mobile-sidebar-overlay {
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @keyframes flowent-workflow-node-border-rotate {
   to {
     --workflow-node-border-angle: 360deg;
