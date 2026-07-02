@@ -4,15 +4,23 @@ export function promptHistoryFromMessages(messages: Message[]) {
   const history: string[] = [];
 
   for (const message of messages) {
-    if (message.author !== "user" || message.content.trim().length === 0) {
+    if (message.author !== "user") {
       continue;
     }
-    if (history.at(-1) === message.content) {
-      continue;
-    }
-    history.push(message.content);
+    appendPromptHistoryEntry(history, message.content);
   }
 
+  return history;
+}
+
+export function appendPromptHistoryEntry(history: string[], content: string) {
+  if (content.trim().length === 0) {
+    return history;
+  }
+  if (history.at(-1) === content) {
+    return history;
+  }
+  history.push(content);
   return history;
 }
 

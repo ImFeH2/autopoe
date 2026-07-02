@@ -19,6 +19,7 @@ import type {
 import { contextCapacityFromMessages } from "@/components/flowent/workspace/context-capacity";
 import { ContextCapacityTray } from "@/components/flowent/workspace/context-capacity-tray";
 import {
+  appendPromptHistoryEntry,
   isCaretOnFirstLine,
   isCaretOnLastLine,
   promptHistoryFromMessages,
@@ -83,10 +84,18 @@ export function ChatComposer({
   const [isSkillMenuDismissed, setIsSkillMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedSkillIndex, setSelectedSkillIndex] = useState(0);
-  const promptHistory = useMemo(
+  const [sessionPromptHistory, setSessionPromptHistory] = useState<string[]>(
+    [],
+  );
+  const messagePromptHistory = useMemo(
     () => promptHistoryFromMessages(messages),
     [messages],
   );
+  const messagePromptHistoryRef = useRef<string[]>(messagePromptHistory);
+  const promptHistory =
+    sessionPromptHistory.length > 0
+      ? sessionPromptHistory
+      : messagePromptHistory;
   const firstLine = draft.split("\n")[0] ?? "";
   const commandName = firstLine.startsWith("/") ? firstLine.slice(1) : "";
   const isCommandDraft =
@@ -150,6 +159,12 @@ export function ChatComposer({
       ),
     [contextWindowLimit, draft, messages, usageInfo],
   );
+
+  useEffect(() => {
+    if (messagePromptHistory.length > 0) {
+      messagePromptHistoryRef.current = messagePromptHistory;
+    }
+  }, [messagePromptHistory]);
 
   useEffect(() => {
     if (preserveCommandMenuDismissalRef.current) {
@@ -279,12 +294,24 @@ export function ChatComposer({
     };
   }, [onOffsetChange]);
 
+  const rememberPromptHistory = (content: string) => {
+    setSessionPromptHistory((currentHistory) =>
+      appendPromptHistoryEntry(
+        currentHistory.length > 0
+          ? [...currentHistory]
+          : [...messagePromptHistoryRef.current],
+        content,
+      ),
+    );
+  };
+
   const runCommand = (command: WorkspaceCommand) => {
     const commandAccepted = onCommand(command.id);
     if (!commandAccepted) {
       setIsCommandMenuDismissed(true);
       return;
     }
+    rememberPromptHistory(command.label);
     onDraftChange("");
     setIsCommandMenuDismissed(false);
   };
@@ -314,7 +341,11 @@ export function ChatComposer({
   };
 
   const setDraftFromPromptHistory = (value: string) => {
+    preserveCommandMenuDismissalRef.current = true;
+    preserveSkillMenuDismissalRef.current = true;
     preserveHistoryNavigationRef.current = true;
+    setIsCommandMenuDismissed(true);
+    setIsSkillMenuDismissed(true);
     onDraftChange(value);
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current;
@@ -416,6 +447,11 @@ export function ChatComposer({
       return;
     }
 
+    if (!canSubmit) {
+      return;
+    }
+
+    rememberPromptHistory(submittedDraft);
     onSendMessage(submittedDraft);
   };
 

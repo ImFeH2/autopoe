@@ -9168,6 +9168,19 @@ describe("App", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchWasCalledWith("/api/workspace/respond", "POST")).toBe(false);
+
+    await user.click(composer);
+    await user.keyboard("{ArrowUp}");
+    expect(composer).toHaveValue("/clear");
+
+    await user.keyboard("{ArrowUp}");
+    expect(composer).toHaveValue("Draft a launch checklist");
+
+    await user.keyboard("{ArrowDown}");
+    expect(composer).toHaveValue("/clear");
+
+    await user.keyboard("{ArrowDown}");
+    expect(composer).toHaveValue("");
   });
 
   it("shows a notification and keeps messages when Clear fails", async () => {
