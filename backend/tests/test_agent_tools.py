@@ -160,7 +160,10 @@ def test_agent_prompt_explains_workflow_tool_rules() -> None:
     assert "pass that content as the run_workflow input" in (
         FLOWENT_AGENT_SYSTEM_PROMPT
     )
-    assert "Do not delete workflows." in FLOWENT_AGENT_SYSTEM_PROMPT
+    assert "delete saved workflows when the user clearly asks" in (
+        FLOWENT_AGENT_SYSTEM_PROMPT
+    )
+    assert "Do not delete workflows." not in FLOWENT_AGENT_SYSTEM_PROMPT
 
 
 def test_workspace_response_streams_tool_process_and_final_text(
@@ -336,6 +339,118 @@ def test_workspace_agent_creates_workflow_with_generated_uuid(
     state = client.get("/api/state").json()
     assert [workflow["id"] for workflow in state["workflows"]] == [str(fixed_uuid)]
     assert events[-1]["data"]["message"]["content"] == "I created the workflow."
+
+
+def test_workspace_agent_deletes_workflow(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk(
+                    "delete_workflow",
+                    {"workflow_id": "workflow-1"},
+                    call_id="call-delete",
+                )
+            else:
+                yield text_chunk("I deleted Launch Workflow.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Delete Launch Workflow."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    tool_done = next(event for event in events if event["event"] == "tool_done")
+    assert tool_done["data"]["status"] == "success"
+    assert tool_done["data"]["title"] == "Deleted Launch Workflow"
+    assert tool_done["data"]["result"] == {
+        "type": "workflow_delete",
+        "output": "Deleted Launch Workflow.",
+        "summary": {
+            "edge_count": 1,
+            "id": "workflow-1",
+            "name": "Launch Workflow",
+            "node_count": 2,
+            "nodes": [
+                {"id": "input", "name": "Input", "type": "input"},
+                {"id": "output", "name": "Output", "type": "output"},
+            ],
+        },
+    }
+    assert len(captured_requests) == 2
+    tool_names = {tool["function"]["name"] for tool in captured_requests[0]["tools"]}
+    assert "delete_workflow" in tool_names
+    assert captured_requests[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-delete",
+        "content": "Deleted Launch Workflow.",
+    }
+    state = client.get("/api/state").json()
+    assert state["workflows"] == []
+    assert events[-1]["data"]["message"]["content"] == "I deleted Launch Workflow."
+
+
+def test_workspace_agent_reports_missing_workflow_delete(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+    captured_requests: list[dict[str, object]] = []
+
+    async def fake_completion(**request: object) -> object:
+        captured_requests.append(request)
+
+        async def chunks() -> object:
+            if len(captured_requests) == 1:
+                yield tool_call_chunk(
+                    "delete_workflow",
+                    {"workflow_id": "missing-workflow"},
+                    call_id="call-delete",
+                )
+            else:
+                yield text_chunk("I could not find that workflow.")
+
+        return chunks()
+
+    client = TestClient(
+        create_app(serve_frontend=False, chat_completion=fake_completion)
+    )
+    configure_provider(client)
+    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+
+    response = client.post(
+        "/api/workspace/respond",
+        json={"content": "Delete the missing workflow."},
+    )
+
+    assert response.status_code == 200
+    events = stream_events(response.text)
+    tool_error = next(event for event in events if event["event"] == "tool_error")
+    assert tool_error["data"]["status"] == "failed"
+    assert tool_error["data"]["title"] == "Deleting workflow"
+    assert tool_error["data"]["result"]["text"] == "Workflow not found."
+    assert captured_requests[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-delete",
+        "content": "Workflow not found.",
+    }
+    state = client.get("/api/state").json()
+    assert [workflow["id"] for workflow in state["workflows"]] == ["workflow-1"]
+    assert events[-1]["data"]["message"]["content"] == (
+        "I could not find that workflow."
+    )
 
 
 def test_workspace_agent_rejects_invalid_workflow_update_without_saving(

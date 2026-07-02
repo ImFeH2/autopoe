@@ -62,6 +62,11 @@ class WorkflowService:
             )
         )
 
+    def delete_workflow(self, workflow_id: str) -> StoredWorkflow:
+        workflow = self.get_workflow(workflow_id)
+        self.store.delete_workflow(workflow_id)
+        return workflow
+
     async def run_workflow(
         self,
         workflow_id: str,

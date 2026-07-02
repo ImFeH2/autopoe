@@ -81,6 +81,18 @@ def workflow_tool_specs() -> list[dict[str, object]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "delete_workflow",
+                "description": "Delete a saved workflow by id after the user clearly asks to remove it. List workflows first when the name is ambiguous.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"workflow_id": {"type": "string"}},
+                    "required": ["workflow_id"],
+                },
+            },
+        },
     ]
 
 
@@ -95,6 +107,8 @@ def workflow_tool_title(name: str) -> str | None:
         return "Creating workflow"
     if name == "update_workflow":
         return "Updating workflow"
+    if name == "delete_workflow":
+        return "Deleting workflow"
     return None
 
 
@@ -120,6 +134,8 @@ class WorkflowAgentTools:
                 return self.create_workflow(arguments)
             if name == "update_workflow":
                 return self.update_workflow(arguments)
+            if name == "delete_workflow":
+                return self.delete_workflow(arguments)
         except Exception as error:
             return ToolResult(
                 result=text_tool_result(str(error) or "Workflow tool failed."),
@@ -205,6 +221,20 @@ class WorkflowAgentTools:
         self.service.get_workflow(workflow.id)
         saved = self.service.save_workflow(workflow)
         return saved_workflow_result(saved, "Updated")
+
+    def delete_workflow(self, arguments: dict[str, object]) -> ToolResult:
+        workflow_id = str(arguments["workflow_id"])
+        workflow = self.service.delete_workflow(workflow_id)
+        summary = workflow_summary(workflow)
+        output = f"Deleted {workflow.name}."
+        return ToolResult(
+            result={
+                "type": "workflow_delete",
+                "output": output,
+                "summary": summary,
+            },
+            title=f"Deleted {workflow.name}",
+        )
 
 
 def string_argument(arguments: dict[str, object], name: str) -> str:
