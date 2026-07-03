@@ -135,7 +135,7 @@ export function MessageShortcutRail({
       }}
     >
       <div
-        className="pointer-events-auto flowent-hidden-scrollbar flex max-h-[min(78vh,620px)] flex-col items-end gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-white/5 bg-black/20 p-2 shadow-[0_16px_44px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-colors duration-200 group-hover/shortcut-rail:bg-black/70"
+        className="pointer-events-auto flowent-hidden-scrollbar flex max-h-[min(78vh,620px)] flex-col items-end gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl bg-black/20 p-2 shadow-[0_16px_44px_rgba(0,0,0,0.2)] backdrop-blur-sm transition-colors duration-200 group-hover/shortcut-rail:bg-black/70"
         ref={railRef}
       >
         {messages.map((message) => {

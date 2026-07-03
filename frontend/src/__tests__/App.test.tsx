@@ -2967,6 +2967,8 @@ describe("App", () => {
     expect(shortcutList).toHaveClass("overscroll-contain");
     expect(shortcutList).toHaveClass("flowent-hidden-scrollbar");
     expect(shortcutList).not.toHaveClass("flowent-shortcut-scrollbar");
+    expect(shortcutList).not.toHaveClass("border");
+    expect(shortcutList).not.toHaveClass("border-white/5");
     expect(shortcutList).toHaveClass("rounded-2xl");
     expect(shortcutList).not.toHaveClass("rounded-full");
     expect(shortcutList.className).not.toContain(
