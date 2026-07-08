@@ -16,7 +16,13 @@
 
 # Flowent
 
-A workflow orchestration platform for multi-agent collaboration.
+Run tasks and build workflows by talking to Flowent.
+
+Flowent is an AI workspace built around Steward, an AI operator that helps you
+run tasks, use tools, and build workflows through conversation. Simple requests
+can be handled directly by the agent runtime; complex or repeatable work can
+become workflows that Flowent creates, runs, and refines from execution
+feedback.
 
 ## Install
 

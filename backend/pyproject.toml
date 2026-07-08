@@ -1,7 +1,7 @@
 [project]
 name = "flowent"
 version = "0.3.8"
-description = "A workflow orchestration platform for multi-agent collaboration"
+description = "Run tasks and build workflows by talking to Flowent."
 readme = "README.md"
 authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
@@ -9,19 +9,20 @@ authors = [
 requires-python = ">=3.11"
 license = "Apache-2.0"
 keywords = [
-    "agent",
-    "agents",
     "ai",
-    "ai-agents",
-    "assistant",
+    "agent",
+    "ai-agent",
+    "ai-workspace",
+    "agent-runtime",
+    "agentic-workflows",
     "automation",
-    "code-generation",
-    "llm",
-    "mcp",
-    "orchestration",
-    "sandbox",
-    "web-application",
     "workflow",
+    "workflow-automation",
+    "mcp",
+    "llm",
+    "fastapi",
+    "react",
+    "telegram-bot",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
