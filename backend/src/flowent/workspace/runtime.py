@@ -77,6 +77,12 @@ class WorkspaceCompactTask:
     task: asyncio.Task[tuple[StoredMessage, TokenUsageInfo]]
 
 
+@dataclass
+class WorkspacePendingResponse:
+    stop_event: asyncio.Event
+    task: asyncio.Task[Any]
+
+
 class WorkspaceRuntime:
     def __init__(
         self,
@@ -103,6 +109,10 @@ class WorkspaceRuntime:
         self.active_response: WorkspaceResponse | None = None
         self.generation = 0
         self.active_compact_task: WorkspaceCompactTask | None = None
+        self.turn_lock = asyncio.Lock()
+        self.response_reserved = False
+        self.pending_response: WorkspacePendingResponse | None = None
+        self.background_tasks: set[asyncio.Task[Any]] = set()
 
     def extra_tool_specs(self) -> list[Mapping[str, object]]:
         return self.agent_runtime.extra_tool_specs()
@@ -236,6 +246,10 @@ class WorkspaceRuntime:
             raise RuntimeError("Context could not be optimized.") from error
 
     async def run_turn(self, content: str) -> StoredMessage:
+        async with self.turn_lock:
+            return await self._run_turn(content)
+
+    async def _run_turn(self, content: str) -> StoredMessage:
         state = self.store.read_state()
         connection = selected_connection(state)
         context_window_limit = context_window_for_settings(state.settings)
@@ -376,7 +390,11 @@ class WorkspaceRuntime:
                 )
 
     async def stop_response_for_shutdown(self) -> None:
-        tasks: list[asyncio.Task[None]] = []
+        tasks: list[asyncio.Task[Any]] = []
+        pending_response = self.pending_response
+        if pending_response is not None and not pending_response.task.done():
+            pending_response.stop_event.set()
+            tasks.append(pending_response.task)
         response = self.active_response
         if response is not None and response.task is not None:
             if not response.task.done():
@@ -398,6 +416,9 @@ class WorkspaceRuntime:
     async def stop_for_shutdown(self) -> None:
         await self.stop_response_for_shutdown()
         await self.stop_compact_for_shutdown()
+        await self.gather_shutdown_tasks(
+            "Workspace background", list(self.background_tasks)
+        )
 
     def current_response(self) -> WorkspaceResponse | None:
         response = self.active_response
@@ -414,15 +435,92 @@ class WorkspaceRuntime:
             and not response.task.done()
         )
 
-    def clear(self) -> list[StoredMessage]:
+    def reserve_response(self) -> WorkspacePendingResponse:
+        if self.response_reserved or self.has_active_response():
+            raise HTTPException(
+                status_code=409,
+                detail="Response in progress",
+            )
+        task = asyncio.current_task()
+        if task is None:
+            raise RuntimeError("Workspace response task is unavailable.")
+        pending_response = WorkspacePendingResponse(
+            stop_event=asyncio.Event(),
+            task=task,
+        )
+        self.response_reserved = True
+        self.pending_response = pending_response
+        return pending_response
+
+    def activate_response(self, pending_response: WorkspacePendingResponse) -> None:
+        if self.pending_response is pending_response:
+            self.pending_response = None
+
+    def release_response(
+        self, pending_response: WorkspacePendingResponse | None = None
+    ) -> None:
+        self.response_reserved = False
+        if pending_response is None or self.pending_response is pending_response:
+            self.pending_response = None
+
+    async def acquire_response_turn(
+        self, pending_response: WorkspacePendingResponse
+    ) -> None:
+        acquire_task = asyncio.create_task(self.turn_lock.acquire())
+        stop_task = asyncio.create_task(pending_response.stop_event.wait())
+        acquired = False
+        try:
+            await asyncio.wait(
+                {acquire_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if pending_response.stop_event.is_set():
+                raise HTTPException(status_code=409, detail="Response stopped.")
+            await acquire_task
+            acquired = True
+            if pending_response.stop_event.is_set():
+                raise HTTPException(status_code=409, detail="Response stopped.")
+        except BaseException:
+            if not acquire_task.done():
+                acquire_task.cancel()
+            if not stop_task.done():
+                stop_task.cancel()
+            acquire_result, _ = await asyncio.gather(
+                acquire_task,
+                stop_task,
+                return_exceptions=True,
+            )
+            if acquired or acquire_result is True:
+                self.turn_lock.release()
+            raise
+        else:
+            stop_task.cancel()
+            await asyncio.gather(stop_task, return_exceptions=True)
+
+    async def clear(self) -> list[StoredMessage]:
         self.generation += 1
+        pending_response = self.pending_response
+        if pending_response is not None:
+            pending_response.stop_event.set()
         response = self.active_response
         if response is not None:
             response.is_done = True
             if response.task is not None and not response.task.done():
                 response.discard_on_cancel = True
                 response.task.cancel()
-        return self.store.save_messages([])
+        async with self.turn_lock:
+            return self.store.save_messages([])
+
+    async def replace_messages(
+        self, messages: list[StoredMessage]
+    ) -> list[StoredMessage]:
+        if self.response_reserved or self.turn_lock.locked():
+            raise HTTPException(
+                status_code=409,
+                detail="Response in progress",
+            )
+        async with self.turn_lock:
+            return self.store.save_messages(messages)
 
     async def notify_cleared_response(self) -> None:
         response = self.active_response
@@ -450,38 +548,97 @@ class WorkspaceRuntime:
             {"message": stream_message_data(message, response.active_output)},
         )
 
-    def start_response(
+    async def start_response(
         self, content: str, *, message_id: str | None = None
     ) -> WorkspaceResponse:
-        if self.has_active_response():
+        pending_response = self.reserve_response()
+        lock_acquired = False
+        response_started = False
+        try:
+            if self.store.read_is_compacting():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Context refining in progress. Please wait a moment.",
+                )
+            await self.acquire_response_turn(pending_response)
+            lock_acquired = True
+            if self.store.read_is_compacting():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Context refining in progress. Please wait a moment.",
+                )
+            state = self.store.read_state()
+            user_message_id = message_id or str(uuid4())
+            if any(message.id == user_message_id for message in state.messages):
+                raise HTTPException(status_code=409, detail="Message already exists.")
+            user_message = StoredMessage(
+                author="user",
+                content=content,
+                id=user_message_id,
+            )
+            next_messages = [*state.messages, user_message]
+            self.store.save_messages(next_messages)
+            response = self._start_response_from_messages(
+                content=content,
+                next_messages=next_messages,
+                state=state,
+                user_message=user_message,
+            )
+            self.activate_response(pending_response)
+            response_started = True
+            return response
+        finally:
+            if not response_started:
+                if lock_acquired:
+                    self.turn_lock.release()
+                self.release_response(pending_response)
+
+    async def edit_message(
+        self,
+        message_id: str,
+        *,
+        action: Literal["resend", "save"],
+        content: str,
+    ) -> tuple[list[StoredMessage], WorkspaceResponse | None]:
+        pending_response = self.reserve_response() if action == "resend" else None
+        if pending_response is None and (
+            self.response_reserved or self.has_active_response()
+        ):
             raise HTTPException(
                 status_code=409,
                 detail="Response in progress",
             )
-        if self.store.read_is_compacting():
-            raise HTTPException(
-                status_code=409,
-                detail="Context refining in progress. Please wait a moment.",
+        lock_acquired = False
+        try:
+            if self.store.read_is_compacting():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Context refining in progress. Please wait a moment.",
+                )
+            if pending_response is None:
+                await self.turn_lock.acquire()
+            else:
+                await self.acquire_response_turn(pending_response)
+            lock_acquired = True
+            result = self._edit_message_locked(
+                message_id,
+                action=action,
+                content=content,
             )
-        state = self.store.read_state()
-        user_message_id = message_id or str(uuid4())
-        if any(message.id == user_message_id for message in state.messages):
-            raise HTTPException(status_code=409, detail="Message already exists.")
-        user_message = StoredMessage(
-            author="user",
-            content=content,
-            id=user_message_id,
-        )
-        next_messages = [*state.messages, user_message]
-        self.store.save_messages(next_messages)
-        return self._start_response_from_messages(
-            content=content,
-            next_messages=next_messages,
-            state=state,
-            user_message=user_message,
-        )
+            if result[1] is None:
+                self.turn_lock.release()
+                lock_acquired = False
+            elif pending_response is not None:
+                self.activate_response(pending_response)
+            return result
+        except BaseException:
+            if lock_acquired:
+                self.turn_lock.release()
+            if pending_response is not None:
+                self.release_response(pending_response)
+            raise
 
-    def edit_message(
+    def _edit_message_locked(
         self,
         message_id: str,
         *,
@@ -535,7 +692,32 @@ class WorkspaceRuntime:
         )
         return next_messages, response
 
-    def retry_error(
+    async def retry_error(
+        self,
+        message_id: str,
+        *,
+        error_id: str,
+    ) -> tuple[list[StoredMessage], WorkspaceResponse]:
+        pending_response = self.reserve_response()
+        lock_acquired = False
+        try:
+            if self.store.read_is_compacting():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Context refining in progress. Please wait a moment.",
+                )
+            await self.acquire_response_turn(pending_response)
+            lock_acquired = True
+            result = self._retry_error_locked(message_id, error_id=error_id)
+            self.activate_response(pending_response)
+            return result
+        except BaseException:
+            if lock_acquired:
+                self.turn_lock.release()
+            self.release_response(pending_response)
+            raise
+
+    def _retry_error_locked(
         self,
         message_id: str,
         *,
@@ -652,6 +834,15 @@ class WorkspaceRuntime:
             generation=self.generation,
         )
         self.active_response = response
+        turn_released = False
+
+        def release_turn() -> None:
+            nonlocal turn_released
+            if turn_released:
+                return
+            turn_released = True
+            self.release_response()
+            self.turn_lock.release()
 
         async def response_task() -> None:
             nonlocal next_messages
@@ -1059,8 +1250,27 @@ class WorkspaceRuntime:
                     response.condition.notify_all()
                 if self.active_response is response:
                     self.active_response = None
+                release_turn()
 
         response.task = asyncio.create_task(response_task())
+
+        def response_task_done(_: asyncio.Task[None]) -> None:
+            if turn_released:
+                return
+            response.is_done = True
+            if self.active_response is response:
+                self.active_response = None
+            release_turn()
+
+            async def notify_response_done() -> None:
+                async with response.condition:
+                    response.condition.notify_all()
+
+            notify_task = asyncio.create_task(notify_response_done())
+            self.background_tasks.add(notify_task)
+            notify_task.add_done_callback(self.background_tasks.discard)
+
+        response.task.add_done_callback(response_task_done)
         return response
 
     async def response_stream(
@@ -1110,6 +1320,9 @@ class WorkspaceRuntime:
         return response
 
     def stop_response(self) -> None:
+        pending_response = self.pending_response
+        if pending_response is not None:
+            pending_response.stop_event.set()
         response = self.current_response()
         if (
             response is not None
@@ -1119,36 +1332,37 @@ class WorkspaceRuntime:
             response.task.cancel()
 
     def compact_stream(self) -> AsyncIterator[str]:
-        async def run_manual_compact(
-            *,
-            checkpoint: StoredCompactionCheckpoint | None,
-            connection: ProviderConnection,
-            context_window_limit: int,
-            state: StoredState,
-        ) -> tuple[StoredMessage, TokenUsageInfo]:
-            logger.info("Workspace compact requested")
+        async def run_manual_compact() -> tuple[StoredMessage, TokenUsageInfo]:
             try:
-                model_history: list[ChatMessage | Mapping[str, object]] = [
-                    *runtime_context_messages(self.cwd, state.settings.agent_prompt),
-                    *workspace_chat_messages(
-                        state.messages,
-                        self.store.read_compacted_context(),
-                        checkpoint,
-                    ),
-                ]
+                async with self.turn_lock:
+                    state = self.store.read_state()
+                    connection = selected_connection(state)
+                    context_window_limit = context_window_for_settings(state.settings)
+                    checkpoint = self.store.read_active_compaction_checkpoint()
+                    logger.info("Workspace compact requested")
+                    model_history: list[ChatMessage | Mapping[str, object]] = [
+                        *runtime_context_messages(
+                            self.cwd, state.settings.agent_prompt
+                        ),
+                        *workspace_chat_messages(
+                            state.messages,
+                            self.store.read_compacted_context(),
+                            checkpoint,
+                        ),
+                    ]
 
-                marker, _, usage_info = await self.save_context_checkpoint(
-                    connection=connection,
-                    context_window_limit=context_window_limit,
-                    marker_content=COMPACTED_CONTEXT_MARKER,
-                    messages=state.messages,
-                    model_history=model_history,
-                    source_message_id=None,
-                    trigger="manual",
-                )
-                self.store.save_messages([*state.messages, marker])
-                logger.info("Workspace compact completed")
-                return marker, usage_info
+                    marker, _, usage_info = await self.save_context_checkpoint(
+                        connection=connection,
+                        context_window_limit=context_window_limit,
+                        marker_content=COMPACTED_CONTEXT_MARKER,
+                        messages=state.messages,
+                        model_history=model_history,
+                        source_message_id=None,
+                        trigger="manual",
+                    )
+                    self.store.save_messages([*state.messages, marker])
+                    logger.info("Workspace compact completed")
+                    return marker, usage_info
             except Exception:
                 logger.exception("Workspace compact failed")
                 raise
@@ -1174,24 +1388,13 @@ class WorkspaceRuntime:
                 self.active_compact_task = None
 
         if self.active_compact_task is None:
-            if self.current_response() is not None:
+            if self.response_reserved or self.current_response() is not None:
                 raise HTTPException(
                     status_code=409,
                     detail="Compact is unavailable while Flowent is responding.",
                 )
-            state = self.store.read_state()
-            connection = selected_connection(state)
-            context_window_limit = context_window_for_settings(state.settings)
-            checkpoint = self.store.read_active_compaction_checkpoint()
             self.store.save_is_compacting(True)
-            compact_task = asyncio.create_task(
-                run_manual_compact(
-                    checkpoint=checkpoint,
-                    connection=connection,
-                    context_window_limit=context_window_limit,
-                    state=state,
-                )
-            )
+            compact_task = asyncio.create_task(run_manual_compact())
             compact_task.add_done_callback(clear_active_compact_task)
             self.active_compact_task = WorkspaceCompactTask(task=compact_task)
 

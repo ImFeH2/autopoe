@@ -11,7 +11,6 @@ from flowent.api_models import (
     WorkspaceRespondRequest,
 )
 from flowent.logging import TRACE_LEVEL
-from flowent.storage import StateStore
 from flowent.workspace.runtime import WorkspaceRuntime
 
 logger = logging.getLogger("flowent.routes.workspace")
@@ -21,13 +20,14 @@ def register_workspace_routes(
     app: FastAPI,
     *,
     runtime: WorkspaceRuntime,
-    store: StateStore,
 ) -> None:
     @app.put("/api/workspace/messages")
     async def save_workspace_messages(
         request: WorkspaceMessagesRequest,
     ) -> WorkspaceMessagesRequest:
-        return WorkspaceMessagesRequest(messages=store.save_messages(request.messages))
+        return WorkspaceMessagesRequest(
+            messages=await runtime.replace_messages(request.messages)
+        )
 
     @app.post("/api/workspace/messages/{message_id}/edit")
     async def edit_workspace_message(
@@ -41,7 +41,7 @@ def register_workspace_routes(
             len(request.content),
         )
         logger.log(TRACE_LEVEL, "Workspace edited user content=%r", request.content)
-        messages, response = runtime.edit_message(
+        messages, response = await runtime.edit_message(
             message_id,
             action=request.action,
             content=request.content,
@@ -61,7 +61,7 @@ def register_workspace_routes(
             message_id,
             error_id,
         )
-        messages, response = runtime.retry_error(
+        messages, response = await runtime.retry_error(
             message_id,
             error_id=error_id,
         )
@@ -72,7 +72,7 @@ def register_workspace_routes(
 
     @app.post("/api/workspace/clear")
     async def clear_workspace() -> WorkspaceClearResponse:
-        messages = runtime.clear()
+        messages = await runtime.clear()
         await runtime.notify_cleared_response()
         return WorkspaceClearResponse(messages=messages)
 
@@ -106,7 +106,7 @@ def register_workspace_routes(
             "Workspace response requested content_length=%s", len(request.content)
         )
         logger.log(TRACE_LEVEL, "Workspace user content=%r", request.content)
-        response = runtime.start_response(
+        response = await runtime.start_response(
             request.content, message_id=request.message_id
         )
         return StreamingResponse(

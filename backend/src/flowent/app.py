@@ -132,7 +132,7 @@ def create_app(
         workflow_service=workflow_service,
     )
     register_permission_routes(app, cwd=cwd, store=store)
-    register_workspace_routes(app, runtime=runtime, store=store)
+    register_workspace_routes(app, runtime=runtime)
 
     if serve_frontend and static_dir.is_dir():
         assets_dir = static_dir / "assets"
