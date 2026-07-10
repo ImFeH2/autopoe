@@ -46,9 +46,9 @@ const appState = () => ({
   },
   skills: [],
   telegram_bot: {
-    bot_token: "",
     enabled: false,
     error: "",
+    has_bot_token: false,
     sessions: [],
     status: "disabled",
   },

@@ -10,6 +10,7 @@ export const providerOptions: ProviderOption[] = [
 export const createEmptyProvider = (): Provider => ({
   apiKey: "",
   baseUrl: "",
+  hasAccessKey: false,
   id: "new",
   models: [],
   name: "",

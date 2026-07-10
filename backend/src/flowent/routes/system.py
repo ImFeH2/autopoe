@@ -3,11 +3,11 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from flowent._version import __version__
-from flowent.api_models import AboutResponse
+from flowent.api_models import AboutResponse, AppStateResponse
 from flowent.channels import TelegramBotManager
 from flowent.mcp import McpManager
 from flowent.skills import discover_skills
-from flowent.storage import StateStore, StoredState
+from flowent.storage import StateStore
 from flowent.workspace.context import state_with_current_model_context_window
 from flowent.workspace.runtime import WorkspaceRuntime
 
@@ -26,7 +26,7 @@ def register_system_routes(
         return {"status": "ok"}
 
     @app.get("/api/state")
-    async def app_state() -> StoredState:
+    async def app_state() -> AppStateResponse:
         state = state_with_current_model_context_window(store.read_state())
         active_response = runtime.current_response()
         update: dict[str, object] = {
@@ -41,7 +41,7 @@ def register_system_routes(
         update["telegram_bot"] = telegram_bot_manager.bot_with_status(
             state.telegram_bot
         )
-        return state.model_copy(update=update)
+        return AppStateResponse.from_stored(state.model_copy(update=update))
 
     @app.get("/api/about")
     async def about() -> AboutResponse:

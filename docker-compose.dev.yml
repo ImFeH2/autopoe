@@ -22,7 +22,7 @@ services:
       - /app
       - dev
     ports:
-      - "${FLOWENT_DEV_PORT:-6873}:6873"
+      - "127.0.0.1:${FLOWENT_DEV_PORT:-6873}:6873"
     volumes:
       - .:/app
       - flowent-dev-node-modules:/app/node_modules

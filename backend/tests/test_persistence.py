@@ -29,8 +29,8 @@ def test_app_state_persists_providers_across_app_instances(
     assert state_response.status_code == 200
     assert state_response.json()["providers"] == [
         {
-            "api_key": "sk-local",
             "base_url": "https://api.example.test/v1",
+            "has_api_key": True,
             "id": "provider-openai",
             "models": ["gpt-5.1", "gpt-5.1-mini"],
             "name": "OpenAI",
@@ -292,7 +292,6 @@ def test_app_state_persists_telegram_bot_across_app_instances(
         json={
             "bot_token": "telegram-secret",
             "enabled": False,
-            "sessions": [],
         },
     )
 
@@ -303,9 +302,9 @@ def test_app_state_persists_telegram_bot_across_app_instances(
 
     assert state_response.status_code == 200
     assert state_response.json()["telegram_bot"] == {
-        "bot_token": "telegram-secret",
         "enabled": False,
         "error": "",
+        "has_bot_token": True,
         "sessions": [],
         "status": "disabled",
     }

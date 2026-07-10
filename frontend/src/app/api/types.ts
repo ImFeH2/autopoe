@@ -17,12 +17,16 @@ import type {
 } from "@/components/flowent/types";
 
 export type ApiProvider = {
-  api_key: string;
   base_url: string;
+  has_api_key: boolean;
   id: string;
   models: string[];
   name: string;
   type: Provider["type"];
+};
+
+export type ApiProviderSaveRequest = Omit<ApiProvider, "has_api_key"> & {
+  api_key?: string;
 };
 
 export type ApiTelegramSession = {
@@ -36,11 +40,16 @@ export type ApiTelegramSession = {
 };
 
 export type ApiTelegramBot = {
-  bot_token: string;
   enabled: boolean;
   error?: string;
+  has_bot_token: boolean;
   sessions?: ApiTelegramSession[];
   status?: TelegramBot["status"];
+};
+
+export type ApiTelegramBotSaveRequest = {
+  bot_token?: string;
+  enabled: boolean;
 };
 
 export type ApiMcpTool = {

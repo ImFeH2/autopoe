@@ -2,7 +2,9 @@ import type {
   ApiMcpServer,
   ApiMcpTool,
   ApiProvider,
+  ApiProviderSaveRequest,
   ApiTelegramBot,
+  ApiTelegramBotSaveRequest,
   ApiTelegramSession,
   ApiWritablePath,
   ApiWorkflow,
@@ -65,21 +67,22 @@ export const contextWindowFromLimit = (
 };
 
 export const providerFromApi = (provider: ApiProvider): Provider => ({
-  apiKey: provider.api_key,
+  apiKey: "",
   baseUrl: provider.base_url,
+  hasAccessKey: provider.has_api_key ?? false,
   id: provider.id,
   models: provider.models,
   name: provider.name,
   type: provider.type,
 });
 
-export const providerToApi = (provider: Provider): ApiProvider => ({
-  api_key: provider.apiKey,
+export const providerToApi = (provider: Provider): ApiProviderSaveRequest => ({
   base_url: provider.baseUrl,
   id: provider.id,
   models: provider.models,
   name: provider.name,
   type: provider.type,
+  ...(provider.apiKey ? { api_key: provider.apiKey } : {}),
 });
 
 export const telegramSessionFromApi = (
@@ -94,22 +97,11 @@ export const telegramSessionFromApi = (
   username: session.username,
 });
 
-export const telegramSessionToApi = (
-  session: TelegramSession,
-): ApiTelegramSession => ({
-  chat_id: session.chatId,
-  display_name: session.displayName,
-  recent_message: session.recentMessage,
-  status: session.status,
-  updated_at: session.updatedAt,
-  user_id: session.userId,
-  username: session.username,
-});
-
 export const createEmptyTelegramBot = (): TelegramBot => ({
   botSecret: "",
   enabled: false,
   error: "",
+  hasBotSecret: false,
   sessions: [],
   status: "disabled",
 });
@@ -117,19 +109,19 @@ export const createEmptyTelegramBot = (): TelegramBot => ({
 export const telegramBotFromApi = (
   telegramBot?: ApiTelegramBot,
 ): TelegramBot => ({
-  botSecret: telegramBot?.bot_token ?? "",
+  botSecret: "",
   enabled: telegramBot?.enabled ?? false,
   error: telegramBot?.error ?? "",
+  hasBotSecret: telegramBot?.has_bot_token ?? false,
   sessions: (telegramBot?.sessions ?? []).map(telegramSessionFromApi),
   status: telegramBot?.status ?? "disabled",
 });
 
-export const telegramBotToApi = (telegramBot: TelegramBot): ApiTelegramBot => ({
-  bot_token: telegramBot.botSecret,
+export const telegramBotToApi = (
+  telegramBot: TelegramBot,
+): ApiTelegramBotSaveRequest => ({
   enabled: telegramBot.enabled,
-  error: telegramBot.error,
-  sessions: telegramBot.sessions.map(telegramSessionToApi),
-  status: telegramBot.status,
+  ...(telegramBot.botSecret ? { bot_token: telegramBot.botSecret } : {}),
 });
 
 export const writablePathFromApi = (

@@ -7,7 +7,7 @@ services:
     environment:
       FLOWENT_HOST: 0.0.0.0
     ports:
-      - "${FLOWENT_PORT:-6873}:6873"
+      - "127.0.0.1:${FLOWENT_PORT:-6873}:6873"
     volumes:
       - flowent-data:/home/flowent/.flowent
       - flowent-workspace:/workspace

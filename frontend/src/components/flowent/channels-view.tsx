@@ -116,6 +116,11 @@ export function ChannelsView({
                 onChange={(event) =>
                   onUpdateTelegramBot({ botSecret: event.target.value })
                 }
+                placeholder={
+                  telegramBot.hasBotSecret && !telegramBot.botSecret
+                    ? "Saved"
+                    : undefined
+                }
                 type="password"
                 value={telegramBot.botSecret}
               />

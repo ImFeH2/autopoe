@@ -279,16 +279,15 @@ def test_telegram_bot_config_is_saved_and_reported_in_state(
         json={
             "bot_token": "telegram-secret",
             "enabled": False,
-            "sessions": [],
         },
     )
     state = client.get("/api/state").json()
 
     assert response.status_code == 200
     assert state["telegram_bot"] == {
-        "bot_token": "telegram-secret",
         "enabled": False,
         "error": "",
+        "has_bot_token": True,
         "sessions": [],
         "status": "disabled",
     }

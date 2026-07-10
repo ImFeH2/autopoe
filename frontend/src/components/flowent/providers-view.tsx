@@ -287,14 +287,19 @@ function ProviderFields({
       <div className={dataRowClassName}>
         <Label
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
-          htmlFor="provider-api-key"
+          htmlFor="provider-access-key"
         >
-          API key
+          Access key
         </Label>
         <Input
           className={fieldInputClassName}
-          id="provider-api-key"
+          id="provider-access-key"
           onChange={(event) => onUpdateProvider({ apiKey: event.target.value })}
+          placeholder={
+            activeProvider.hasAccessKey && !activeProvider.apiKey
+              ? "Saved"
+              : undefined
+          }
           type="password"
           value={activeProvider.apiKey}
         />

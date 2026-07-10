@@ -6,6 +6,8 @@ from flowent.api_models import (
     McpImportPreviewRequest,
     McpImportRequest,
     SkillSettingsRequest,
+    TelegramBotResponse,
+    TelegramBotSaveRequest,
     TelegramSessionApproveRequest,
 )
 from flowent.channels import TelegramBotManager
@@ -87,10 +89,19 @@ def register_integration_routes(
             raise HTTPException(status_code=404, detail="Skill not found.") from error
 
     @app.put("/api/telegram-bot")
-    async def save_telegram_bot(telegram_bot: StoredTelegramBot) -> StoredTelegramBot:
-        saved_bot = store.save_telegram_bot(telegram_bot)
+    async def save_telegram_bot(
+        telegram_bot: TelegramBotSaveRequest,
+    ) -> TelegramBotResponse:
+        saved_bot = store.save_telegram_bot(
+            StoredTelegramBot(
+                bot_token=telegram_bot.bot_token or "",
+                enabled=telegram_bot.enabled,
+            )
+        )
         await telegram_bot_manager.sync_bot(saved_bot)
-        return telegram_bot_manager.bot_with_status(saved_bot)
+        return TelegramBotResponse.from_stored(
+            telegram_bot_manager.bot_with_status(saved_bot)
+        )
 
     @app.post("/api/telegram-bot/approve")
     async def approve_telegram_session(

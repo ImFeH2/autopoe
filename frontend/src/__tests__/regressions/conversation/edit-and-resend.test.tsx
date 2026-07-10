@@ -18,8 +18,8 @@ const selectedProviderState = (messages: TestMessage[]) => ({
   messages,
   providers: [
     {
-      api_key: "sk-local",
       base_url: "",
+      has_api_key: true,
       id: "provider-openai",
       models: ["gpt-5.1"],
       name: "OpenAI",
@@ -33,9 +33,9 @@ const selectedProviderState = (messages: TestMessage[]) => ({
   },
   skills: [],
   telegram_bot: {
-    bot_token: "",
     enabled: false,
     error: "",
+    has_bot_token: false,
     sessions: [],
     status: "disabled",
   },

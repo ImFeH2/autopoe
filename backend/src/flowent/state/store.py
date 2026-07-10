@@ -368,6 +368,10 @@ class StateStore:
         with self.connect() as connection:
             return self._read_telegram_bot(connection)
 
+    def read_provider(self, provider_id: str) -> StoredProvider:
+        with self.connect() as connection:
+            return self._read_provider(connection, provider_id)
+
     def save_telegram_bot(self, telegram_bot: StoredTelegramBot) -> StoredTelegramBot:
         with self.connect() as connection:
             connection.execute(
@@ -380,7 +384,10 @@ class StateStore:
                 VALUES (1, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled = excluded.enabled,
-                    bot_token = excluded.bot_token,
+                    bot_token = CASE
+                        WHEN excluded.bot_token <> '' THEN excluded.bot_token
+                        ELSE telegram_bot.bot_token
+                    END,
                     updated_at = unixepoch()
                 """,
                 (
@@ -472,7 +479,10 @@ class StateStore:
                     name = excluded.name,
                     type = excluded.type,
                     base_url = excluded.base_url,
-                    api_key = excluded.api_key,
+                    api_key = CASE
+                        WHEN excluded.api_key <> '' THEN excluded.api_key
+                        ELSE providers.api_key
+                    END,
                     updated_at = unixepoch()
                 """,
                 (
@@ -496,7 +506,7 @@ class StateStore:
                     for position, model in enumerate(provider.models)
                 ],
             )
-        return provider
+            return self._read_provider(connection, provider.id)
 
     def delete_provider(self, provider_id: str) -> None:
         with self.connect() as connection:
@@ -940,6 +950,28 @@ class StateStore:
                 (provider_id,),
             )
         ]
+
+    def _read_provider(
+        self, connection: sqlite3.Connection, provider_id: str
+    ) -> StoredProvider:
+        row = connection.execute(
+            """
+            SELECT id, name, type, base_url, api_key
+            FROM providers
+            WHERE id = ?
+            """,
+            (provider_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(provider_id)
+        return StoredProvider(
+            api_key=row["api_key"],
+            base_url=row["base_url"],
+            id=row["id"],
+            models=self._provider_models(connection, row["id"]),
+            name=row["name"],
+            type=row["type"],
+        )
 
     def _read_telegram_bot(self, connection: sqlite3.Connection) -> StoredTelegramBot:
         bot_row = connection.execute(

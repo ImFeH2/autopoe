@@ -19,9 +19,9 @@ export type TestTelegramSession = {
 };
 
 export type TestTelegramBot = {
-  bot_token: string;
   enabled: boolean;
   error: string;
+  has_bot_token: boolean;
   sessions: TestTelegramSession[];
   status: "disabled" | "error" | "running" | "starting";
 };
@@ -114,8 +114,8 @@ export type TestWorkflowRunResult = {
 export const workflowUuid = "00000000-0000-4000-8000-000000000000";
 
 export type TestProvider = {
-  api_key: string;
   base_url: string;
+  has_api_key: boolean;
   id: string;
   models: string[];
   name: string;
@@ -154,9 +154,9 @@ export const contextUsageInfo = (
 });
 
 export const emptyTelegramBotState = (): TestTelegramBot => ({
-  bot_token: "",
   enabled: false,
   error: "",
+  has_bot_token: false,
   sessions: [],
   status: "disabled",
 });
@@ -166,8 +166,8 @@ export const selectedProviderState = () => ({
   messages: [],
   providers: [
     {
-      api_key: "sk-local",
       base_url: "",
+      has_api_key: true,
       id: "provider-openai",
       models: ["gpt-5.1"],
       name: "OpenAI",

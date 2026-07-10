@@ -6590,7 +6590,7 @@ describe("App", () => {
       screen.getByRole("combobox", { name: "Provider type" }),
     ).toHaveTextContent("OpenAI");
     expect(screen.getByRole("textbox", { name: "Base URL" })).toHaveValue("");
-    expect(screen.getByLabelText("API key")).toBeInTheDocument();
+    expect(screen.getByLabelText("Access key")).toBeInTheDocument();
     expect(screen.getByText("No models")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
 
@@ -6641,6 +6641,7 @@ describe("App", () => {
         body: JSON.stringify({
           base_url: "",
           provider: "anthropic",
+          provider_id: "new",
           secret_reference: "",
         }),
         method: "POST",
@@ -6709,8 +6710,8 @@ describe("App", () => {
       messages: [],
       providers: [
         {
-          api_key: "",
           base_url: "",
+          has_api_key: false,
           id: "provider-openai",
           models: ["gpt-5.1"],
           name: "OpenAI",
@@ -6737,24 +6738,24 @@ describe("App", () => {
       messages: [],
       providers: [
         {
-          api_key: "sk-local",
           base_url: "https://api.example.test/v1",
+          has_api_key: true,
           id: "provider-openai",
           models: ["gpt-5.1"],
           name: "OpenAI",
           type: "openai",
         },
         {
-          api_key: "sk-anthropic",
           base_url: "",
+          has_api_key: true,
           id: "provider-anthropic",
           models: ["claude-sonnet-4-5"],
           name: "Anthropic",
           type: "anthropic",
         },
         {
-          api_key: "sk-gemini",
           base_url: "",
+          has_api_key: true,
           id: "provider-gemini",
           models: ["gemini-3-pro"],
           name: "Gemini",
@@ -6819,16 +6820,16 @@ describe("App", () => {
       messages: [],
       providers: [
         {
-          api_key: "sk-local",
           base_url: "https://api.example.test/v1",
+          has_api_key: true,
           id: "provider-openai",
           models: ["gpt-5.1"],
           name: "OpenAI",
           type: "openai",
         },
         {
-          api_key: "sk-anthropic",
           base_url: "",
+          has_api_key: true,
           id: "provider-anthropic",
           models: ["claude-sonnet-4-5", "claude-haiku-4-5"],
           name: "Anthropic",
@@ -6888,16 +6889,16 @@ describe("App", () => {
       messages: [],
       providers: [
         {
-          api_key: "sk-openai",
           base_url: "https://api.example.test/v1",
+          has_api_key: true,
           id: "provider-openai",
           models: ["gpt-5.1"],
           name: "OpenAI",
           type: "openai",
         },
         {
-          api_key: "sk-anthropic",
           base_url: "",
+          has_api_key: true,
           id: "provider-anthropic",
           models: ["claude-sonnet-4-5"],
           name: "Anthropic",
@@ -6997,8 +6998,8 @@ describe("App", () => {
       messages: [],
       providers: [
         {
-          api_key: "",
           base_url: "",
+          has_api_key: false,
           id: "provider-openai",
           models: ["gpt-5.1", "gpt-5.1-mini"],
           name: "OpenAI",
@@ -7283,9 +7284,9 @@ describe("App", () => {
         selected_provider_id: "",
       },
       telegram_bot: {
-        bot_token: "bot-secret",
         enabled: true,
         error: "",
+        has_bot_token: true,
         sessions: [
           {
             chat_id: "2001",
@@ -7313,7 +7314,11 @@ describe("App", () => {
     render(<App />);
     await user.click(await screen.findByRole("tab", { name: "Channels" }));
 
-    expect(screen.getByLabelText("Bot secret")).toHaveValue("bot-secret");
+    expect(screen.getByLabelText("Bot secret")).toHaveValue("");
+    expect(screen.getByLabelText("Bot secret")).toHaveAttribute(
+      "placeholder",
+      "Saved",
+    );
     expect(screen.getByRole("combobox", { name: "Enabled" })).toHaveTextContent(
       "On",
     );
@@ -7332,9 +7337,9 @@ describe("App", () => {
         selected_provider_id: "",
       },
       telegram_bot: {
-        bot_token: "bot-secret",
         enabled: true,
         error: "Secret is invalid",
+        has_bot_token: true,
         sessions: [],
         status: "error",
       },
@@ -7357,9 +7362,9 @@ describe("App", () => {
         selected_provider_id: "",
       },
       telegram_bot: {
-        bot_token: "bot-secret",
         enabled: true,
         error: "",
+        has_bot_token: true,
         sessions: [
           {
             chat_id: "2001",
@@ -7396,9 +7401,9 @@ describe("App", () => {
         selected_provider_id: "",
       },
       telegram_bot: {
-        bot_token: "bot-secret",
         enabled: true,
         error: "",
+        has_bot_token: true,
         sessions: [
           {
             chat_id: "2001",
@@ -8062,8 +8067,8 @@ describe("App", () => {
       messages: [],
       providers: [
         {
-          api_key: "",
           base_url: "",
+          has_api_key: false,
           id: "provider-openai",
           models: ["gpt-5.1"],
           name: "OpenAI",

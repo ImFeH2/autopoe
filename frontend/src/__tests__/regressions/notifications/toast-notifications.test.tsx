@@ -7,9 +7,9 @@ import { FlowentToastProvider } from "@/components/flowent/toast";
 import { useFlowentToast } from "@/components/flowent/toast-context";
 
 const emptyTelegramBot = () => ({
-  bot_token: "",
   enabled: false,
   error: "",
+  has_bot_token: false,
   sessions: [],
   status: "disabled",
 });
@@ -273,7 +273,7 @@ describe("toast notifications", () => {
       screen.getByLabelText("Base URL"),
       "https://example.invalid",
     );
-    await user.type(screen.getByLabelText("API key"), "not-a-real-key");
+    await user.type(screen.getByLabelText("Access key"), "not-a-real-key");
     await user.click(screen.getByRole("button", { name: "Fetch" }));
 
     const notification = await screen.findByRole("alert");
@@ -368,9 +368,9 @@ describe("toast notifications", () => {
     mockAppFetch(
       appState({
         telegram_bot: {
-          bot_token: "bot-secret",
           enabled: true,
           error: "",
+          has_bot_token: true,
           sessions: [],
           status: "running",
         },
@@ -379,9 +379,9 @@ describe("toast notifications", () => {
         if (input === "/api/telegram-bot" && init?.method === "PUT") {
           return new Response(
             JSON.stringify({
-              bot_token: "bot-secret",
               enabled: true,
               error: "Secret is invalid",
+              has_bot_token: true,
               sessions: [],
               status: "error",
             }),

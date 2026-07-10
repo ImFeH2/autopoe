@@ -63,7 +63,7 @@ export const useProviderSettings = ({
 
   const loadProviderEditor = useCallback((provider: Provider) => {
     setProviderEditorId(provider.id);
-    setProviderDraft(provider);
+    setProviderDraft({ ...provider, apiKey: "" });
   }, []);
 
   const openNewProviderEditor = useCallback(() => {
@@ -198,16 +198,21 @@ export const useProviderSettings = ({
         "Provider",
     };
 
+    const persistedProvider = await saveProviderRequest(savedProvider);
+    if (!persistedProvider) {
+      return;
+    }
+
     setProviders((currentProviders) => {
       if (isCreatingProvider) {
-        return [...currentProviders, savedProvider];
+        return [...currentProviders, persistedProvider];
       }
       return currentProviders.map((provider) =>
-        provider.id === savedProvider.id ? savedProvider : provider,
+        provider.id === persistedProvider.id ? persistedProvider : provider,
       );
     });
-    setProviderEditorId(savedProvider.id);
-    setProviderDraft(savedProvider);
+    setProviderEditorId(persistedProvider.id);
+    setProviderDraft(persistedProvider);
 
     if (!selectedProviderId) {
       void saveRuntimeSettingsRequest({
@@ -215,13 +220,11 @@ export const useProviderSettings = ({
         contextWindowLimit,
         reasoningEffort,
         selectedModel: "",
-        selectedProviderId: savedProvider.id,
+        selectedProviderId: persistedProvider.id,
       });
-      setSelectedProviderId(savedProvider.id);
+      setSelectedProviderId(persistedProvider.id);
       setSelectedModel("");
     }
-
-    await saveProviderRequest(savedProvider);
   }, [
     agentPrompt,
     contextWindowLimit,

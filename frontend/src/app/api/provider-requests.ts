@@ -1,4 +1,5 @@
-import { providerToApi } from "@/app/api/mappers";
+import { providerFromApi, providerToApi } from "@/app/api/mappers";
+import type { ApiProvider } from "@/app/api/types";
 import type { Provider } from "@/components/flowent/types";
 
 const providerModelFetchFailureMessages = {
@@ -61,13 +62,14 @@ const providerModelFetchFailureFromResponse = async (
 };
 
 export const fetchProviderModelsRequest = async (
-  provider: Pick<Provider, "apiKey" | "baseUrl" | "type">,
+  provider: Pick<Provider, "apiKey" | "baseUrl" | "id" | "type">,
 ) => {
   try {
     const response = await fetch("/api/providers/models", {
       body: JSON.stringify({
         base_url: provider.baseUrl,
         provider: provider.type,
+        provider_id: provider.id,
         secret_reference: provider.apiKey,
       }),
       headers: { "Content-Type": "application/json" },
@@ -94,11 +96,15 @@ export const fetchProviderModelsRequest = async (
 };
 
 export const saveProviderRequest = async (provider: Provider) => {
-  await fetch("/api/providers", {
+  const response = await fetch("/api/providers", {
     body: JSON.stringify(providerToApi(provider)),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   });
+  if (!response.ok) {
+    return null;
+  }
+  return providerFromApi((await response.json()) as ApiProvider);
 };
 
 export const removeProviderRequest = async (providerId: string) => {

@@ -32,11 +32,12 @@ export type ProviderOption = {
 };
 
 export type Provider = {
+  apiKey: string;
   id: string;
   name: string;
   type: ProviderKind;
   baseUrl: string;
-  apiKey: string;
+  hasAccessKey: boolean;
   models: string[];
 };
 
@@ -58,6 +59,7 @@ export type TelegramBot = {
   botSecret: string;
   enabled: boolean;
   error: string;
+  hasBotSecret: boolean;
   sessions: TelegramSession[];
   status: TelegramBotStatus;
 };

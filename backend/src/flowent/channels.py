@@ -121,6 +121,7 @@ class TelegramBotTransport:
 
 @dataclass
 class ChannelRuntime:
+    bot_token: str = ""
     error: str = ""
     offset: int | None = None
     status: ChannelStatus = ChannelStatus.DISABLED
@@ -139,6 +140,7 @@ class TelegramBotManager:
         self.store = store
         self.telegram_transport = telegram_transport or TelegramBotTransport()
         self.runtime = ChannelRuntime()
+        self._sync_lock = asyncio.Lock()
 
     def bot_with_status(self, bot: StoredTelegramBot) -> StoredTelegramBot:
         if not bot.enabled:
@@ -157,24 +159,38 @@ class TelegramBotManager:
         await self.sync_bot(self.store.read_telegram_bot())
 
     async def stop_all(self) -> None:
-        if self.runtime.task is not None:
-            self.runtime.task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self.runtime.task
-        self.runtime = ChannelRuntime()
+        async with self._sync_lock:
+            await self._stop_runtime_task()
+            self.runtime = ChannelRuntime()
 
     async def sync_bot(self, bot: StoredTelegramBot) -> None:
+        async with self._sync_lock:
+            await self._sync_bot(bot)
+
+    async def _sync_bot(self, bot: StoredTelegramBot) -> None:
         if not bot.enabled:
-            if self.runtime.task is not None:
-                self.runtime.task.cancel()
-            self.runtime.status = ChannelStatus.DISABLED
-            self.runtime.error = ""
+            await self._stop_runtime_task()
+            self.runtime = ChannelRuntime()
             return
-        if self.runtime.task is not None and not self.runtime.task.done():
+        if (
+            self.runtime.task is not None
+            and not self.runtime.task.done()
+            and self.runtime.bot_token == bot.bot_token
+        ):
             return
-        self.runtime.status = ChannelStatus.STARTING
-        self.runtime.error = ""
+        await self._stop_runtime_task()
+        self.runtime = ChannelRuntime(
+            bot_token=bot.bot_token,
+            status=ChannelStatus.STARTING,
+        )
         self.runtime.task = asyncio.create_task(self._run_bot(bot))
+
+    async def _stop_runtime_task(self) -> None:
+        if self.runtime.task is None:
+            return
+        self.runtime.task.cancel()
+        with suppress(asyncio.CancelledError):
+            await self.runtime.task
 
     async def poll_once(self, bot: StoredTelegramBot) -> None:
         if not bot.enabled:
