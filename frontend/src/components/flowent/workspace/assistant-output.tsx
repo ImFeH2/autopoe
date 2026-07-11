@@ -7,6 +7,7 @@ import type {
   AssistantOutputGroup,
   AssistantOutputItem,
 } from "@/components/flowent/types";
+import { AnimatedExpandableContent } from "@/components/flowent/workspace/animated-expandable-content";
 import { MessageIconButton } from "@/components/flowent/workspace/message-icon-button";
 import { ToolProcessItem } from "@/components/flowent/workspace/tool-process";
 import { cn } from "@/lib/utils";
@@ -171,13 +172,13 @@ function ThinkingProcessItem({
           {isStreaming ? "Thinking..." : "Thought Process"}
         </span>
       </Button>
-      {isExpanded ? (
+      <AnimatedExpandableContent isOpen={isExpanded}>
         <div className="py-1">
           <div className="whitespace-pre-wrap break-words text-base leading-5 text-white/60">
             {content}
           </div>
         </div>
-      ) : null}
+      </AnimatedExpandableContent>
     </div>
   );
 }

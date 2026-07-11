@@ -11,6 +11,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import type { ToolItem } from "@/components/flowent/types";
+import { AnimatedExpandableContent } from "@/components/flowent/workspace/animated-expandable-content";
 import { cn } from "@/lib/utils";
 
 export function ToolProcessItem({ tool }: { tool: ToolItem }) {
@@ -44,7 +45,9 @@ export function ToolProcessItem({ tool }: { tool: ToolItem }) {
         <span className="min-w-0 flex-1 truncate text-left">{tool.title}</span>
         <span className="shrink-0 text-xs text-white/55">{statusLabel}</span>
       </Button>
-      {isOpen ? <ToolProcessDetails tool={tool} /> : null}
+      <AnimatedExpandableContent isOpen={isOpen}>
+        <ToolProcessDetails tool={tool} />
+      </AnimatedExpandableContent>
     </div>
   );
 }

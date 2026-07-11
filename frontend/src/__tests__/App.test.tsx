@@ -5831,7 +5831,9 @@ describe("App", () => {
     await user.click(toolDetails);
 
     expect(toolDetails).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("RESULT")).not.toBeInTheDocument();
+    });
   });
 
   it("shows shell command output and structured fields inside the tool result", async () => {
@@ -8505,7 +8507,9 @@ describe("App", () => {
       name: "Thought Process",
     });
     expect(screen.getByText("The answer is ready.")).toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent("Checked the current files.");
+    await waitFor(() => {
+      expect(document.body).not.toHaveTextContent("Checked the current files.");
+    });
 
     await user.click(thoughtProcess);
 
