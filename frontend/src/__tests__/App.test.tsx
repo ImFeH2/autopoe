@@ -1354,6 +1354,52 @@ const mockInitialState = (
     if (
       typeof input === "string" &&
       input.startsWith("/api/workflows/") &&
+      input.endsWith("/schedule")
+    ) {
+      const workflowId = input
+        .replace("/api/workflows/", "")
+        .replace("/schedule", "");
+      return new Response(
+        JSON.stringify({
+          last_error: "",
+          last_result: null,
+          last_run_at: null,
+          next_run_at: null,
+          status: "stopped",
+          timezone: "UTC",
+          workflow_id: workflowId,
+        }),
+        { headers: { "Content-Type": "application/json" }, status: 200 },
+      );
+    }
+
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/workflows/") &&
+      (input.endsWith("/schedule/start") || input.endsWith("/schedule/stop")) &&
+      init?.method === "POST"
+    ) {
+      const isStarting = input.endsWith("/schedule/start");
+      const workflowId = input
+        .replace("/api/workflows/", "")
+        .replace(isStarting ? "/schedule/start" : "/schedule/stop", "");
+      return new Response(
+        JSON.stringify({
+          last_error: "",
+          last_result: null,
+          last_run_at: null,
+          next_run_at: isStarting ? 1_788_888_600 : null,
+          status: isStarting ? "scheduled" : "stopped",
+          timezone: "UTC",
+          workflow_id: workflowId,
+        }),
+        { headers: { "Content-Type": "application/json" }, status: 200 },
+      );
+    }
+
+    if (
+      typeof input === "string" &&
+      input.startsWith("/api/workflows/") &&
       input.endsWith("/run") &&
       init?.method === "POST"
     ) {
@@ -1363,7 +1409,6 @@ const mockInitialState = (
       const request = init.body
         ? (JSON.parse(String(init.body)) as {
             inputs?: Record<string, string>;
-            timer_id?: string;
           })
         : {};
       const result: TestWorkflowRunResult = {
@@ -1377,18 +1422,14 @@ const mockInitialState = (
           {
             error: "",
             id: "output",
-            output: request.timer_id
-              ? "Timer fired."
-              : request.inputs?.input || "Ready to ship.",
+            output: request.inputs?.input || "Ready to ship.",
             status: "success",
           },
         ],
-        outputs: request.timer_id
-          ? { final_result: "Timer fired." }
-          : {
-              final_result: request.inputs?.input || "Ready to ship.",
-              summary: request.inputs?.["input-window"] || "Summary ready.",
-            },
+        outputs: {
+          final_result: request.inputs?.input || "Ready to ship.",
+          summary: request.inputs?.["input-window"] || "Summary ready.",
+        },
         status: "success",
         workflow_id: workflowId,
       };
@@ -2370,66 +2411,6 @@ describe("App", () => {
         input: "release blockers",
         "input-window": "next week",
       },
-    });
-  });
-
-  it("keeps a timer workflow running until it is stopped", async () => {
-    const user = userEvent.setup();
-    const workflow = savedWorkflow({
-      definition: {
-        edges: [
-          {
-            id: "edge-timer-output",
-            label: "",
-            source: "timer",
-            source_handle: "out",
-            target: "output",
-            target_handle: "in",
-          },
-        ],
-        nodes: [
-          {
-            data: {
-              interval_seconds: 5,
-              mode: "interval",
-              payload: "Timer fired.",
-            },
-            description: "",
-            id: "timer",
-            name: "Timer",
-            position: { x: 0, y: 0 },
-            type: "timer",
-          },
-          {
-            data: { output_key: "final_result", transform: "" },
-            description: "",
-            id: "output",
-            name: "Output",
-            position: { x: 260, y: 0 },
-            type: "output",
-          },
-        ],
-        version: 1,
-      },
-    });
-    mockInitialState({
-      ...selectedProviderState(),
-      workflows: [workflow],
-    });
-    render(<App />);
-
-    await user.click(
-      await screen.findByRole("button", { name: /Launch Workflow/ }),
-    );
-    await user.click(screen.getByRole("button", { name: "Run" }));
-
-    expect(
-      await screen.findByRole("button", { name: "Stop" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText("Timer fired.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Stop" }));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
     });
   });
 

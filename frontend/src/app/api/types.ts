@@ -14,6 +14,7 @@ import type {
   WorkflowNodeRunResult,
   WorkflowRunRequest,
   WorkflowRunResult,
+  WorkflowSchedule,
 } from "@/components/flowent/types";
 
 export type ApiProvider = {
@@ -136,7 +137,20 @@ export type ApiWorkflowRunResult = {
 export type ApiWorkflowRunRequest = {
   input?: string;
   inputs?: Record<string, string>;
-  timer_id?: string;
+};
+
+export type ApiWorkflowSchedule = {
+  last_error: string;
+  last_result: ApiWorkflowRunResult | null;
+  last_run_at: number | null;
+  next_run_at: number | null;
+  status: WorkflowSchedule["status"];
+  timezone: string;
+  workflow_id: string;
+};
+
+export type ApiWorkflowScheduleStartRequest = ApiWorkflowRunRequest & {
+  timezone?: string;
 };
 
 export type ApiMessage = Message;

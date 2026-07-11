@@ -1,4 +1,11 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -157,6 +164,7 @@ function ShortToastHarness() {
 
 describe("toast notifications", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -192,24 +200,27 @@ describe("toast notifications", () => {
   });
 
   it("removes short notifications automatically", async () => {
-    const user = userEvent.setup();
+    vi.useFakeTimers();
     render(
       <FlowentToastProvider>
         <ShortToastHarness />
       </FlowentToastProvider>,
     );
 
-    await user.click(
+    fireEvent.click(
       screen.getByRole("button", { name: "Show short notification" }),
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent("Short message");
-    await waitFor(
-      () => {
-        expect(screen.queryByText("Short message")).not.toBeInTheDocument();
-      },
-      { timeout: 1200 },
-    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(79);
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Short message");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.queryByText("Short message")).not.toBeInTheDocument();
   });
 
   it.each([

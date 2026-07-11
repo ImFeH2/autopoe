@@ -5,9 +5,7 @@ import type {
   WorkflowRunResult,
 } from "@/components/flowent/types";
 import {
-  cronDelayMs,
   normalizeRunInputs,
-  timerDelayMs,
   workflowFailureMessage,
 } from "@/components/flowent/workflow-run";
 
@@ -36,30 +34,6 @@ describe("workflow run helpers", () => {
         },
       ),
     ).toEqual({ "input-a": "launch" });
-  });
-
-  it("uses interval seconds for interval timers", () => {
-    expect(
-      timerDelayMs(
-        workflowNode({
-          data: { interval_seconds: 7, mode: "interval" },
-          id: "timer",
-          type: "timer",
-        }),
-      ),
-    ).toBe(7000);
-  });
-
-  it("falls back to one minute for invalid cron expressions", () => {
-    expect(cronDelayMs("not-a-cron", new Date("2026-06-17T10:00:30Z"))).toBe(
-      60_000,
-    );
-  });
-
-  it("finds the next matching cron minute", () => {
-    expect(cronDelayMs("*/5 * * * *", new Date("2026-06-17T10:02:30Z"))).toBe(
-      150_000,
-    );
   });
 
   it("uses the first node failure as the workflow failure message", () => {

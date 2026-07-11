@@ -992,7 +992,7 @@ def test_workspace_response_auto_compacts_after_tool_result(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "1200")
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "1600")
     (tmp_path / "notes.txt").write_text("Launch notes. " * 600)
     captured_requests: list[dict[str, object]] = []
 

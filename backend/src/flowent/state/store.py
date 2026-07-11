@@ -19,6 +19,8 @@ from flowent.state.models import (
     StoredToolItem,
     StoredWorkflow,
     StoredWorkflowDefinition,
+    StoredWorkflowSchedule,
+    StoredWorkflowScheduleTimer,
     StoredWritablePath,
 )
 from flowent.state.schema import migrate
@@ -251,6 +253,99 @@ class StateStore:
     def delete_workflow(self, workflow_id: str) -> None:
         with self.connect() as connection:
             connection.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
+
+    def read_workflow_schedule(self, workflow_id: str) -> StoredWorkflowSchedule | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT workflow_id, status, generation, default_input, inputs,
+                       timezone, last_run_at, last_result, last_error
+                FROM workflow_schedules
+                WHERE workflow_id = ?
+                """,
+                (workflow_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._workflow_schedule_from_row(connection, row)
+
+    def read_workflow_schedules(self) -> list[StoredWorkflowSchedule]:
+        with self.connect() as connection:
+            return [
+                self._workflow_schedule_from_row(connection, row)
+                for row in connection.execute(
+                    """
+                    SELECT workflow_id, status, generation, default_input, inputs,
+                           timezone, last_run_at, last_result, last_error
+                    FROM workflow_schedules
+                    ORDER BY workflow_id
+                    """
+                )
+            ]
+
+    def save_workflow_schedule(
+        self,
+        schedule: StoredWorkflowSchedule,
+        *,
+        expected_generation: int | None = None,
+    ) -> bool:
+        with self.connect() as connection:
+            if expected_generation is not None:
+                current = connection.execute(
+                    "SELECT generation FROM workflow_schedules WHERE workflow_id = ?",
+                    (schedule.workflow_id,),
+                ).fetchone()
+                if current is None or current["generation"] != expected_generation:
+                    return False
+            connection.execute(
+                """
+                INSERT INTO workflow_schedules (
+                    workflow_id, status, generation, default_input, inputs,
+                    timezone, last_run_at, last_result, last_error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workflow_id) DO UPDATE SET
+                    status = excluded.status,
+                    generation = excluded.generation,
+                    default_input = excluded.default_input,
+                    inputs = excluded.inputs,
+                    timezone = excluded.timezone,
+                    last_run_at = excluded.last_run_at,
+                    last_result = excluded.last_result,
+                    last_error = excluded.last_error,
+                    updated_at = unixepoch()
+                """,
+                (
+                    schedule.workflow_id,
+                    schedule.status,
+                    schedule.generation,
+                    schedule.default_input,
+                    json.dumps(schedule.inputs, ensure_ascii=False),
+                    schedule.timezone,
+                    schedule.last_run_at,
+                    json.dumps(schedule.last_result, ensure_ascii=False)
+                    if schedule.last_result is not None
+                    else None,
+                    schedule.last_error,
+                ),
+            )
+            connection.execute(
+                "DELETE FROM workflow_schedule_timers WHERE workflow_id = ?",
+                (schedule.workflow_id,),
+            )
+            connection.executemany(
+                """
+                INSERT INTO workflow_schedule_timers (
+                    workflow_id, timer_node_id, next_run_at
+                )
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (schedule.workflow_id, timer.timer_node_id, timer.next_run_at)
+                    for timer in schedule.timers
+                ],
+            )
+        return True
 
     def read_skill_enabled(self) -> dict[str, bool]:
         with self.connect() as connection:
@@ -1094,6 +1189,36 @@ class StateStore:
                 """
             )
         ]
+
+    def _workflow_schedule_from_row(
+        self, connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> StoredWorkflowSchedule:
+        return StoredWorkflowSchedule(
+            default_input=row["default_input"],
+            generation=row["generation"],
+            inputs=json.loads(row["inputs"] or "{}"),
+            last_error=row["last_error"],
+            last_result=json.loads(row["last_result"]) if row["last_result"] else None,
+            last_run_at=row["last_run_at"],
+            status=row["status"],
+            timers=[
+                StoredWorkflowScheduleTimer(
+                    next_run_at=timer_row["next_run_at"],
+                    timer_node_id=timer_row["timer_node_id"],
+                )
+                for timer_row in connection.execute(
+                    """
+                    SELECT timer_node_id, next_run_at
+                    FROM workflow_schedule_timers
+                    WHERE workflow_id = ?
+                    ORDER BY timer_node_id
+                    """,
+                    (row["workflow_id"],),
+                )
+            ],
+            timezone=row["timezone"],
+            workflow_id=row["workflow_id"],
+        )
 
 
 def workflow_agent_history_messages(value: str) -> list[dict[str, object]]:

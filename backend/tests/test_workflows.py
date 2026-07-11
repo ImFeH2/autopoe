@@ -122,6 +122,16 @@ def test_workflow_save_rejects_invalid_edges(tmp_path, monkeypatch) -> None:
     assert response.json()["detail"] == "Workflow edges must connect existing nodes."
 
 
+def test_delete_missing_workflow_remains_idempotent(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
+    client = TestClient(create_app(serve_frontend=False))
+
+    response = client.delete("/api/workflows/missing")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
 def test_workflow_run_returns_output_node_result(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
@@ -292,7 +302,7 @@ def test_workflow_run_accepts_timer_node_without_input(tmp_path, monkeypatch) ->
     assert response.json()["outputs"] == {"final_result": "tick"}
 
 
-def test_workflow_run_targets_single_timer_node(tmp_path, monkeypatch) -> None:
+def test_workflow_run_rejects_internal_timer_selector(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
     workflow = {
@@ -363,8 +373,7 @@ def test_workflow_run_targets_single_timer_node(tmp_path, monkeypatch) -> None:
         json={"timer_id": "timer-b"},
     )
 
-    assert response.status_code == 200
-    assert response.json()["outputs"] == {"beta": "beta"}
+    assert response.status_code == 422
 
 
 def test_workflow_run_accepts_input_override(tmp_path, monkeypatch) -> None:

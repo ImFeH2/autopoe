@@ -1,6 +1,7 @@
 import type {
   ApiWorkflow,
   ApiWorkflowRunResult,
+  ApiWorkflowSchedule,
   RequestResult,
 } from "@/app/api/types";
 import {
@@ -8,12 +9,16 @@ import {
   workflowFromApi,
   workflowRunRequestToApi,
   workflowRunResultFromApi,
+  workflowScheduleFromApi,
+  workflowScheduleStartRequestToApi,
   workflowToApi,
 } from "@/app/api/mappers";
 import type {
   Workflow,
   WorkflowRunRequest,
   WorkflowRunResult,
+  WorkflowSchedule,
+  WorkflowScheduleStartRequest,
 } from "@/components/flowent/types";
 
 export const saveWorkflowRequest = async (
@@ -61,7 +66,6 @@ export const runWorkflowRequest = async (
       body: JSON.stringify(workflowRunRequestToApi(request)),
       headers: { "Content-Type": "application/json" },
       method: "POST",
-      signal: request.signal,
     },
   );
 
@@ -79,4 +83,89 @@ export const runWorkflowRequest = async (
     (await response.json()) as ApiWorkflowRunResult,
   );
   return { data: result, error: "" };
+};
+
+export const fetchWorkflowScheduleRequest = async (
+  workflowId: string,
+): Promise<RequestResult<WorkflowSchedule>> => {
+  const response = await fetch(
+    `/api/workflows/${encodeURIComponent(workflowId)}/schedule`,
+  );
+
+  if (!response.ok) {
+    return {
+      data: null,
+      error: await errorMessageFromResponse(
+        response,
+        "Run status could not be loaded.",
+      ),
+    };
+  }
+
+  return {
+    data: workflowScheduleFromApi(
+      (await response.json()) as ApiWorkflowSchedule,
+    ),
+    error: "",
+  };
+};
+
+export const startWorkflowScheduleRequest = async (
+  workflowId: string,
+  request: WorkflowScheduleStartRequest = {},
+): Promise<RequestResult<WorkflowSchedule>> => {
+  const response = await fetch(
+    `/api/workflows/${encodeURIComponent(workflowId)}/schedule/start`,
+    {
+      body: JSON.stringify(workflowScheduleStartRequestToApi(request)),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+  );
+
+  if (!response.ok) {
+    return {
+      data: null,
+      error: await errorMessageFromResponse(
+        response,
+        "Workflow could not be started.",
+      ),
+    };
+  }
+
+  return {
+    data: workflowScheduleFromApi(
+      (await response.json()) as ApiWorkflowSchedule,
+    ),
+    error: "",
+  };
+};
+
+export const stopWorkflowScheduleRequest = async (
+  workflowId: string,
+): Promise<RequestResult<WorkflowSchedule>> => {
+  const response = await fetch(
+    `/api/workflows/${encodeURIComponent(workflowId)}/schedule/stop`,
+    {
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+  );
+
+  if (!response.ok) {
+    return {
+      data: null,
+      error: await errorMessageFromResponse(
+        response,
+        "Workflow could not be stopped.",
+      ),
+    };
+  }
+
+  return {
+    data: workflowScheduleFromApi(
+      (await response.json()) as ApiWorkflowSchedule,
+    ),
+    error: "",
+  };
 };

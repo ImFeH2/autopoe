@@ -75,6 +75,7 @@ import type {
   WorkflowNodeRunResult,
   WorkflowNodeType,
   WorkflowRunResult,
+  WorkflowScheduleStatus,
 } from "@/components/flowent/types";
 import {
   defaultWorkflowNodeData,
@@ -270,7 +271,14 @@ const nodeTypes = {
 };
 
 type WorkflowAutoSaveStatus = "idle" | "saving" | "saved" | "error";
-type WorkflowRunControlState = "ready" | "running" | "stoppable";
+type WorkflowRunControlState =
+  | "ready"
+  | "running"
+  | "stoppable"
+  | "loading"
+  | "starting"
+  | "stopping"
+  | "unavailable";
 
 const workflowAutoSaveStatusLabel = {
   error: "Could not save",
@@ -426,8 +434,10 @@ function WorkflowRunControl({
     >
       {state === "stoppable" ? (
         <Square className="size-4" aria-hidden="true" />
-      ) : state === "running" ? (
+      ) : ["running", "loading", "starting", "stopping"].includes(state) ? (
         <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+      ) : state === "unavailable" ? (
+        <AlertCircle className="size-4" aria-hidden="true" />
       ) : (
         <Play className="size-4" aria-hidden="true" />
       )}
@@ -727,6 +737,32 @@ function snapWorkflowNodes(nodes: WorkflowCanvasNode[]) {
   }));
 }
 
+function formatScheduleTime(timestamp: number, timezone: string) {
+  const fallbackTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const displayTimezone = timezone || fallbackTimezone;
+  const options: Intl.DateTimeFormatOptions = {
+    dateStyle: "medium",
+    timeStyle: "short",
+    ...(displayTimezone ? { timeZone: displayTimezone } : {}),
+  };
+  try {
+    const formattedTime = new Intl.DateTimeFormat(undefined, options).format(
+      new Date(timestamp * 1000),
+    );
+    return displayTimezone
+      ? `${formattedTime} (${displayTimezone})`
+      : formattedTime;
+  } catch {
+    const formattedTime = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(timestamp * 1000));
+    return fallbackTimezone
+      ? `${formattedTime} (${fallbackTimezone})`
+      : formattedTime;
+  }
+}
+
 export function WorkflowCanvas({
   autoSaveStatus,
   draftWorkflow,
@@ -736,6 +772,10 @@ export function WorkflowCanvas({
   runResult,
   runControlLabel,
   runControlState,
+  scheduleError,
+  scheduleNextRunAt,
+  scheduleStatus,
+  scheduleTimezone,
 }: {
   autoSaveStatus: WorkflowAutoSaveStatus;
   draftWorkflow: Workflow;
@@ -745,6 +785,10 @@ export function WorkflowCanvas({
   runResult: WorkflowRunResult | null;
   runControlLabel: string;
   runControlState: WorkflowRunControlState;
+  scheduleError: string;
+  scheduleNextRunAt: number | null;
+  scheduleStatus: WorkflowScheduleStatus | null;
+  scheduleTimezone: string;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const workflowLayoutGroupRef = useRef<GroupImperativeHandle | null>(null);
@@ -1071,10 +1115,44 @@ export function WorkflowCanvas({
           Right-click the canvas or use Add to create your first node.
         </div>
       ) : null}
-      {isRunning ? (
-        <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-md border border-white/10 bg-black/80 px-2.5 py-1.5 text-xs text-[#dedede]">
-          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-          Workflow running...
+      {isRunning ||
+      ["scheduled", "running", "error"].includes(scheduleStatus ?? "") ||
+      scheduleError ? (
+        <div
+          className="absolute top-3 left-3 z-10 grid gap-1 rounded-md border border-white/10 bg-black/80 px-2.5 py-1.5 text-xs text-[#dedede] backdrop-blur-sm max-[640px]:top-16 max-[640px]:right-3"
+          data-slot="workflow-schedule-status"
+        >
+          <div className="flex items-center gap-2">
+            {isRunning || scheduleStatus === "running" ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : scheduleStatus === "error" || scheduleError ? (
+              <AlertCircle
+                className="size-3.5 text-[#ff8a8a]"
+                aria-hidden="true"
+              />
+            ) : (
+              <Check className="size-3.5 text-[#7ddf89]" aria-hidden="true" />
+            )}
+            <span>
+              {isRunning
+                ? "Workflow running..."
+                : scheduleStatus === "running"
+                  ? "Running now"
+                  : scheduleStatus === "scheduled"
+                    ? "Running"
+                    : scheduleStatus === "error"
+                      ? "Needs attention"
+                      : "Unavailable"}
+            </span>
+          </div>
+          {scheduleNextRunAt ? (
+            <div className="text-[#9b9b9b]">
+              Next run {formatScheduleTime(scheduleNextRunAt, scheduleTimezone)}
+            </div>
+          ) : null}
+          {scheduleError ? (
+            <div className="max-w-72 text-[#ffb3b3]">{scheduleError}</div>
+          ) : null}
         </div>
       ) : null}
       <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
@@ -1099,7 +1177,7 @@ export function WorkflowCanvas({
           </DropdownMenuContent>
         </DropdownMenu>
         <WorkflowRunControl
-          isDisabled={runControlState === "running"}
+          isDisabled={!["ready", "stoppable"].includes(runControlState)}
           label={runControlLabel}
           onRun={onRun}
           state={runControlState}

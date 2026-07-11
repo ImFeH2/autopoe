@@ -8,6 +8,7 @@ from flowent.llm import CompletionCallable
 from flowent.mcp import McpManager
 from flowent.provider_connections import selected_connection
 from flowent.storage import StateStore, StoredWorkflow, StoredWorkflowDefinition
+from flowent.workflow_scheduler import WorkflowScheduler
 from flowent.workflows import (
     WorkflowRunResponse,
     run_workflow_definition,
@@ -36,6 +37,7 @@ class WorkflowService:
             store=store,
             workflow_service=self,
         )
+        self.scheduler = WorkflowScheduler(self)
 
     def list_workflows(self) -> list[StoredWorkflow]:
         return self.store.read_workflows()
@@ -53,17 +55,23 @@ class WorkflowService:
             raise ValueError("Workflow not found.")
         return workflow
 
-    def save_workflow(self, workflow: StoredWorkflow) -> StoredWorkflow:
-        return self.store.save_workflow(
-            validate_workflow_draft(
-                workflow.model_copy(
-                    update={"name": workflow.name.strip() or "Untitled Workflow"}
-                )
+    async def save_workflow(self, workflow: StoredWorkflow) -> StoredWorkflow:
+        try:
+            previous = self.get_workflow(workflow.id)
+        except ValueError:
+            previous = None
+        validated = validate_workflow_draft(
+            workflow.model_copy(
+                update={"name": workflow.name.strip() or "Untitled Workflow"}
             )
         )
+        if previous is None:
+            return self.store.save_workflow(validated)
+        return await self.scheduler.save_workflow(validated)
 
-    def delete_workflow(self, workflow_id: str) -> StoredWorkflow:
+    async def delete_workflow(self, workflow_id: str) -> StoredWorkflow:
         workflow = self.get_workflow(workflow_id)
+        await self.scheduler.delete(workflow_id)
         self.store.delete_workflow(workflow_id)
         return workflow
 

@@ -122,6 +122,28 @@ class StoredWorkflow(BaseModel):
     updated_at: int = 0
 
 
+class StoredWorkflowScheduleTimer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    next_run_at: float | None = None
+    timer_node_id: str
+
+
+class StoredWorkflowSchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_input: str = ""
+    generation: int = 0
+    inputs: dict[str, str] = Field(default_factory=dict)
+    last_error: str = ""
+    last_result: dict[str, object] | None = None
+    last_run_at: float | None = None
+    status: Literal["stopped", "scheduled", "running", "error"] = "stopped"
+    timers: list[StoredWorkflowScheduleTimer] = Field(default_factory=list)
+    timezone: str = "UTC"
+    workflow_id: str
+
+
 class StoredProvider(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

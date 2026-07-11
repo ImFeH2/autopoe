@@ -1,11 +1,35 @@
 from fastapi import Body, FastAPI, HTTPException
 
-from flowent.api_models import WorkflowRunRequest
+from flowent.api_models import (
+    WorkflowRunRequest,
+    WorkflowScheduleResponse,
+    WorkflowScheduleStartRequest,
+)
 from flowent.storage import StoredWorkflow
 from flowent.workflow_service import WorkflowService
 from flowent.workflows import WorkflowRunResponse
 
 OPTIONAL_WORKFLOW_RUN_BODY = Body(default=None)
+OPTIONAL_WORKFLOW_SCHEDULE_BODY = Body(default=None)
+
+
+def schedule_response(schedule) -> WorkflowScheduleResponse:
+    return WorkflowScheduleResponse(
+        workflow_id=schedule.workflow_id,
+        status=schedule.status,
+        timezone=schedule.timezone,
+        next_run_at=min(
+            (
+                item.next_run_at
+                for item in schedule.timers
+                if item.next_run_at is not None
+            ),
+            default=None,
+        ),
+        last_run_at=schedule.last_run_at,
+        last_result=schedule.last_result,
+        last_error=schedule.last_error,
+    )
 
 
 def register_workflow_routes(
@@ -16,14 +40,53 @@ def register_workflow_routes(
     @app.put("/api/workflows")
     async def save_workflow(workflow: StoredWorkflow) -> StoredWorkflow:
         try:
-            return workflow_service.save_workflow(workflow)
+            return await workflow_service.save_workflow(workflow)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.delete("/api/workflows/{workflow_id}")
     async def delete_workflow(workflow_id: str) -> dict[str, bool]:
-        workflow_service.store.delete_workflow(workflow_id)
-        return {"ok": True}
+        try:
+            await workflow_service.delete_workflow(workflow_id)
+            return {"ok": True}
+        except ValueError as error:
+            if str(error) == "Workflow not found.":
+                return {"ok": True}
+            raise
+
+    @app.get("/api/workflows/{workflow_id}/schedule")
+    async def get_schedule(workflow_id: str) -> WorkflowScheduleResponse:
+        try:
+            return schedule_response(workflow_service.scheduler.get(workflow_id))
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/api/workflows/{workflow_id}/schedule/start")
+    async def start_schedule(
+        workflow_id: str,
+        request: WorkflowScheduleStartRequest | None = OPTIONAL_WORKFLOW_SCHEDULE_BODY,
+    ) -> WorkflowScheduleResponse:
+        body = request or WorkflowScheduleStartRequest()
+        try:
+            schedule = await workflow_service.scheduler.start_schedule(
+                workflow_id,
+                default_input=body.input,
+                inputs=body.inputs,
+                timezone=body.timezone,
+            )
+            return schedule_response(schedule)
+        except ValueError as error:
+            status = 404 if str(error) == "Workflow not found." else 400
+            raise HTTPException(status_code=status, detail=str(error)) from error
+
+    @app.post("/api/workflows/{workflow_id}/schedule/stop")
+    async def stop_schedule(workflow_id: str) -> WorkflowScheduleResponse:
+        try:
+            return schedule_response(
+                await workflow_service.scheduler.stop_schedule(workflow_id)
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
     @app.post("/api/workflows/{workflow_id}/run")
     async def run_workflow(
@@ -36,7 +99,6 @@ def register_workflow_routes(
                 workflow_id,
                 default_input=run_request.input,
                 input_values=run_request.inputs,
-                timer_node_id=run_request.timer_id,
             )
         except ValueError as error:
             status_code = 404 if str(error) == "Workflow not found." else 400

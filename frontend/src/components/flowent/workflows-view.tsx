@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { AlertCircle, ArrowRight } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -17,6 +17,9 @@ import type {
   WorkflowNode,
   WorkflowRunRequest,
   WorkflowRunResult,
+  WorkflowSchedule,
+  WorkflowScheduleRequestState,
+  WorkflowScheduleStartRequest,
 } from "@/components/flowent/types";
 import {
   cloneWorkflow,
@@ -24,10 +27,7 @@ import {
 } from "@/components/flowent/workflows/workflow-model";
 import { WorkflowCanvas } from "@/components/flowent/workflows/workflow-canvas";
 import {
-  isAbortError,
   normalizeRunInputs,
-  timerDelayMs,
-  waitForTimer,
   workflowFailureMessage,
   workflowInputNodes,
   workflowTimerNodes,
@@ -43,6 +43,7 @@ function WorkflowEditorView({
   draftWorkflow,
   inputValues,
   isInputFormOpen,
+  isSchedulePersisted,
   isRunning,
   onCancelInputForm,
   onConfirmInputForm,
@@ -51,11 +52,14 @@ function WorkflowEditorView({
   onRun,
   onStop,
   runResult,
+  workflowSchedule,
+  workflowScheduleRequestState,
 }: {
   autoSaveStatus: AutoSaveStatus;
   draftWorkflow: Workflow;
   inputValues: Record<string, string>;
   isInputFormOpen: boolean;
+  isSchedulePersisted: boolean;
   isRunning: boolean;
   onCancelInputForm: () => void;
   onConfirmInputForm: () => void;
@@ -64,11 +68,47 @@ function WorkflowEditorView({
   onRun: () => void;
   onStop: () => void;
   runResult: WorkflowRunResult | null;
+  workflowSchedule: WorkflowSchedule | null;
+  workflowScheduleRequestState: WorkflowScheduleRequestState;
 }) {
   const outputEntries = Object.entries(runResult?.outputs ?? {});
   const inputNodes = workflowInputNodes(draftWorkflow);
   const hasTimer = workflowTimerNodes(draftWorkflow).length > 0;
-  const canStop = isRunning && hasTimer;
+  const scheduleStatus = workflowSchedule?.status ?? null;
+  const canStop =
+    hasTimer &&
+    scheduleStatus !== null &&
+    ["scheduled", "running"].includes(scheduleStatus);
+  const isScheduleLoading =
+    hasTimer &&
+    isSchedulePersisted &&
+    ["idle", "loading"].includes(workflowScheduleRequestState);
+  const runControl = (() => {
+    if (!hasTimer) {
+      return {
+        label: "Run",
+        state: isRunning ? ("running" as const) : ("ready" as const),
+      };
+    }
+    if (isScheduleLoading) {
+      return { label: "Loading...", state: "loading" as const };
+    }
+    if (workflowScheduleRequestState === "starting") {
+      return { label: "Starting...", state: "starting" as const };
+    }
+    if (workflowScheduleRequestState === "stopping") {
+      return { label: "Stopping...", state: "stopping" as const };
+    }
+    if (workflowScheduleRequestState === "unavailable") {
+      return { label: "Unavailable", state: "unavailable" as const };
+    }
+    if (canStop) {
+      return { label: "Stop", state: "stoppable" as const };
+    }
+    return { label: "Run", state: "ready" as const };
+  })();
+  const runFailed = runResult?.status === "failed";
+  const runError = runFailed ? workflowFailureMessage(runResult) : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
@@ -84,13 +124,24 @@ function WorkflowEditorView({
       {runResult ? (
         <div className="grid shrink-0 gap-2 border-b border-white/10 px-3 py-2 text-xs text-[#dedede]">
           <div className="flex items-center gap-2">
-            <ArrowRight className="size-4 text-[#7ddf89]" aria-hidden="true" />
-            <span>
-              {runResult.status === "success"
-                ? "Run completed."
-                : "Run failed."}
-            </span>
+            {runFailed ? (
+              <AlertCircle
+                className="size-4 text-[#ff8a8a]"
+                aria-hidden="true"
+              />
+            ) : (
+              <ArrowRight
+                className="size-4 text-[#7ddf89]"
+                aria-hidden="true"
+              />
+            )}
+            <span>{runFailed ? "Run failed." : "Run completed."}</span>
           </div>
+          {runFailed ? (
+            <div className="text-[#ffb3b3]">
+              {workflowFailureMessage(runResult)}
+            </div>
+          ) : null}
           {outputEntries.length > 0 ? (
             <div className="grid gap-1">
               {outputEntries.map(([key, value]) => (
@@ -116,10 +167,19 @@ function WorkflowEditorView({
           onRun={canStop ? onStop : onRun}
           onChange={onDraftChange}
           runResult={runResult}
-          runControlLabel={canStop ? "Stop" : "Run"}
-          runControlState={
-            canStop ? "stoppable" : isRunning ? "running" : "ready"
+          runControlLabel={runControl.label}
+          runControlState={runControl.state}
+          scheduleError={
+            workflowScheduleRequestState === "unavailable"
+              ? "Could not load run status."
+              : workflowSchedule?.status === "error" &&
+                  workflowSchedule.lastError !== runError
+                ? workflowSchedule.lastError
+                : ""
           }
+          scheduleStatus={scheduleStatus}
+          scheduleNextRunAt={workflowSchedule?.nextRunAt ?? null}
+          scheduleTimezone={workflowSchedule?.timezone ?? ""}
         />
       </ReactFlowProvider>
     </div>
@@ -195,18 +255,18 @@ function RunInputPanel({
 
 export function WorkflowsView({
   activeWorkflow,
-  isRunningWorkflow,
   newWorkflowKey,
-  onFinishWorkflowRun,
   onRunWorkflow,
   onSaveWorkflow,
+  onStartWorkflowSchedule,
+  onStopWorkflowSchedule,
   runningWorkflowId,
   workflowRunResult,
+  workflowSchedule,
+  workflowScheduleRequestState,
 }: {
   activeWorkflow: Workflow | null;
-  isRunningWorkflow: boolean;
   newWorkflowKey: number;
-  onFinishWorkflowRun: (workflowId: string) => void;
   onRunWorkflow: (
     workflowId: string,
     request?: WorkflowRunRequest,
@@ -218,8 +278,21 @@ export function WorkflowsView({
     data: Workflow | null;
     error: string;
   }>;
+  onStartWorkflowSchedule: (
+    workflowId: string,
+    request?: WorkflowScheduleStartRequest,
+  ) => Promise<{
+    data: WorkflowSchedule | null;
+    error: string;
+  }>;
+  onStopWorkflowSchedule: (workflowId: string) => Promise<{
+    data: WorkflowSchedule | null;
+    error: string;
+  }>;
   runningWorkflowId: string;
   workflowRunResult: WorkflowRunResult | null;
+  workflowSchedule: WorkflowSchedule | null;
+  workflowScheduleRequestState: WorkflowScheduleRequestState;
 }) {
   const [draftWorkflow, setDraftWorkflow] = useState<Workflow>(() =>
     activeWorkflow ? cloneWorkflow(activeWorkflow) : createDraftWorkflow(),
@@ -229,7 +302,6 @@ export function WorkflowsView({
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("idle");
   const [saveRevision, setSaveRevision] = useState(0);
   const toast = useFlowentToast();
-  const runAbortControllerRef = useRef<AbortController | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const savePromiseRef = useRef<Promise<Workflow | null> | null>(null);
   const latestDraftRef = useRef(draftWorkflow);
@@ -379,7 +451,6 @@ export function WorkflowsView({
   useEffect(
     () => () => {
       clearAutoSaveTimer();
-      runAbortControllerRef.current?.abort();
     },
     [clearAutoSaveTimer],
   );
@@ -395,16 +466,21 @@ export function WorkflowsView({
     return clearAutoSaveTimer;
   }, [clearAutoSaveTimer, saveLatestDraft, saveRevision]);
 
-  const activeRunResult =
-    workflowRunResult?.workflowId === draftWorkflow.id
+  const hasTimer = workflowTimerNodes(draftWorkflow).length > 0;
+  const activeWorkflowSchedule =
+    workflowSchedule?.workflowId === draftWorkflow.id ? workflowSchedule : null;
+  const activeRunResult = hasTimer
+    ? (activeWorkflowSchedule?.lastResult ?? null)
+    : workflowRunResult?.workflowId === draftWorkflow.id
       ? workflowRunResult
       : null;
-  const isRunning = runningWorkflowId === draftWorkflow.id && isRunningWorkflow;
+  const isRunning = runningWorkflowId === draftWorkflow.id;
 
-  const stopRun = () => {
-    runAbortControllerRef.current?.abort();
-    runAbortControllerRef.current = null;
-    onFinishWorkflowRun(draftWorkflow.id);
+  const stopRun = async () => {
+    const result = await onStopWorkflowSchedule(draftWorkflow.id);
+    if (!result.data) {
+      toast.error(result.error);
+    }
   };
 
   const runSavedWorkflow = async (
@@ -415,8 +491,7 @@ export function WorkflowsView({
       workflowInputNodes(savedWorkflow),
       nextInputValues,
     );
-    const timerNodes = workflowTimerNodes(savedWorkflow);
-    if (timerNodes.length === 0) {
+    if (workflowTimerNodes(savedWorkflow).length === 0) {
       const result = await onRunWorkflow(savedWorkflow.id, {
         inputs: requestInputs,
       });
@@ -430,79 +505,12 @@ export function WorkflowsView({
       return;
     }
 
-    const abortController = new AbortController();
-    runAbortControllerRef.current?.abort();
-    runAbortControllerRef.current = abortController;
-    try {
-      await runTimers(
-        savedWorkflow,
-        timerNodes,
-        requestInputs,
-        abortController,
-      );
-    } catch (error) {
-      if (!isAbortError(error)) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "Run could not be completed.",
-        );
-      }
-    } finally {
-      if (runAbortControllerRef.current === abortController) {
-        runAbortControllerRef.current = null;
-      }
-      onFinishWorkflowRun(savedWorkflow.id);
-    }
-  };
-
-  const runTimers = async (
-    savedWorkflow: Workflow,
-    timerNodes: WorkflowNode[],
-    requestInputs: Record<string, string>,
-    abortController: AbortController,
-  ) => {
-    const signal = abortController.signal;
-    for (const timerNode of timerNodes) {
-      if (signal.aborted) {
-        throw new DOMException("Run stopped.", "AbortError");
-      }
-      const result = await onRunWorkflow(savedWorkflow.id, {
-        inputs: requestInputs,
-        signal,
-        timerId: timerNode.id,
-      });
-      if (!result.data) {
-        throw new Error(result.error);
-      }
-      if (result.data.status === "failed") {
-        throw new Error(workflowFailureMessage(result.data));
-      }
-    }
-
-    const scheduledTimers = timerNodes.map((timerNode) => ({
-      nextAt: Date.now() + timerDelayMs(timerNode),
-      timerNode,
-    }));
-
-    while (!signal.aborted) {
-      const nextTimer = scheduledTimers.sort((a, b) => a.nextAt - b.nextAt)[0];
-      if (!nextTimer) {
-        return;
-      }
-      await waitForTimer(Math.max(0, nextTimer.nextAt - Date.now()), signal);
-      const result = await onRunWorkflow(savedWorkflow.id, {
-        inputs: requestInputs,
-        signal,
-        timerId: nextTimer.timerNode.id,
-      });
-      if (!result.data) {
-        throw new Error(result.error);
-      }
-      if (result.data.status === "failed") {
-        throw new Error(workflowFailureMessage(result.data));
-      }
-      nextTimer.nextAt = Date.now() + timerDelayMs(nextTimer.timerNode);
+    const result = await onStartWorkflowSchedule(savedWorkflow.id, {
+      inputs: requestInputs,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    if (!result.data) {
+      toast.error(result.error);
     }
   };
 
@@ -541,6 +549,7 @@ export function WorkflowsView({
       draftWorkflow={draftWorkflow}
       inputValues={inputValues}
       isInputFormOpen={isInputFormOpen}
+      isSchedulePersisted={isPersistedRef.current}
       isRunning={isRunning}
       onCancelInputForm={() => setIsInputFormOpen(false)}
       onConfirmInputForm={() => {
@@ -558,6 +567,8 @@ export function WorkflowsView({
       }}
       onStop={stopRun}
       runResult={activeRunResult}
+      workflowSchedule={activeWorkflowSchedule}
+      workflowScheduleRequestState={workflowScheduleRequestState}
     />
   );
 }

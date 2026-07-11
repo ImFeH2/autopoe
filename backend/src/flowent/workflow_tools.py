@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -42,7 +44,7 @@ def workflow_tool_specs() -> list[dict[str, object]]:
             "type": "function",
             "function": {
                 "name": "run_workflow",
-                "description": "Run a saved workflow. Pass input when the user's current message contains the content the workflow should process.",
+                "description": "Run a saved workflow once. For a Timer workflow, use start_workflow_schedule instead.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -53,6 +55,50 @@ def workflow_tool_specs() -> list[dict[str, object]]:
                             "additionalProperties": {"type": "string"},
                         },
                     },
+                    "required": ["workflow_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "start_workflow_schedule",
+                "description": "Start or restart a Timer workflow schedule.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "workflow_id": {"type": "string"},
+                        "input": {"type": "string"},
+                        "inputs": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "timezone": {"type": "string"},
+                    },
+                    "required": ["workflow_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "stop_workflow_schedule",
+                "description": "Stop a Timer workflow schedule.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"workflow_id": {"type": "string"}},
+                    "required": ["workflow_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_workflow_schedule",
+                "description": "Get the current Timer workflow schedule and latest run trace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"workflow_id": {"type": "string"}},
                     "required": ["workflow_id"],
                 },
             },
@@ -103,6 +149,12 @@ def workflow_tool_title(name: str) -> str | None:
         return "Reading workflow"
     if name == "run_workflow":
         return "Running workflow"
+    if name == "start_workflow_schedule":
+        return "Starting workflow schedule"
+    if name == "stop_workflow_schedule":
+        return "Stopping workflow schedule"
+    if name == "get_workflow_schedule":
+        return "Reading workflow schedule"
     if name == "create_workflow":
         return "Creating workflow"
     if name == "update_workflow":
@@ -130,12 +182,18 @@ class WorkflowAgentTools:
                 return self.get_workflow(arguments)
             if name == "run_workflow":
                 return await self.run_workflow(arguments)
+            if name == "start_workflow_schedule":
+                return await self.start_workflow_schedule(arguments)
+            if name == "stop_workflow_schedule":
+                return await self.stop_workflow_schedule(arguments)
+            if name == "get_workflow_schedule":
+                return self.get_workflow_schedule(arguments)
             if name == "create_workflow":
-                return self.create_workflow(arguments)
+                return await self.create_workflow(arguments)
             if name == "update_workflow":
-                return self.update_workflow(arguments)
+                return await self.update_workflow(arguments)
             if name == "delete_workflow":
-                return self.delete_workflow(arguments)
+                return await self.delete_workflow(arguments)
         except Exception as error:
             return ToolResult(
                 result=text_tool_result(str(error) or "Workflow tool failed."),
@@ -209,22 +267,22 @@ class WorkflowAgentTools:
             title=f"Ran {workflow.name}",
         )
 
-    def create_workflow(self, arguments: dict[str, object]) -> ToolResult:
+    async def create_workflow(self, arguments: dict[str, object]) -> ToolResult:
         workflow = workflow_argument(arguments)
-        saved = self.service.save_workflow(
+        saved = await self.service.save_workflow(
             workflow.model_copy(update={"id": str(uuid4())})
         )
         return saved_workflow_result(saved, "Created")
 
-    def update_workflow(self, arguments: dict[str, object]) -> ToolResult:
+    async def update_workflow(self, arguments: dict[str, object]) -> ToolResult:
         workflow = workflow_argument(arguments)
         self.service.get_workflow(workflow.id)
-        saved = self.service.save_workflow(workflow)
+        saved = await self.service.save_workflow(workflow)
         return saved_workflow_result(saved, "Updated")
 
-    def delete_workflow(self, arguments: dict[str, object]) -> ToolResult:
+    async def delete_workflow(self, arguments: dict[str, object]) -> ToolResult:
         workflow_id = str(arguments["workflow_id"])
-        workflow = self.service.delete_workflow(workflow_id)
+        workflow = await self.service.delete_workflow(workflow_id)
         summary = workflow_summary(workflow)
         output = f"Deleted {workflow.name}."
         return ToolResult(
@@ -235,6 +293,66 @@ class WorkflowAgentTools:
             },
             title=f"Deleted {workflow.name}",
         )
+
+    async def start_workflow_schedule(self, arguments: dict[str, object]) -> ToolResult:
+        schedule = await self.service.scheduler.start_schedule(
+            str(arguments["workflow_id"]),
+            default_input=string_argument(arguments, "input")
+            if "input" in arguments
+            else None,
+            inputs=string_map_argument(arguments, "inputs")
+            if "inputs" in arguments
+            else None,
+            timezone=string_argument(arguments, "timezone")
+            if "timezone" in arguments
+            else None,
+        )
+        return ToolResult(
+            result=schedule_result(schedule), title="Started workflow schedule"
+        )
+
+    async def stop_workflow_schedule(self, arguments: dict[str, object]) -> ToolResult:
+        schedule = await self.service.scheduler.stop_schedule(
+            str(arguments["workflow_id"])
+        )
+        return ToolResult(
+            result=schedule_result(schedule), title="Stopped workflow schedule"
+        )
+
+    def get_workflow_schedule(self, arguments: dict[str, object]) -> ToolResult:
+        schedule = self.service.scheduler.get(str(arguments["workflow_id"]))
+        return ToolResult(
+            result=schedule_result(schedule), title="Read workflow schedule"
+        )
+
+
+def schedule_result(schedule) -> dict[str, object]:
+    next_run = min(
+        (item.next_run_at for item in schedule.timers if item.next_run_at is not None),
+        default=None,
+    )
+    details = ""
+    if schedule.last_error:
+        details = f" Last failure: {schedule.last_error}"
+    elif schedule.last_result:
+        outputs = schedule.last_result.get("outputs", {})
+        details = f" Latest outputs: {outputs}"
+    next_text = (
+        f" Next run: {datetime.fromtimestamp(next_run, ZoneInfo(schedule.timezone)).isoformat()}."
+        if next_run is not None
+        else ""
+    )
+    return {
+        "type": "workflow_schedule",
+        "workflow_id": schedule.workflow_id,
+        "status": schedule.status,
+        "timezone": schedule.timezone,
+        "next_run_at": next_run,
+        "last_run_at": schedule.last_run_at,
+        "last_result": schedule.last_result,
+        "last_error": schedule.last_error,
+        "output": f"Workflow schedule is {schedule.status}.{next_text}{details}",
+    }
 
 
 def string_argument(arguments: dict[str, object], name: str) -> str:

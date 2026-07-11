@@ -12,6 +12,7 @@ import type {
   ApiWorkflowEdge,
   ApiWorkflowNode,
   ApiWorkflowRunResult,
+  ApiWorkflowSchedule,
 } from "@/app/api/types";
 import type {
   ContextUsageInfo,
@@ -27,6 +28,8 @@ import type {
   WorkflowNode,
   WorkflowRunRequest,
   WorkflowRunResult,
+  WorkflowSchedule,
+  WorkflowScheduleStartRequest,
   WritablePath,
 } from "@/components/flowent/types";
 import { createClientId } from "@/lib/utils";
@@ -216,7 +219,28 @@ export const workflowRunResultFromApi = (
 export const workflowRunRequestToApi = (request: WorkflowRunRequest) => ({
   input: request.input ?? "",
   inputs: request.inputs ?? {},
-  timer_id: request.timerId ?? "",
+});
+
+export const workflowScheduleFromApi = (
+  schedule: ApiWorkflowSchedule,
+): WorkflowSchedule => ({
+  lastError: schedule.last_error,
+  lastResult: schedule.last_result
+    ? workflowRunResultFromApi(schedule.last_result)
+    : null,
+  lastRunAt: schedule.last_run_at,
+  nextRunAt: schedule.next_run_at,
+  status: schedule.status,
+  timezone: schedule.timezone,
+  workflowId: schedule.workflow_id,
+});
+
+export const workflowScheduleStartRequestToApi = (
+  request: WorkflowScheduleStartRequest,
+) => ({
+  ...(request.input === undefined ? {} : { input: request.input }),
+  inputs: request.inputs ?? {},
+  ...(request.timezone === undefined ? {} : { timezone: request.timezone }),
 });
 
 export const errorMessageFromResponse = async (

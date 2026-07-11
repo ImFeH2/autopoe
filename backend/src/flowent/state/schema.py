@@ -21,6 +21,30 @@ def migrate(connection: sqlite3.Connection) -> None:
             PRIMARY KEY (workflow_id, node_id)
         );
 
+        CREATE TABLE IF NOT EXISTS workflow_schedules (
+            workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'stopped',
+            generation INTEGER NOT NULL DEFAULT 0,
+            default_input TEXT NOT NULL DEFAULT '',
+            inputs TEXT NOT NULL DEFAULT '{}',
+            timezone TEXT NOT NULL DEFAULT 'UTC',
+            last_run_at REAL,
+            last_result TEXT,
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_schedule_timers (
+            workflow_id TEXT NOT NULL REFERENCES workflow_schedules(workflow_id) ON DELETE CASCADE,
+            timer_node_id TEXT NOT NULL,
+            next_run_at REAL,
+            PRIMARY KEY (workflow_id, timer_node_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS workflow_schedule_timers_next_run
+        ON workflow_schedule_timers(next_run_at);
+
         CREATE TABLE IF NOT EXISTS mcp_servers (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

@@ -16,6 +16,7 @@ from flowent.storage import (
     StoredWritablePath,
 )
 from flowent.usage import TokenUsageInfo
+from flowent.workflows import WorkflowRunResponse
 
 
 class ProviderModelsRequest(BaseModel):
@@ -178,7 +179,26 @@ class WorkflowRunRequest(BaseModel):
 
     input: str = ""
     inputs: dict[str, str] = Field(default_factory=dict)
-    timer_id: str = ""
+
+
+class WorkflowScheduleStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input: str | None = None
+    inputs: dict[str, str] | None = None
+    timezone: str | None = None
+
+
+class WorkflowScheduleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str
+    status: Literal["stopped", "scheduled", "running", "error"]
+    timezone: str
+    next_run_at: float | None
+    last_run_at: float | None
+    last_result: WorkflowRunResponse | None
+    last_error: str
 
 
 class AboutResponse(BaseModel):

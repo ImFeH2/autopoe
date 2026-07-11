@@ -21,6 +21,8 @@ from flowent.state.models import (
     StoredWorkflowEdge,
     StoredWorkflowNode,
     StoredWorkflowNodePosition,
+    StoredWorkflowSchedule,
+    StoredWorkflowScheduleTimer,
     StoredWritablePath,
 )
 from flowent.state.store import StateStore
@@ -49,5 +51,7 @@ __all__ = [
     "StoredWorkflowEdge",
     "StoredWorkflowNode",
     "StoredWorkflowNodePosition",
+    "StoredWorkflowSchedule",
+    "StoredWorkflowScheduleTimer",
     "StoredWritablePath",
 ]

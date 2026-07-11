@@ -92,6 +92,9 @@ def create_app(
             logger.exception("%s cleanup failed during shutdown", label)
 
     async def graceful_shutdown() -> None:
+        await run_shutdown_step(
+            "Workflow scheduler", workflow_service.scheduler.shutdown()
+        )
         await run_shutdown_step("Workspace", runtime.stop_for_shutdown())
         await run_shutdown_step("Telegram", telegram_bot_manager.stop_all())
         await run_shutdown_step("MCP", mcp_manager.stop_all())
@@ -100,8 +103,10 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mcp_manager = mcp_manager
         app.state.telegram_bot_manager = telegram_bot_manager
+        app.state.workflow_service = workflow_service
         await mcp_manager.start_enabled()
         await telegram_bot_manager.start_enabled()
+        await workflow_service.scheduler.start()
         try:
             yield
         finally:
@@ -110,6 +115,7 @@ def create_app(
     app = FastAPI(title="Flowent", lifespan=lifespan)
     app.state.mcp_manager = mcp_manager
     app.state.telegram_bot_manager = telegram_bot_manager
+    app.state.workflow_service = workflow_service
 
     register_system_routes(
         app,

@@ -22,6 +22,8 @@ from flowent.state import (
     StoredWorkflowEdge,
     StoredWorkflowNode,
     StoredWorkflowNodePosition,
+    StoredWorkflowSchedule,
+    StoredWorkflowScheduleTimer,
     StoredWritablePath,
 )
 
@@ -49,5 +51,7 @@ __all__ = [
     "StoredWorkflowEdge",
     "StoredWorkflowNode",
     "StoredWorkflowNodePosition",
+    "StoredWorkflowSchedule",
+    "StoredWorkflowScheduleTimer",
     "StoredWritablePath",
 ]

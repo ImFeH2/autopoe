@@ -140,7 +140,6 @@ function FlowentApp() {
     activeWorkflowId,
     closeWorkflowEditor,
     deleteWorkflow,
-    finishWorkflowRun,
     newWorkflowKey,
     openNewWorkflow,
     openWorkflow,
@@ -149,7 +148,11 @@ function FlowentApp() {
     runWorkflow,
     runningWorkflowId,
     saveWorkflow,
+    startWorkflowSchedule,
+    stopWorkflowSchedule,
     workflowRunResult,
+    workflowSchedule,
+    workflowScheduleRequestState,
     workflows,
   } = useWorkflows(initialNavigationState.workflowId);
 
@@ -273,13 +276,15 @@ function FlowentApp() {
       <TabsContent value="workflows" className={viewPanelClassName}>
         <WorkflowsView
           activeWorkflow={activeWorkflow}
-          isRunningWorkflow={Boolean(runningWorkflowId)}
           newWorkflowKey={newWorkflowKey}
-          onFinishWorkflowRun={finishWorkflowRun}
           onRunWorkflow={runWorkflow}
           onSaveWorkflow={saveWorkflow}
+          onStartWorkflowSchedule={startWorkflowSchedule}
+          onStopWorkflowSchedule={stopWorkflowSchedule}
           runningWorkflowId={runningWorkflowId}
           workflowRunResult={workflowRunResult}
+          workflowSchedule={workflowSchedule}
+          workflowScheduleRequestState={workflowScheduleRequestState}
         />
       </TabsContent>
       <TabsContent value="providers" className={viewPanelClassName}>
