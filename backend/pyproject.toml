@@ -1,7 +1,7 @@
 [project]
 name = "flowent"
 version = "0.3.9"
-description = "Run tasks and build workflows by talking to Flowent."
+description = "Just say what you need. Flowent gets it done."
 readme = "README.md"
 authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
