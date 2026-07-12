@@ -9,7 +9,6 @@ const renderWorkspace = () =>
       commands={[]}
       contextWindowLimit={null}
       draft=""
-      errorMessage=""
       isRefiningContext={false}
       isResponding={false}
       messages={[]}

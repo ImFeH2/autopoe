@@ -4566,6 +4566,54 @@ describe("App", () => {
     expect(document.body).not.toHaveTextContent("Load failed");
   });
 
+  it("shows a notification when a resumed workspace response can no longer reconnect", async () => {
+    const failedReconnect = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(new TypeError("Connection lost"));
+        },
+      }),
+      {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      },
+    );
+    const runningState = {
+      ...selectedProviderState(),
+      is_responding: true,
+      response_event_index: 2,
+    };
+    const stoppedState = selectedProviderState();
+    let stateRequests = 0;
+    mockInitialState(runningState);
+    vi.mocked(window.fetch).mockImplementation(async (input, init) => {
+      if (input === "/api/workspace/stream?after=2" && init?.method === "GET") {
+        return failedReconnect;
+      }
+      if (input === "/api/state") {
+        stateRequests += 1;
+        return new Response(
+          JSON.stringify(stateRequests === 1 ? runningState : stoppedState),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      return new Response("{}", {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    });
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Connection lost",
+    );
+    const composer = screen.getByRole("form", { name: "Workspace composer" });
+    expect(composer.parentElement).not.toHaveTextContent("Connection lost");
+  });
+
   it("uses server event indexes when reconnecting a workspace response stream", async () => {
     const user = userEvent.setup();
     const assistantSnapshot = controlledAssistantSnapshotStreamResponse(

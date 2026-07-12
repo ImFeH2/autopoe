@@ -62,7 +62,6 @@ export function useWorkspaceController({
   const usageInfoRef = useRef<ContextUsageInfo | null>(null);
   const [isResponding, setIsResponding] = useState(false);
   const [isRefiningContext, setIsRefiningContext] = useState(false);
-  const [responseError, setResponseError] = useState("");
   const responseAbortRef = useRef<AbortController | null>(null);
   const responseEventIndexRef = useRef(0);
   const messagesRef = useRef<Message[]>([]);
@@ -166,7 +165,6 @@ export function useWorkspaceController({
     const responseAbortController = new AbortController();
     responseAbortRef.current = responseAbortController;
     setIsResponding(true);
-    setResponseError("");
 
     const streamCurrentResponse = async () => {
       const handlers = createWorkspaceStreamHandlers(
@@ -193,7 +191,7 @@ export function useWorkspaceController({
         }
         responseEventIndexRef.current = 0;
         setIsResponding(false);
-        setResponseError(
+        showWorkspaceNotification(
           error instanceof Error ? error.message : "Message could not be sent.",
         );
       } finally {
@@ -208,10 +206,14 @@ export function useWorkspaceController({
     return () => {
       responseAbortController.abort();
     };
-  }, [createWorkspaceStreamHandlers, refreshAppState, streamReconnectKey]);
+  }, [
+    createWorkspaceStreamHandlers,
+    refreshAppState,
+    showWorkspaceNotification,
+    streamReconnectKey,
+  ]);
 
   const compactWorkspace = async () => {
-    setResponseError("");
     setIsRefiningContext(true);
     const compactErrorStartIndex = messages.length;
 
@@ -307,7 +309,6 @@ export function useWorkspaceController({
     responseRunRef.current += 1;
     setMessages([]);
     setTrackedUsageInfo(null);
-    setResponseError("");
     setIsResponding(false);
 
     try {
@@ -380,7 +381,6 @@ export function useWorkspaceController({
     responseEventIndexRef.current = 0;
     responseAbortRef.current?.abort();
     responseAbortRef.current = null;
-    setResponseError("");
     setIsResponding(false);
   };
 
@@ -409,7 +409,6 @@ export function useWorkspaceController({
         id: userMessageId,
       },
     ];
-    setResponseError("");
     setIsResponding(true);
     setMessages(nextMessages);
     if (shouldClearDraft) {
@@ -517,7 +516,6 @@ export function useWorkspaceController({
       (currentMessage) => currentMessage.id === userMessage.id,
     );
 
-    setResponseError("");
     setIsResponding(true);
 
     try {
@@ -569,7 +567,6 @@ export function useWorkspaceController({
       ...messages.slice(0, messageIndex),
       trimmedMessage,
     ];
-    setResponseError("");
     setIsResponding(true);
     setMessages(optimisticMessages);
 
@@ -610,7 +607,6 @@ export function useWorkspaceController({
     }
 
     const previousMessages = messages;
-    setResponseError("");
     if (action === "resend") {
       setIsResponding(true);
     }
@@ -661,7 +657,6 @@ export function useWorkspaceController({
     isResponding,
     loadState,
     messages,
-    responseError,
     retryError,
     retryMessage,
     runCommand,

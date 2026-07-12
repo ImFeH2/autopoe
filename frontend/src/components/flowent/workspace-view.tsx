@@ -50,7 +50,6 @@ export function WorkspaceView({
   commands,
   contextWindowLimit,
   draft,
-  errorMessage,
   isRefiningContext,
   isResponding,
   messages,
@@ -68,7 +67,6 @@ export function WorkspaceView({
   commands: WorkspaceCommand[];
   contextWindowLimit: number | null;
   draft: string;
-  errorMessage: string;
   isRefiningContext: boolean;
   isResponding: boolean;
   messages: Message[];
@@ -94,7 +92,6 @@ export function WorkspaceView({
             commands={commands}
             contextWindowLimit={contextWindowLimit}
             draft={draft}
-            errorMessage={errorMessage}
             isRefiningContext={isRefiningContext}
             isSending={isResponding}
             messages={messages}

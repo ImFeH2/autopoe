@@ -51,7 +51,6 @@ function FlowentApp() {
     isResponding,
     loadState: loadWorkspaceState,
     messages,
-    responseError,
     retryError,
     retryMessage,
     runCommand: runWorkspaceCommand,
@@ -248,7 +247,6 @@ function FlowentApp() {
         <WorkspaceView
           contextWindowLimit={contextWindowLimit}
           draft={draft}
-          errorMessage={responseError}
           isRefiningContext={isRefiningContext}
           isResponding={isResponding}
           messages={messages}

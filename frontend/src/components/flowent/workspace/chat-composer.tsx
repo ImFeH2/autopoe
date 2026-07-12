@@ -39,7 +39,6 @@ export function ChatComposer({
   commands,
   contextWindowLimit,
   draft,
-  errorMessage,
   isRefiningContext,
   isSending,
   messages,
@@ -56,7 +55,6 @@ export function ChatComposer({
   commands: WorkspaceCommand[];
   contextWindowLimit: number | null;
   draft: string;
-  errorMessage: string;
   isRefiningContext: boolean;
   isSending: boolean;
   messages: Message[];
@@ -509,11 +507,6 @@ export function ChatComposer({
             onSelectIndex={setSelectedSkillIndex}
             onSkill={insertSkill}
           />
-        ) : null}
-        {errorMessage ? (
-          <p className="mb-2 rounded-md bg-black/80 px-3 py-2 text-base leading-5 text-red-300 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
-            {errorMessage}
-          </p>
         ) : null}
         <form
           aria-label="Workspace composer"
