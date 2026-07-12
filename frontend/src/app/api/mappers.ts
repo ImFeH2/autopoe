@@ -8,9 +8,9 @@ import type {
   ApiTelegramSession,
   ApiWritablePath,
   ApiWorkflow,
-  ApiWorkflowDefinition,
-  ApiWorkflowEdge,
-  ApiWorkflowNode,
+  ApiWorkflowConnection,
+  ApiWorkflowDraft,
+  ApiWorkflowSpec,
   ApiWorkflowRunResult,
   ApiWorkflowSchedule,
 } from "@/app/api/types";
@@ -23,13 +23,12 @@ import type {
   TelegramBot,
   TelegramSession,
   Workflow,
-  WorkflowDefinition,
-  WorkflowEdge,
-  WorkflowNode,
+  WorkflowConnection,
   WorkflowRunRequest,
   WorkflowRunResult,
   WorkflowSchedule,
   WorkflowScheduleStartRequest,
+  WorkflowSpec,
   WritablePath,
 } from "@/components/flowent/types";
 import { createClientId } from "@/lib/utils";
@@ -134,72 +133,66 @@ export const writablePathFromApi = (
   path: writablePath.path,
 });
 
-export const workflowNodeFromApi = (node: ApiWorkflowNode): WorkflowNode => ({
-  data: node.data ?? {},
-  description: node.description ?? "",
-  id: node.id,
-  name: node.name,
-  position: node.position ?? { x: 0, y: 0 },
-  type: node.type,
+export const workflowConnectionFromApi = (
+  connection: ApiWorkflowConnection,
+): WorkflowConnection => ({
+  from: {
+    nodeId: connection.from.node_id,
+    port: connection.from.port,
+  },
+  id: connection.id,
+  to: {
+    nodeId: connection.to.node_id,
+    port: connection.to.port,
+  },
 });
 
-export const workflowNodeToApi = (node: WorkflowNode): ApiWorkflowNode => ({
-  data: node.data,
-  description: node.description,
-  id: node.id,
-  name: node.name,
-  position: node.position,
-  type: node.type,
+export const workflowConnectionToApi = (
+  connection: WorkflowConnection,
+): ApiWorkflowConnection => ({
+  from: {
+    node_id: connection.from.nodeId,
+    port: connection.from.port,
+  },
+  id: connection.id,
+  to: {
+    node_id: connection.to.nodeId,
+    port: connection.to.port,
+  },
 });
 
-export const workflowEdgeFromApi = (edge: ApiWorkflowEdge): WorkflowEdge => ({
-  id: edge.id,
-  label: edge.label ?? "",
-  source: edge.source,
-  sourceHandle: edge.source_handle ?? "",
-  target: edge.target,
-  targetHandle: edge.target_handle ?? "",
-});
-
-export const workflowEdgeToApi = (edge: WorkflowEdge): ApiWorkflowEdge => ({
-  id: edge.id,
-  label: edge.label,
-  source: edge.source,
-  source_handle: edge.sourceHandle,
-  target: edge.target,
-  target_handle: edge.targetHandle,
-});
-
-export const workflowDefinitionFromApi = (
-  definition: ApiWorkflowDefinition,
-): WorkflowDefinition => ({
-  edges: (definition.edges ?? []).map(workflowEdgeFromApi),
-  nodes: (definition.nodes ?? []).map(workflowNodeFromApi),
-  version: definition.version ?? 1,
-});
-
-export const workflowDefinitionToApi = (
-  definition: WorkflowDefinition,
-): ApiWorkflowDefinition => ({
-  edges: definition.edges.map(workflowEdgeToApi),
-  nodes: definition.nodes.map(workflowNodeToApi),
-  version: definition.version,
+export const workflowSpecFromApi = (spec: ApiWorkflowSpec): WorkflowSpec => ({
+  connections: spec.connections.map(workflowConnectionFromApi),
+  nodes: spec.nodes.map((node) => ({
+    config: node.config,
+    id: node.id,
+    kind: node.kind,
+  })),
 });
 
 export const workflowFromApi = (workflow: ApiWorkflow): Workflow => ({
+  activeRevision: workflow.active_revision,
   createdAt: workflow.created_at,
-  definition: workflowDefinitionFromApi(workflow.definition),
   id: workflow.id,
   name: workflow.name,
+  presentation: workflow.presentation,
+  revision: workflow.revision,
+  spec: workflowSpecFromApi(workflow.spec),
   updatedAt: workflow.updated_at,
 });
 
-export const workflowToApi = (workflow: Workflow): ApiWorkflow => ({
-  created_at: workflow.createdAt,
-  definition: workflowDefinitionToApi(workflow.definition),
+export const workflowToApi = (workflow: Workflow): ApiWorkflowDraft => ({
   id: workflow.id,
   name: workflow.name,
-  updated_at: workflow.updatedAt,
+  presentation: workflow.presentation,
+  spec: {
+    connections: workflow.spec.connections.map(workflowConnectionToApi),
+    nodes: workflow.spec.nodes.map((node) => ({
+      config: node.config,
+      id: node.id,
+      kind: node.kind,
+    })),
+  },
 });
 
 export const workflowRunResultFromApi = (
@@ -208,17 +201,24 @@ export const workflowRunResultFromApi = (
   nodeResults: result.node_results.map((nodeResult) => ({
     error: nodeResult.error,
     id: nodeResult.id,
+    inputs: nodeResult.inputs,
     output: nodeResult.output,
     status: nodeResult.status,
   })),
   outputs: result.outputs,
+  runId: result.run_id,
   status: result.status,
+  trigger: result.trigger,
   workflowId: result.workflow_id,
+  workflowRevision: result.workflow_revision,
 });
 
 export const workflowRunRequestToApi = (request: WorkflowRunRequest) => ({
   input: request.input ?? "",
   inputs: request.inputs ?? {},
+  ...(request.workflowRevision === undefined
+    ? {}
+    : { workflow_revision: request.workflowRevision }),
 });
 
 export const workflowScheduleFromApi = (
@@ -241,6 +241,9 @@ export const workflowScheduleStartRequestToApi = (
   ...(request.input === undefined ? {} : { input: request.input }),
   inputs: request.inputs ?? {},
   ...(request.timezone === undefined ? {} : { timezone: request.timezone }),
+  ...(request.workflowRevision === undefined
+    ? {}
+    : { workflow_revision: request.workflowRevision }),
 });
 
 export const errorMessageFromResponse = async (

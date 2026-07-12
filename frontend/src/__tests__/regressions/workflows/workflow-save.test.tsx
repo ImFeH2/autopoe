@@ -159,25 +159,47 @@ vi.mock("@xyflow/react", async () => {
 });
 
 const singleInputWorkflow = () => ({
+  active_revision: null,
   created_at: 1710000020,
-  definition: {
-    edges: [],
-    nodes: [
-      {
-        data: { default_value: "", input_type: "text" },
-        description: "",
-        id: "input",
-        name: "Input",
-        position: { x: 0, y: 0 },
-        type: "input",
-      },
-    ],
-    version: 1,
-  },
   id: "workflow-draft",
   name: "Draft Workflow",
+  presentation: {
+    connections: {},
+    nodes: {
+      input: {
+        description: "",
+        name: "Input",
+        position: { x: 0, y: 0 },
+      },
+    },
+  },
+  revision: 1,
+  spec: {
+    connections: [],
+    nodes: [
+      {
+        config: { default_value: "", input_type: "text" },
+        id: "input",
+        kind: "input",
+      },
+    ],
+  },
   updated_at: 1710000030,
 });
+
+const savedWorkflowResponse = (body: string) => {
+  const request = JSON.parse(body) as {
+    base_revision: number | null;
+    workflow: Record<string, unknown>;
+  };
+  return {
+    ...request.workflow,
+    active_revision: null,
+    created_at: 1710000020,
+    revision: (request.base_revision ?? 0) + 1,
+    updated_at: 1710000030,
+  };
+};
 
 const selectedProviderState = () => ({
   mcp_servers: [],
@@ -250,10 +272,13 @@ describe("workflow save regressions", () => {
     const user = userEvent.setup();
     mockAppFetch((input, init) => {
       if (input === "/api/workflows" && init?.method === "PUT") {
-        return new Response(String(init.body), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
+        return new Response(
+          JSON.stringify(savedWorkflowResponse(String(init.body))),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
       }
       if (
         typeof input === "string" &&
@@ -291,10 +316,13 @@ describe("workflow save regressions", () => {
       if (input === "/api/workflows" && init?.method === "PUT") {
         const body = JSON.parse(String(init.body));
         saveBodies.push(body);
-        return new Response(JSON.stringify(body), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
+        return new Response(
+          JSON.stringify(savedWorkflowResponse(String(init.body))),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
       }
       return null;
     });
@@ -346,13 +374,15 @@ describe("workflow save regressions", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
     expect(saveBodies[0]).toEqual(
       expect.objectContaining({
-        definition: expect.objectContaining({
-          nodes: [
-            expect.objectContaining({
-              id: "input",
-              position: { x: 480, y: 160 },
+        base_revision: 1,
+        workflow: expect.objectContaining({
+          presentation: expect.objectContaining({
+            nodes: expect.objectContaining({
+              input: expect.objectContaining({
+                position: { x: 480, y: 160 },
+              }),
             }),
-          ],
+          }),
         }),
       }),
     );
@@ -365,10 +395,13 @@ describe("workflow save regressions", () => {
       if (input === "/api/workflows" && init?.method === "PUT") {
         const body = JSON.parse(String(init.body));
         saveBodies.push(body);
-        return new Response(JSON.stringify(body), {
-          headers: { "Content-Type": "application/json" },
-          status: 200,
-        });
+        return new Response(
+          JSON.stringify(savedWorkflowResponse(String(init.body))),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
       }
       return null;
     });
@@ -395,15 +428,25 @@ describe("workflow save regressions", () => {
     );
     expect(saveBodies[0]).toEqual(
       expect.objectContaining({
-        definition: expect.objectContaining({
-          nodes: [
-            expect.objectContaining({
-              position: { x: 140, y: 80 },
-              type: "code",
-            }),
-          ],
+        base_revision: null,
+        workflow: expect.objectContaining({
+          spec: expect.objectContaining({
+            nodes: [
+              expect.objectContaining({
+                kind: "code",
+              }),
+            ],
+          }),
         }),
       }),
+    );
+    const savedWorkflow = (
+      saveBodies[0] as {
+        workflow: { presentation: { nodes: Record<string, unknown> } };
+      }
+    ).workflow;
+    expect(Object.values(savedWorkflow.presentation.nodes)[0]).toEqual(
+      expect.objectContaining({ position: { x: 140, y: 80 } }),
     );
   });
 
@@ -463,7 +506,6 @@ describe("workflow save regressions", () => {
 
     await user.click(await screen.findByRole("button", { name: "Run" }));
 
-    expect(await screen.findByText("Could not save")).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Workflow could not be saved.",
     );

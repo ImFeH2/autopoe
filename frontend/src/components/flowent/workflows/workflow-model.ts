@@ -11,11 +11,13 @@ import {
 
 import type {
   Workflow,
-  WorkflowDefinition,
+  WorkflowConnection,
   WorkflowEdge,
+  WorkflowNode,
   WorkflowNodeRunResult,
   WorkflowNodeType,
   WorkflowRunResult,
+  WorkflowSpec,
 } from "@/components/flowent/types";
 import { createUuid } from "@/lib/utils";
 
@@ -30,14 +32,8 @@ export type WorkflowCanvasNode = Node<WorkflowCanvasNodeData, "workflowNode">;
 export type WorkflowCanvasEdge = Edge<{ label: string }>;
 
 export type SelectedWorkflowElement =
-  | {
-      id: string;
-      kind: "edge";
-    }
-  | {
-      id: string;
-      kind: "node";
-    };
+  | { id: string; kind: "edge" }
+  | { id: string; kind: "node" };
 
 export type WorkflowNodeTemplate = {
   description: string;
@@ -101,13 +97,13 @@ export const defaultWorkflowNodeData = (
     return { default_value: "", input_type: "text" };
   }
   if (type === "agent") {
-    return { agent: "Default agent", prompt: "{{input.output}}" };
+    return { agent: "Default agent", prompt: "" };
   }
   if (type === "merge") {
     return { merge_strategy: "text" };
   }
   if (type === "code") {
-    return { code: "output = input" };
+    return { code: "" };
   }
   if (type === "timer") {
     return {
@@ -120,22 +116,44 @@ export const defaultWorkflowNodeData = (
   return { output_key: "final_result", transform: "" };
 };
 
-export const defaultWorkflowDefinition = (): WorkflowDefinition => ({
-  edges: [],
+export const defaultWorkflowSpec = (): WorkflowSpec => ({
+  connections: [],
   nodes: [],
-  version: 1,
 });
 
 export const createDraftWorkflow = (): Workflow => ({
+  activeRevision: null,
   createdAt: 0,
-  definition: defaultWorkflowDefinition(),
   id: createUuid(),
   name: "Untitled Workflow",
+  presentation: { connections: {}, nodes: {} },
+  revision: 0,
+  spec: defaultWorkflowSpec(),
   updatedAt: 0,
 });
 
 export const cloneWorkflow = (workflow: Workflow): Workflow =>
   JSON.parse(JSON.stringify(workflow)) as Workflow;
+
+export const workflowNodes = (workflow: Workflow): WorkflowNode[] =>
+  workflow.spec.nodes.map((node) => {
+    const presentation = workflow.presentation.nodes[node.id];
+    if (!presentation) {
+      throw new Error(`Missing presentation for workflow node ${node.id}.`);
+    }
+    return { ...node, ...presentation };
+  });
+
+export const workflowEdges = (workflow: Workflow): WorkflowEdge[] =>
+  workflow.spec.connections.map((connection) => {
+    const presentation = workflow.presentation.connections[connection.id];
+    if (!presentation) {
+      throw new Error(
+        `Missing presentation for workflow connection ${connection.id}.`,
+      );
+    }
+    return { ...connection, ...presentation };
+  });
 
 const runResultMap = (runResult: WorkflowRunResult | null) =>
   new Map((runResult?.nodeResults ?? []).map((result) => [result.id, result]));
@@ -145,12 +163,12 @@ export const workflowToFlowNodes = (
   runResult: WorkflowRunResult | null,
 ): WorkflowCanvasNode[] => {
   const results = runResultMap(runResult);
-  return workflow.definition.nodes.map((node) => ({
+  return workflowNodes(workflow).map((node) => ({
     data: {
       description: node.description,
       label: node.name,
       result: results.get(node.id),
-      workflowType: node.type,
+      workflowType: node.kind,
     },
     id: node.id,
     position: node.position,
@@ -159,24 +177,21 @@ export const workflowToFlowNodes = (
 };
 
 export const workflowToFlowEdges = (workflow: Workflow): WorkflowCanvasEdge[] =>
-  workflow.definition.edges.map((edge) => ({
-    data: { label: edge.label },
-    id: edge.id,
-    label: edge.label,
+  workflowEdges(workflow).map((connection) => ({
+    data: { label: connection.label },
+    id: connection.id,
+    label: connection.label,
     markerEnd: { type: MarkerType.ArrowClosed },
-    source: edge.source,
-    sourceHandle: edge.sourceHandle || undefined,
-    target: edge.target,
-    targetHandle: edge.targetHandle || undefined,
+    source: connection.from.nodeId,
+    sourceHandle: connection.from.port,
+    target: connection.to.nodeId,
+    targetHandle: connection.to.port,
   }));
 
-export const flowEdgeToWorkflowEdge = (
+export const flowEdgeToWorkflowConnection = (
   edge: WorkflowCanvasEdge,
-): WorkflowEdge => ({
+): WorkflowConnection => ({
+  from: { nodeId: edge.source, port: "output" },
   id: edge.id,
-  label: String(edge.label ?? edge.data?.label ?? ""),
-  source: edge.source,
-  sourceHandle: edge.sourceHandle ?? "",
-  target: edge.target,
-  targetHandle: edge.targetHandle ?? "",
+  to: { nodeId: edge.target, port: "input" },
 });

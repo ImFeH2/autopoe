@@ -79,13 +79,15 @@ import type {
 } from "@/components/flowent/types";
 import {
   defaultWorkflowNodeData,
-  flowEdgeToWorkflowEdge,
+  flowEdgeToWorkflowConnection,
   type SelectedWorkflowElement,
   type WorkflowCanvasEdge,
   type WorkflowCanvasNode,
   type WorkflowNodeTemplate,
   workflowNodeIconByType,
   workflowNodeTemplates,
+  workflowEdges,
+  workflowNodes,
   workflowToFlowEdges,
   workflowToFlowNodes,
 } from "@/components/flowent/workflows/workflow-model";
@@ -212,7 +214,7 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
       {data.workflowType !== "input" && data.workflowType !== "timer" ? (
         <Handle
           className="!z-10 !size-3.5 !border !border-black/80 !bg-white/20 !opacity-0 transition-[opacity,transform,box-shadow] duration-150 group-hover:!opacity-100"
-          id="in"
+          id="input"
           position={Position.Left}
           type="target"
         />
@@ -257,7 +259,7 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
       {data.workflowType !== "output" ? (
         <Handle
           className="!z-10 !size-3.5 !border !border-black/80 !bg-white/20 !opacity-0 transition-[opacity,transform,box-shadow] duration-150 group-hover:!opacity-100"
-          id="out"
+          id="output"
           position={Position.Right}
           type="source"
         />
@@ -607,8 +609,10 @@ function WorkflowCanvasContextAddMenu({
 }
 
 function WorkflowAutoSaveStatusPill({
+  error,
   status,
 }: {
+  error: string;
   status: WorkflowAutoSaveStatus;
 }) {
   const [renderedStatus, setRenderedStatus] =
@@ -681,13 +685,17 @@ function WorkflowAutoSaveStatusPill({
   }
 
   const statusClasses = workflowAutoSaveStatusClasses[renderedStatus];
-  const label = workflowAutoSaveStatusLabel[renderedStatus];
+  const label =
+    renderedStatus === "error" && error
+      ? error
+      : workflowAutoSaveStatusLabel[renderedStatus];
 
   return (
     <div
       aria-live="polite"
+      role={renderedStatus === "error" ? "alert" : "status"}
       className={cn(
-        "pointer-events-none absolute bottom-3 left-3 z-20 flex h-7 select-none items-center gap-1.5 rounded-md border border-white/10 bg-black/75 px-2.5 text-xs leading-none shadow-[0_8px_24px_rgba(0,0,0,0.26)] backdrop-blur-sm transition-[opacity,transform] duration-200 ease-out",
+        "pointer-events-none absolute bottom-3 left-3 z-20 flex min-h-7 max-w-[min(420px,calc(100%-1.5rem))] select-none items-center gap-1.5 rounded-md border border-white/10 bg-black/75 px-2.5 py-1.5 text-xs leading-4 shadow-[0_8px_24px_rgba(0,0,0,0.26)] backdrop-blur-sm transition-[opacity,transform] duration-200 ease-out",
         isVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
         renderedStatus === "error" ? "border-[#ff8a8a]/25" : "",
       )}
@@ -708,7 +716,7 @@ function WorkflowAutoSaveStatusPill({
           aria-hidden="true"
         />
       )}
-      <span className={statusClasses.text}>{label}</span>
+      <span className={cn("break-words", statusClasses.text)}>{label}</span>
     </div>
   );
 }
@@ -764,6 +772,7 @@ function formatScheduleTime(timestamp: number, timezone: string) {
 }
 
 export function WorkflowCanvas({
+  autoSaveError,
   autoSaveStatus,
   draftWorkflow,
   isRunning,
@@ -777,6 +786,7 @@ export function WorkflowCanvas({
   scheduleStatus,
   scheduleTimezone,
 }: {
+  autoSaveError: string;
   autoSaveStatus: WorkflowAutoSaveStatus;
   draftWorkflow: Workflow;
   isRunning: boolean;
@@ -831,40 +841,57 @@ export function WorkflowCanvas({
     if (selectedElement?.kind !== "node") {
       return null;
     }
-    return draftWorkflow.definition.nodes.find(
+    return workflowNodes(draftWorkflow).find(
       (node) => node.id === selectedElement.id,
     );
-  }, [draftWorkflow.definition.nodes, selectedElement]);
+  }, [draftWorkflow, selectedElement]);
 
   const selectedEdge = useMemo(() => {
     if (selectedElement?.kind !== "edge") {
       return null;
     }
-    return draftWorkflow.definition.edges.find(
+    return workflowEdges(draftWorkflow).find(
       (edge) => edge.id === selectedElement.id,
     );
-  }, [draftWorkflow.definition.edges, selectedElement]);
+  }, [draftWorkflow, selectedElement]);
 
   const commitGraph = useCallback(
     (nextNodes: WorkflowCanvasNode[], nextEdges: WorkflowCanvasEdge[]) => {
       const nodeById = new Map(
-        draftWorkflow.definition.nodes.map((node) => [node.id, node]),
+        draftWorkflow.spec.nodes.map((node) => [node.id, node]),
       );
       const nextWorkflow: Workflow = {
         ...draftWorkflow,
-        definition: {
-          ...draftWorkflow.definition,
-          edges: nextEdges.map(flowEdgeToWorkflowEdge),
+        presentation: {
+          connections: Object.fromEntries(
+            nextEdges.map((edge) => [
+              edge.id,
+              { label: String(edge.label ?? edge.data?.label ?? "") },
+            ]),
+          ),
+          nodes: Object.fromEntries(
+            nextNodes.map((node) => {
+              const currentPresentation =
+                draftWorkflow.presentation.nodes[node.id];
+              return [
+                node.id,
+                {
+                  description: currentPresentation?.description ?? "",
+                  name: currentPresentation?.name ?? node.data.label,
+                  position: snapWorkflowPosition(node.position),
+                },
+              ];
+            }),
+          ),
+        },
+        spec: {
+          connections: nextEdges.map(flowEdgeToWorkflowConnection),
           nodes: nextNodes.map((node) => {
             const currentNode = nodeById.get(node.id);
-            const position = snapWorkflowPosition(node.position);
             return {
-              data: currentNode?.data ?? {},
-              description: currentNode?.description ?? "",
+              config: currentNode?.config ?? {},
               id: node.id,
-              name: currentNode?.name ?? node.data.label,
-              position,
-              type: currentNode?.type ?? node.data.workflowType,
+              kind: currentNode?.kind ?? node.data.workflowType,
             };
           }),
         },
@@ -946,18 +973,36 @@ export function WorkflowCanvas({
       const nodeId = createClientId(type);
       const snappedPosition = snapWorkflowPosition(position);
       const nextWorkflowNode: WorkflowNode = {
-        data: defaultWorkflowNodeData(type),
+        config: defaultWorkflowNodeData(type),
         description: "",
         id: nodeId,
+        kind: type,
         name: template.label,
         position: snappedPosition,
-        type,
       };
       const nextWorkflow = {
         ...draftWorkflow,
-        definition: {
-          ...draftWorkflow.definition,
-          nodes: [...draftWorkflow.definition.nodes, nextWorkflowNode],
+        presentation: {
+          ...draftWorkflow.presentation,
+          nodes: {
+            ...draftWorkflow.presentation.nodes,
+            [nodeId]: {
+              description: nextWorkflowNode.description,
+              name: nextWorkflowNode.name,
+              position: nextWorkflowNode.position,
+            },
+          },
+        },
+        spec: {
+          ...draftWorkflow.spec,
+          nodes: [
+            ...draftWorkflow.spec.nodes,
+            {
+              config: nextWorkflowNode.config,
+              id: nextWorkflowNode.id,
+              kind: nextWorkflowNode.kind,
+            },
+          ],
         },
       };
       onChange(nextWorkflow);
@@ -966,9 +1011,25 @@ export function WorkflowCanvas({
         ...workflowToFlowNodes(
           {
             ...draftWorkflow,
-            definition: {
-              ...draftWorkflow.definition,
-              nodes: [nextWorkflowNode],
+            presentation: {
+              connections: {},
+              nodes: {
+                [nodeId]: {
+                  description: nextWorkflowNode.description,
+                  name: nextWorkflowNode.name,
+                  position: nextWorkflowNode.position,
+                },
+              },
+            },
+            spec: {
+              connections: [],
+              nodes: [
+                {
+                  config: nextWorkflowNode.config,
+                  id: nextWorkflowNode.id,
+                  kind: nextWorkflowNode.kind,
+                },
+              ],
             },
           },
           runResult,
@@ -1002,12 +1063,30 @@ export function WorkflowCanvas({
   );
 
   const updateNode = (nodeId: string, updates: Partial<WorkflowNode>) => {
+    const currentPresentation = draftWorkflow.presentation.nodes[nodeId];
     const nextWorkflow = {
       ...draftWorkflow,
-      definition: {
-        ...draftWorkflow.definition,
-        nodes: draftWorkflow.definition.nodes.map((node) =>
-          node.id === nodeId ? { ...node, ...updates } : node,
+      presentation: {
+        ...draftWorkflow.presentation,
+        nodes: {
+          ...draftWorkflow.presentation.nodes,
+          [nodeId]: {
+            description: updates.description ?? currentPresentation.description,
+            name: updates.name ?? currentPresentation.name,
+            position: updates.position ?? currentPresentation.position,
+          },
+        },
+      },
+      spec: {
+        ...draftWorkflow.spec,
+        nodes: draftWorkflow.spec.nodes.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                config: updates.config ?? node.config,
+                kind: updates.kind ?? node.kind,
+              }
+            : node,
         ),
       },
     };
@@ -1033,12 +1112,12 @@ export function WorkflowCanvas({
     key: string,
     value: string | number | boolean,
   ) => {
-    const node = draftWorkflow.definition.nodes.find(
+    const node = draftWorkflow.spec.nodes.find(
       (currentNode) => currentNode.id === nodeId,
     );
     updateNode(nodeId, {
-      data: {
-        ...(node?.data ?? {}),
+      config: {
+        ...(node?.config ?? {}),
         [key]: value,
       },
     });
@@ -1047,11 +1126,16 @@ export function WorkflowCanvas({
   const updateEdge = (edgeId: string, updates: Partial<WorkflowEdge>) => {
     const nextWorkflow = {
       ...draftWorkflow,
-      definition: {
-        ...draftWorkflow.definition,
-        edges: draftWorkflow.definition.edges.map((edge) =>
-          edge.id === edgeId ? { ...edge, ...updates } : edge,
-        ),
+      presentation: {
+        ...draftWorkflow.presentation,
+        connections: {
+          ...draftWorkflow.presentation.connections,
+          [edgeId]: {
+            label:
+              updates.label ??
+              draftWorkflow.presentation.connections[edgeId].label,
+          },
+        },
       },
     };
     onChange(nextWorkflow);
@@ -1233,7 +1317,10 @@ export function WorkflowCanvas({
           />
         </ContextMenuContent>
       </ContextMenu>
-      <WorkflowAutoSaveStatusPill status={autoSaveStatus} />
+      <WorkflowAutoSaveStatusPill
+        error={autoSaveError}
+        status={autoSaveStatus}
+      />
     </section>
   );
 

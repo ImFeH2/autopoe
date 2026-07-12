@@ -218,7 +218,7 @@ export type RuntimeSettings = {
   selectedProviderId: string;
 };
 
-export type WorkflowNodeType =
+export type WorkflowNodeKind =
   | "input"
   | "agent"
   | "merge"
@@ -231,41 +231,69 @@ export type WorkflowNodePosition = {
   y: number;
 };
 
-export type WorkflowNode = {
-  data: Record<string, unknown>;
-  description: string;
+export type WorkflowSpecNode = {
+  config: Record<string, unknown>;
   id: string;
+  kind: WorkflowNodeKind;
+};
+
+export type WorkflowConnectionEnd = {
+  nodeId: string;
+  port: "input" | "output";
+};
+
+export type WorkflowConnection = {
+  from: WorkflowConnectionEnd;
+  id: string;
+  to: WorkflowConnectionEnd;
+};
+
+export type WorkflowNodePresentation = {
+  description: string;
   name: string;
   position: WorkflowNodePosition;
-  type: WorkflowNodeType;
 };
 
-export type WorkflowEdge = {
-  id: string;
+export type WorkflowConnectionPresentation = {
   label: string;
-  source: string;
-  sourceHandle: string;
-  target: string;
-  targetHandle: string;
 };
 
-export type WorkflowDefinition = {
-  edges: WorkflowEdge[];
-  nodes: WorkflowNode[];
-  version: number;
+export type WorkflowSpec = {
+  connections: WorkflowConnection[];
+  nodes: WorkflowSpecNode[];
 };
+
+export type WorkflowPresentation = {
+  connections: Record<string, WorkflowConnectionPresentation>;
+  nodes: Record<string, WorkflowNodePresentation>;
+};
+
+export type WorkflowNode = WorkflowSpecNode & WorkflowNodePresentation;
+
+export type WorkflowEdge = WorkflowConnection & WorkflowConnectionPresentation;
+
+export type WorkflowNodeType = WorkflowNodeKind;
 
 export type Workflow = {
+  activeRevision: number | null;
   createdAt: number;
-  definition: WorkflowDefinition;
   id: string;
   name: string;
+  presentation: WorkflowPresentation;
+  revision: number;
+  spec: WorkflowSpec;
   updatedAt: number;
 };
 
+export type WorkflowNodeRunError = {
+  code: string;
+  message: string;
+};
+
 export type WorkflowNodeRunResult = {
-  error: string;
+  error: WorkflowNodeRunError | null;
   id: string;
+  inputs: string[];
   output: string;
   status: "failed" | "pending" | "running" | "success";
 };
@@ -273,13 +301,17 @@ export type WorkflowNodeRunResult = {
 export type WorkflowRunResult = {
   nodeResults: WorkflowNodeRunResult[];
   outputs: Record<string, string>;
+  runId: string;
   status: "failed" | "success";
+  trigger: "manual" | "schedule";
   workflowId: string;
+  workflowRevision: number;
 };
 
 export type WorkflowRunRequest = {
   input?: string;
   inputs?: Record<string, string>;
+  workflowRevision?: number;
 };
 
 export type WorkflowScheduleStatus =

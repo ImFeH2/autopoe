@@ -1333,10 +1333,15 @@ const mockInitialState = (
     }
 
     if (input === "/api/workflows" && init?.method === "PUT") {
-      const request = JSON.parse(String(init.body)) as TestWorkflow;
+      const request = JSON.parse(String(init.body)) as {
+        base_revision: number | null;
+        workflow: Pick<TestWorkflow, "id" | "name" | "presentation" | "spec">;
+      };
       const savedWorkflow: TestWorkflow = {
-        ...request,
-        created_at: request.created_at || 1710000020,
+        ...request.workflow,
+        active_revision: (request.base_revision ?? 0) + 1,
+        created_at: 1710000020,
+        revision: (request.base_revision ?? 0) + 1,
         updated_at: 1710000030,
       };
       state.workflows = [
@@ -1414,14 +1419,16 @@ const mockInitialState = (
       const result: TestWorkflowRunResult = {
         node_results: [
           {
-            error: "",
+            error: null,
             id: "input",
+            inputs: [],
             output: request.inputs?.input || "launch checklist",
             status: "success",
           },
           {
-            error: "",
+            error: null,
             id: "output",
+            inputs: [request.inputs?.input || "Ready to ship."],
             output: request.inputs?.input || "Ready to ship.",
             status: "success",
           },
@@ -1430,8 +1437,11 @@ const mockInitialState = (
           final_result: request.inputs?.input || "Ready to ship.",
           summary: request.inputs?.["input-window"] || "Summary ready.",
         },
+        run_id: "run-1",
         status: "success",
+        trigger: "manual",
         workflow_id: workflowId,
+        workflow_revision: 1,
       };
       return new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json" },
@@ -2183,7 +2193,7 @@ describe("App", () => {
     expect(window.fetch).toHaveBeenCalledWith(
       "/api/workflows",
       expect.objectContaining({
-        body: expect.stringContaining('"type":"input"'),
+        body: expect.stringContaining('"kind":"input"'),
         method: "PUT",
       }),
     );
@@ -2270,7 +2280,7 @@ describe("App", () => {
         expect(window.fetch).toHaveBeenCalledWith(
           "/api/workflows",
           expect.objectContaining({
-            body: expect.stringContaining('"type":"code"'),
+            body: expect.stringContaining('"kind":"code"'),
             method: "PUT",
           }),
         );
@@ -2316,14 +2326,14 @@ describe("App", () => {
         expect(window.fetch).toHaveBeenCalledWith(
           "/api/workflows",
           expect.objectContaining({
-            body: expect.stringContaining('"type":"timer"'),
+            body: expect.stringContaining('"kind":"timer"'),
             method: "PUT",
           }),
         );
         expect(window.fetch).toHaveBeenCalledWith(
           "/api/workflows",
           expect.objectContaining({
-            body: expect.stringContaining('"interval_seconds":"10"'),
+            body: expect.stringContaining('"interval_seconds":10'),
             method: "PUT",
           }),
         );
@@ -2363,18 +2373,27 @@ describe("App", () => {
 
   it("collects multiple workflow inputs before running", async () => {
     const user = userEvent.setup();
+    const baseWorkflow = savedWorkflow();
     const workflow = savedWorkflow({
-      definition: {
-        ...savedWorkflow().definition,
-        nodes: [
-          ...savedWorkflow().definition.nodes,
-          {
-            data: { default_value: "default window", input_type: "text" },
+      presentation: {
+        ...baseWorkflow.presentation,
+        nodes: {
+          ...baseWorkflow.presentation.nodes,
+          "input-window": {
             description: "",
-            id: "input-window",
             name: "Window",
             position: { x: 0, y: 120 },
-            type: "input",
+          },
+        },
+      },
+      spec: {
+        ...baseWorkflow.spec,
+        nodes: [
+          ...baseWorkflow.spec.nodes,
+          {
+            config: { default_value: "default window", input_type: "text" },
+            id: "input-window",
+            kind: "input",
           },
         ],
       },

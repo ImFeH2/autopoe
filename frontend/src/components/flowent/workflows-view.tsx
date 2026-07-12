@@ -38,7 +38,98 @@ const AUTO_SAVE_DELAY_MS = 500;
 
 type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const valuesMatch = (left: unknown, right: unknown) =>
+  JSON.stringify(left) === JSON.stringify(right);
+
+function rebaseChangedValue(
+  base: unknown,
+  current: unknown,
+  latest: unknown,
+): unknown {
+  if (valuesMatch(base, current)) {
+    return latest;
+  }
+  if (Array.isArray(base) && Array.isArray(current) && Array.isArray(latest)) {
+    const keyed = [...base, ...current, ...latest].every(
+      (item) => isRecord(item) && typeof item.id === "string",
+    );
+    if (!keyed) {
+      return current;
+    }
+    const baseById = new Map(
+      base.map((item) => [(item as Record<string, unknown>).id, item]),
+    );
+    const currentById = new Map(
+      current.map((item) => [(item as Record<string, unknown>).id, item]),
+    );
+    const latestById = new Map(
+      latest.map((item) => [(item as Record<string, unknown>).id, item]),
+    );
+    const rebased = latest.flatMap((latestItem) => {
+      const id = (latestItem as Record<string, unknown>).id;
+      const currentItem = currentById.get(id);
+      const baseItem = baseById.get(id);
+      if (baseItem !== undefined && currentItem === undefined) {
+        return [];
+      }
+      if (currentItem === undefined) {
+        return [latestItem];
+      }
+      return [rebaseChangedValue(baseItem, currentItem, latestItem)];
+    });
+    for (const currentItem of current) {
+      const id = (currentItem as Record<string, unknown>).id;
+      if (!baseById.has(id) && !latestById.has(id)) {
+        rebased.push(currentItem);
+      }
+    }
+    return rebased;
+  }
+  if (isRecord(base) && isRecord(current) && isRecord(latest)) {
+    const rebased: Record<string, unknown> = {};
+    const keys = new Set([
+      ...Object.keys(base),
+      ...Object.keys(current),
+      ...Object.keys(latest),
+    ]);
+    for (const key of keys) {
+      const hasBase = Object.hasOwn(base, key);
+      const hasCurrent = Object.hasOwn(current, key);
+      const hasLatest = Object.hasOwn(latest, key);
+      if (hasBase && !hasCurrent) {
+        continue;
+      }
+      if (!hasCurrent) {
+        if (hasLatest) {
+          rebased[key] = latest[key];
+        }
+        continue;
+      }
+      if (!hasBase) {
+        rebased[key] = current[key];
+        continue;
+      }
+      if (!hasLatest) {
+        continue;
+      }
+      rebased[key] = rebaseChangedValue(base[key], current[key], latest[key]);
+    }
+    return rebased;
+  }
+  return current;
+}
+
+const rebaseWorkflowChanges = (
+  base: Workflow,
+  current: Workflow,
+  latest: Workflow,
+) => rebaseChangedValue(base, current, latest) as Workflow;
+
 function WorkflowEditorView({
+  autoSaveError,
   autoSaveStatus,
   draftWorkflow,
   inputValues,
@@ -55,6 +146,7 @@ function WorkflowEditorView({
   workflowSchedule,
   workflowScheduleRequestState,
 }: {
+  autoSaveError: string;
   autoSaveStatus: AutoSaveStatus;
   draftWorkflow: Workflow;
   inputValues: Record<string, string>;
@@ -161,6 +253,7 @@ function WorkflowEditorView({
       ) : null}
       <ReactFlowProvider>
         <WorkflowCanvas
+          autoSaveError={autoSaveError}
           autoSaveStatus={autoSaveStatus}
           draftWorkflow={draftWorkflow}
           isRunning={isRunning}
@@ -225,7 +318,7 @@ function RunInputPanel({
       </div>
       <div className="grid gap-2 md:grid-cols-2">
         {inputNodes.map((node) => {
-          const defaultValue = String(node.data.default_value ?? "");
+          const defaultValue = String(node.config.default_value ?? "");
           return (
             <div className={fieldGroupClassName} key={node.id}>
               <Label
@@ -260,6 +353,7 @@ export function WorkflowsView({
   onSaveWorkflow,
   onStartWorkflowSchedule,
   onStopWorkflowSchedule,
+  onWorkflowPersisted,
   runningWorkflowId,
   workflowRunResult,
   workflowSchedule,
@@ -277,6 +371,7 @@ export function WorkflowsView({
   onSaveWorkflow: (workflow: Workflow) => Promise<{
     data: Workflow | null;
     error: string;
+    latest?: Workflow;
   }>;
   onStartWorkflowSchedule: (
     workflowId: string,
@@ -289,6 +384,7 @@ export function WorkflowsView({
     data: WorkflowSchedule | null;
     error: string;
   }>;
+  onWorkflowPersisted: (workflowId: string) => void;
   runningWorkflowId: string;
   workflowRunResult: WorkflowRunResult | null;
   workflowSchedule: WorkflowSchedule | null;
@@ -300,10 +396,16 @@ export function WorkflowsView({
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [isInputFormOpen, setIsInputFormOpen] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("idle");
+  const [autoSaveError, setAutoSaveError] = useState("");
+  const [autoSaveConflict, setAutoSaveConflict] = useState("");
   const [saveRevision, setSaveRevision] = useState(0);
   const toast = useFlowentToast();
   const saveTimerRef = useRef<number | null>(null);
   const savePromiseRef = useRef<Promise<Workflow | null> | null>(null);
+  const saveLatestDraftRef = useRef<
+    (options?: { force?: boolean }) => Promise<Workflow | null>
+  >(async () => null);
+  const isMountedRef = useRef(true);
   const latestDraftRef = useRef(draftWorkflow);
   const latestRevisionRef = useRef(0);
   const savedRevisionRef = useRef(0);
@@ -344,19 +446,46 @@ export function WorkflowsView({
       const workflowToSave = latestDraftRef.current;
       const requestRevision = latestRevisionRef.current;
       const requestSession = editorSessionRef.current;
-      setAutoSaveStatus("saving");
+      if (isMountedRef.current) {
+        setAutoSaveStatus("saving");
+      }
 
       const savePromise = onSaveWorkflow(workflowToSave)
         .then((result) => {
-          const isCurrentSession = editorSessionRef.current === requestSession;
+          const isSameSession = editorSessionRef.current === requestSession;
+          const isCurrentSession = isSameSession && isMountedRef.current;
           const isCurrentRevision =
             latestRevisionRef.current === requestRevision;
 
           if (!result.data) {
-            if (isCurrentSession) {
-              setAutoSaveStatus(isCurrentRevision ? "error" : "saving");
+            if (isSameSession) {
+              if (result.latest) {
+                const hasNewerEdits = !isCurrentRevision;
+                const nextDraft = hasNewerEdits
+                  ? rebaseWorkflowChanges(
+                      workflowToSave,
+                      latestDraftRef.current,
+                      result.latest,
+                    )
+                  : result.latest;
+                latestDraftRef.current = nextDraft;
+                savedRevisionRef.current = requestRevision;
+                isPersistedRef.current = true;
+                if (!hasNewerEdits) {
+                  latestRevisionRef.current = requestRevision;
+                }
+                if (isCurrentSession) {
+                  setDraftWorkflow(nextDraft);
+                  setAutoSaveError("");
+                  setAutoSaveConflict(result.error);
+                  setAutoSaveStatus(hasNewerEdits ? "saving" : "error");
+                }
+              } else if (isCurrentSession) {
+                setAutoSaveError(result.error);
+                setAutoSaveStatus(isCurrentRevision ? "error" : "saving");
+              }
             }
-            if ((isCurrentSession && isCurrentRevision) || !isCurrentSession) {
+            if (!isCurrentSession) {
               toast.error(result.error);
             }
             return null;
@@ -364,18 +493,41 @@ export function WorkflowsView({
 
           const savedWorkflow = result.data;
 
-          if (isCurrentSession) {
+          if (isSameSession) {
+            const wasPersisted = isPersistedRef.current;
             isPersistedRef.current = true;
+            if (isCurrentSession) {
+              setAutoSaveConflict("");
+            }
             savedRevisionRef.current = Math.max(
               savedRevisionRef.current,
               requestRevision,
             );
             if (isCurrentRevision) {
               latestDraftRef.current = savedWorkflow;
-              setDraftWorkflow(savedWorkflow);
-              setAutoSaveStatus("saved");
+              if (isCurrentSession) {
+                setDraftWorkflow(savedWorkflow);
+                setAutoSaveError("");
+                setAutoSaveStatus("saved");
+              }
             } else {
-              setAutoSaveStatus("saving");
+              const currentDraft = latestDraftRef.current;
+              const rebasedDraft = {
+                ...currentDraft,
+                activeRevision: savedWorkflow.activeRevision,
+                createdAt: savedWorkflow.createdAt,
+                revision: savedWorkflow.revision,
+                updatedAt: savedWorkflow.updatedAt,
+              };
+              latestDraftRef.current = rebasedDraft;
+              if (isCurrentSession) {
+                setDraftWorkflow(rebasedDraft);
+                setAutoSaveError("");
+                setAutoSaveStatus("saving");
+              }
+            }
+            if (isCurrentSession && !wasPersisted) {
+              onWorkflowPersisted(savedWorkflow.id);
             }
           }
 
@@ -390,13 +542,16 @@ export function WorkflowsView({
       savePromiseRef.current = savePromise;
       return savePromise;
     },
-    [clearAutoSaveTimer, onSaveWorkflow, toast],
+    [clearAutoSaveTimer, onSaveWorkflow, onWorkflowPersisted, toast],
   );
+  saveLatestDraftRef.current = saveLatestDraft;
 
   const updateDraftWorkflow = useCallback((workflow: Workflow) => {
     latestDraftRef.current = workflow;
     latestRevisionRef.current += 1;
     setDraftWorkflow(workflow);
+    setAutoSaveError("");
+    setAutoSaveConflict("");
     setAutoSaveStatus("saving");
     setSaveRevision(latestRevisionRef.current);
   }, []);
@@ -442,18 +597,22 @@ export function WorkflowsView({
     savedRevisionRef.current = 0;
     isPersistedRef.current = Boolean(activeWorkflow);
     setDraftWorkflow(nextWorkflow);
+    setAutoSaveError("");
+    setAutoSaveConflict("");
     setInputValues({});
     setIsInputFormOpen(false);
     setAutoSaveStatus("idle");
     setSaveRevision(0);
   }, [activeWorkflow, clearAutoSaveTimer, newWorkflowKey, saveLatestDraft]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
       clearAutoSaveTimer();
-    },
-    [clearAutoSaveTimer],
-  );
+      void saveLatestDraftRef.current();
+    };
+  }, [clearAutoSaveTimer]);
 
   useEffect(() => {
     if (saveRevision <= savedRevisionRef.current) {
@@ -469,9 +628,15 @@ export function WorkflowsView({
   const hasTimer = workflowTimerNodes(draftWorkflow).length > 0;
   const activeWorkflowSchedule =
     workflowSchedule?.workflowId === draftWorkflow.id ? workflowSchedule : null;
+  const activeWorkflowRevision =
+    draftWorkflow.activeRevision ?? draftWorkflow.revision;
   const activeRunResult = hasTimer
-    ? (activeWorkflowSchedule?.lastResult ?? null)
-    : workflowRunResult?.workflowId === draftWorkflow.id
+    ? activeWorkflowSchedule?.lastResult?.workflowRevision ===
+      activeWorkflowRevision
+      ? activeWorkflowSchedule.lastResult
+      : null
+    : workflowRunResult?.workflowId === draftWorkflow.id &&
+        workflowRunResult.workflowRevision === activeWorkflowRevision
       ? workflowRunResult
       : null;
   const isRunning = runningWorkflowId === draftWorkflow.id;
@@ -494,13 +659,18 @@ export function WorkflowsView({
     if (workflowTimerNodes(savedWorkflow).length === 0) {
       const result = await onRunWorkflow(savedWorkflow.id, {
         inputs: requestInputs,
+        workflowRevision: savedWorkflow.revision,
       });
       if (!result.data) {
-        toast.error(result.error);
+        setAutoSaveError(result.error);
+        setAutoSaveStatus("error");
         return;
       }
       if (result.data.status === "failed") {
-        toast.error(workflowFailureMessage(result.data));
+        setAutoSaveError(workflowFailureMessage(result.data));
+        setAutoSaveStatus("error");
+      } else {
+        setAutoSaveError("");
       }
       return;
     }
@@ -508,9 +678,13 @@ export function WorkflowsView({
     const result = await onStartWorkflowSchedule(savedWorkflow.id, {
       inputs: requestInputs,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      workflowRevision: savedWorkflow.revision,
     });
     if (!result.data) {
-      toast.error(result.error);
+      setAutoSaveError(result.error);
+      setAutoSaveStatus("error");
+    } else {
+      setAutoSaveError("");
     }
   };
 
@@ -545,7 +719,8 @@ export function WorkflowsView({
 
   return (
     <WorkflowEditorView
-      autoSaveStatus={autoSaveStatus}
+      autoSaveError={autoSaveConflict || autoSaveError}
+      autoSaveStatus={autoSaveConflict ? "error" : autoSaveStatus}
       draftWorkflow={draftWorkflow}
       inputValues={inputValues}
       isInputFormOpen={isInputFormOpen}

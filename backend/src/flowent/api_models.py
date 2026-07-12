@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 from flowent.llm import ProviderFormat
 from flowent.storage import (
@@ -179,6 +179,7 @@ class WorkflowRunRequest(BaseModel):
 
     input: str = ""
     inputs: dict[str, str] = Field(default_factory=dict)
+    workflow_revision: PositiveInt | None = None
 
 
 class WorkflowScheduleStartRequest(BaseModel):
@@ -187,6 +188,7 @@ class WorkflowScheduleStartRequest(BaseModel):
     input: str | None = None
     inputs: dict[str, str] | None = None
     timezone: str | None = None
+    workflow_revision: PositiveInt | None = None
 
 
 class WorkflowScheduleResponse(BaseModel):

@@ -67,48 +67,55 @@ export type TestWritablePath = {
 };
 
 export type TestWorkflowNode = {
-  data: Record<string, unknown>;
-  description: string;
+  config: Record<string, unknown>;
   id: string;
-  name: string;
-  position: {
-    x: number;
-    y: number;
-  };
-  type: "agent" | "code" | "input" | "merge" | "output" | "timer";
+  kind: "agent" | "code" | "input" | "merge" | "output" | "timer";
 };
 
 export type TestWorkflowEdge = {
+  from: { node_id: string; port: "output" };
   id: string;
-  label: string;
-  source: string;
-  source_handle: string;
-  target: string;
-  target_handle: string;
+  to: { node_id: string; port: "input" };
 };
 
 export type TestWorkflow = {
+  active_revision: number | null;
   created_at: number;
-  definition: {
-    edges: TestWorkflowEdge[];
-    nodes: TestWorkflowNode[];
-    version: number;
-  };
   id: string;
   name: string;
+  presentation: {
+    connections: Record<string, { label: string }>;
+    nodes: Record<
+      string,
+      {
+        description: string;
+        name: string;
+        position: { x: number; y: number };
+      }
+    >;
+  };
+  revision: number;
+  spec: {
+    connections: TestWorkflowEdge[];
+    nodes: TestWorkflowNode[];
+  };
   updated_at: number;
 };
 
 export type TestWorkflowRunResult = {
   node_results: Array<{
-    error: string;
+    error: { code: string; message: string } | null;
     id: string;
+    inputs: string[];
     output: string;
     status: "failed" | "pending" | "running" | "success";
   }>;
   outputs: Record<string, string>;
+  run_id: string;
   status: "failed" | "success";
+  trigger: "manual" | "schedule";
   workflow_id: string;
+  workflow_revision: number;
 };
 
 export const workflowUuid = "00000000-0000-4000-8000-000000000000";
@@ -186,40 +193,47 @@ export const selectedProviderState = () => ({
 export const savedWorkflow = (
   updates: Partial<TestWorkflow> = {},
 ): TestWorkflow => ({
+  active_revision: 1,
   created_at: 1710000020,
-  definition: {
-    edges: [
+  id: "workflow-1",
+  name: "Launch Workflow",
+  presentation: {
+    connections: { "edge-input-output": { label: "" } },
+    nodes: {
+      input: {
+        description: "",
+        name: "Input",
+        position: { x: 0, y: 0 },
+      },
+      output: {
+        description: "",
+        name: "Output",
+        position: { x: 260, y: 0 },
+      },
+    },
+  },
+  revision: 1,
+  spec: {
+    connections: [
       {
+        from: { node_id: "input", port: "output" },
         id: "edge-input-output",
-        label: "",
-        source: "input",
-        source_handle: "out",
-        target: "output",
-        target_handle: "in",
+        to: { node_id: "output", port: "input" },
       },
     ],
     nodes: [
       {
-        data: { default_value: "launch checklist", input_type: "text" },
-        description: "",
+        config: { default_value: "launch checklist", input_type: "text" },
         id: "input",
-        name: "Input",
-        position: { x: 0, y: 0 },
-        type: "input",
+        kind: "input",
       },
       {
-        data: { output_key: "final_result", transform: "" },
-        description: "",
+        config: { output_key: "final_result", transform: "" },
         id: "output",
-        name: "Output",
-        position: { x: 260, y: 0 },
-        type: "output",
+        kind: "output",
       },
     ],
-    version: 1,
   },
-  id: "workflow-1",
-  name: "Launch Workflow",
   updated_at: 1710000030,
   ...updates,
 });

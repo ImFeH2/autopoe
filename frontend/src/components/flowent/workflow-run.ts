@@ -3,12 +3,13 @@ import type {
   WorkflowNode,
   WorkflowRunResult,
 } from "@/components/flowent/types";
+import { workflowNodes } from "@/components/flowent/workflows/workflow-model";
 
 export const workflowInputNodes = (workflow: Workflow) =>
-  workflow.definition.nodes.filter((node) => node.type === "input");
+  workflowNodes(workflow).filter((node) => node.kind === "input");
 
 export const workflowTimerNodes = (workflow: Workflow) =>
-  workflow.definition.nodes.filter((node) => node.type === "timer");
+  workflowNodes(workflow).filter((node) => node.kind === "timer");
 
 export const normalizeRunInputs = (
   inputNodes: WorkflowNode[],
@@ -23,5 +24,5 @@ export const normalizeRunInputs = (
 };
 
 export const workflowFailureMessage = (result: WorkflowRunResult) =>
-  result.nodeResults.find((nodeResult) => nodeResult.status === "failed")
-    ?.error || "Run could not be completed.";
+  result.nodeResults.find((nodeResult) => nodeResult.status === "failed")?.error
+    ?.message || "Run could not be completed.";

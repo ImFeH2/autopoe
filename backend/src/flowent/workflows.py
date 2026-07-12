@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 import tempfile
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,23 +17,32 @@ from flowent.context import runtime_context_messages
 from flowent.llm import ProviderConnection
 from flowent.sandbox import SandboxRunner
 from flowent.storage import (
-    StoredWorkflow,
-    StoredWorkflowDefinition,
-    StoredWorkflowEdge,
+    StoredWorkflowConnection,
     StoredWorkflowNode,
+    StoredWorkflowPresentation,
+    StoredWorkflowSpec,
+    WorkflowDraft,
 )
 
 if TYPE_CHECKING:
     from flowent.agent_runtime import FlowentAgentRuntime
 
 
+class WorkflowNodeRunError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+
+
 class WorkflowNodeRunResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    error: str = ""
+    error: WorkflowNodeRunError | None = None
     id: str
+    inputs: list[str] = Field(default_factory=list)
     output: str = ""
-    status: str
+    status: Literal["failed", "pending", "running", "success"]
 
 
 class WorkflowRunResponse(BaseModel):
@@ -39,8 +50,11 @@ class WorkflowRunResponse(BaseModel):
 
     node_results: list[WorkflowNodeRunResult] = Field(default_factory=list)
     outputs: dict[str, str] = Field(default_factory=dict)
-    status: str
+    run_id: str
+    status: Literal["failed", "success"]
+    trigger: Literal["manual", "schedule"]
     workflow_id: str
+    workflow_revision: int
 
 
 class WorkflowRunRequestValues(BaseModel):
@@ -78,79 +92,182 @@ print(result, end="")
 """
 
 
-def validate_workflow(workflow: StoredWorkflow) -> StoredWorkflow:
-    validate_workflow_definition(workflow.definition)
+def validate_workflow_draft(workflow: WorkflowDraft) -> WorkflowDraft:
+    validate_workflow_draft_spec(workflow.spec, workflow.presentation)
     return workflow
 
 
-def validate_workflow_draft(workflow: StoredWorkflow) -> StoredWorkflow:
-    validate_workflow_draft_definition(workflow.definition)
-    return workflow
-
-
-def validate_workflow_draft_definition(definition: StoredWorkflowDefinition) -> None:
-    node_ids = [node.id for node in definition.nodes]
+def validate_workflow_draft_spec(
+    spec: StoredWorkflowSpec,
+    presentation: StoredWorkflowPresentation | None = None,
+) -> None:
+    node_ids = [node.id for node in spec.nodes]
     if any(not node_id.strip() for node_id in node_ids):
         raise ValueError("Workflow node ids must not be empty.")
     if len(set(node_ids)) != len(node_ids):
         raise ValueError("Workflow node ids must be unique.")
 
-    edge_ids = [edge.id for edge in definition.edges]
-    if any(not edge_id.strip() for edge_id in edge_ids):
-        raise ValueError("Workflow edge ids must not be empty.")
-    if len(set(edge_ids)) != len(edge_ids):
-        raise ValueError("Workflow edge ids must be unique.")
+    connection_ids = [connection.id for connection in spec.connections]
+    if any(not connection_id.strip() for connection_id in connection_ids):
+        raise ValueError("Workflow connection ids must not be empty.")
+    if len(set(connection_ids)) != len(connection_ids):
+        raise ValueError("Workflow connection ids must be unique.")
 
-    node_id_set = set(node_ids)
-    for edge in definition.edges:
-        if edge.source not in node_id_set or edge.target not in node_id_set:
-            raise ValueError("Workflow edges must connect existing nodes.")
+    if presentation is not None:
+        if set(presentation.nodes) != set(node_ids):
+            raise ValueError("Workflow node presentation must match workflow nodes.")
+        if set(presentation.connections) != set(connection_ids):
+            raise ValueError(
+                "Workflow connection presentation must match workflow connections."
+            )
+
+    nodes = {node.id: node for node in spec.nodes}
+    pairs: set[tuple[str, str]] = set()
+    for connection in spec.connections:
+        source_id = connection.from_.node_id
+        target_id = connection.to.node_id
+        if source_id not in nodes or target_id not in nodes:
+            raise ValueError(f"Connection {connection.id} must connect existing nodes.")
+        if connection.from_.port != "output":
+            raise ValueError(
+                f"Connection {connection.id} must use output on node {source_id}."
+            )
+        if connection.to.port != "input":
+            raise ValueError(
+                f"Connection {connection.id} must use input on node {target_id}."
+            )
+        if nodes[source_id].kind == "output":
+            raise ValueError(f"Output node {source_id} cannot start a connection.")
+        if nodes[target_id].kind in {"input", "timer"}:
+            raise ValueError(
+                f"{nodes[target_id].kind.title()} node {target_id} cannot receive a connection."
+            )
+        if source_id == target_id:
+            raise ValueError(
+                f"Connection {connection.id} cannot connect a node to itself."
+            )
+        pair = (source_id, target_id)
+        if pair in pairs:
+            raise ValueError(
+                f"Nodes {source_id} and {target_id} cannot have duplicate connections."
+            )
+        pairs.add(pair)
 
 
-def validate_workflow_definition(definition: StoredWorkflowDefinition) -> list[str]:
-    node_ids = [node.id for node in definition.nodes]
-    if not node_ids:
+def compile_workflow_spec(spec: StoredWorkflowSpec) -> list[str]:
+    validate_workflow_draft_spec(spec)
+    if not spec.nodes:
         raise ValueError("Workflow needs at least one node.")
-    if any(not node_id.strip() for node_id in node_ids):
-        raise ValueError("Workflow node ids must not be empty.")
-    if len(set(node_ids)) != len(node_ids):
-        raise ValueError("Workflow node ids must be unique.")
-    if not any(node.type in {"input", "timer"} for node in definition.nodes):
-        raise ValueError("Workflow needs an input or timer node.")
-    if not any(node.type == "output" for node in definition.nodes):
-        raise ValueError("Workflow needs an output node.")
 
-    edge_ids = [edge.id for edge in definition.edges]
-    if any(not edge_id.strip() for edge_id in edge_ids):
-        raise ValueError("Workflow edge ids must not be empty.")
-    if len(set(edge_ids)) != len(edge_ids):
-        raise ValueError("Workflow edge ids must be unique.")
+    sources = {node.id for node in spec.nodes if node.kind in {"input", "timer"}}
+    outputs = {node.id for node in spec.nodes if node.kind == "output"}
+    if not sources:
+        raise ValueError("Workflow needs an Input or Timer node.")
+    if not outputs:
+        raise ValueError("Workflow needs an Output node.")
 
-    node_id_set = set(node_ids)
-    for edge in definition.edges:
-        if edge.source not in node_id_set or edge.target not in node_id_set:
-            raise ValueError("Workflow edges must connect existing nodes.")
+    ordered = topological_node_ids(spec)
+    outgoing: dict[str, set[str]] = defaultdict(set)
+    incoming: dict[str, set[str]] = defaultdict(set)
+    for connection in spec.connections:
+        outgoing[connection.from_.node_id].add(connection.to.node_id)
+        incoming[connection.to.node_id].add(connection.from_.node_id)
 
-    return topological_node_ids(definition)
+    for node in spec.nodes:
+        if node.id not in sources and not incoming[node.id]:
+            raise ValueError(f"Node {node.id} needs an incoming connection.")
+        if node.id not in outputs and not outgoing[node.id]:
+            raise ValueError(f"Node {node.id} needs an outgoing connection.")
+
+    reachable = reachable_nodes(sources, outgoing)
+    unreachable = [node.id for node in spec.nodes if node.id not in reachable]
+    if unreachable:
+        raise ValueError(
+            f"Node {unreachable[0]} is not reachable from an Input or Timer node."
+        )
+
+    reaches_output = reachable_nodes(outputs, incoming)
+    stranded = [node.id for node in spec.nodes if node.id not in reaches_output]
+    if stranded:
+        raise ValueError(f"Node {stranded[0]} does not lead to an Output node.")
+
+    output_keys = [
+        node.config.output_key.strip() for node in spec.nodes if node.kind == "output"
+    ]
+    if any(not output_key for output_key in output_keys):
+        raise ValueError("Output keys must not be empty.")
+    if len(output_keys) != len(set(output_keys)):
+        raise ValueError("Output keys must be unique.")
+
+    validate_timer_configs(spec)
+    validate_prompt_references(spec, incoming)
+    return ordered
 
 
-def workflow_requires_connection(definition: StoredWorkflowDefinition) -> bool:
-    return any(node.type == "agent" for node in definition.nodes)
+def validate_timer_configs(spec: StoredWorkflowSpec) -> None:
+    from flowent.workflow_scheduler import next_cron_run_at
+
+    for node in spec.nodes:
+        if node.kind != "timer":
+            continue
+        if node.config.mode == "interval":
+            if (
+                not math.isfinite(node.config.interval_seconds)
+                or node.config.interval_seconds < 1
+            ):
+                raise ValueError("Timer interval must be at least 1 second.")
+            continue
+        from datetime import UTC, datetime
+
+        next_cron_run_at(node.config.cron, datetime.now(UTC))
 
 
-def timer_run_node_ids(
-    definition: StoredWorkflowDefinition, timer_node_id: str
-) -> set[str]:
-    nodes = {node.id: node for node in definition.nodes}
+def validate_prompt_references(
+    spec: StoredWorkflowSpec, incoming: Mapping[str, set[str]]
+) -> None:
+    node_ids = {node.id for node in spec.nodes}
+    for node in spec.nodes:
+        if node.kind != "agent":
+            continue
+        ancestors = reachable_nodes({node.id}, incoming) - {node.id}
+        for reference in PLACEHOLDER_PATTERN.findall(node.config.prompt):
+            if reference not in node_ids:
+                raise ValueError(
+                    f"Agent node {node.id} references unknown node {reference}."
+                )
+            if reference not in ancestors:
+                raise ValueError(
+                    f"Agent node {node.id} can only reference an upstream node."
+                )
+
+
+def reachable_nodes(start_ids: set[str], adjacency: Mapping[str, set[str]]) -> set[str]:
+    reached = set(start_ids)
+    queue = deque(start_ids)
+    while queue:
+        node_id = queue.popleft()
+        for next_id in adjacency.get(node_id, set()):
+            if next_id not in reached:
+                reached.add(next_id)
+                queue.append(next_id)
+    return reached
+
+
+def workflow_requires_connection(spec: StoredWorkflowSpec) -> bool:
+    return any(node.kind == "agent" for node in spec.nodes)
+
+
+def timer_run_node_ids(spec: StoredWorkflowSpec, timer_node_id: str) -> set[str]:
+    nodes = {node.id: node for node in spec.nodes}
     timer_node = nodes.get(timer_node_id)
-    if timer_node is None or timer_node.type != "timer":
+    if timer_node is None or timer_node.kind != "timer":
         raise ValueError("Timer node not found.")
 
     outgoing: dict[str, list[str]] = defaultdict(list)
     incoming: dict[str, list[str]] = defaultdict(list)
-    for edge in definition.edges:
-        outgoing[edge.source].append(edge.target)
-        incoming[edge.target].append(edge.source)
+    for connection in spec.connections:
+        outgoing[connection.from_.node_id].append(connection.to.node_id)
+        incoming[connection.to.node_id].append(connection.from_.node_id)
 
     active = {timer_node_id}
     queue = deque([timer_node_id])
@@ -166,22 +283,21 @@ def timer_run_node_ids(
         node_id = queue.popleft()
         for source in incoming[node_id]:
             source_node = nodes[source]
-            if source_node.type == "timer" and source != timer_node_id:
+            if source_node.kind == "timer" and source != timer_node_id:
                 continue
             if source not in active:
                 active.add(source)
                 queue.append(source)
-
     return active
 
 
-def topological_node_ids(definition: StoredWorkflowDefinition) -> list[str]:
-    node_ids = [node.id for node in definition.nodes]
+def topological_node_ids(spec: StoredWorkflowSpec) -> list[str]:
+    node_ids = [node.id for node in spec.nodes]
     outgoing: dict[str, list[str]] = defaultdict(list)
     indegree = {node_id: 0 for node_id in node_ids}
-    for edge in definition.edges:
-        outgoing[edge.source].append(edge.target)
-        indegree[edge.target] += 1
+    for connection in spec.connections:
+        outgoing[connection.from_.node_id].append(connection.to.node_id)
+        indegree[connection.to.node_id] += 1
 
     node_order = {node_id: index for index, node_id in enumerate(node_ids)}
     ready = deque(
@@ -194,9 +310,7 @@ def topological_node_ids(definition: StoredWorkflowDefinition) -> list[str]:
     while ready:
         node_id = ready.popleft()
         ordered.append(node_id)
-        for target in sorted(
-            outgoing[node_id], key=lambda node_id: node_order[node_id]
-        ):
+        for target in sorted(outgoing[node_id], key=lambda item: node_order[item]):
             indegree[target] -= 1
             if indegree[target] == 0:
                 ready.append(target)
@@ -206,96 +320,114 @@ def topological_node_ids(definition: StoredWorkflowDefinition) -> list[str]:
     return ordered
 
 
-async def run_workflow_definition(
+async def run_workflow_spec(
     *,
     connection: ProviderConnection | None,
-    definition: StoredWorkflowDefinition,
     default_input: str = "",
     input_values: Mapping[str, str] | None = None,
     runtime: FlowentAgentRuntime | None = None,
+    run_id: str | None = None,
+    spec: StoredWorkflowSpec,
     timer_node_id: str = "",
+    trigger: Literal["manual", "schedule"] = "manual",
     workflow_depth: int = 0,
     workflow_id: str,
+    workflow_revision: int,
 ) -> WorkflowRunResponse:
-    ordered_ids = validate_workflow_definition(definition)
-    if workflow_requires_connection(definition) and connection is None:
+    ordered_ids = compile_workflow_spec(spec)
+    if workflow_requires_connection(spec) and connection is None:
         raise ValueError("Choose a provider and model before running.")
-
     return await run_workflow_once(
         connection=connection,
-        definition=definition,
         input_values=WorkflowRunRequestValues(
             default_input=default_input,
             input_values=dict(input_values or {}),
         ),
         ordered_ids=ordered_ids,
+        run_id=run_id,
         runtime=runtime,
+        spec=spec,
         timer_node_id=timer_node_id,
+        trigger=trigger,
         workflow_depth=workflow_depth,
         workflow_id=workflow_id,
+        workflow_revision=workflow_revision,
     )
 
 
 async def run_workflow_once(
     *,
     connection: ProviderConnection | None,
-    definition: StoredWorkflowDefinition,
     input_values: WorkflowRunRequestValues,
     ordered_ids: list[str],
-    runtime: FlowentAgentRuntime | None = None,
-    timer_node_id: str = "",
-    workflow_depth: int = 0,
+    run_id: str | None,
+    runtime: FlowentAgentRuntime | None,
+    spec: StoredWorkflowSpec,
+    timer_node_id: str,
+    trigger: Literal["manual", "schedule"],
+    workflow_depth: int,
     workflow_id: str,
+    workflow_revision: int,
 ) -> WorkflowRunResponse:
-    nodes = {node.id: node for node in definition.nodes}
-    incoming_edges = edges_by_target(definition.edges)
-    active_node_ids = (
-        timer_run_node_ids(definition, timer_node_id) if timer_node_id else None
-    )
-    results: dict[str, WorkflowNodeRunResult] = {
+    nodes = {node.id: node for node in spec.nodes}
+    incoming_connections = connections_by_target(spec.connections)
+    active_node_ids = timer_run_node_ids(spec, timer_node_id) if timer_node_id else None
+    results = {
         node.id: WorkflowNodeRunResult(id=node.id, status="pending")
-        for node in definition.nodes
+        for node in spec.nodes
     }
     outputs: dict[str, str] = {}
     named_outputs: dict[str, str] = {}
     remaining_default_input = input_values.default_input
+    run_id = run_id or str(uuid4())
 
     for node_id in ordered_ids:
         node = nodes[node_id]
         if active_node_ids is not None and node.id not in active_node_ids:
             continue
-        results[node.id] = WorkflowNodeRunResult(id=node.id, status="running")
+        node_inputs = upstream_outputs(incoming_connections[node.id], outputs)
+        results[node.id] = WorkflowNodeRunResult(
+            id=node.id, inputs=node_inputs, status="running"
+        )
         try:
             output = await run_node(
                 connection=connection,
                 default_input=remaining_default_input,
                 input_values=input_values.input_values,
-                incoming_edges=incoming_edges[node.id],
                 node=node,
+                node_inputs=node_inputs,
                 outputs=outputs,
                 runtime=runtime,
                 workflow_depth=workflow_depth,
                 workflow_id=workflow_id,
             )
-            if node.type == "input" and remaining_default_input:
+            if node.kind == "input" and remaining_default_input:
                 remaining_default_input = ""
         except Exception as error:
             results[node.id] = WorkflowNodeRunResult(
-                error=str(error) or "Node could not be completed.",
+                error=WorkflowNodeRunError(
+                    code="node_execution_failed",
+                    message=str(error) or "Node could not be completed.",
+                ),
                 id=node.id,
+                inputs=node_inputs,
                 status="failed",
             )
             return WorkflowRunResponse(
                 node_results=list(results.values()),
                 outputs=named_outputs,
+                run_id=run_id,
                 status="failed",
+                trigger=trigger,
                 workflow_id=workflow_id,
+                workflow_revision=workflow_revision,
             )
         outputs[node.id] = output
-        if node.type == "output":
+        if node.kind == "output":
             named_outputs[node_output_key(node)] = output
         results[node.id] = WorkflowNodeRunResult(
             id=node.id,
+            inputs=node_inputs,
             output=output,
             status="success",
         )
@@ -303,8 +435,11 @@ async def run_workflow_once(
     return WorkflowRunResponse(
         node_results=list(results.values()),
         outputs=named_outputs,
+        run_id=run_id,
         status="success",
+        trigger=trigger,
         workflow_id=workflow_id,
+        workflow_revision=workflow_revision,
     )
 
 
@@ -313,28 +448,26 @@ async def run_node(
     connection: ProviderConnection | None,
     default_input: str,
     input_values: Mapping[str, str],
-    incoming_edges: list[StoredWorkflowEdge],
     node: StoredWorkflowNode,
+    node_inputs: list[str],
     outputs: Mapping[str, str],
-    runtime: FlowentAgentRuntime | None = None,
-    workflow_depth: int = 0,
+    runtime: FlowentAgentRuntime | None,
+    workflow_depth: int,
     workflow_id: str,
 ) -> str:
-    if node.type == "input":
+    if node.kind == "input":
         if node.id in input_values:
             return input_values[node.id]
         if default_input:
             return default_input
-        return node_data_text(node, "default_value")
-    if node.type == "agent":
+        return node.config.default_value
+    if node.kind == "agent":
         if connection is None:
             raise ValueError("Choose a provider and model before running.")
         if runtime is None:
             raise ValueError("Agent runtime is not available.")
         prompt = render_template(
-            node_data_text(node, "prompt")
-            or joined_upstream_outputs(incoming_edges, outputs),
-            outputs,
+            node.config.prompt or joined_text(node_inputs), outputs
         )
         context_messages = runtime_context_messages(
             runtime.cwd, runtime.store.read_state().settings.agent_prompt
@@ -345,10 +478,7 @@ async def run_node(
         runtime.store.save_workflow_agent_history(workflow_id, node.id, pending_history)
         result = await runtime.complete(
             connection=connection,
-            messages=[
-                *context_messages,
-                *pending_history,
-            ],
+            messages=[*context_messages, *pending_history],
             history_start_index=1 + len(context_messages),
             user_request=prompt,
             workflow_depth=workflow_depth,
@@ -357,33 +487,30 @@ async def run_node(
             workflow_id, node.id, list(result.history)
         )
         return result.content
-    if node.type == "merge":
-        upstream = upstream_outputs(incoming_edges, outputs)
-        if node_data_text(node, "merge_strategy") == "json":
-            return merge_json_outputs(upstream)
-        return "\n".join(output for output in upstream if output)
-    if node.type == "code":
-        return await run_code_node(node, upstream_outputs(incoming_edges, outputs))
-    if node.type == "timer":
-        return timer_payload(node)
-    if node.type == "output":
-        return joined_upstream_outputs(incoming_edges, outputs)
-    raise ValueError("Node type is not supported.")
+    if node.kind == "merge":
+        if node.config.merge_strategy == "json":
+            return merge_json_outputs(node_inputs)
+        return joined_text(node_inputs)
+    if node.kind == "code":
+        return await run_code_node(node, node_inputs)
+    if node.kind == "timer":
+        return node.config.payload or "Timer fired."
+    if node.kind == "output":
+        return joined_text(node_inputs)
+    raise ValueError("Node kind is not supported.")
 
 
 async def run_code_node(node: StoredWorkflowNode, upstream: list[str]) -> str:
-    code = node_data_text(node, "code")
+    if node.kind != "code":
+        raise ValueError("Code node is required.")
+    code = node.config.code
     if not code.strip():
         return joined_text(upstream)
     with tempfile.TemporaryDirectory(prefix="flowent-workflow-code-") as code_dir:
         result = await SandboxRunner(timeout_seconds=10, cwd=Path(code_dir)).run_async(
             [sys.executable, "-I", "-c", PYTHON_CODE_RUNNER],
             input_text=json.dumps(
-                {
-                    "code": code,
-                    "input": joined_text(upstream),
-                    "inputs": upstream,
-                },
+                {"code": code, "input": joined_text(upstream), "inputs": upstream},
                 ensure_ascii=False,
             ),
             timeout_seconds=10,
@@ -393,44 +520,28 @@ async def run_code_node(node: StoredWorkflowNode, upstream: list[str]) -> str:
     return result.stdout
 
 
-def edges_by_target(
-    edges: list[StoredWorkflowEdge],
-) -> dict[str, list[StoredWorkflowEdge]]:
-    grouped: dict[str, list[StoredWorkflowEdge]] = defaultdict(list)
-    for edge in edges:
-        grouped[edge.target].append(edge)
+def connections_by_target(
+    connections: list[StoredWorkflowConnection],
+) -> dict[str, list[StoredWorkflowConnection]]:
+    grouped: dict[str, list[StoredWorkflowConnection]] = defaultdict(list)
+    for connection in connections:
+        grouped[connection.to.node_id].append(connection)
     return grouped
 
 
-def node_data_text(node: StoredWorkflowNode, key: str) -> str:
-    value = node.data.get(key, "")
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    return str(value)
-
-
 def node_output_key(node: StoredWorkflowNode) -> str:
-    return node_data_text(node, "output_key") or node.id
-
-
-def timer_payload(node: StoredWorkflowNode) -> str:
-    return node_data_text(node, "payload") or "Timer fired."
+    return node.config.output_key if node.kind == "output" else node.id
 
 
 def upstream_outputs(
-    incoming_edges: list[StoredWorkflowEdge],
+    incoming_connections: list[StoredWorkflowConnection],
     outputs: Mapping[str, str],
 ) -> list[str]:
-    return [outputs[edge.source] for edge in incoming_edges if edge.source in outputs]
-
-
-def joined_upstream_outputs(
-    incoming_edges: list[StoredWorkflowEdge],
-    outputs: Mapping[str, str],
-) -> str:
-    return joined_text(upstream_outputs(incoming_edges, outputs))
+    return [
+        outputs[connection.from_.node_id]
+        for connection in incoming_connections
+        if connection.from_.node_id in outputs
+    ]
 
 
 def joined_text(values: list[str]) -> str:
@@ -439,8 +550,7 @@ def joined_text(values: list[str]) -> str:
 
 def render_template(template: str, outputs: Mapping[str, str]) -> str:
     return PLACEHOLDER_PATTERN.sub(
-        lambda match: outputs.get(match.group(1), ""),
-        template,
+        lambda match: outputs.get(match.group(1), ""), template
     )
 
 

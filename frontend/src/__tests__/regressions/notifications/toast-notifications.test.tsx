@@ -49,40 +49,47 @@ const projectSkill = (updates = {}) => ({
 });
 
 const savedWorkflow = () => ({
+  active_revision: 1,
   created_at: 1710000020,
-  definition: {
-    edges: [
+  id: "workflow-1",
+  name: "Launch Workflow",
+  presentation: {
+    connections: { "edge-input-output": { label: "" } },
+    nodes: {
+      input: {
+        description: "",
+        name: "Input",
+        position: { x: 0, y: 0 },
+      },
+      output: {
+        description: "",
+        name: "Output",
+        position: { x: 260, y: 0 },
+      },
+    },
+  },
+  revision: 1,
+  spec: {
+    connections: [
       {
+        from: { node_id: "input", port: "output" },
         id: "edge-input-output",
-        label: "",
-        source: "input",
-        source_handle: "out",
-        target: "output",
-        target_handle: "in",
+        to: { node_id: "output", port: "input" },
       },
     ],
     nodes: [
       {
-        data: { default_value: "launch checklist", input_type: "text" },
-        description: "",
+        config: { default_value: "launch checklist", input_type: "text" },
         id: "input",
-        name: "Input",
-        position: { x: 0, y: 0 },
-        type: "input",
+        kind: "input",
       },
       {
-        data: { output_key: "final_result", transform: "" },
-        description: "",
+        config: { output_key: "final_result", transform: "" },
         id: "output",
-        name: "Output",
-        position: { x: 260, y: 0 },
-        type: "output",
+        kind: "output",
       },
     ],
-    version: 1,
   },
-  id: "workflow-1",
-  name: "Launch Workflow",
   updated_at: 1710000030,
 });
 

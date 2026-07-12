@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Literal
 
 from flowent.agent_runtime import FlowentAgentRuntime
 from flowent.llm import CompletionCallable
 from flowent.mcp import McpManager
 from flowent.provider_connections import selected_connection
-from flowent.storage import StateStore, StoredWorkflow, StoredWorkflowDefinition
+from flowent.storage import (
+    StateStore,
+    StoredWorkflow,
+    StoredWorkflowRevision,
+    WorkflowDraft,
+)
 from flowent.workflow_scheduler import WorkflowScheduler
 from flowent.workflows import (
     WorkflowRunResponse,
-    run_workflow_definition,
+    compile_workflow_spec,
+    run_workflow_spec,
     validate_workflow_draft,
     workflow_requires_connection,
 )
@@ -55,19 +63,53 @@ class WorkflowService:
             raise ValueError("Workflow not found.")
         return workflow
 
-    async def save_workflow(self, workflow: StoredWorkflow) -> StoredWorkflow:
-        try:
-            previous = self.get_workflow(workflow.id)
-        except ValueError:
-            previous = None
+    def get_active_revision(self, workflow_id: str) -> StoredWorkflowRevision:
+        self.get_workflow(workflow_id)
+        revision = self.store.read_active_workflow_revision(workflow_id)
+        if revision is None:
+            raise ValueError("Workflow is not ready to run.")
+        return revision
+
+    def get_workflow_revision(
+        self, workflow_id: str, revision: int
+    ) -> StoredWorkflowRevision:
+        workflow = self.get_workflow(workflow_id)
+        stored_revision = self.store.read_workflow_revision(workflow_id, revision)
+        if stored_revision is not None:
+            return stored_revision
+        if workflow.revision == revision:
+            compile_workflow_spec(workflow.spec)
+            active_revision = self.store.read_active_workflow_revision(workflow_id)
+            if active_revision is not None and active_revision.spec == workflow.spec:
+                return active_revision
+            raise ValueError("Workflow revision is not ready to run.")
+        raise ValueError("Workflow revision not found.")
+
+    async def save_workflow(
+        self,
+        workflow: WorkflowDraft,
+        *,
+        base_revision: int | None,
+        require_executable: bool = False,
+    ) -> StoredWorkflow:
         validated = validate_workflow_draft(
             workflow.model_copy(
                 update={"name": workflow.name.strip() or "Untitled Workflow"}
             )
         )
-        if previous is None:
-            return self.store.save_workflow(validated)
-        return await self.scheduler.save_workflow(validated)
+        try:
+            compile_workflow_spec(validated.spec)
+        except ValueError:
+            if require_executable:
+                raise
+            executable = False
+        else:
+            executable = True
+        return await self.scheduler.save_workflow(
+            validated,
+            base_revision=base_revision,
+            executable=executable,
+        )
 
     async def delete_workflow(self, workflow_id: str) -> StoredWorkflow:
         workflow = self.get_workflow(workflow_id)
@@ -82,47 +124,41 @@ class WorkflowService:
         default_input: str = "",
         input_values: Mapping[str, str] | None = None,
         timer_node_id: str = "",
+        trigger: Literal["manual", "schedule"] = "manual",
+        run_id: str | None = None,
+        workflow_revision: int | None = None,
         workflow_depth: int = 0,
     ) -> WorkflowRunResponse:
-        workflow = self.get_workflow(workflow_id)
+        revision = (
+            self.get_workflow_revision(workflow_id, workflow_revision)
+            if workflow_revision is not None
+            else self.get_active_revision(workflow_id)
+        )
         connection = (
             selected_connection(self.store.read_state())
-            if workflow_requires_connection(workflow.definition)
+            if workflow_requires_connection(revision.spec)
             else None
         )
-        return await run_workflow_definition(
+        result = await run_workflow_spec(
             connection=connection,
             default_input=default_input,
-            definition=workflow.definition,
             input_values=input_values,
             runtime=self.agent_runtime,
+            run_id=run_id,
+            spec=revision.spec,
             timer_node_id=timer_node_id,
-            workflow_depth=workflow_depth,
-            workflow_id=workflow.id,
-        )
-
-    async def run_workflow_definition(
-        self,
-        *,
-        default_input: str = "",
-        definition: StoredWorkflowDefinition,
-        input_values: Mapping[str, str] | None = None,
-        timer_node_id: str = "",
-        workflow_depth: int = 0,
-        workflow_id: str,
-    ) -> WorkflowRunResponse:
-        connection = (
-            selected_connection(self.store.read_state())
-            if workflow_requires_connection(definition)
-            else None
-        )
-        return await run_workflow_definition(
-            connection=connection,
-            default_input=default_input,
-            definition=definition,
-            input_values=input_values,
-            runtime=self.agent_runtime,
-            timer_node_id=timer_node_id,
+            trigger=trigger,
             workflow_depth=workflow_depth,
             workflow_id=workflow_id,
+            workflow_revision=revision.revision,
         )
+        current_task = asyncio.current_task()
+        if current_task is not None and current_task.cancelling():
+            raise asyncio.CancelledError
+        stored_run = result.model_dump(mode="json")
+        stored_run["inputs"] = {
+            "default_input": default_input,
+            "values": dict(input_values or {}),
+        }
+        self.store.save_workflow_run(stored_run)
+        return result

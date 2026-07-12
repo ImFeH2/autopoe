@@ -10,9 +10,9 @@ import {
 } from "@/components/flowent/workflow-run";
 
 const workflowNode = (
-  updates: Partial<WorkflowNode> & Pick<WorkflowNode, "id" | "type">,
+  updates: Partial<WorkflowNode> & Pick<WorkflowNode, "id" | "kind">,
 ): WorkflowNode => ({
-  data: {},
+  config: {},
   description: "",
   name: updates.id,
   position: { x: 0, y: 0 },
@@ -24,8 +24,8 @@ describe("workflow run helpers", () => {
     expect(
       normalizeRunInputs(
         [
-          workflowNode({ id: "input-a", type: "input" }),
-          workflowNode({ id: "input-b", type: "input" }),
+          workflowNode({ id: "input-a", kind: "input" }),
+          workflowNode({ id: "input-b", kind: "input" }),
         ],
         {
           "input-a": "launch",
@@ -39,12 +39,27 @@ describe("workflow run helpers", () => {
   it("uses the first node failure as the workflow failure message", () => {
     const result: WorkflowRunResult = {
       nodeResults: [
-        { error: "", id: "input", output: "", status: "success" },
-        { error: "Code failed.", id: "code", output: "", status: "failed" },
+        {
+          error: null,
+          id: "input",
+          inputs: [],
+          output: "",
+          status: "success",
+        },
+        {
+          error: { code: "node_execution_failed", message: "Code failed." },
+          id: "code",
+          inputs: [],
+          output: "",
+          status: "failed",
+        },
       ],
       outputs: {},
+      runId: "run",
       status: "failed",
+      trigger: "manual",
       workflowId: "workflow",
+      workflowRevision: 1,
     };
 
     expect(workflowFailureMessage(result)).toBe("Code failed.");

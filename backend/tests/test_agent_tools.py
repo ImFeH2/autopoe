@@ -77,42 +77,82 @@ def configure_provider(client: TestClient) -> None:
 
 def input_output_workflow(workflow_id: str = "workflow-1") -> dict[str, object]:
     return {
-        "created_at": 0,
-        "definition": {
-            "edges": [
+        "id": workflow_id,
+        "name": "Launch Workflow",
+        "spec": {
+            "connections": [
                 {
                     "id": "edge-input-output",
-                    "label": "",
-                    "source": "input",
-                    "source_handle": "out",
-                    "target": "output",
-                    "target_handle": "in",
+                    "from": {"node_id": "input", "port": "output"},
+                    "to": {"node_id": "output", "port": "input"},
                 }
             ],
             "nodes": [
                 {
-                    "data": {"default_value": "saved input"},
-                    "description": "",
+                    "config": {"default_value": "saved input", "input_type": "text"},
                     "id": "input",
-                    "name": "Input",
-                    "position": {"x": 0, "y": 0},
-                    "type": "input",
+                    "kind": "input",
                 },
                 {
-                    "data": {"output_key": "final_result"},
-                    "description": "",
+                    "config": {"output_key": "final_result", "transform": ""},
                     "id": "output",
-                    "name": "Output",
-                    "position": {"x": 260, "y": 0},
-                    "type": "output",
+                    "kind": "output",
                 },
             ],
-            "version": 1,
         },
-        "id": workflow_id,
-        "name": "Launch Workflow",
-        "updated_at": 0,
+        "presentation": {
+            "connections": {"edge-input-output": {"label": ""}},
+            "nodes": {
+                "input": {
+                    "description": "",
+                    "name": "Input",
+                    "position": {"x": 0, "y": 0},
+                },
+                "output": {
+                    "description": "",
+                    "name": "Output",
+                    "position": {"x": 260, "y": 0},
+                },
+            },
+        },
     }
+
+
+def steward_input_output_workflow() -> dict[str, object]:
+    return {
+        "name": "Launch Workflow",
+        "nodes": [
+            {
+                "id": "input",
+                "kind": "input",
+                "config": {"default_value": "saved input", "input_type": "text"},
+                "name": "Input",
+                "description": "",
+            },
+            {
+                "id": "output",
+                "kind": "output",
+                "config": {"output_key": "final_result", "transform": ""},
+                "name": "Output",
+                "description": "",
+            },
+        ],
+        "connections": [
+            {
+                "id": "edge-input-output",
+                "from": {"node_id": "input", "port": "output"},
+                "to": {"node_id": "output", "port": "input"},
+                "label": "",
+            }
+        ],
+    }
+
+
+def save_workflow(client: TestClient):
+    return client.put(
+        "/api/workflows",
+        json={"base_revision": None, "workflow": input_output_workflow()},
+    )
 
 
 def tool_call_chunk(
@@ -160,6 +200,10 @@ def test_agent_prompt_explains_workflow_tool_rules() -> None:
     assert "pass that content as the run_workflow input" in (
         FLOWENT_AGENT_SYSTEM_PROMPT
     )
+    assert "get_workflow_run" in FLOWENT_AGENT_SYSTEM_PROMPT
+    assert "run_id" in FLOWENT_AGENT_SYSTEM_PROMPT
+    assert "valid node ids and connections" in FLOWENT_AGENT_SYSTEM_PROMPT
+    assert "valid node ids and edges" not in FLOWENT_AGENT_SYSTEM_PROMPT
     assert "delete saved workflows when the user clearly asks" in (
         FLOWENT_AGENT_SYSTEM_PROMPT
     )
@@ -263,7 +307,7 @@ def test_workspace_agent_can_run_workflow_with_current_message_input(
         create_app(serve_frontend=False, chat_completion=fake_completion)
     )
     configure_provider(client)
-    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+    assert save_workflow(client).status_code == 200
 
     response = client.post(
         "/api/workspace/respond",
@@ -281,11 +325,14 @@ def test_workspace_agent_can_run_workflow_with_current_message_input(
     assert len(captured_requests) == 2
     tool_names = {tool["function"]["name"] for tool in captured_requests[0]["tools"]}
     assert "run_workflow" in tool_names
-    assert captured_requests[1]["messages"][-1] == {
-        "role": "tool",
-        "tool_call_id": "call-run",
-        "content": "Launch Workflow completed.\nfinal_result: release blockers",
-    }
+    tool_message = captured_requests[1]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["tool_call_id"] == "call-run"
+    tool_payload = json.loads(tool_message["content"])
+    assert tool_payload["run_id"]
+    assert tool_payload["workflow_revision"] == 1
+    assert tool_payload["outputs"] == {"final_result": "release blockers"}
+    assert tool_payload["node_results"][1]["inputs"] == ["release blockers"]
     assert events[-1]["data"]["message"]["content"] == (
         "The workflow returned release blockers."
     )
@@ -298,7 +345,7 @@ def test_workspace_agent_creates_workflow_with_generated_uuid(
     monkeypatch.setattr("flowent.workflow_tools.uuid4", lambda: fixed_uuid)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
-    workflow = input_output_workflow("workflow-model-choice")
+    workflow = steward_input_output_workflow()
     captured_requests: list[dict[str, object]] = []
 
     async def fake_completion(**request: object) -> object:
@@ -334,7 +381,7 @@ def test_workspace_agent_creates_workflow_with_generated_uuid(
     assert captured_requests[1]["messages"][-1] == {
         "role": "tool",
         "tool_call_id": "call-create",
-        "content": "Created Launch Workflow with 2 nodes and 1 edges.",
+        "content": "Created Launch Workflow with 2 nodes and 1 connections.",
     }
     state = client.get("/api/state").json()
     assert [workflow["id"] for workflow in state["workflows"]] == [str(fixed_uuid)]
@@ -365,7 +412,7 @@ def test_workspace_agent_deletes_workflow(tmp_path, monkeypatch) -> None:
         create_app(serve_frontend=False, chat_completion=fake_completion)
     )
     configure_provider(client)
-    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+    assert save_workflow(client).status_code == 200
 
     response = client.post(
         "/api/workspace/respond",
@@ -381,14 +428,16 @@ def test_workspace_agent_deletes_workflow(tmp_path, monkeypatch) -> None:
         "type": "workflow_delete",
         "output": "Deleted Launch Workflow.",
         "summary": {
-            "edge_count": 1,
+            "active_revision": 1,
+            "connection_count": 1,
             "id": "workflow-1",
             "name": "Launch Workflow",
             "node_count": 2,
             "nodes": [
-                {"id": "input", "name": "Input", "type": "input"},
-                {"id": "output", "name": "Output", "type": "output"},
+                {"id": "input", "kind": "input", "name": "Input"},
+                {"id": "output", "kind": "output", "name": "Output"},
             ],
+            "revision": 1,
         },
     }
     assert len(captured_requests) == 2
@@ -428,7 +477,7 @@ def test_workspace_agent_reports_missing_workflow_delete(tmp_path, monkeypatch) 
         create_app(serve_frontend=False, chat_completion=fake_completion)
     )
     configure_provider(client)
-    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+    assert save_workflow(client).status_code == 200
 
     response = client.post(
         "/api/workspace/respond",
@@ -458,8 +507,8 @@ def test_workspace_agent_rejects_invalid_workflow_update_without_saving(
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
-    invalid_workflow = input_output_workflow()
-    invalid_workflow["definition"]["edges"][0]["target"] = "missing"
+    invalid_workflow = steward_input_output_workflow()
+    invalid_workflow["connections"][0]["to"]["node_id"] = "missing"
     captured_requests: list[dict[str, object]] = []
 
     async def fake_completion(**request: object) -> object:
@@ -469,7 +518,11 @@ def test_workspace_agent_rejects_invalid_workflow_update_without_saving(
             if len(captured_requests) == 1:
                 yield tool_call_chunk(
                     "update_workflow",
-                    {"workflow": invalid_workflow},
+                    {
+                        "workflow_id": "workflow-1",
+                        "base_revision": 1,
+                        "workflow": invalid_workflow,
+                    },
                     call_id="call-update",
                 )
             else:
@@ -483,7 +536,7 @@ def test_workspace_agent_rejects_invalid_workflow_update_without_saving(
         create_app(serve_frontend=False, chat_completion=fake_completion)
     )
     configure_provider(client)
-    assert client.put("/api/workflows", json=input_output_workflow()).status_code == 200
+    assert save_workflow(client).status_code == 200
 
     response = client.post(
         "/api/workspace/respond",
@@ -496,15 +549,18 @@ def test_workspace_agent_rejects_invalid_workflow_update_without_saving(
     assert tool_error["data"]["status"] == "failed"
     assert tool_error["data"]["title"] == "Updating workflow"
     assert tool_error["data"]["result"]["text"] == (
-        "Workflow edges must connect existing nodes."
+        "Connection edge-input-output must connect existing nodes."
     )
     assert captured_requests[1]["messages"][-1] == {
         "role": "tool",
         "tool_call_id": "call-update",
-        "content": "Workflow edges must connect existing nodes.",
+        "content": "Connection edge-input-output must connect existing nodes.",
     }
     state = client.get("/api/state").json()
-    assert state["workflows"][0]["definition"]["edges"][0]["target"] == "output"
+    assert state["workflows"][0]["spec"]["connections"][0]["to"] == {
+        "node_id": "output",
+        "port": "input",
+    }
     assert events[-1]["data"]["message"]["content"] == (
         "I could not save the workflow because an edge is invalid."
     )

@@ -5,28 +5,34 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 
 type WorkflowFixture = {
+  active_revision: number;
   created_at: number;
-  definition: {
-    edges: Array<{
-      id: string;
-      label: string;
-      source: string;
-      source_handle: string;
-      target: string;
-      target_handle: string;
-    }>;
-    nodes: Array<{
-      data: Record<string, unknown>;
-      description: string;
-      id: string;
-      name: string;
-      position: { x: number; y: number };
-      type: "input" | "output" | "timer";
-    }>;
-    version: number;
-  };
   id: string;
   name: string;
+  presentation: {
+    connections: Record<string, { label: string }>;
+    nodes: Record<
+      string,
+      {
+        description: string;
+        name: string;
+        position: { x: number; y: number };
+      }
+    >;
+  };
+  revision: number;
+  spec: {
+    connections: Array<{
+      from: { node_id: string; port: "output" };
+      id: string;
+      to: { node_id: string; port: "input" };
+    }>;
+    nodes: Array<{
+      config: Record<string, unknown>;
+      id: string;
+      kind: "input" | "output" | "timer";
+    }>;
+  };
   updated_at: number;
 };
 
@@ -34,14 +40,18 @@ type ScheduleFixture = {
   last_error: string;
   last_result: null | {
     node_results: Array<{
-      error: string;
+      error: { code: string; message: string } | null;
       id: string;
+      inputs: string[];
       output: string;
       status: "failed" | "pending" | "running" | "success";
     }>;
     outputs: Record<string, string>;
+    run_id: string;
     status: "failed" | "success";
+    trigger: "manual" | "schedule";
     workflow_id: string;
+    workflow_revision: number;
   };
   last_run_at: number | null;
   next_run_at: number | null;
@@ -57,82 +67,96 @@ type ScheduleResponse =
 type WorkflowResultFixture = NonNullable<ScheduleFixture["last_result"]>;
 
 const timerWorkflow = (): WorkflowFixture => ({
+  active_revision: 1,
   created_at: 1710000020,
-  definition: {
-    edges: [
+  id: "timer-workflow",
+  name: "Timer Workflow",
+  presentation: {
+    connections: { "edge-timer-output": { label: "" } },
+    nodes: {
+      output: {
+        description: "",
+        name: "Output",
+        position: { x: 260, y: 0 },
+      },
+      timer: {
+        description: "",
+        name: "Timer",
+        position: { x: 0, y: 0 },
+      },
+    },
+  },
+  revision: 1,
+  spec: {
+    connections: [
       {
+        from: { node_id: "timer", port: "output" },
         id: "edge-timer-output",
-        label: "",
-        source: "timer",
-        source_handle: "out",
-        target: "output",
-        target_handle: "in",
+        to: { node_id: "output", port: "input" },
       },
     ],
     nodes: [
       {
-        data: {
+        config: {
           interval_seconds: 60,
           mode: "interval",
           payload: "Timer fired.",
         },
-        description: "",
         id: "timer",
-        name: "Timer",
-        position: { x: 0, y: 0 },
-        type: "timer",
+        kind: "timer",
       },
       {
-        data: { output_key: "final_result", transform: "" },
-        description: "",
+        config: { output_key: "final_result", transform: "" },
         id: "output",
-        name: "Output",
-        position: { x: 260, y: 0 },
-        type: "output",
+        kind: "output",
       },
     ],
-    version: 1,
   },
-  id: "timer-workflow",
-  name: "Timer Workflow",
   updated_at: 1710000030,
 });
 
 const manualWorkflow = (): WorkflowFixture => ({
+  active_revision: 1,
   created_at: 1710000020,
-  definition: {
-    edges: [
+  id: "manual-workflow",
+  name: "Manual Workflow",
+  presentation: {
+    connections: { "edge-input-output": { label: "" } },
+    nodes: {
+      input: {
+        description: "",
+        name: "Input",
+        position: { x: 0, y: 0 },
+      },
+      output: {
+        description: "",
+        name: "Output",
+        position: { x: 260, y: 0 },
+      },
+    },
+  },
+  revision: 1,
+  spec: {
+    connections: [
       {
+        from: { node_id: "input", port: "output" },
         id: "edge-input-output",
-        label: "",
-        source: "input",
-        source_handle: "out",
-        target: "output",
-        target_handle: "in",
+        to: { node_id: "output", port: "input" },
       },
     ],
     nodes: [
       {
-        data: { default_value: "Manual input", input_type: "text" },
-        description: "",
+        config: { default_value: "Manual input", input_type: "text" },
         id: "input",
-        name: "Input",
-        position: { x: 0, y: 0 },
-        type: "input",
+        kind: "input",
       },
       {
-        data: { output_key: "final_result", transform: "" },
-        description: "",
+        config: { output_key: "final_result", transform: "" },
         id: "output",
-        name: "Output",
-        position: { x: 260, y: 0 },
-        type: "output",
+        kind: "output",
       },
     ],
-    version: 1,
   },
-  id: "manual-workflow",
-  name: "Manual Workflow",
   updated_at: 1710000030,
 });
 
@@ -143,15 +167,22 @@ const workflowResult = (
 ): WorkflowResultFixture => ({
   node_results: [
     {
-      error: status === "failed" ? output : "",
+      error:
+        status === "failed"
+          ? { code: "node_execution_failed", message: output }
+          : null,
       id: status === "failed" ? "timer" : "output",
+      inputs: [],
       output: status === "success" ? output : "",
       status,
     },
   ],
   outputs: status === "success" ? { final_result: output } : {},
+  run_id: `${workflowId}-run`,
   status,
+  trigger: workflowId === "timer-workflow" ? "schedule" : "manual",
   workflow_id: workflowId,
+  workflow_revision: 1,
 });
 
 const schedule = (updates: Partial<ScheduleFixture> = {}): ScheduleFixture => ({
@@ -233,7 +264,20 @@ const mockWorkflowApi = ({
       return jsonResponse({});
     }
     if (input === "/api/workflows" && init?.method === "PUT") {
-      return jsonResponse(JSON.parse(String(init.body)));
+      const request = JSON.parse(String(init.body)) as {
+        base_revision: number | null;
+        workflow: Pick<
+          WorkflowFixture,
+          "id" | "name" | "presentation" | "spec"
+        >;
+      };
+      return jsonResponse({
+        ...request.workflow,
+        active_revision: (request.base_revision ?? 0) + 1,
+        created_at: 1710000020,
+        revision: (request.base_revision ?? 0) + 1,
+        updated_at: 1710000030,
+      });
     }
     if (input === `/api/workflows/${workflow.id}/schedule`) {
       if (firstScheduleRejects && scheduleRequestIndex === 0) {

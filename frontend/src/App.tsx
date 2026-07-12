@@ -277,6 +277,7 @@ function FlowentApp() {
         <WorkflowsView
           activeWorkflow={activeWorkflow}
           newWorkflowKey={newWorkflowKey}
+          onWorkflowPersisted={openWorkflow}
           onRunWorkflow={runWorkflow}
           onSaveWorkflow={saveWorkflow}
           onStartWorkflowSchedule={startWorkflowSchedule}

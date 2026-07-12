@@ -6,9 +6,17 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from flowent.storage import StoredWorkflowSchedule, StoredWorkflowScheduleTimer
+from flowent.state.models import WorkflowTimerNode
+from flowent.storage import (
+    StoredWorkflowRevision,
+    StoredWorkflowSchedule,
+    StoredWorkflowScheduleTimer,
+    StoredWorkflowSpec,
+    WorkflowDraft,
+)
 
 logger = logging.getLogger("flowent.workflow_scheduler")
 
@@ -107,12 +115,25 @@ class WorkflowScheduler:
 
     async def start(self) -> None:
         for schedule in self.store.read_workflow_schedules():
-            if schedule.status in {"scheduled", "running"}:
-                if schedule.status == "running":
-                    workflow = self.service.get_workflow(schedule.workflow_id)
-                    schedule.generation += 1
-                    self._recover_interrupted_schedule(schedule, workflow)
-                    self.store.save_workflow_schedule(schedule)
+            if schedule.status not in {"scheduled", "running"}:
+                continue
+            active_revision = self.service.get_active_revision(schedule.workflow_id)
+            if (
+                schedule.status == "running"
+                or schedule.scheduled_revision != active_revision.revision
+            ):
+                schedule.generation += 1
+                self._apply_revision(
+                    schedule,
+                    active_revision,
+                    interrupt_message=(
+                        "Workflow run was interrupted when Flowent restarted."
+                        if schedule.status == "running"
+                        else ""
+                    ),
+                )
+                self.store.save_workflow_schedule(schedule)
+            if schedule.status == "scheduled":
                 self._spawn(schedule.workflow_id, schedule.generation)
 
     async def shutdown(self) -> None:
@@ -136,6 +157,7 @@ class WorkflowScheduler:
         default_input: str | None = None,
         inputs: dict[str, str] | None = None,
         timezone: str | None = None,
+        workflow_revision: int | None = None,
     ) -> StoredWorkflowSchedule:
         async with self._workflow_lock(workflow_id):
             return await self._start_schedule(
@@ -143,21 +165,27 @@ class WorkflowScheduler:
                 default_input=default_input,
                 inputs=inputs,
                 timezone=timezone,
+                workflow_revision=workflow_revision,
             )
 
     async def _start_schedule(
         self,
         workflow_id: str,
         *,
-        default_input: str | None = None,
-        inputs: dict[str, str] | None = None,
-        timezone: str | None = None,
+        default_input: str | None,
+        inputs: dict[str, str] | None,
+        timezone: str | None,
+        workflow_revision: int | None,
     ) -> StoredWorkflowSchedule:
-        workflow = self.service.get_workflow(workflow_id)
+        revision = self.service.get_active_revision(workflow_id)
+        if workflow_revision is not None and revision.revision != workflow_revision:
+            self.service.get_workflow_revision(workflow_id, workflow_revision)
+            raise ValueError(
+                "This workflow changed elsewhere. Open the latest version before starting it."
+            )
         existing = self.store.read_workflow_schedule(workflow_id)
         has_cron = any(
-            node.type == "timer" and str(node.data.get("mode", "interval")) == "cron"
-            for node in workflow.definition.nodes
+            node.config.mode == "cron" for node in timer_nodes(revision.spec)
         )
         if timezone is None and existing is None and has_cron:
             raise ValueError("Timer timezone is required for cron schedules.")
@@ -177,11 +205,12 @@ class WorkflowScheduler:
             and selected_input == existing.default_input
             and selected_inputs == existing.inputs
             and selected_timezone == existing.timezone
+            and existing.scheduled_revision == revision.revision
         )
         if unchanged:
             return existing
-        generation = (existing.generation + 1) if existing else 1
-        timers = self._immediate_timers(workflow)
+        generation = existing.generation + 1 if existing else 1
+        timers = self._immediate_timers(revision.spec)
         if not timers:
             raise ValueError("Workflow does not have a Timer node.")
         schedule = StoredWorkflowSchedule(
@@ -190,6 +219,7 @@ class WorkflowScheduler:
             generation=generation,
             default_input=selected_input,
             inputs=selected_inputs,
+            scheduled_revision=revision.revision,
             timezone=selected_timezone,
             timers=timers,
             last_result=existing.last_result if existing else None,
@@ -199,166 +229,110 @@ class WorkflowScheduler:
         if old:
             old.cancel()
             await asyncio.gather(old, return_exceptions=True)
-            existing = self.store.read_workflow_schedule(workflow_id) or existing
-            schedule.last_result = existing.last_result
-            schedule.last_run_at = existing.last_run_at
+            refreshed = self.store.read_workflow_schedule(workflow_id)
+            if refreshed is not None:
+                schedule.last_result = refreshed.last_result
+                schedule.last_run_at = refreshed.last_run_at
         self.store.save_workflow_schedule(schedule)
         self._spawn(workflow_id, generation)
         return schedule
 
     async def stop_schedule(self, workflow_id: str) -> StoredWorkflowSchedule:
         async with self._workflow_lock(workflow_id):
-            return await self._stop_schedule(workflow_id)
-
-    async def _stop_schedule(self, workflow_id: str) -> StoredWorkflowSchedule:
-        task = self.tasks.pop(workflow_id, None)
-        if task:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        schedule = self.get(workflow_id)
-        schedule.generation += 1
-        schedule.status = "stopped"
-        schedule.timers = []
-        self.store.save_workflow_schedule(schedule)
-        return schedule
+            task = self.tasks.pop(workflow_id, None)
+            if task:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            schedule = self.get(workflow_id)
+            schedule.generation += 1
+            schedule.status = "stopped"
+            schedule.timers = []
+            self._clear_running(schedule)
+            self.store.save_workflow_schedule(schedule)
+            return schedule
 
     async def delete(self, workflow_id: str) -> None:
         async with self._workflow_lock(workflow_id):
-            await self._delete(workflow_id)
+            task = self.tasks.pop(workflow_id, None)
+            if task:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
-    async def _delete(self, workflow_id: str) -> None:
-        task = self.tasks.pop(workflow_id, None)
-        if task:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-
-    async def save_workflow(self, workflow):
+    async def save_workflow(
+        self,
+        workflow: WorkflowDraft,
+        *,
+        base_revision: int | None,
+        executable: bool,
+    ):
         async with self._workflow_lock(workflow.id):
-            old_workflow = self.service.get_workflow(workflow.id)
-            if not self._timer_schedule_changed(old_workflow, workflow):
-                return self.store.save_workflow(workflow)
+            old_revision = self.store.read_active_workflow_revision(workflow.id)
+            saved = self.store.save_workflow(
+                workflow,
+                base_revision=base_revision,
+                executable=executable,
+            )
+            new_revision = self.store.read_active_workflow_revision(workflow.id)
+            if timer_signatures(old_revision) == timer_signatures(new_revision):
+                schedule = self.store.read_workflow_schedule(workflow.id)
+                if schedule is not None and new_revision is not None:
+                    schedule.scheduled_revision = new_revision.revision
+                    self.store.save_workflow_schedule(schedule)
+                return saved
             task = self.tasks.pop(workflow.id, None)
             if task:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-            try:
-                saved = self.store.save_workflow(workflow)
-            except Exception:
-                self._resume_after_failed_save(old_workflow)
-                raise
-            await self._reconcile_safely(old_workflow, saved)
+            await self._reconcile_safely(
+                workflow.id,
+                old_revision,
+                new_revision,
+            )
             return saved
 
-    async def _reconcile(self, old_workflow, workflow) -> None:
-        schedule = self.store.read_workflow_schedule(workflow.id)
-        if schedule is None or schedule.status not in {"scheduled", "running"}:
-            return
-        old_task = self.tasks.pop(workflow.id, None)
-        if old_task:
-            old_task.cancel()
-            await asyncio.gather(old_task, return_exceptions=True)
-        schedule = self.store.read_workflow_schedule(workflow.id)
-        if schedule is None or schedule.status not in {"scheduled", "running"}:
-            return
-        was_running = schedule.status == "running"
-        claimed_timer_ids = {
-            item.timer_node_id for item in schedule.timers if item.next_run_at is None
-        }
-        old_nodes = {
-            node.id: self._timer_signature(node)
-            for node in old_workflow.definition.nodes
-            if node.type == "timer"
-        }
-        new_nodes = {
-            node.id: node for node in workflow.definition.nodes if node.type == "timer"
-        }
-        schedule.generation += 1
-        if not new_nodes:
-            schedule.status = "stopped"
-            schedule.timers = []
-            if was_running:
-                self._mark_interrupted(
-                    schedule,
-                    claimed_timer_ids,
-                    "Workflow run was interrupted because the Timer schedule changed.",
-                )
-            self.store.save_workflow_schedule(schedule)
-            return
-        existing = {item.timer_node_id: item for item in schedule.timers}
-        timers: list[StoredWorkflowScheduleTimer] = []
-        for node_id, node in new_nodes.items():
-            if (
-                node_id in existing
-                and node_id not in claimed_timer_ids
-                and old_nodes.get(node_id) == self._timer_signature(node)
-            ):
-                timers.append(existing[node_id])
-            else:
-                timers.append(
-                    StoredWorkflowScheduleTimer(
-                        timer_node_id=node_id,
-                        next_run_at=self._next_run(node, schedule.timezone),
-                    )
-                )
-        schedule.status = "scheduled"
-        schedule.timers = timers
-        if was_running:
-            self._mark_interrupted(
-                schedule,
-                claimed_timer_ids,
-                "Workflow run was interrupted because the Timer schedule changed.",
-            )
-        self.store.save_workflow_schedule(schedule)
-        self._spawn(workflow.id, schedule.generation)
-
-    async def _reconcile_safely(self, old_workflow, workflow) -> None:
+    async def _reconcile_safely(
+        self,
+        workflow_id: str,
+        old_revision: StoredWorkflowRevision | None,
+        new_revision: StoredWorkflowRevision | None,
+    ) -> None:
         try:
-            await self._reconcile(old_workflow, workflow)
+            await self._reconcile(workflow_id, old_revision, new_revision)
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            schedule = self.store.read_workflow_schedule(workflow.id)
+            schedule = self.store.read_workflow_schedule(workflow_id)
             if schedule is not None:
                 schedule.generation += 1
                 schedule.status = "error"
                 schedule.last_error = str(error) or "Workflow schedule failed."
+                schedule.last_result = None
                 schedule.timers = []
+                self._clear_running(schedule)
                 self.store.save_workflow_schedule(schedule)
 
-    def _resume_after_failed_save(self, workflow) -> None:
-        schedule = self.store.read_workflow_schedule(workflow.id)
+    async def _reconcile(
+        self,
+        workflow_id: str,
+        old_revision: StoredWorkflowRevision | None,
+        new_revision: StoredWorkflowRevision | None,
+    ) -> None:
+        schedule = self.store.read_workflow_schedule(workflow_id)
         if schedule is None or schedule.status not in {"scheduled", "running"}:
             return
-        if schedule.status == "running":
-            schedule.generation += 1
-            self._recover_interrupted_schedule(
-                schedule,
-                workflow,
-                message=(
-                    "Workflow run was interrupted because workflow changes "
-                    "could not be saved."
-                ),
-            )
-            self.store.save_workflow_schedule(schedule)
-        self._spawn(workflow.id, schedule.generation)
-
-    def _timer_signature(self, node) -> tuple[object, ...]:
-        return (
-            str(node.data.get("mode", "interval")),
-            node.data.get("interval_seconds"),
-            node.data.get("cron"),
+        schedule.generation += 1
+        self._apply_revision(
+            schedule,
+            new_revision,
+            interrupt_message=(
+                "Workflow run was interrupted because the Timer schedule changed."
+                if schedule.status == "running"
+                else ""
+            ),
         )
-
-    def _timer_schedule_changed(self, old_workflow, workflow) -> bool:
-        return {
-            node.id: self._timer_signature(node)
-            for node in old_workflow.definition.nodes
-            if node.type == "timer"
-        } != {
-            node.id: self._timer_signature(node)
-            for node in workflow.definition.nodes
-            if node.type == "timer"
-        }
+        self.store.save_workflow_schedule(schedule)
+        if schedule.status == "scheduled":
+            self._spawn(workflow_id, schedule.generation)
 
     def _spawn(self, workflow_id: str, generation: int) -> None:
         task = asyncio.create_task(self._run(workflow_id, generation))
@@ -370,6 +344,7 @@ class WorkflowScheduler:
             task.exception()
 
     async def _run(self, workflow_id: str, generation: int) -> None:
+        persisted_run_id: str | None = None
         try:
             while True:
                 schedule = self.store.read_workflow_schedule(workflow_id)
@@ -391,167 +366,271 @@ class WorkflowScheduler:
                 if due is None:
                     return
                 await asyncio.sleep(max(0, due.next_run_at - time.time()))
-                schedule = self.store.read_workflow_schedule(workflow_id)
-                if schedule is None or schedule.generation != generation:
-                    return
-                schedule.status = "running"
-                schedule.timers = [
-                    item.model_copy(update={"next_run_at": None})
-                    if item.timer_node_id == due.timer_node_id
-                    else item
-                    for item in schedule.timers
-                ]
-                self.store.save_workflow_schedule(
-                    schedule, expected_generation=generation
-                )
-                result = await self.service.run_workflow(
-                    workflow_id,
-                    default_input=schedule.default_input,
-                    input_values=schedule.inputs,
-                    timer_node_id=due.timer_node_id,
-                )
-                current_task = asyncio.current_task()
-                cancellation_requested = bool(
-                    current_task is not None and current_task.cancelling()
-                )
-                schedule = self.store.read_workflow_schedule(workflow_id)
-                if schedule is None or schedule.generation != generation:
-                    return
-                schedule.last_run_at = time.time()
-                schedule.last_result = result.model_dump(mode="json")
-                if result.status != "success":
-                    schedule.status = "error"
-                    schedule.last_error = next(
-                        (item.error for item in result.node_results if item.error),
-                        "Workflow run failed.",
-                    )
-                    schedule.timers = []
-                else:
-                    schedule.status = "scheduled"
-                    schedule.last_error = ""
-                    workflow = self.service.get_workflow(workflow_id)
-                    next_run = next(
-                        item.next_run_at
-                        for item in self._future_timers(workflow, schedule.timezone)
-                        if item.timer_node_id == due.timer_node_id
-                    )
+                async with self._workflow_lock(workflow_id):
+                    schedule = self.store.read_workflow_schedule(workflow_id)
+                    if (
+                        schedule is None
+                        or schedule.generation != generation
+                        or schedule.status not in {"scheduled", "running"}
+                    ):
+                        return
+                    revision = self.service.get_active_revision(workflow_id)
+                    run_id = str(uuid4())
+                    persisted_run_id = None
+                    schedule.status = "running"
+                    schedule.running_revision = revision.revision
+                    schedule.running_run_id = run_id
+                    schedule.running_timer_node_id = due.timer_node_id
                     schedule.timers = [
-                        item.model_copy(update={"next_run_at": next_run})
+                        item.model_copy(update={"next_run_at": None})
                         if item.timer_node_id == due.timer_node_id
                         else item
                         for item in schedule.timers
                     ]
-                self.store.save_workflow_schedule(
-                    schedule, expected_generation=generation
+                    if not self.store.save_workflow_schedule(
+                        schedule, expected_generation=generation
+                    ):
+                        return
+                result = await self.service.run_workflow(
+                    workflow_id,
+                    default_input=schedule.default_input,
+                    input_values=schedule.inputs,
+                    run_id=run_id,
+                    timer_node_id=due.timer_node_id,
+                    trigger="schedule",
+                    workflow_revision=revision.revision,
                 )
-                if schedule.status == "error":
-                    return
-                if cancellation_requested:
+                persisted_run_id = run_id
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling():
+                    raise asyncio.CancelledError
+                async with self._workflow_lock(workflow_id):
+                    schedule = self.store.read_workflow_schedule(workflow_id)
+                    if (
+                        schedule is None
+                        or schedule.generation != generation
+                        or schedule.running_run_id != run_id
+                    ):
+                        return
+                    schedule.last_run_at = time.time()
+                    schedule.last_result = result.model_dump(mode="json")
+                    if result.status == "failed":
+                        schedule.status = "error"
+                        schedule.last_error = next(
+                            (
+                                item.error.message
+                                for item in result.node_results
+                                if item.error is not None
+                            ),
+                            "Workflow run failed.",
+                        )
+                        schedule.timers = []
+                    else:
+                        schedule.status = "scheduled"
+                        schedule.last_error = ""
+                        active_revision = self.service.get_active_revision(workflow_id)
+                        next_run = next(
+                            item.next_run_at
+                            for item in self._future_timers(
+                                active_revision.spec, schedule.timezone
+                            )
+                            if item.timer_node_id == due.timer_node_id
+                        )
+                        schedule.timers = [
+                            item.model_copy(update={"next_run_at": next_run})
+                            if item.timer_node_id == due.timer_node_id
+                            else item
+                            for item in schedule.timers
+                        ]
+                        schedule.scheduled_revision = active_revision.revision
+                    self._clear_running(schedule)
+                    self.store.save_workflow_schedule(
+                        schedule, expected_generation=generation
+                    )
+                if result.status == "failed":
                     return
         except asyncio.CancelledError:
             raise
         except Exception as error:
             logger.exception("Workflow schedule failed workflow_id=%s", workflow_id)
-            schedule = self.store.read_workflow_schedule(workflow_id)
-            if schedule is not None and schedule.generation == generation:
-                schedule.status = "error"
-                schedule.last_error = str(error) or "Workflow schedule failed."
-                schedule.timers = []
-                self.store.save_workflow_schedule(
-                    schedule, expected_generation=generation
-                )
+            async with self._workflow_lock(workflow_id):
+                schedule = self.store.read_workflow_schedule(workflow_id)
+                if schedule is not None and schedule.generation == generation:
+                    message = str(error) or "Workflow schedule failed."
+                    if schedule.running_run_id == persisted_run_id:
+                        schedule.running_run_id = ""
+                    self._mark_schedule_failure(schedule, message)
+                    schedule.status = "error"
+                    schedule.last_error = message
+                    schedule.timers = []
+                    self._clear_running(schedule)
+                    self.store.save_workflow_schedule(
+                        schedule, expected_generation=generation
+                    )
 
-    def _immediate_timers(self, workflow) -> list[StoredWorkflowScheduleTimer]:
-        self._validate_timers(workflow)
+    def _immediate_timers(
+        self, spec: StoredWorkflowSpec
+    ) -> list[StoredWorkflowScheduleTimer]:
+        self._validate_timers(spec)
         now = time.time()
         return [
             StoredWorkflowScheduleTimer(timer_node_id=node.id, next_run_at=now)
-            for node in workflow.definition.nodes
-            if node.type == "timer"
+            for node in timer_nodes(spec)
         ]
 
     def _future_timers(
-        self, workflow, timezone: str
+        self, spec: StoredWorkflowSpec, timezone: str
     ) -> list[StoredWorkflowScheduleTimer]:
-        self._validate_timers(workflow)
+        self._validate_timers(spec)
         return [
             StoredWorkflowScheduleTimer(
-                timer_node_id=node.id, next_run_at=self._next_run(node, timezone)
+                timer_node_id=node.id,
+                next_run_at=self._next_run(node, timezone),
             )
-            for node in workflow.definition.nodes
-            if node.type == "timer"
+            for node in timer_nodes(spec)
         ]
 
-    def _recover_interrupted_schedule(
+    def _apply_revision(
         self,
-        schedule,
-        workflow,
+        schedule: StoredWorkflowSchedule,
+        revision: StoredWorkflowRevision | None,
         *,
-        message: str = "Workflow run was interrupted when Flowent restarted.",
+        interrupt_message: str,
     ) -> None:
-        existing = {item.timer_node_id: item for item in schedule.timers}
+        scheduled_revision = (
+            self.store.read_workflow_revision(
+                schedule.workflow_id, schedule.scheduled_revision
+            )
+            if schedule.scheduled_revision is not None
+            else None
+        )
         claimed_timer_ids = {
             item.timer_node_id for item in schedule.timers if item.next_run_at is None
         }
-        schedule.status = "scheduled"
+        if schedule.running_timer_node_id:
+            claimed_timer_ids.add(schedule.running_timer_node_id)
+        if interrupt_message and claimed_timer_ids:
+            self._mark_interrupted(
+                schedule,
+                claimed_timer_ids,
+                scheduled_revision,
+                interrupt_message,
+            )
+        existing = {item.timer_node_id: item for item in schedule.timers}
+        old_signatures = timer_signatures(scheduled_revision)
+        new_timers = timer_nodes(revision.spec) if revision is not None else []
         schedule.timers = [
             existing[node.id]
-            if node.id in existing and existing[node.id].next_run_at is not None
+            if node.id in existing
+            and node.id not in claimed_timer_ids
+            and old_signatures.get(node.id) == timer_signature(node)
             else StoredWorkflowScheduleTimer(
                 timer_node_id=node.id,
                 next_run_at=self._next_run(node, schedule.timezone),
             )
-            for node in workflow.definition.nodes
-            if node.type == "timer"
+            for node in new_timers
         ]
-        self._mark_interrupted(
-            schedule,
-            claimed_timer_ids,
-            message,
-        )
+        schedule.scheduled_revision = revision.revision if revision else None
+        schedule.status = "scheduled" if schedule.timers else "stopped"
+        self._clear_running(schedule)
 
     def _mark_interrupted(
         self,
         schedule: StoredWorkflowSchedule,
         timer_node_ids: set[str],
+        revision: StoredWorkflowRevision | None,
         message: str,
     ) -> None:
         if not timer_node_ids:
             return
+        workflow_revision = schedule.running_revision or (
+            revision.revision if revision is not None else None
+        )
+        run_id = schedule.running_run_id or str(uuid4())
         schedule.last_run_at = time.time()
         schedule.last_error = message
-        schedule.last_result = {
+        trace = {
+            "run_id": run_id,
+            "workflow_revision": workflow_revision or 0,
             "workflow_id": schedule.workflow_id,
             "status": "failed",
+            "trigger": "schedule",
             "outputs": {},
             "node_results": [
                 {
                     "id": timer_node_id,
                     "status": "failed",
+                    "inputs": [],
                     "output": "",
-                    "error": message,
+                    "error": {"code": "run_interrupted", "message": message},
                 }
                 for timer_node_id in sorted(timer_node_ids)
             ],
         }
+        schedule.last_result = trace
+        if workflow_revision is not None:
+            self.store.save_workflow_run(
+                {
+                    **trace,
+                    "inputs": {
+                        "default_input": schedule.default_input,
+                        "values": schedule.inputs,
+                    },
+                }
+            )
 
-    def _validate_timers(self, workflow) -> None:
-        for node in workflow.definition.nodes:
-            if node.type == "timer":
-                self._next_run(node, "UTC")
+    def _mark_schedule_failure(
+        self, schedule: StoredWorkflowSchedule, message: str
+    ) -> None:
+        timer_node_id = schedule.running_timer_node_id
+        workflow_revision = schedule.running_revision
+        if not timer_node_id or workflow_revision is None:
+            schedule.last_result = None
+            return
+        run_id = schedule.running_run_id or str(uuid4())
+        trace = {
+            "run_id": run_id,
+            "workflow_revision": workflow_revision,
+            "workflow_id": schedule.workflow_id,
+            "status": "failed",
+            "trigger": "schedule",
+            "outputs": {},
+            "node_results": [
+                {
+                    "id": timer_node_id,
+                    "status": "failed",
+                    "inputs": [],
+                    "output": "",
+                    "error": {"code": "schedule_failed", "message": message},
+                }
+            ],
+        }
+        schedule.last_run_at = time.time()
+        schedule.last_result = trace
+        self.store.save_workflow_run(
+            {
+                **trace,
+                "inputs": {
+                    "default_input": schedule.default_input,
+                    "values": schedule.inputs,
+                },
+            }
+        )
 
-    def _next_run(self, node, timezone: str) -> float:
-        mode = str(node.data.get("mode", "interval"))
-        if mode == "cron":
-            expression = str(node.data.get("cron", ""))
+    def _clear_running(self, schedule: StoredWorkflowSchedule) -> None:
+        schedule.running_revision = None
+        schedule.running_run_id = ""
+        schedule.running_timer_node_id = ""
+
+    def _validate_timers(self, spec: StoredWorkflowSpec) -> None:
+        for node in timer_nodes(spec):
+            self._next_run(node, "UTC")
+
+    def _next_run(self, node: WorkflowTimerNode, timezone: str) -> float:
+        if node.config.mode == "cron":
             now = datetime.now(self._timezone(timezone))
-            return next_cron_run_at(expression, now).timestamp()
-        if mode != "interval":
-            raise ValueError("Timer mode is invalid.")
-        try:
-            seconds = float(node.data.get("interval_seconds", 0))
-        except (TypeError, ValueError):
-            seconds = 0
+            return next_cron_run_at(node.config.cron, now).timestamp()
+        seconds = node.config.interval_seconds
         if not math.isfinite(seconds) or seconds < 1:
             raise ValueError("Timer interval must be at least 1 second.")
         return time.time() + seconds
@@ -564,3 +643,19 @@ class WorkflowScheduler:
 
     def _workflow_lock(self, workflow_id: str) -> asyncio.Lock:
         return self.workflow_locks.setdefault(workflow_id, asyncio.Lock())
+
+
+def timer_nodes(spec: StoredWorkflowSpec) -> list[WorkflowTimerNode]:
+    return [node for node in spec.nodes if isinstance(node, WorkflowTimerNode)]
+
+
+def timer_signature(node: WorkflowTimerNode) -> tuple[object, ...]:
+    return (node.config.mode, node.config.interval_seconds, node.config.cron)
+
+
+def timer_signatures(
+    revision: StoredWorkflowRevision | None,
+) -> dict[str, tuple[object, ...]]:
+    if revision is None:
+        return {}
+    return {node.id: timer_signature(node) for node in timer_nodes(revision.spec)}

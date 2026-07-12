@@ -1,11 +1,16 @@
 from fastapi import Body, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 from flowent.api_models import (
     WorkflowRunRequest,
     WorkflowScheduleResponse,
     WorkflowScheduleStartRequest,
 )
-from flowent.storage import StoredWorkflow
+from flowent.storage import (
+    StoredWorkflow,
+    WorkflowRevisionConflictError,
+    WorkflowSaveRequest,
+)
 from flowent.workflow_service import WorkflowService
 from flowent.workflows import WorkflowRunResponse
 
@@ -37,10 +42,21 @@ def register_workflow_routes(
     *,
     workflow_service: WorkflowService,
 ) -> None:
-    @app.put("/api/workflows")
-    async def save_workflow(workflow: StoredWorkflow) -> StoredWorkflow:
+    @app.put("/api/workflows", response_model=StoredWorkflow)
+    async def save_workflow(request: WorkflowSaveRequest):
         try:
-            return await workflow_service.save_workflow(workflow)
+            return await workflow_service.save_workflow(
+                request.workflow,
+                base_revision=request.base_revision,
+            )
+        except WorkflowRevisionConflictError as error:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": str(error),
+                    "workflow": error.workflow.model_dump(mode="json", by_alias=True),
+                },
+            )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -73,6 +89,7 @@ def register_workflow_routes(
                 default_input=body.input,
                 inputs=body.inputs,
                 timezone=body.timezone,
+                workflow_revision=body.workflow_revision,
             )
             return schedule_response(schedule)
         except ValueError as error:
@@ -99,6 +116,7 @@ def register_workflow_routes(
                 workflow_id,
                 default_input=run_request.input,
                 input_values=run_request.inputs,
+                workflow_revision=run_request.workflow_revision,
             )
         except ValueError as error:
             status_code = 404 if str(error) == "Workflow not found." else 400

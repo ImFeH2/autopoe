@@ -16,6 +16,7 @@ from flowent.tools import tool_result_model_content
 from flowent.usage import (
     TokenUsageInfo,
     current_model_context_window,
+    estimated_token_usage_for_messages,
     estimated_token_usage_for_request,
     recompute_context_usage,
 )
@@ -57,13 +58,30 @@ def should_auto_compact(
     token_limit = auto_compact_token_limit(context_window)
     if token_limit <= 0:
         return False
+    request_messages = model_request_messages_data(messages)
+    if explicit_auto_compact_token_limit():
+        return (
+            estimated_token_usage_for_messages(request_messages).total_tokens
+            >= token_limit
+        )
     return (
         estimated_token_usage_for_request(
-            model_request_messages_data(messages),
+            request_messages,
             tools=tools,
         ).total_tokens
         >= token_limit
     )
+
+
+def explicit_auto_compact_token_limit() -> bool:
+    raw_limit = os.environ.get("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "")
+    if not raw_limit:
+        return False
+    try:
+        int(raw_limit)
+    except ValueError:
+        return False
+    return True
 
 
 def model_visible_messages_for_usage(

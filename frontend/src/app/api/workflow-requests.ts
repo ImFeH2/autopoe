@@ -1,6 +1,7 @@
 import type {
   ApiWorkflow,
   ApiWorkflowRunResult,
+  ApiWorkflowSaveRequest,
   ApiWorkflowSchedule,
   RequestResult,
 } from "@/app/api/types";
@@ -24,11 +25,31 @@ import type {
 export const saveWorkflowRequest = async (
   workflow: Workflow,
 ): Promise<RequestResult<Workflow>> => {
+  const body: ApiWorkflowSaveRequest = {
+    base_revision: workflow.revision > 0 ? workflow.revision : null,
+    workflow: workflowToApi(workflow),
+  };
   const response = await fetch("/api/workflows", {
-    body: JSON.stringify(workflowToApi(workflow)),
+    body: JSON.stringify(body),
     headers: { "Content-Type": "application/json" },
     method: "PUT",
   });
+
+  if (response.status === 409) {
+    const conflict = (await response.json()) as {
+      detail?: string;
+      workflow?: ApiWorkflow;
+    };
+    return {
+      data: null,
+      error:
+        conflict.detail ??
+        "This workflow changed elsewhere. The latest version is now open.",
+      ...(conflict.workflow
+        ? { latest: workflowFromApi(conflict.workflow) }
+        : {}),
+    };
+  }
 
   if (!response.ok) {
     return {

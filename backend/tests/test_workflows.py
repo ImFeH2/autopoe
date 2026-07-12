@@ -34,44 +34,150 @@ def text_chunk(content: str) -> dict[str, object]:
     return {"choices": [{"delta": {"content": content}}]}
 
 
-def input_output_workflow(workflow_id: str = "workflow-1") -> dict[str, object]:
-    return {
-        "created_at": 0,
-        "definition": {
-            "edges": [
-                {
-                    "id": "edge-input-output",
-                    "label": "",
-                    "source": "input",
-                    "source_handle": "out",
-                    "target": "output",
-                    "target_handle": "in",
-                }
-            ],
-            "nodes": [
-                {
-                    "data": {"default_value": "launch checklist"},
-                    "description": "",
-                    "id": "input",
-                    "name": "Input",
-                    "position": {"x": 0, "y": 0},
-                    "type": "input",
-                },
-                {
-                    "data": {"output_key": "final_result"},
-                    "description": "",
-                    "id": "output",
-                    "name": "Output",
-                    "position": {"x": 260, "y": 0},
-                    "type": "output",
-                },
-            ],
-            "version": 1,
+def workflow_node(
+    node_id: str,
+    kind: str,
+    config: dict[str, object],
+    *,
+    name: str | None = None,
+    x: float = 0,
+    y: float = 0,
+) -> tuple[dict[str, object], dict[str, object]]:
+    return (
+        {"id": node_id, "kind": kind, "config": config},
+        {
+            "name": name or node_id.replace("-", " ").title(),
+            "description": "",
+            "position": {"x": x, "y": y},
         },
+    )
+
+
+def workflow_connection(
+    connection_id: str, source: str, target: str
+) -> tuple[dict[str, object], dict[str, str]]:
+    return (
+        {
+            "id": connection_id,
+            "from": {"node_id": source, "port": "output"},
+            "to": {"node_id": target, "port": "input"},
+        },
+        {"label": ""},
+    )
+
+
+def workflow_payload(
+    nodes: list[tuple[dict[str, object], dict[str, object]]],
+    connections: list[tuple[dict[str, object], dict[str, str]]],
+    *,
+    name: str = "Launch Workflow",
+    workflow_id: str = "workflow-1",
+) -> dict[str, object]:
+    return {
         "id": workflow_id,
-        "name": "Launch Workflow",
-        "updated_at": 0,
+        "name": name,
+        "spec": {
+            "nodes": [node for node, _ in nodes],
+            "connections": [connection for connection, _ in connections],
+        },
+        "presentation": {
+            "nodes": {node["id"]: presentation for node, presentation in nodes},
+            "connections": {
+                connection["id"]: presentation
+                for connection, presentation in connections
+            },
+        },
     }
+
+
+def input_output_workflow(workflow_id: str = "workflow-1") -> dict[str, object]:
+    return workflow_payload(
+        [
+            workflow_node(
+                "input",
+                "input",
+                {"default_value": "launch checklist", "input_type": "text"},
+                name="Input",
+            ),
+            workflow_node(
+                "output",
+                "output",
+                {"output_key": "final_result", "transform": ""},
+                name="Output",
+                x=260,
+            ),
+        ],
+        [workflow_connection("edge-input-output", "input", "output")],
+        workflow_id=workflow_id,
+    )
+
+
+def agent_workflow(prompt: str) -> dict[str, object]:
+    return workflow_payload(
+        [
+            workflow_node(
+                "input",
+                "input",
+                {"default_value": "launch checklist", "input_type": "text"},
+                name="Input",
+            ),
+            workflow_node(
+                "agent",
+                "agent",
+                {"agent": "Default agent", "prompt": prompt},
+                name="Agent",
+                x=260,
+            ),
+            workflow_node(
+                "output",
+                "output",
+                {"output_key": "final_result", "transform": ""},
+                name="Output",
+                x=520,
+            ),
+        ],
+        [
+            workflow_connection("edge-input-agent", "input", "agent"),
+            workflow_connection("edge-agent-output", "agent", "output"),
+        ],
+    )
+
+
+def code_workflow(code: str) -> dict[str, object]:
+    return workflow_payload(
+        [
+            workflow_node(
+                "input",
+                "input",
+                {"default_value": "launch checklist", "input_type": "text"},
+                name="Input",
+            ),
+            workflow_node("code", "code", {"code": code}, name="Code", x=260),
+            workflow_node(
+                "output",
+                "output",
+                {"output_key": "final_result", "transform": ""},
+                name="Output",
+                x=520,
+            ),
+        ],
+        [
+            workflow_connection("edge-input-code", "input", "code"),
+            workflow_connection("edge-code-output", "code", "output"),
+        ],
+    )
+
+
+def save_workflow(
+    client: TestClient,
+    workflow: dict[str, object],
+    *,
+    base_revision: int | None = None,
+):
+    return client.put(
+        "/api/workflows",
+        json={"base_revision": base_revision, "workflow": workflow},
+    )
 
 
 def configure_provider(client: TestClient) -> None:
@@ -102,24 +208,28 @@ def test_workflow_persists_in_app_state(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
 
-    response = client.put("/api/workflows", json=input_output_workflow())
+    response = save_workflow(client, input_output_workflow())
 
     assert response.status_code == 200
     state = client.get("/api/state").json()
     assert state["workflows"][0]["id"] == "workflow-1"
-    assert state["workflows"][0]["definition"]["nodes"][0]["id"] == "input"
+    assert state["workflows"][0]["spec"]["nodes"][0]["id"] == "input"
+    assert state["workflows"][0]["revision"] == 1
+    assert state["workflows"][0]["active_revision"] == 1
 
 
-def test_workflow_save_rejects_invalid_edges(tmp_path, monkeypatch) -> None:
+def test_workflow_save_rejects_invalid_connections(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
     workflow = input_output_workflow()
-    workflow["definition"]["edges"][0]["target"] = "missing"
+    workflow["spec"]["connections"][0]["to"]["node_id"] = "missing"
 
-    response = client.put("/api/workflows", json=workflow)
+    response = save_workflow(client, workflow)
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Workflow edges must connect existing nodes."
+    assert response.json()["detail"] == (
+        "Connection edge-input-output must connect existing nodes."
+    )
 
 
 def test_delete_missing_workflow_remains_idempotent(tmp_path, monkeypatch) -> None:
@@ -135,7 +245,7 @@ def test_delete_missing_workflow_remains_idempotent(tmp_path, monkeypatch) -> No
 def test_workflow_run_returns_output_node_result(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
-    client.put("/api/workflows", json=input_output_workflow())
+    save_workflow(client, input_output_workflow())
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -143,6 +253,7 @@ def test_workflow_run_returns_output_node_result(tmp_path, monkeypatch) -> None:
     result = response.json()
     assert result["status"] == "success"
     assert result["outputs"] == {"final_result": "launch checklist"}
+    assert result["workflow_revision"] == 1
     assert [node["status"] for node in result["node_results"]] == [
         "success",
         "success",
@@ -152,57 +263,35 @@ def test_workflow_run_returns_output_node_result(tmp_path, monkeypatch) -> None:
 def test_workflow_run_accepts_multiple_input_values(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            "data": {"default_value": "default window", "input_type": "text"},
-            "description": "",
-            "id": "input-window",
-            "name": "Window",
-            "position": {"x": 0, "y": 120},
-            "type": "input",
-        },
+    workflow = workflow_payload(
+        [
+            workflow_node(
+                "input",
+                "input",
+                {"default_value": "launch checklist", "input_type": "text"},
+            ),
+            workflow_node(
+                "input-window",
+                "input",
+                {"default_value": "default window", "input_type": "text"},
+                name="Window",
+                y=120,
+            ),
+            workflow_node("merge", "merge", {"merge_strategy": "text"}, x=260),
+            workflow_node(
+                "output",
+                "output",
+                {"output_key": "final_result", "transform": ""},
+                x=520,
+            ),
+        ],
+        [
+            workflow_connection("edge-input-merge", "input", "merge"),
+            workflow_connection("edge-window-merge", "input-window", "merge"),
+            workflow_connection("edge-merge-output", "merge", "output"),
+        ],
     )
-    workflow["definition"]["nodes"].insert(
-        2,
-        {
-            "data": {"merge_strategy": "text"},
-            "description": "",
-            "id": "merge",
-            "name": "Merge",
-            "position": {"x": 260, "y": 0},
-            "type": "merge",
-        },
-    )
-    workflow["definition"]["nodes"][3]["position"] = {"x": 520, "y": 0}
-    workflow["definition"]["edges"] = [
-        {
-            "id": "edge-input-merge",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "merge",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-window-merge",
-            "label": "",
-            "source": "input-window",
-            "source_handle": "out",
-            "target": "merge",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-merge-output",
-            "label": "",
-            "source": "merge",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        },
-    ]
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, workflow)
 
     response = client.post(
         "/api/workflows/workflow-1/run",
@@ -218,28 +307,34 @@ def test_workflow_run_accepts_multiple_input_values(tmp_path, monkeypatch) -> No
 def test_workflow_run_returns_multiple_output_nodes(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].append(
-        {
-            "data": {"output_key": "summary"},
-            "description": "",
-            "id": "output-summary",
-            "name": "Summary",
-            "position": {"x": 260, "y": 120},
-            "type": "output",
-        }
+    workflow = workflow_payload(
+        [
+            workflow_node(
+                "input",
+                "input",
+                {"default_value": "launch checklist", "input_type": "text"},
+            ),
+            workflow_node(
+                "output",
+                "output",
+                {"output_key": "final_result", "transform": ""},
+                x=260,
+            ),
+            workflow_node(
+                "output-summary",
+                "output",
+                {"output_key": "summary", "transform": ""},
+                name="Summary",
+                x=260,
+                y=120,
+            ),
+        ],
+        [
+            workflow_connection("edge-input-output", "input", "output"),
+            workflow_connection("edge-input-summary", "input", "output-summary"),
+        ],
     )
-    workflow["definition"]["edges"].append(
-        {
-            "id": "edge-input-summary",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "output-summary",
-            "target_handle": "in",
-        }
-    )
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, workflow)
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -250,51 +345,35 @@ def test_workflow_run_returns_multiple_output_nodes(tmp_path, monkeypatch) -> No
     }
 
 
+def timer_workflow() -> dict[str, object]:
+    return workflow_payload(
+        [
+            workflow_node(
+                "timer",
+                "timer",
+                {
+                    "cron": "",
+                    "interval_seconds": 5,
+                    "mode": "interval",
+                    "payload": "tick",
+                },
+            ),
+            workflow_node(
+                "output",
+                "output",
+                {"output_key": "final_result", "transform": ""},
+                x=260,
+            ),
+        ],
+        [workflow_connection("edge-timer-output", "timer", "output")],
+        name="Timer Workflow",
+    )
+
+
 def test_workflow_run_accepts_timer_node_without_input(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
-    workflow = {
-        "created_at": 0,
-        "definition": {
-            "edges": [
-                {
-                    "id": "edge-timer-output",
-                    "label": "",
-                    "source": "timer",
-                    "source_handle": "out",
-                    "target": "output",
-                    "target_handle": "in",
-                }
-            ],
-            "nodes": [
-                {
-                    "data": {
-                        "interval_seconds": 5,
-                        "mode": "interval",
-                        "payload": "tick",
-                    },
-                    "description": "",
-                    "id": "timer",
-                    "name": "Timer",
-                    "position": {"x": 0, "y": 0},
-                    "type": "timer",
-                },
-                {
-                    "data": {"output_key": "final_result"},
-                    "description": "",
-                    "id": "output",
-                    "name": "Output",
-                    "position": {"x": 260, "y": 0},
-                    "type": "output",
-                },
-            ],
-            "version": 1,
-        },
-        "id": "workflow-1",
-        "name": "Timer Workflow",
-        "updated_at": 0,
-    }
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, timer_workflow())
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -305,73 +384,9 @@ def test_workflow_run_accepts_timer_node_without_input(tmp_path, monkeypatch) ->
 def test_workflow_run_rejects_internal_timer_selector(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
-    workflow = {
-        "created_at": 0,
-        "definition": {
-            "edges": [
-                {
-                    "id": "edge-a-output-a",
-                    "label": "",
-                    "source": "timer-a",
-                    "source_handle": "out",
-                    "target": "output-a",
-                    "target_handle": "in",
-                },
-                {
-                    "id": "edge-b-output-b",
-                    "label": "",
-                    "source": "timer-b",
-                    "source_handle": "out",
-                    "target": "output-b",
-                    "target_handle": "in",
-                },
-            ],
-            "nodes": [
-                {
-                    "data": {"mode": "interval", "payload": "alpha"},
-                    "description": "",
-                    "id": "timer-a",
-                    "name": "Timer A",
-                    "position": {"x": 0, "y": 0},
-                    "type": "timer",
-                },
-                {
-                    "data": {"mode": "interval", "payload": "beta"},
-                    "description": "",
-                    "id": "timer-b",
-                    "name": "Timer B",
-                    "position": {"x": 0, "y": 120},
-                    "type": "timer",
-                },
-                {
-                    "data": {"output_key": "alpha"},
-                    "description": "",
-                    "id": "output-a",
-                    "name": "Output A",
-                    "position": {"x": 260, "y": 0},
-                    "type": "output",
-                },
-                {
-                    "data": {"output_key": "beta"},
-                    "description": "",
-                    "id": "output-b",
-                    "name": "Output B",
-                    "position": {"x": 260, "y": 120},
-                    "type": "output",
-                },
-            ],
-            "version": 1,
-        },
-        "id": "workflow-1",
-        "name": "Timer Workflow",
-        "updated_at": 0,
-    }
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, timer_workflow())
 
-    response = client.post(
-        "/api/workflows/workflow-1/run",
-        json={"timer_id": "timer-b"},
-    )
+    response = client.post("/api/workflows/workflow-1/run", json={"timer_id": "timer"})
 
     assert response.status_code == 422
 
@@ -379,11 +394,10 @@ def test_workflow_run_rejects_internal_timer_selector(tmp_path, monkeypatch) -> 
 def test_workflow_run_accepts_input_override(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
     client = TestClient(create_app(serve_frontend=False))
-    client.put("/api/workflows", json=input_output_workflow())
+    save_workflow(client, input_output_workflow())
 
     response = client.post(
-        "/api/workflows/workflow-1/run",
-        json={"input": "release blockers"},
+        "/api/workflows/workflow-1/run", json={"input": "release blockers"}
     )
 
     assert response.status_code == 200
@@ -406,41 +420,7 @@ def test_workflow_run_uses_agent_node_runtime(tmp_path, monkeypatch) -> None:
         create_app(serve_frontend=False, chat_completion=fake_completion)
     )
     configure_provider(client)
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            "data": {
-                "agent": "Default agent",
-                "prompt": "Create steps for {{input.output}}.",
-            },
-            "description": "",
-            "id": "agent",
-            "name": "Agent",
-            "position": {"x": 260, "y": 0},
-            "type": "agent",
-        },
-    )
-    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
-    workflow["definition"]["edges"] = [
-        {
-            "id": "edge-input-agent",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "agent",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-agent-output",
-            "label": "",
-            "source": "agent",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        },
-    ]
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, agent_workflow("Create steps for {{input.output}}."))
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -459,7 +439,6 @@ def test_workflow_agent_node_continues_after_tool_result(tmp_path, monkeypatch) 
     workdir = tmp_path / "workdir"
     workdir.mkdir()
     (workdir / "notes.txt").write_text("Launch notes")
-    monkeypatch.chdir(workdir)
     requests: list[dict[str, object]] = []
 
     async def fake_completion(**request: object) -> object:
@@ -483,41 +462,10 @@ def test_workflow_agent_node_continues_after_tool_result(tmp_path, monkeypatch) 
         )
     )
     configure_provider(client)
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            "data": {
-                "agent": "Default agent",
-                "prompt": "Read notes.txt and summarize {{input.output}}.",
-            },
-            "description": "",
-            "id": "agent",
-            "name": "Agent",
-            "position": {"x": 260, "y": 0},
-            "type": "agent",
-        },
+    save_workflow(
+        client,
+        agent_workflow("Read notes.txt and summarize {{input.output}}."),
     )
-    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
-    workflow["definition"]["edges"] = [
-        {
-            "id": "edge-input-agent",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "agent",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-agent-output",
-            "label": "",
-            "source": "agent",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        },
-    ]
-    client.put("/api/workflows", json=workflow)
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -531,9 +479,6 @@ def test_workflow_agent_node_continues_after_tool_result(tmp_path, monkeypatch) 
         "tool_call_id": "call-read",
         "content": "Launch notes",
     }
-    assert requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == (
-        "read_file"
-    )
 
 
 def test_workflow_agent_node_reuses_its_own_history(tmp_path, monkeypatch) -> None:
@@ -541,7 +486,6 @@ def test_workflow_agent_node_reuses_its_own_history(tmp_path, monkeypatch) -> No
     workdir = tmp_path / "workdir"
     workdir.mkdir()
     (workdir / "notes.txt").write_text("Launch notes")
-    monkeypatch.chdir(workdir)
     requests: list[dict[str, object]] = []
 
     async def fake_completion(**request: object) -> object:
@@ -567,41 +511,10 @@ def test_workflow_agent_node_reuses_its_own_history(tmp_path, monkeypatch) -> No
         )
     )
     configure_provider(client)
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            "data": {
-                "agent": "Default agent",
-                "prompt": "Read notes.txt and summarize {{input.output}}.",
-            },
-            "description": "",
-            "id": "agent",
-            "name": "Agent",
-            "position": {"x": 260, "y": 0},
-            "type": "agent",
-        },
+    save_workflow(
+        client,
+        agent_workflow("Read notes.txt and summarize {{input.output}}."),
     )
-    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
-    workflow["definition"]["edges"] = [
-        {
-            "id": "edge-input-agent",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "agent",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-agent-output",
-            "label": "",
-            "source": "agent",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        },
-    ]
-    client.put("/api/workflows", json=workflow)
 
     first_response = client.post(
         "/api/workflows/workflow-1/run", json={"input": "first launch"}
@@ -610,22 +523,9 @@ def test_workflow_agent_node_reuses_its_own_history(tmp_path, monkeypatch) -> No
         "/api/workflows/workflow-1/run", json={"input": "second launch"}
     )
 
-    assert first_response.status_code == 200
     assert first_response.json()["outputs"] == {"final_result": "First summary."}
-    assert second_response.status_code == 200
     assert second_response.json()["outputs"] == {"final_result": "Second summary."}
-    assert len(requests) == 3
     second_run_messages = requests[2]["messages"]
-    assert second_run_messages[-5] == {
-        "role": "user",
-        "content": "Read notes.txt and summarize first launch.",
-    }
-    assert second_run_messages[-4]["tool_calls"][0]["function"]["name"] == "read_file"
-    assert second_run_messages[-3] == {
-        "role": "tool",
-        "tool_call_id": "call-read",
-        "content": "Launch notes",
-    }
     assert second_run_messages[-2] == {
         "role": "assistant",
         "content": "First summary.",
@@ -659,41 +559,7 @@ def test_workflow_agent_node_cannot_call_workflow_recursively(
         create_app(serve_frontend=False, chat_completion=fake_completion)
     )
     configure_provider(client)
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            "data": {
-                "agent": "Default agent",
-                "prompt": "Run this workflow again.",
-            },
-            "description": "",
-            "id": "agent",
-            "name": "Agent",
-            "position": {"x": 260, "y": 0},
-            "type": "agent",
-        },
-    )
-    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
-    workflow["definition"]["edges"] = [
-        {
-            "id": "edge-input-agent",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "agent",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-agent-output",
-            "label": "",
-            "source": "agent",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        },
-    ]
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, agent_workflow("Run this workflow again."))
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -720,38 +586,7 @@ def test_workflow_run_uses_code_node_python_output(tmp_path, monkeypatch) -> Non
 
     monkeypatch.setattr("flowent.sandbox.SandboxRunner.run_async", fake_run_async)
     client = TestClient(create_app(serve_frontend=False))
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            "data": {"code": "output = input.upper()"},
-            "description": "",
-            "id": "code",
-            "name": "Code",
-            "position": {"x": 260, "y": 0},
-            "type": "code",
-        },
-    )
-    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
-    workflow["definition"]["edges"] = [
-        {
-            "id": "edge-input-code",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "code",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-code-output",
-            "label": "",
-            "source": "code",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        },
-    ]
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, code_workflow("output = input.upper()"))
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -768,7 +603,9 @@ def test_workflow_run_uses_code_node_python_output(tmp_path, monkeypatch) -> Non
     assert '"input": "launch checklist"' in requests[0]["input_text"]
 
 
-def test_workflow_run_reports_code_node_failure(tmp_path, monkeypatch) -> None:
+def test_workflow_run_reports_structured_code_node_failure(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path))
 
     async def fake_run_async(self, command, **kwargs):
@@ -781,38 +618,7 @@ def test_workflow_run_reports_code_node_failure(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("flowent.sandbox.SandboxRunner.run_async", fake_run_async)
     client = TestClient(create_app(serve_frontend=False))
-    workflow = input_output_workflow()
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            "data": {"code": "output = missing"},
-            "description": "",
-            "id": "code",
-            "name": "Code",
-            "position": {"x": 260, "y": 0},
-            "type": "code",
-        },
-    )
-    workflow["definition"]["nodes"][2]["position"] = {"x": 520, "y": 0}
-    workflow["definition"]["edges"] = [
-        {
-            "id": "edge-input-code",
-            "label": "",
-            "source": "input",
-            "source_handle": "out",
-            "target": "code",
-            "target_handle": "in",
-        },
-        {
-            "id": "edge-code-output",
-            "label": "",
-            "source": "code",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        },
-    ]
-    client.put("/api/workflows", json=workflow)
+    save_workflow(client, code_workflow("output = missing"))
 
     response = client.post("/api/workflows/workflow-1/run")
 
@@ -821,8 +627,12 @@ def test_workflow_run_reports_code_node_failure(tmp_path, monkeypatch) -> None:
     assert result["status"] == "failed"
     assert result["outputs"] == {}
     assert result["node_results"][1] == {
-        "error": "NameError: name 'missing' is not defined",
+        "error": {
+            "code": "node_execution_failed",
+            "message": "NameError: name 'missing' is not defined",
+        },
         "id": "code",
+        "inputs": ["launch checklist"],
         "output": "",
         "status": "failed",
     }

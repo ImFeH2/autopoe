@@ -24,7 +24,7 @@ export function WorkflowNodeProperties({
 }: {
   node: WorkflowNode;
   onNodeChange: (updates: Partial<WorkflowNode>) => void;
-  onNodeDataChange: (key: string, value: string) => void;
+  onNodeDataChange: (key: string, value: number | string) => void;
 }) {
   return (
     <div className="mt-3 grid gap-3">
@@ -58,13 +58,13 @@ export function WorkflowNodeProperties({
           value={node.description}
         />
       </div>
-      {node.type === "input" ? (
+      {node.kind === "input" ? (
         <>
           <div className={fieldGroupClassName}>
             <Label className={fieldLabelClassName}>Type</Label>
             <Select
               onValueChange={(value) => onNodeDataChange("input_type", value)}
-              value={String(node.data.input_type ?? "text")}
+              value={String(node.config.input_type ?? "text")}
             >
               <SelectTrigger className={fieldTriggerClassName}>
                 <SelectValue />
@@ -89,18 +89,18 @@ export function WorkflowNodeProperties({
               onChange={(event) =>
                 onNodeDataChange("default_value", event.target.value)
               }
-              value={String(node.data.default_value ?? "")}
+              value={String(node.config.default_value ?? "")}
             />
           </div>
         </>
       ) : null}
-      {node.type === "agent" ? (
+      {node.kind === "agent" ? (
         <>
           <div className={fieldGroupClassName}>
             <Label className={fieldLabelClassName}>Agent</Label>
             <Select
               onValueChange={(value) => onNodeDataChange("agent", value)}
-              value={String(node.data.agent ?? "Default agent")}
+              value={String(node.config.agent ?? "Default agent")}
             >
               <SelectTrigger className={fieldTriggerClassName}>
                 <SelectValue />
@@ -123,7 +123,7 @@ export function WorkflowNodeProperties({
               onChange={(event) =>
                 onNodeDataChange("prompt", event.target.value)
               }
-              value={String(node.data.prompt ?? "")}
+              value={String(node.config.prompt ?? "")}
             />
           </div>
           <div className={fieldGroupClassName}>
@@ -132,12 +132,12 @@ export function WorkflowNodeProperties({
           </div>
         </>
       ) : null}
-      {node.type === "merge" ? (
+      {node.kind === "merge" ? (
         <div className={fieldGroupClassName}>
           <Label className={fieldLabelClassName}>Merge Strategy</Label>
           <Select
             onValueChange={(value) => onNodeDataChange("merge_strategy", value)}
-            value={String(node.data.merge_strategy ?? "text")}
+            value={String(node.config.merge_strategy ?? "text")}
           >
             <SelectTrigger className={fieldTriggerClassName}>
               <SelectValue />
@@ -149,7 +149,7 @@ export function WorkflowNodeProperties({
           </Select>
         </div>
       ) : null}
-      {node.type === "code" ? (
+      {node.kind === "code" ? (
         <div className={fieldGroupClassName}>
           <Label className={fieldLabelClassName} htmlFor={`${node.id}-code`}>
             Python Code
@@ -158,17 +158,17 @@ export function WorkflowNodeProperties({
             className="min-h-40 rounded-md border-white/10 bg-input/30 font-mono text-sm leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
             id={`${node.id}-code`}
             onChange={(event) => onNodeDataChange("code", event.target.value)}
-            value={String(node.data.code ?? "")}
+            value={String(node.config.code ?? "")}
           />
         </div>
       ) : null}
-      {node.type === "timer" ? (
+      {node.kind === "timer" ? (
         <>
           <div className={fieldGroupClassName}>
             <Label className={fieldLabelClassName}>Mode</Label>
             <Select
               onValueChange={(value) => onNodeDataChange("mode", value)}
-              value={String(node.data.mode ?? "interval")}
+              value={String(node.config.mode ?? "interval")}
             >
               <SelectTrigger className={fieldTriggerClassName}>
                 <SelectValue />
@@ -179,7 +179,7 @@ export function WorkflowNodeProperties({
               </SelectContent>
             </Select>
           </div>
-          {String(node.data.mode ?? "interval") === "cron" ? (
+          {String(node.config.mode ?? "interval") === "cron" ? (
             <div className={fieldGroupClassName}>
               <Label
                 className={fieldLabelClassName}
@@ -193,7 +193,7 @@ export function WorkflowNodeProperties({
                 onChange={(event) =>
                   onNodeDataChange("cron", event.target.value)
                 }
-                value={String(node.data.cron ?? "")}
+                value={String(node.config.cron ?? "")}
               />
             </div>
           ) : (
@@ -209,10 +209,13 @@ export function WorkflowNodeProperties({
                 id={`${node.id}-interval`}
                 min={1}
                 onChange={(event) =>
-                  onNodeDataChange("interval_seconds", event.target.value)
+                  onNodeDataChange(
+                    "interval_seconds",
+                    Number(event.target.value),
+                  )
                 }
                 type="number"
-                value={String(node.data.interval_seconds ?? "5")}
+                value={String(node.config.interval_seconds ?? "5")}
               />
             </div>
           )}
@@ -229,12 +232,12 @@ export function WorkflowNodeProperties({
               onChange={(event) =>
                 onNodeDataChange("payload", event.target.value)
               }
-              value={String(node.data.payload ?? "")}
+              value={String(node.config.payload ?? "")}
             />
           </div>
         </>
       ) : null}
-      {node.type === "output" ? (
+      {node.kind === "output" ? (
         <>
           <div className={fieldGroupClassName}>
             <Label
@@ -249,7 +252,7 @@ export function WorkflowNodeProperties({
               onChange={(event) =>
                 onNodeDataChange("output_key", event.target.value)
               }
-              value={String(node.data.output_key ?? "")}
+              value={String(node.config.output_key ?? "")}
             />
           </div>
           <div className={fieldGroupClassName}>
@@ -265,7 +268,7 @@ export function WorkflowNodeProperties({
               onChange={(event) =>
                 onNodeDataChange("transform", event.target.value)
               }
-              value={String(node.data.transform ?? "")}
+              value={String(node.config.transform ?? "")}
             />
           </div>
         </>

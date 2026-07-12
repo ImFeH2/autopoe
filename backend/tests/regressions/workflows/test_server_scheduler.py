@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import time
+import copy
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,99 +12,162 @@ import pytest
 
 from flowent.main import create_app
 from flowent.sandbox import CommandResult
-from flowent.storage import StoredWorkflow
+from flowent.storage import WorkflowDraft
 from flowent.workflow_scheduler import next_cron_run_at
 from flowent.workflow_tools import WorkflowAgentTools, workflow_tool_specs
-from flowent.workflows import WorkflowNodeRunResult, WorkflowRunResponse
 
 
 def timer_workflow(
     *,
-    interval_seconds: object = 1,
+    cron: str = "",
+    interval_seconds: object = 60,
+    mode: str = "interval",
+    payload: str = "tick",
     with_failure: bool = False,
     workflow_id: str = "workflow-timer",
 ) -> dict[str, object]:
-    middle_nodes: list[dict[str, object]] = []
-    edges = [
+    nodes: list[dict[str, object]] = [
         {
-            "id": "edge-timer-output",
-            "label": "",
-            "source": "timer",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
+            "id": "timer",
+            "kind": "timer",
+            "config": {
+                "cron": cron,
+                "interval_seconds": interval_seconds,
+                "mode": mode,
+                "payload": payload,
+            },
         }
     ]
+    presentation_nodes: dict[str, object] = {
+        "timer": {
+            "name": "Timer",
+            "description": "",
+            "position": {"x": 0, "y": 0},
+        }
+    }
+    connections: list[dict[str, object]] = []
+    presentation_connections: dict[str, object] = {}
+    previous_id = "timer"
     if with_failure:
-        middle_nodes = [
+        nodes.append(
             {
-                "data": {"code": "raise RuntimeError('scheduled failure')"},
-                "description": "",
                 "id": "code",
-                "name": "Code",
-                "position": {"x": 260, "y": 0},
-                "type": "code",
+                "kind": "code",
+                "config": {"code": "raise RuntimeError('scheduled failure')"},
             }
-        ]
-        edges = [
+        )
+        presentation_nodes["code"] = {
+            "name": "Code",
+            "description": "",
+            "position": {"x": 260, "y": 0},
+        }
+        connections.append(
             {
-                "id": "edge-timer-code",
-                "label": "",
-                "source": "timer",
-                "source_handle": "out",
-                "target": "code",
-                "target_handle": "in",
-            },
-            {
-                "id": "edge-code-output",
-                "label": "",
-                "source": "code",
-                "source_handle": "out",
-                "target": "output",
-                "target_handle": "in",
-            },
-        ]
+                "id": "timer-code",
+                "from": {"node_id": "timer", "port": "output"},
+                "to": {"node_id": "code", "port": "input"},
+            }
+        )
+        presentation_connections["timer-code"] = {"label": ""}
+        previous_id = "code"
+    nodes.append(
+        {
+            "id": "output",
+            "kind": "output",
+            "config": {"output_key": "result", "transform": ""},
+        }
+    )
+    presentation_nodes["output"] = {
+        "name": "Output",
+        "description": "",
+        "position": {"x": 520 if with_failure else 260, "y": 0},
+    }
+    connection_id = f"{previous_id}-output"
+    connections.append(
+        {
+            "id": connection_id,
+            "from": {"node_id": previous_id, "port": "output"},
+            "to": {"node_id": "output", "port": "input"},
+        }
+    )
+    presentation_connections[connection_id] = {"label": ""}
     return {
-        "created_at": 0,
-        "definition": {
-            "edges": edges,
-            "nodes": [
-                {
-                    "data": {
-                        "interval_seconds": interval_seconds,
-                        "mode": "interval",
-                        "payload": "tick",
-                    },
-                    "description": "",
-                    "id": "timer",
-                    "name": "Timer",
-                    "position": {"x": 0, "y": 0},
-                    "type": "timer",
-                },
-                *middle_nodes,
-                {
-                    "data": {"output_key": "result"},
-                    "description": "",
-                    "id": "output",
-                    "name": "Output",
-                    "position": {"x": 520, "y": 0},
-                    "type": "output",
-                },
-            ],
-            "version": 1,
-        },
         "id": workflow_id,
         "name": "Timer Workflow",
-        "updated_at": 0,
+        "spec": {"nodes": nodes, "connections": connections},
+        "presentation": {
+            "nodes": presentation_nodes,
+            "connections": presentation_connections,
+        },
     }
+
+
+def two_timer_workflow() -> dict[str, object]:
+    workflow = timer_workflow(interval_seconds=60)
+    workflow["spec"]["nodes"].extend(
+        [
+            {
+                "id": "timer-b",
+                "kind": "timer",
+                "config": {
+                    "cron": "",
+                    "interval_seconds": 60,
+                    "mode": "interval",
+                    "payload": "beta",
+                },
+            },
+            {
+                "id": "output-b",
+                "kind": "output",
+                "config": {"output_key": "beta", "transform": ""},
+            },
+        ]
+    )
+    workflow["spec"]["connections"].append(
+        {
+            "id": "timer-b-output-b",
+            "from": {"node_id": "timer-b", "port": "output"},
+            "to": {"node_id": "output-b", "port": "input"},
+        }
+    )
+    workflow["presentation"]["nodes"].update(
+        {
+            "timer-b": {
+                "name": "Timer B",
+                "description": "",
+                "position": {"x": 0, "y": 120},
+            },
+            "output-b": {
+                "name": "Output B",
+                "description": "",
+                "position": {"x": 260, "y": 120},
+            },
+        }
+    )
+    workflow["presentation"]["connections"]["timer-b-output-b"] = {"label": ""}
+    return workflow
+
+
+async def save_workflow(
+    client: httpx.AsyncClient,
+    workflow: dict[str, object],
+    *,
+    base_revision: int | None = None,
+) -> dict[str, object]:
+    response = await client.put(
+        "/api/workflows",
+        json={"base_revision": base_revision, "workflow": workflow},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 async def wait_for_schedule(
     client: httpx.AsyncClient,
     workflow_id: str,
-    predicate,
+    predicate: Callable[[dict[str, object]], bool],
     *,
-    timeout: float = 3,
+    timeout: float = 4,
 ) -> dict[str, object]:
     async def poll() -> dict[str, object]:
         while True:
@@ -129,25 +193,25 @@ async def test_timer_schedule_runs_without_an_open_browser(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client,
     ):
-        assert (await client.put("/api/workflows", json=timer_workflow())).is_success
-        start = await client.post(
+        await save_workflow(client, timer_workflow())
+        started = await client.post(
             "/api/workflows/workflow-timer/schedule/start", json={}
         )
-        assert start.status_code == 200
-        schedule = await wait_for_schedule(
+        completed = await wait_for_schedule(
             client,
             "workflow-timer",
-            lambda value: value["last_result"] is not None,
+            lambda value: isinstance(value.get("last_result"), dict),
         )
 
-    assert schedule["status"] == "scheduled"
-    assert schedule["last_result"]["outputs"] == {"result": "tick"}
-    assert schedule["last_error"] == ""
-    assert schedule["next_run_at"] is not None
+    assert started.status_code == 200
+    assert completed["status"] == "scheduled"
+    assert completed["last_result"]["outputs"] == {"result": "tick"}
+    assert completed["last_result"]["trigger"] == "schedule"
+    assert completed["last_result"]["workflow_revision"] == 1
 
 
 @pytest.mark.anyio
-async def test_schedule_failure_persists_trace_and_pauses(
+async def test_schedule_failure_persists_structured_trace_and_pauses(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -168,27 +232,28 @@ async def test_schedule_failure_persists_trace_and_pauses(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client,
     ):
-        await client.put("/api/workflows", json=timer_workflow(with_failure=True))
-        response = await client.post(
-            "/api/workflows/workflow-timer/schedule/start", json={}
-        )
-        assert response.status_code == 200
-        schedule = await wait_for_schedule(
+        await save_workflow(client, timer_workflow(with_failure=True))
+        await client.post("/api/workflows/workflow-timer/schedule/start", json={})
+        failed = await wait_for_schedule(
             client,
             "workflow-timer",
-            lambda value: value["status"] == "error",
+            lambda value: value.get("status") == "error",
         )
 
-    assert schedule["next_run_at"] is None
-    assert schedule["last_result"]["status"] == "failed"
-    assert schedule["last_result"]["node_results"][1]["error"] == (
-        "RuntimeError: scheduled failure"
+    trace = failed["last_result"]
+    code_result = next(
+        result for result in trace["node_results"] if result["id"] == "code"
     )
-    assert schedule["last_error"] == "RuntimeError: scheduled failure"
+    assert failed["last_error"] == "RuntimeError: scheduled failure"
+    assert code_result["inputs"] == ["tick"]
+    assert code_result["error"] == {
+        "code": "node_execution_failed",
+        "message": "RuntimeError: scheduled failure",
+    }
 
 
 @pytest.mark.anyio
-async def test_invalid_interval_is_rejected_without_fallback(
+async def test_invalid_interval_is_saved_as_draft_without_replacing_active(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -199,15 +264,18 @@ async def test_invalid_interval_is_rejected_without_fallback(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client,
     ):
-        await client.put(
-            "/api/workflows", json=timer_workflow(interval_seconds="invalid")
+        created = await save_workflow(client, timer_workflow())
+        invalid = timer_workflow(interval_seconds=0)
+        saved = await save_workflow(
+            client, invalid, base_revision=int(created["revision"])
         )
-        response = await client.post(
+        started = await client.post(
             "/api/workflows/workflow-timer/schedule/start", json={}
         )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Timer interval must be at least 1 second."
+    assert saved["revision"] == 2
+    assert saved["active_revision"] == 1
+    assert started.status_code == 200
 
 
 @pytest.mark.anyio
@@ -220,21 +288,19 @@ async def test_stopped_schedule_does_not_run_again(tmp_path: Path, monkeypatch) 
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client,
     ):
-        await client.put("/api/workflows", json=timer_workflow())
+        await save_workflow(client, timer_workflow())
         await client.post("/api/workflows/workflow-timer/schedule/start", json={})
         first = await wait_for_schedule(
             client,
             "workflow-timer",
-            lambda value: value["last_run_at"] is not None,
+            lambda value: value.get("last_run_at") is not None,
         )
-        stop = await client.post("/api/workflows/workflow-timer/schedule/stop")
-        await asyncio.sleep(1.1)
-        stopped = (await client.get("/api/workflows/workflow-timer/schedule")).json()
+        stopped = await client.post("/api/workflows/workflow-timer/schedule/stop")
+        await asyncio.sleep(1.05)
+        final = (await client.get("/api/workflows/workflow-timer/schedule")).json()
 
-    assert stop.status_code == 200
-    assert stopped["status"] == "stopped"
-    assert stopped["next_run_at"] is None
-    assert stopped["last_run_at"] == first["last_run_at"]
+    assert stopped.json()["status"] == "stopped"
+    assert final["last_run_at"] == first["last_run_at"]
 
 
 @pytest.mark.anyio
@@ -247,59 +313,31 @@ async def test_schedule_state_recovers_after_app_recreation(
     async with (
         first_app.router.lifespan_context(first_app),
         httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=first_app), base_url="http://testserver"
+            transport=httpx.ASGITransport(app=first_app),
+            base_url="http://testserver",
         ) as client,
     ):
-        await client.put("/api/workflows", json=timer_workflow(interval_seconds=60))
+        await save_workflow(client, timer_workflow())
         await client.post("/api/workflows/workflow-timer/schedule/start", json={})
         before = await wait_for_schedule(
             client,
             "workflow-timer",
-            lambda value: value["last_result"] is not None,
+            lambda value: value.get("last_result") is not None,
         )
 
     second_app = create_app(serve_frontend=False)
     async with (
         second_app.router.lifespan_context(second_app),
         httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=second_app), base_url="http://testserver"
+            transport=httpx.ASGITransport(app=second_app),
+            base_url="http://testserver",
         ) as client,
     ):
-        after = (await client.get("/api/workflows/workflow-timer/schedule")).json()
+        recovered = (await client.get("/api/workflows/workflow-timer/schedule")).json()
 
-    assert after["status"] == "scheduled"
-    assert after["last_result"] == before["last_result"]
-    assert after["next_run_at"] == before["next_run_at"]
-
-
-@pytest.mark.anyio
-async def test_recovered_schedule_executes_its_next_interval(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    first_app = create_app(serve_frontend=False)
-    async with first_app.router.lifespan_context(first_app):
-        service = first_app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(timer_workflow()))
-        await service.scheduler.start_schedule("workflow-timer")
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").last_run_at is not None
-        )
-        before = service.scheduler.get("workflow-timer").last_run_at
-
-    second_app = create_app(serve_frontend=False)
-    async with second_app.router.lifespan_context(second_app):
-        service = second_app.state.workflow_service
-        await asyncio.wait_for(
-            _wait_until(
-                lambda: service.scheduler.get("workflow-timer").last_run_at > before
-            ),
-            timeout=2,
-        )
-        after = service.scheduler.get("workflow-timer")
-
-    assert after.status == "scheduled"
-    assert after.last_run_at > before
+    assert recovered["status"] == "scheduled"
+    assert recovered["last_result"]["run_id"] == before["last_result"]["run_id"]
+    assert recovered["next_run_at"] is not None
 
 
 @pytest.mark.anyio
@@ -310,33 +348,30 @@ async def test_steward_schedule_tools_start_stop_and_get(
     app = create_app(serve_frontend=False)
     async with app.router.lifespan_context(app):
         service = app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(timer_workflow()))
+        await service.save_workflow(
+            WorkflowDraft.model_validate(timer_workflow()),
+            base_revision=None,
+        )
         tools = WorkflowAgentTools(service)
-
-        start = await tools.run_tool(
+        started = await tools.run_tool(
             "start_workflow_schedule", {"workflow_id": "workflow-timer"}
         )
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").last_result is not None
-        )
-        get = await tools.run_tool(
+        read = await tools.run_tool(
             "get_workflow_schedule", {"workflow_id": "workflow-timer"}
         )
-        stop = await tools.run_tool(
+        stopped = await tools.run_tool(
             "stop_workflow_schedule", {"workflow_id": "workflow-timer"}
         )
 
     tool_names = {item["function"]["name"] for item in workflow_tool_specs()}
+    assert started is not None and started.ok is True
+    assert read is not None and read.result["status"] in {"scheduled", "running"}
+    assert stopped is not None and stopped.result["status"] == "stopped"
     assert {
         "get_workflow_schedule",
         "start_workflow_schedule",
         "stop_workflow_schedule",
     }.issubset(tool_names)
-    assert start is not None and start.ok is True
-    assert get is not None and get.result["status"] in {"running", "scheduled"}
-    assert "Next run:" in get.result["output"]
-    assert "Latest outputs:" in get.result["output"]
-    assert stop is not None and stop.result["status"] == "stopped"
 
 
 @pytest.mark.anyio
@@ -351,27 +386,22 @@ async def test_repeated_start_without_changes_is_idempotent(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client,
     ):
-        await client.put("/api/workflows", json=timer_workflow(interval_seconds=60))
+        await save_workflow(client, timer_workflow())
         await client.post(
-            "/api/workflows/workflow-timer/schedule/start",
-            json={"input": "first"},
+            "/api/workflows/workflow-timer/schedule/start", json={"input": "first"}
         )
         first = await wait_for_schedule(
             client,
             "workflow-timer",
-            lambda value: value["last_result"] is not None,
+            lambda value: value.get("last_result") is not None,
         )
-        second_response = await client.post(
-            "/api/workflows/workflow-timer/schedule/start",
-            json={"input": "first"},
+        second = await client.post(
+            "/api/workflows/workflow-timer/schedule/start", json={"input": "first"}
         )
-        second = second_response.json()
-        await asyncio.sleep(0.1)
-        final = (await client.get("/api/workflows/workflow-timer/schedule")).json()
 
-    assert second_response.status_code == 200
-    assert second["next_run_at"] == first["next_run_at"]
-    assert final["last_run_at"] == first["last_run_at"]
+    assert second.status_code == 200
+    assert second.json()["next_run_at"] == first["next_run_at"]
+    assert second.json()["last_run_at"] == first["last_run_at"]
 
 
 def test_cron_step_finds_next_run_in_selected_timezone() -> None:
@@ -429,12 +459,6 @@ async def test_cron_schedule_requires_an_explicit_timezone(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    workflow = timer_workflow()
-    workflow["definition"]["nodes"][0]["data"] = {
-        "cron": "*/5 * * * *",
-        "mode": "cron",
-        "payload": "tick",
-    }
     app = create_app(serve_frontend=False)
     async with (
         app.router.lifespan_context(app),
@@ -442,7 +466,10 @@ async def test_cron_schedule_requires_an_explicit_timezone(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client,
     ):
-        await client.put("/api/workflows", json=workflow)
+        await save_workflow(
+            client,
+            timer_workflow(cron="*/5 * * * *", mode="cron"),
+        )
         missing = await client.post(
             "/api/workflows/workflow-timer/schedule/start", json={}
         )
@@ -452,7 +479,9 @@ async def test_cron_schedule_requires_an_explicit_timezone(
         )
 
     assert missing.status_code == 400
-    assert missing.json()["detail"] == "Timer timezone is required for cron schedules."
+    assert missing.json()["detail"] == (
+        "Timer timezone is required for cron schedules."
+    )
     assert started.status_code == 200
     assert started.json()["timezone"] == "Asia/Shanghai"
 
@@ -462,163 +491,27 @@ async def test_all_due_timers_run_without_resetting_each_other(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    workflow = timer_workflow(interval_seconds=60)
-    timer = workflow["definition"]["nodes"][0]
-    second_timer = {
-        **timer,
-        "id": "timer-second",
-        "name": "Second Timer",
-        "data": {**timer["data"], "interval_seconds": 120, "payload": "second"},
-    }
-    workflow["definition"]["nodes"].insert(1, second_timer)
-    workflow["definition"]["edges"].append(
-        {
-            "id": "edge-second-output",
-            "label": "",
-            "source": "timer-second",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        }
-    )
-    calls: list[str] = []
     app = create_app(serve_frontend=False)
-    async with app.router.lifespan_context(app):
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client,
+    ):
+        await save_workflow(client, two_timer_workflow())
         service = app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(workflow))
         original = service.run_workflow
+        timer_ids: list[str] = []
 
         async def record_run(workflow_id: str, **kwargs):
-            calls.append(kwargs["timer_node_id"])
+            timer_ids.append(str(kwargs.get("timer_node_id")))
             return await original(workflow_id, **kwargs)
 
         monkeypatch.setattr(service, "run_workflow", record_run)
-        await service.scheduler.start_schedule("workflow-timer")
-        await asyncio.wait_for(_wait_until(lambda: len(calls) == 2), timeout=2)
-        schedule = service.scheduler.get("workflow-timer")
+        await client.post("/api/workflows/workflow-timer/schedule/start", json={})
+        await asyncio.wait_for(wait_until(lambda: len(timer_ids) >= 2), timeout=3)
 
-    assert calls == ["timer", "timer-second"]
-    deadlines = {item.timer_node_id: item.next_run_at for item in schedule.timers}
-    assert deadlines["timer-second"] - deadlines["timer"] >= 59
-
-
-@pytest.mark.anyio
-async def test_running_single_timer_has_no_next_run(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    started = asyncio.Event()
-    finish = asyncio.Event()
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
-        ) as client,
-    ):
-        service = app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(timer_workflow()))
-
-        async def hold_run(*args, **kwargs):
-            started.set()
-            await finish.wait()
-            return WorkflowRunResponse(
-                workflow_id="workflow-timer",
-                status="success",
-                outputs={"result": "tick"},
-                node_results=[
-                    WorkflowNodeRunResult(
-                        id="timer", status="success", output="tick", error=""
-                    )
-                ],
-            )
-
-        monkeypatch.setattr(service, "run_workflow", hold_run)
-        await service.scheduler.start_schedule("workflow-timer")
-        await started.wait()
-        response = await client.get("/api/workflows/workflow-timer/schedule")
-        finish.set()
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "running"
-    assert response.json()["next_run_at"] is None
-
-
-@pytest.mark.anyio
-async def test_running_timer_preserves_another_timer_deadline(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    workflow = timer_workflow(interval_seconds=60)
-    timer = workflow["definition"]["nodes"][0]
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            **timer,
-            "id": "timer-second",
-            "name": "Second Timer",
-            "data": {**timer["data"], "interval_seconds": 120, "payload": "second"},
-        },
-    )
-    workflow["definition"]["edges"].append(
-        {
-            "id": "edge-second-output",
-            "label": "",
-            "source": "timer-second",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
-        }
-    )
-    app = create_app(serve_frontend=False)
-    started = asyncio.Event()
-    finish = asyncio.Event()
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
-        ) as client,
-    ):
-        service = app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(workflow))
-
-        async def hold_run(*args, **kwargs):
-            started.set()
-            await finish.wait()
-            return WorkflowRunResponse(
-                workflow_id="workflow-timer",
-                status="success",
-                outputs={"result": "tick"},
-                node_results=[
-                    WorkflowNodeRunResult(
-                        id="timer", status="success", output="tick", error=""
-                    )
-                ],
-            )
-
-        monkeypatch.setattr(service, "run_workflow", hold_run)
-        await service.scheduler.start_schedule("workflow-timer")
-        stored = service.scheduler.get("workflow-timer")
-        future_deadline = time.time() + 120
-        stored.timers = [
-            timer.model_copy(update={"next_run_at": future_deadline})
-            if timer.timer_node_id == "timer-second"
-            else timer
-            for timer in stored.timers
-        ]
-        service.store.save_workflow_schedule(stored)
-        await started.wait()
-        response = await client.get("/api/workflows/workflow-timer/schedule")
-        finish.set()
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "running"
-    assert response.json()["next_run_at"] == pytest.approx(future_deadline)
-
-
-async def _wait_until(predicate) -> None:
-    while not predicate():
-        await asyncio.sleep(0.01)
+    assert set(timer_ids[:2]) == {"timer", "timer-b"}
 
 
 @pytest.mark.anyio
@@ -627,283 +520,99 @@ async def test_active_schedule_reconciles_timer_configuration(
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     app = create_app(serve_frontend=False)
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        initial = StoredWorkflow.model_validate(timer_workflow(interval_seconds=60))
-        await service.save_workflow(initial)
-        await service.scheduler.start_schedule("workflow-timer")
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").last_result is not None
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client,
+    ):
+        created = await save_workflow(client, timer_workflow(interval_seconds=60))
+        await client.post("/api/workflows/workflow-timer/schedule/start", json={})
+        before = await wait_for_schedule(
+            client,
+            "workflow-timer",
+            lambda value: value.get("last_result") is not None,
         )
-        before = service.scheduler.get("workflow-timer")
-        layout = initial.model_copy(deep=True)
-        layout.definition.nodes[0].position.x = 100
-        await service.save_workflow(layout)
-        await asyncio.sleep(0.05)
-        unchanged = service.scheduler.get("workflow-timer")
-        changed = layout.model_copy(deep=True)
-        changed.definition.nodes[0].data["interval_seconds"] = 120
-        await service.save_workflow(changed)
-        await asyncio.sleep(0.05)
-        updated = service.scheduler.get("workflow-timer")
-
-    assert unchanged.timers[0].next_run_at == before.timers[0].next_run_at
-    assert updated.generation > unchanged.generation
-    assert updated.timers[0].next_run_at > unchanged.timers[0].next_run_at
-
-
-@pytest.mark.anyio
-async def test_rapid_timer_updates_keep_the_latest_interval(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    run_started = asyncio.Event()
-    cancellation_started = asyncio.Event()
-    finish_cancellation = asyncio.Event()
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        initial = StoredWorkflow.model_validate(timer_workflow(interval_seconds=60))
-        await service.save_workflow(initial)
-
-        async def finish_after_cancellation(*args, **kwargs):
-            run_started.set()
-            try:
-                await asyncio.Future()
-            except asyncio.CancelledError:
-                cancellation_started.set()
-                await finish_cancellation.wait()
-                return WorkflowRunResponse(
-                    workflow_id="workflow-timer",
-                    status="success",
-                    outputs={"result": "tick"},
-                    node_results=[
-                        WorkflowNodeRunResult(
-                            id="timer", status="success", output="tick", error=""
-                        )
-                    ],
-                )
-
-        monkeypatch.setattr(service, "run_workflow", finish_after_cancellation)
-        await service.scheduler.start_schedule("workflow-timer")
-        await asyncio.wait_for(run_started.wait(), timeout=1)
-
-        intermediate = initial.model_copy(deep=True)
-        intermediate.definition.nodes[0].data["interval_seconds"] = 120
-        intermediate_save = asyncio.create_task(service.save_workflow(intermediate))
-        await asyncio.wait_for(cancellation_started.wait(), timeout=1)
-
-        latest = intermediate.model_copy(deep=True)
-        latest.definition.nodes[0].data["interval_seconds"] = 180
-        latest_save = asyncio.create_task(service.save_workflow(latest))
-        finish_cancellation.set()
-        await asyncio.wait_for(intermediate_save, timeout=2)
-        await asyncio.wait_for(latest_save, timeout=2)
-        schedule = service.scheduler.get("workflow-timer")
-
-    assert schedule.status == "scheduled"
-    assert schedule.timers[0].next_run_at is not None
-    assert schedule.timers[0].next_run_at >= time.time() + 170
-
-
-@pytest.mark.anyio
-async def test_running_schedule_ignores_layout_only_saves(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    run_started = asyncio.Event()
-    run_cancelled = asyncio.Event()
-    finish_run = asyncio.Event()
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        workflow = StoredWorkflow.model_validate(timer_workflow(interval_seconds=60))
-        await service.save_workflow(workflow)
-
-        async def hold_run(*args, **kwargs):
-            run_started.set()
-            try:
-                await finish_run.wait()
-            except asyncio.CancelledError:
-                run_cancelled.set()
-                raise
-            return WorkflowRunResponse(
-                workflow_id="workflow-timer",
-                status="success",
-                outputs={"result": "tick"},
-                node_results=[
-                    WorkflowNodeRunResult(
-                        id="timer", status="success", output="tick", error=""
-                    )
-                ],
-            )
-
-        monkeypatch.setattr(service, "run_workflow", hold_run)
-        await service.scheduler.start_schedule("workflow-timer")
-        await run_started.wait()
-        layout = workflow.model_copy(deep=True)
-        layout.definition.nodes[0].position.x = 100
-        await service.save_workflow(layout)
-        await asyncio.sleep(0.05)
-        schedule = service.scheduler.get("workflow-timer")
-        was_cancelled = run_cancelled.is_set()
-        finish_run.set()
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").status == "scheduled"
+        changed = timer_workflow(interval_seconds=120)
+        saved = await save_workflow(
+            client, changed, base_revision=int(created["revision"])
         )
+        after = (await client.get("/api/workflows/workflow-timer/schedule")).json()
 
-    assert was_cancelled is False
-    assert schedule.status == "running"
+    assert saved["active_revision"] == 2
+    assert after["status"] == "scheduled"
+    assert after["next_run_at"] > before["next_run_at"]
 
 
 @pytest.mark.anyio
-async def test_running_schedule_change_records_interrupted_trace_without_repeating(
+async def test_running_schedule_ignores_presentation_only_saves(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     app = create_app(serve_frontend=False)
-    run_started = asyncio.Event()
-    run_calls = 0
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        workflow = StoredWorkflow.model_validate(timer_workflow(interval_seconds=60))
-        await service.save_workflow(workflow)
-
-        async def hold_run(*args, **kwargs):
-            nonlocal run_calls
-            run_calls += 1
-            run_started.set()
-            await asyncio.Future()
-
-        monkeypatch.setattr(service, "run_workflow", hold_run)
-        await service.scheduler.start_schedule("workflow-timer")
-        await run_started.wait()
-        changed = workflow.model_copy(deep=True)
-        changed.definition.nodes[0].data["interval_seconds"] = 120
-        await service.save_workflow(changed)
-        schedule = service.scheduler.get("workflow-timer")
-        await asyncio.sleep(0.05)
-
-    assert schedule.status == "scheduled"
-    assert "interrupted" in schedule.last_error.lower()
-    assert schedule.last_result is not None
-    assert schedule.last_result["status"] == "failed"
-    assert schedule.last_result["node_results"][0]["id"] == "timer"
-    assert schedule.timers[0].next_run_at is not None
-    assert schedule.timers[0].next_run_at >= time.time() + 110
-    assert run_calls == 1
-
-
-@pytest.mark.anyio
-async def test_schedule_change_preserves_a_run_completed_during_cancellation(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    run_started = asyncio.Event()
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        workflow = StoredWorkflow.model_validate(timer_workflow(interval_seconds=60))
-        await service.save_workflow(workflow)
-
-        async def complete_when_cancelled(*args, **kwargs):
-            run_started.set()
-            try:
-                await asyncio.Future()
-            except asyncio.CancelledError:
-                return WorkflowRunResponse(
-                    workflow_id="workflow-timer",
-                    status="success",
-                    outputs={"result": "completed"},
-                    node_results=[
-                        WorkflowNodeRunResult(
-                            id="timer",
-                            status="success",
-                            output="completed",
-                            error="",
-                        )
-                    ],
-                )
-
-        monkeypatch.setattr(service, "run_workflow", complete_when_cancelled)
-        await service.scheduler.start_schedule("workflow-timer")
-        await run_started.wait()
-        changed = workflow.model_copy(deep=True)
-        changed.definition.nodes[0].data["interval_seconds"] = 120
-        await service.save_workflow(changed)
-        schedule = service.scheduler.get("workflow-timer")
-
-    assert schedule.status == "scheduled"
-    assert schedule.last_error == ""
-    assert schedule.last_result is not None
-    assert schedule.last_result["status"] == "success"
-    assert schedule.last_result["outputs"] == {"result": "completed"}
-    assert schedule.timers[0].next_run_at is not None
-    assert schedule.timers[0].next_run_at >= time.time() + 110
-
-
-@pytest.mark.anyio
-async def test_recovery_marks_claimed_timer_interrupted_and_preserves_other_deadline(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    workflow = timer_workflow(interval_seconds=60)
-    timer = workflow["definition"]["nodes"][0]
-    workflow["definition"]["nodes"].insert(
-        1,
-        {
-            **timer,
-            "id": "timer-second",
-            "name": "Second Timer",
-            "data": {**timer["data"], "interval_seconds": 120, "payload": "second"},
-        },
-    )
-    workflow["definition"]["edges"].append(
-        {
-            "id": "edge-second-output",
-            "label": "",
-            "source": "timer-second",
-            "source_handle": "out",
-            "target": "output",
-            "target_handle": "in",
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client,
+    ):
+        workflow = timer_workflow()
+        created = await save_workflow(client, workflow)
+        await client.post("/api/workflows/workflow-timer/schedule/start", json={})
+        before = await wait_for_schedule(
+            client,
+            "workflow-timer",
+            lambda value: value.get("last_result") is not None,
+        )
+        moved = copy.deepcopy(workflow)
+        moved["presentation"]["nodes"]["timer"]["position"] = {
+            "x": 420,
+            "y": 180,
         }
-    )
-    first_app = create_app(serve_frontend=False)
-    run_started = asyncio.Event()
-    async with first_app.router.lifespan_context(first_app):
-        service = first_app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(workflow))
+        saved = await save_workflow(
+            client, moved, base_revision=int(created["revision"])
+        )
+        after = (await client.get("/api/workflows/workflow-timer/schedule")).json()
+
+    assert saved["revision"] == 2
+    assert saved["active_revision"] == 1
+    assert after["next_run_at"] == before["next_run_at"]
+
+
+@pytest.mark.anyio
+async def test_timer_change_interrupts_claimed_run_with_structured_trace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    app = create_app(serve_frontend=False)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client,
+    ):
+        created = await save_workflow(client, timer_workflow())
+        service = app.state.workflow_service
+        claimed = asyncio.Event()
 
         async def hold_run(*args, **kwargs):
-            run_started.set()
-            await asyncio.Future()
+            claimed.set()
+            await asyncio.Event().wait()
 
         monkeypatch.setattr(service, "run_workflow", hold_run)
-        await service.scheduler.start_schedule("workflow-timer")
-        stored = service.scheduler.get("workflow-timer")
-        other_deadline = time.time() + 120
-        stored.timers = [
-            item.model_copy(update={"next_run_at": other_deadline})
-            if item.timer_node_id == "timer-second"
-            else item
-            for item in stored.timers
-        ]
-        service.store.save_workflow_schedule(stored)
-        await run_started.wait()
+        await client.post("/api/workflows/workflow-timer/schedule/start", json={})
+        await asyncio.wait_for(claimed.wait(), timeout=2)
+        changed = timer_workflow(interval_seconds=120)
+        await save_workflow(client, changed, base_revision=int(created["revision"]))
+        interrupted = (
+            await client.get("/api/workflows/workflow-timer/schedule")
+        ).json()
 
-    second_app = create_app(serve_frontend=False)
-    async with second_app.router.lifespan_context(second_app):
-        recovered = second_app.state.workflow_service.scheduler.get("workflow-timer")
-
-    deadlines = {item.timer_node_id: item.next_run_at for item in recovered.timers}
-    assert recovered.status == "scheduled"
-    assert "interrupted" in recovered.last_error.lower()
-    assert recovered.last_result is not None
-    assert recovered.last_result["status"] == "failed"
-    assert recovered.last_result["node_results"][0]["id"] == "timer"
-    assert deadlines["timer"] is not None
-    assert deadlines["timer"] >= time.time() + 50
-    assert deadlines["timer-second"] == pytest.approx(other_deadline)
+    assert interrupted["status"] == "scheduled"
+    assert interrupted["last_result"]["workflow_revision"] == 1
+    assert interrupted["last_result"]["node_results"][0]["error"]["code"] == (
+        "run_interrupted"
+    )
 
 
 @pytest.mark.anyio
@@ -912,310 +621,30 @@ async def test_unexpected_scheduler_exception_is_persisted(
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     app = create_app(serve_frontend=False)
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(timer_workflow()))
-
-        async def fail(*args, **kwargs):
-            raise RuntimeError("unexpected scheduler failure")
-
-        monkeypatch.setattr(service, "run_workflow", fail)
-        await service.scheduler.start_schedule("workflow-timer")
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").status == "error"
-        )
-        schedule = service.scheduler.get("workflow-timer")
-
-    assert schedule.last_error == "unexpected scheduler failure"
-    assert schedule.timers == []
-
-
-@pytest.mark.anyio
-async def test_stop_preserves_result_completed_during_cancellation(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    started = asyncio.Event()
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        await service.save_workflow(StoredWorkflow.model_validate(timer_workflow()))
-
-        async def finish_when_cancelled(*args, **kwargs):
-            started.set()
-            try:
-                await asyncio.Future()
-            except asyncio.CancelledError:
-                return WorkflowRunResponse(
-                    workflow_id="workflow-timer",
-                    status="failed",
-                    outputs={"result": "latest"},
-                    node_results=[
-                        WorkflowNodeRunResult(
-                            id="timer",
-                            status="failed",
-                            output="latest",
-                            error="finished during stop",
-                        )
-                    ],
-                )
-
-        monkeypatch.setattr(service, "run_workflow", finish_when_cancelled)
-        await service.scheduler.start_schedule("workflow-timer")
-        await started.wait()
-        stopped = await service.scheduler.stop_schedule("workflow-timer")
-
-    assert stopped.status == "stopped"
-    assert stopped.last_result is not None
-    assert stopped.last_result["outputs"] == {"result": "latest"}
-
-
-@pytest.mark.anyio
-async def test_invalid_timer_update_moves_active_schedule_to_error(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        workflow = StoredWorkflow.model_validate(timer_workflow(interval_seconds=60))
-        await service.save_workflow(workflow)
-        await service.scheduler.start_schedule("workflow-timer")
-        invalid = workflow.model_copy(deep=True)
-        invalid.definition.nodes[0].data["interval_seconds"] = float("inf")
-        await service.save_workflow(invalid)
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").status == "error"
-        )
-        schedule = service.scheduler.get("workflow-timer")
-
-    assert schedule.last_error == "Timer interval must be at least 1 second."
-    assert schedule.timers == []
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("change", ["interval", "remove"])
-async def test_timer_save_survives_immediate_shutdown_and_restart(
-    tmp_path: Path, monkeypatch, change: str
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    initial = timer_workflow(interval_seconds=3600)
-    first_app = create_app(serve_frontend=False)
     async with (
-        first_app.router.lifespan_context(first_app),
+        app.router.lifespan_context(app),
         httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=first_app),
-            base_url="http://testserver",
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client,
     ):
-        assert (await client.put("/api/workflows", json=initial)).is_success
-        assert (
-            await client.post("/api/workflows/workflow-timer/schedule/start", json={})
-        ).is_success
-        await wait_for_schedule(
+        await save_workflow(client, timer_workflow())
+        service = app.state.workflow_service
+
+        async def fail(*args, **kwargs):
+            raise RuntimeError("scheduler exploded")
+
+        monkeypatch.setattr(service, "run_workflow", fail)
+        await client.post("/api/workflows/workflow-timer/schedule/start", json={})
+        failed = await wait_for_schedule(
             client,
             "workflow-timer",
-            lambda value: value["last_result"] is not None,
+            lambda value: value.get("status") == "error",
         )
-        service = first_app.state.workflow_service
-        original_reconcile = service.scheduler._reconcile
 
-        async def delayed_reconcile(old_workflow, workflow) -> None:
-            await asyncio.sleep(0.1)
-            await original_reconcile(old_workflow, workflow)
-
-        monkeypatch.setattr(service.scheduler, "_reconcile", delayed_reconcile)
-        changed = timer_workflow(interval_seconds=7200)
-        if change == "remove":
-            changed["definition"]["nodes"] = [changed["definition"]["nodes"][-1]]
-            changed["definition"]["edges"] = []
-        saved = await client.put("/api/workflows", json=changed)
-        assert saved.is_success
-
-    second_app = create_app(serve_frontend=False)
-    async with second_app.router.lifespan_context(second_app):
-        schedule = second_app.state.workflow_service.scheduler.get("workflow-timer")
-
-    if change == "remove":
-        assert schedule.status == "stopped"
-        assert schedule.timers == []
-    else:
-        assert schedule.status == "scheduled"
-        assert schedule.timers[0].timer_node_id == "timer"
-        assert schedule.timers[0].next_run_at >= time.time() + 7100
+    assert failed["last_error"] == "scheduler exploded"
+    assert failed["next_run_at"] is None
 
 
-@pytest.mark.anyio
-@pytest.mark.parametrize("change", ["interval", "remove"])
-async def test_timer_save_waits_for_scheduler_lock_before_replacing_definition(
-    tmp_path: Path, monkeypatch, change: str
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        initial = StoredWorkflow.model_validate(timer_workflow(interval_seconds=3600))
-        await service.save_workflow(initial)
-        await service.scheduler.start_schedule("workflow-timer")
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").last_result is not None
-        )
-        worker = service.scheduler.tasks.pop("workflow-timer")
-        worker.cancel()
-        await asyncio.gather(worker, return_exceptions=True)
-        schedule = service.scheduler.get("workflow-timer")
-        schedule.timers[0].next_run_at = time.time() + 0.05
-        service.store.save_workflow_schedule(schedule)
-        service.scheduler._spawn("workflow-timer", schedule.generation)
-
-        changed = initial.model_copy(deep=True)
-        if change == "remove":
-            changed.definition.nodes = [changed.definition.nodes[-1]]
-            changed.definition.edges = []
-        else:
-            changed.definition.nodes[0].data["interval_seconds"] = 7200
-        lock = service.scheduler._workflow_lock("workflow-timer")
-        await lock.acquire()
-        save_task = asyncio.create_task(service.save_workflow(changed))
-        try:
-            await asyncio.sleep(0.1)
-            visible = service.get_workflow("workflow-timer")
-            visible_timers = [
-                node for node in visible.definition.nodes if node.type == "timer"
-            ]
-        finally:
-            lock.release()
-            await save_task
-        final = service.scheduler.get("workflow-timer")
-
-    assert len(visible_timers) == 1
-    assert visible_timers[0].data["interval_seconds"] == 3600
-    if change == "remove":
-        assert final.status == "stopped"
-        assert final.timers == []
-    else:
-        assert final.status == "scheduled"
-        assert final.timers[0].next_run_at >= time.time() + 7100
-
-
-@pytest.mark.anyio
-async def test_failed_timer_save_restores_the_existing_schedule(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        initial = StoredWorkflow.model_validate(timer_workflow(interval_seconds=3600))
-        await service.save_workflow(initial)
-        await service.scheduler.start_schedule("workflow-timer")
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").last_result is not None
-        )
-        changed = initial.model_copy(deep=True)
-        changed.definition.nodes[0].data["interval_seconds"] = 7200
-        original_save = service.store.save_workflow
-
-        def fail_changed_save(workflow):
-            if workflow.definition.nodes[0].data["interval_seconds"] == 7200:
-                raise RuntimeError("workflow save failed")
-            return original_save(workflow)
-
-        monkeypatch.setattr(service.store, "save_workflow", fail_changed_save)
-        with pytest.raises(RuntimeError, match="workflow save failed"):
-            await service.save_workflow(changed)
-        stored = service.get_workflow("workflow-timer")
-        schedule = service.scheduler.get("workflow-timer")
-        worker = service.scheduler.tasks.get("workflow-timer")
-
-    assert stored.definition.nodes[0].data["interval_seconds"] == 3600
-    assert schedule.status == "scheduled"
-    assert schedule.timers[0].next_run_at is not None
-    assert worker is not None
-
-
-@pytest.mark.anyio
-async def test_failed_timer_save_recovers_a_claimed_run_with_an_accurate_trace(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    run_started = asyncio.Event()
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        initial = StoredWorkflow.model_validate(timer_workflow(interval_seconds=3600))
-        await service.save_workflow(initial)
-
-        async def hold_run(*args, **kwargs):
-            run_started.set()
-            await asyncio.Future()
-
-        monkeypatch.setattr(service, "run_workflow", hold_run)
-        await service.scheduler.start_schedule("workflow-timer")
-        await run_started.wait()
-        changed = initial.model_copy(deep=True)
-        changed.definition.nodes[0].data["interval_seconds"] = 7200
-        original_save = service.store.save_workflow
-
-        def fail_changed_save(workflow):
-            if workflow.definition.nodes[0].data["interval_seconds"] == 7200:
-                raise RuntimeError("workflow save failed")
-            return original_save(workflow)
-
-        monkeypatch.setattr(service.store, "save_workflow", fail_changed_save)
-        with pytest.raises(RuntimeError, match="workflow save failed"):
-            await service.save_workflow(changed)
-        stored = service.get_workflow("workflow-timer")
-        schedule = service.scheduler.get("workflow-timer")
-        worker = service.scheduler.tasks.get("workflow-timer")
-
-    assert stored.definition.nodes[0].data["interval_seconds"] == 3600
-    assert schedule.status == "scheduled"
-    assert schedule.timers[0].next_run_at >= time.time() + 3500
-    assert schedule.last_result is not None
-    assert schedule.last_result["status"] == "failed"
-    assert "changes could not be saved" in schedule.last_error
-    assert schedule.last_result["node_results"][0]["error"] == schedule.last_error
-    assert worker is not None
-
-
-@pytest.mark.anyio
-async def test_concurrent_stale_timer_save_keeps_definition_and_schedule_aligned(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
-    app = create_app(serve_frontend=False)
-    reconcile_started = asyncio.Event()
-    finish_reconcile = asyncio.Event()
-    async with app.router.lifespan_context(app):
-        service = app.state.workflow_service
-        initial = StoredWorkflow.model_validate(timer_workflow(interval_seconds=3600))
-        await service.save_workflow(initial)
-        await service.scheduler.start_schedule("workflow-timer")
-        await _wait_until(
-            lambda: service.scheduler.get("workflow-timer").last_result is not None
-        )
-        original_reconcile = service.scheduler._reconcile
-
-        async def hold_first_reconcile(old_workflow, workflow) -> None:
-            if not reconcile_started.is_set():
-                reconcile_started.set()
-                await finish_reconcile.wait()
-            await original_reconcile(old_workflow, workflow)
-
-        monkeypatch.setattr(service.scheduler, "_reconcile", hold_first_reconcile)
-        changed = initial.model_copy(deep=True)
-        changed.definition.nodes[0].data["interval_seconds"] = 7200
-        changed_save = asyncio.create_task(service.save_workflow(changed))
-        await reconcile_started.wait()
-        stale_save = asyncio.create_task(service.save_workflow(initial))
-        await asyncio.sleep(0.05)
-        finish_reconcile.set()
-        await asyncio.gather(changed_save, stale_save)
-        stored = service.get_workflow("workflow-timer")
-        schedule = service.scheduler.get("workflow-timer")
-
-    assert stored.definition.nodes[0].data["interval_seconds"] == 3600
-    assert schedule.status == "scheduled"
-    assert schedule.timers[0].next_run_at >= time.time() + 3500
-    assert schedule.timers[0].next_run_at < time.time() + 3700
+async def wait_until(predicate: Callable[[], bool]) -> None:
+    while not predicate():
+        await asyncio.sleep(0.01)

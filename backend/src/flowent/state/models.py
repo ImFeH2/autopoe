@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, PositiveInt
 
 from flowent.llm import ChatMessage, ProviderFormat, ReasoningEffort
 from flowent.usage import TokenUsageInfo
@@ -76,50 +76,231 @@ class StoredWritablePath(BaseModel):
 class StoredWorkflowNodePosition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    x: float = 0
-    y: float = 0
+    x: FiniteFloat
+    y: FiniteFloat
 
 
-class StoredWorkflowNode(BaseModel):
+class WorkflowInputNodeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    data: dict[str, object] = Field(default_factory=dict)
-    description: str = ""
+    default_value: str = ""
+    input_type: Literal["text", "json", "file"] = "text"
+
+
+class WorkflowAgentNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent: Literal["Default agent"] = "Default agent"
+    prompt: str = ""
+
+
+class WorkflowMergeNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    merge_strategy: Literal["text", "json"] = "text"
+
+
+class WorkflowCodeNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = ""
+
+
+class WorkflowTimerNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cron: str = ""
+    interval_seconds: FiniteFloat = 5
+    mode: Literal["interval", "cron"] = "interval"
+    payload: str = ""
+
+
+class WorkflowOutputNodeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    output_key: str = ""
+    transform: str = ""
+
+
+class WorkflowInputNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkflowInputNodeConfig
+    id: str
+    kind: Literal["input"]
+
+
+class WorkflowAgentNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkflowAgentNodeConfig
+    id: str
+    kind: Literal["agent"]
+
+
+class WorkflowMergeNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkflowMergeNodeConfig
+    id: str
+    kind: Literal["merge"]
+
+
+class WorkflowCodeNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkflowCodeNodeConfig
+    id: str
+    kind: Literal["code"]
+
+
+class WorkflowTimerNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkflowTimerNodeConfig
+    id: str
+    kind: Literal["timer"]
+
+
+class WorkflowOutputNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkflowOutputNodeConfig
+    id: str
+    kind: Literal["output"]
+
+
+StoredWorkflowNode = Annotated[
+    WorkflowInputNode
+    | WorkflowAgentNode
+    | WorkflowMergeNode
+    | WorkflowCodeNode
+    | WorkflowTimerNode
+    | WorkflowOutputNode,
+    Field(discriminator="kind"),
+]
+
+
+class StoredWorkflowConnectionEnd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    port: Literal["input", "output"]
+
+
+class StoredWorkflowConnection(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, serialize_by_alias=True
+    )
+
+    from_: StoredWorkflowConnectionEnd = Field(alias="from")
+    id: str
+    to: StoredWorkflowConnectionEnd
+
+
+class StoredWorkflowSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connections: list[StoredWorkflowConnection]
+    nodes: list[StoredWorkflowNode] = Field(default_factory=list)
+
+
+class StoredWorkflowNodePresentation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str
+    name: str
+    position: StoredWorkflowNodePosition
+
+
+class StoredWorkflowConnectionPresentation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+
+
+class StoredWorkflowPresentation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connections: dict[str, StoredWorkflowConnectionPresentation]
+    nodes: dict[str, StoredWorkflowNodePresentation]
+
+
+class WorkflowDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     name: str
-    position: StoredWorkflowNodePosition = Field(
-        default_factory=StoredWorkflowNodePosition
-    )
-    type: Literal["input", "agent", "merge", "code", "timer", "output"]
+    presentation: StoredWorkflowPresentation
+    spec: StoredWorkflowSpec
 
 
-class StoredWorkflowEdge(BaseModel):
+class WorkflowSaveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str
-    label: str = ""
-    source: str
-    source_handle: str = ""
-    target: str
-    target_handle: str = ""
-
-
-class StoredWorkflowDefinition(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    edges: list[StoredWorkflowEdge] = Field(default_factory=list)
-    nodes: list[StoredWorkflowNode] = Field(default_factory=list)
-    version: int = 1
+    base_revision: int | None
+    workflow: WorkflowDraft
 
 
 class StoredWorkflow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    active_revision: int | None
     created_at: int = 0
-    definition: StoredWorkflowDefinition
     id: str
     name: str
+    presentation: StoredWorkflowPresentation
+    revision: PositiveInt
+    spec: StoredWorkflowSpec
     updated_at: int = 0
+
+
+class StoredWorkflowRevision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: int = 0
+    revision: PositiveInt
+    spec: StoredWorkflowSpec
+    workflow_id: str
+
+
+class StoredWorkflowRunInputs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_input: str = ""
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+class StoredWorkflowRunNodeError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+
+
+class StoredWorkflowRunNodeResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    error: StoredWorkflowRunNodeError | None = None
+    id: str
+    inputs: list[str] = Field(default_factory=list)
+    output: str = ""
+    status: Literal["failed", "pending", "running", "success"]
+
+
+class StoredWorkflowRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: int = 0
+    inputs: StoredWorkflowRunInputs
+    node_results: list[StoredWorkflowRunNodeResult] = Field(default_factory=list)
+    outputs: dict[str, str] = Field(default_factory=dict)
+    run_id: str
+    status: Literal["failed", "success"]
+    trigger: Literal["manual", "schedule"]
+    updated_at: int = 0
+    workflow_id: str
+    workflow_revision: PositiveInt
 
 
 class StoredWorkflowScheduleTimer(BaseModel):
@@ -138,6 +319,10 @@ class StoredWorkflowSchedule(BaseModel):
     last_error: str = ""
     last_result: dict[str, object] | None = None
     last_run_at: float | None = None
+    running_revision: PositiveInt | None = None
+    running_run_id: str = ""
+    running_timer_node_id: str = ""
+    scheduled_revision: PositiveInt | None = None
     status: Literal["stopped", "scheduled", "running", "error"] = "stopped"
     timers: list[StoredWorkflowScheduleTimer] = Field(default_factory=list)
     timezone: str = "UTC"

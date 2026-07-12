@@ -8,13 +8,14 @@ import type {
   TelegramBot,
   TelegramSession,
   Workflow,
-  WorkflowDefinition,
+  WorkflowConnection,
   WorkflowEdge,
   WorkflowNode,
   WorkflowNodeRunResult,
   WorkflowRunRequest,
   WorkflowRunResult,
   WorkflowSchedule,
+  WorkflowSpec,
 } from "@/components/flowent/types";
 
 export type ApiProvider = {
@@ -86,43 +87,64 @@ export type ApiWritablePath = {
 };
 
 export type ApiWorkflowNode = {
-  data: Record<string, unknown>;
-  description: string;
+  config: Record<string, unknown>;
   id: string;
-  name: string;
-  position: {
-    x: number;
-    y: number;
-  };
-  type: WorkflowNode["type"];
+  kind: WorkflowNode["kind"];
 };
 
-export type ApiWorkflowEdge = {
-  id: string;
-  label: string;
-  source: string;
-  source_handle: string;
-  target: string;
-  target_handle: string;
+export type ApiWorkflowConnectionEnd = {
+  node_id: string;
+  port: "input" | "output";
 };
 
-export type ApiWorkflowDefinition = {
-  edges: ApiWorkflowEdge[];
+export type ApiWorkflowConnection = {
+  from: ApiWorkflowConnectionEnd;
+  id: string;
+  to: ApiWorkflowConnectionEnd;
+};
+
+export type ApiWorkflowSpec = {
+  connections: ApiWorkflowConnection[];
   nodes: ApiWorkflowNode[];
-  version: number;
+};
+
+export type ApiWorkflowPresentation = {
+  connections: Record<string, { label: string }>;
+  nodes: Record<
+    string,
+    {
+      description: string;
+      name: string;
+      position: { x: number; y: number };
+    }
+  >;
 };
 
 export type ApiWorkflow = {
+  active_revision: number | null;
   created_at: number;
-  definition: ApiWorkflowDefinition;
   id: string;
   name: string;
+  presentation: ApiWorkflowPresentation;
+  revision: number;
+  spec: ApiWorkflowSpec;
   updated_at: number;
 };
 
+export type ApiWorkflowDraft = Pick<
+  ApiWorkflow,
+  "id" | "name" | "presentation" | "spec"
+>;
+
+export type ApiWorkflowSaveRequest = {
+  base_revision: number | null;
+  workflow: ApiWorkflowDraft;
+};
+
 export type ApiWorkflowNodeRunResult = {
-  error: string;
+  error: { code: string; message: string } | null;
   id: string;
+  inputs: string[];
   output: string;
   status: WorkflowNodeRunResult["status"];
 };
@@ -130,13 +152,17 @@ export type ApiWorkflowNodeRunResult = {
 export type ApiWorkflowRunResult = {
   node_results: ApiWorkflowNodeRunResult[];
   outputs: Record<string, string>;
+  run_id: string;
   status: WorkflowRunResult["status"];
+  trigger: WorkflowRunResult["trigger"];
   workflow_id: string;
+  workflow_revision: number;
 };
 
 export type ApiWorkflowRunRequest = {
   input?: string;
   inputs?: Record<string, string>;
+  workflow_revision?: number;
 };
 
 export type ApiWorkflowSchedule = {
@@ -188,6 +214,7 @@ export type RequestResult<T> =
   | {
       data: null;
       error: string;
+      latest?: T;
     };
 
 export type WorkspaceMessageEditResponse = {
@@ -196,7 +223,8 @@ export type WorkspaceMessageEditResponse = {
 };
 
 export type DomainWorkflow = Workflow;
-export type DomainWorkflowDefinition = WorkflowDefinition;
+export type DomainWorkflowConnection = WorkflowConnection;
 export type DomainWorkflowEdge = WorkflowEdge;
 export type DomainWorkflowNode = WorkflowNode;
 export type DomainWorkflowRunRequest = WorkflowRunRequest;
+export type DomainWorkflowSpec = WorkflowSpec;

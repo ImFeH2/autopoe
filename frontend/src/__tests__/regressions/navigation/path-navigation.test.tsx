@@ -5,31 +5,41 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 
 const workflow = {
+  active_revision: null,
   created_at: 1,
-  definition: {
-    edges: [],
-    nodes: [
-      {
-        data: { label: "Input" },
-        description: "",
-        id: "input",
-        name: "Input",
-        position: { x: 80, y: 120 },
-        type: "input",
-      },
-      {
-        data: { label: "Output" },
-        description: "",
-        id: "output",
-        name: "Output",
-        position: { x: 360, y: 120 },
-        type: "output",
-      },
-    ],
-    version: 1,
-  },
   id: "workflow-draft",
   name: "Draft Workflow",
+  presentation: {
+    connections: {},
+    nodes: {
+      input: {
+        description: "",
+        name: "Input",
+        position: { x: 80, y: 120 },
+      },
+      output: {
+        description: "",
+        name: "Output",
+        position: { x: 360, y: 120 },
+      },
+    },
+  },
+  revision: 1,
+  spec: {
+    connections: [],
+    nodes: [
+      {
+        config: { default_value: "", input_type: "text" },
+        id: "input",
+        kind: "input",
+      },
+      {
+        config: { output_key: "result", transform: "" },
+        id: "output",
+        kind: "output",
+      },
+    ],
+  },
   updated_at: 1,
 };
 

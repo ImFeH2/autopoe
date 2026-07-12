@@ -8,10 +8,40 @@ def migrate(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS workflows (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            definition TEXT NOT NULL,
+            spec TEXT NOT NULL,
+            presentation TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            active_revision INTEGER,
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
             updated_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
+
+        CREATE TABLE IF NOT EXISTS workflow_revisions (
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            revision INTEGER NOT NULL,
+            spec TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY (workflow_id, revision)
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+            run_id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            workflow_revision INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            inputs TEXT NOT NULL DEFAULT '{}',
+            node_results TEXT NOT NULL DEFAULT '[]',
+            outputs TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            FOREIGN KEY (workflow_id, workflow_revision)
+                REFERENCES workflow_revisions(workflow_id, revision)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS workflow_runs_workflow_created
+        ON workflow_runs(workflow_id, created_at DESC);
 
         CREATE TABLE IF NOT EXISTS workflow_agent_histories (
             workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
@@ -25,6 +55,10 @@ def migrate(connection: sqlite3.Connection) -> None:
             workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
             status TEXT NOT NULL DEFAULT 'stopped',
             generation INTEGER NOT NULL DEFAULT 0,
+            scheduled_revision INTEGER,
+            running_revision INTEGER,
+            running_run_id TEXT NOT NULL DEFAULT '',
+            running_timer_node_id TEXT NOT NULL DEFAULT '',
             default_input TEXT NOT NULL DEFAULT '',
             inputs TEXT NOT NULL DEFAULT '{}',
             timezone TEXT NOT NULL DEFAULT 'UTC',
@@ -221,6 +255,12 @@ def migrate(connection: sqlite3.Connection) -> None:
     if not migration_version_exists(connection, 2):
         migrate_tool_result_items(connection)
         connection.execute("INSERT INTO schema_migrations (version) VALUES (2)")
+    if not migration_version_exists(connection, 3):
+        migrate_workflow_contract(connection)
+        connection.execute("INSERT INTO schema_migrations (version) VALUES (3)")
+    if not migration_version_exists(connection, 4):
+        migrate_workflow_schedule_state(connection)
+        connection.execute("INSERT INTO schema_migrations (version) VALUES (4)")
 
 
 def table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
@@ -235,6 +275,108 @@ def migration_version_exists(connection: sqlite3.Connection, version: int) -> bo
         ).fetchone()
         is not None
     )
+
+
+def migrate_workflow_contract(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        DROP TABLE IF EXISTS workflow_schedule_timers;
+        DROP TABLE IF EXISTS workflow_schedules;
+        DROP TABLE IF EXISTS workflow_runs;
+        DROP TABLE IF EXISTS workflow_revisions;
+        DROP TABLE IF EXISTS workflow_agent_histories;
+        DROP TABLE IF EXISTS workflows;
+
+        CREATE TABLE workflows (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            spec TEXT NOT NULL,
+            presentation TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            active_revision INTEGER,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+
+        CREATE TABLE workflow_revisions (
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            revision INTEGER NOT NULL,
+            spec TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY (workflow_id, revision)
+        );
+
+        CREATE TABLE workflow_runs (
+            run_id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            workflow_revision INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            inputs TEXT NOT NULL DEFAULT '{}',
+            node_results TEXT NOT NULL DEFAULT '[]',
+            outputs TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            FOREIGN KEY (workflow_id, workflow_revision)
+                REFERENCES workflow_revisions(workflow_id, revision)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX workflow_runs_workflow_created
+        ON workflow_runs(workflow_id, created_at DESC);
+
+        CREATE TABLE workflow_agent_histories (
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            node_id TEXT NOT NULL,
+            messages TEXT NOT NULL DEFAULT '[]',
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY (workflow_id, node_id)
+        );
+
+        CREATE TABLE workflow_schedules (
+            workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'stopped',
+            generation INTEGER NOT NULL DEFAULT 0,
+            scheduled_revision INTEGER,
+            running_revision INTEGER,
+            running_run_id TEXT NOT NULL DEFAULT '',
+            running_timer_node_id TEXT NOT NULL DEFAULT '',
+            default_input TEXT NOT NULL DEFAULT '',
+            inputs TEXT NOT NULL DEFAULT '{}',
+            timezone TEXT NOT NULL DEFAULT 'UTC',
+            last_run_at REAL,
+            last_result TEXT,
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+
+        CREATE TABLE workflow_schedule_timers (
+            workflow_id TEXT NOT NULL REFERENCES workflow_schedules(workflow_id) ON DELETE CASCADE,
+            timer_node_id TEXT NOT NULL,
+            next_run_at REAL,
+            PRIMARY KEY (workflow_id, timer_node_id)
+        );
+
+        CREATE INDEX workflow_schedule_timers_next_run
+        ON workflow_schedule_timers(next_run_at);
+        """
+    )
+
+
+def migrate_workflow_schedule_state(connection: sqlite3.Connection) -> None:
+    columns = table_columns(connection, "workflow_schedules")
+    additions = {
+        "scheduled_revision": "INTEGER",
+        "running_revision": "INTEGER",
+        "running_run_id": "TEXT NOT NULL DEFAULT ''",
+        "running_timer_node_id": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE workflow_schedules ADD COLUMN {name} {definition}"
+            )
 
 
 def migrate_tool_result_items(connection: sqlite3.Connection) -> None:

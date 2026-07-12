@@ -71,6 +71,33 @@ def test_auto_compact_env_limit_overrides_context_window_ratio(monkeypatch) -> N
     assert should_auto_compact(messages, context_window=400_000)
 
 
+def test_auto_compact_env_limit_applies_to_compactable_messages(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", "100")
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "description": "A" * 1_600,
+                "name": "large_tool",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
+
+    assert not should_auto_compact(
+        [ChatMessage(role="user", content="small")],
+        context_window=400_000,
+        tools=tools,
+    )
+    assert should_auto_compact(
+        [ChatMessage(role="user", content="A" * 400)],
+        context_window=400_000,
+        tools=tools,
+    )
+
+
 def test_auto_compact_includes_tool_schemas(monkeypatch) -> None:
     monkeypatch.delenv("FLOWENT_AUTO_COMPACT_TOKEN_LIMIT", raising=False)
     messages = [ChatMessage(role="user", content="small")]

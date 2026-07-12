@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from flowent.storage import StoredWorkflow
+from flowent.state.models import (
+    WorkflowAgentNodeConfig,
+    WorkflowCodeNodeConfig,
+    WorkflowInputNodeConfig,
+    WorkflowMergeNodeConfig,
+    WorkflowOutputNodeConfig,
+    WorkflowTimerNodeConfig,
+)
+from flowent.storage import (
+    StoredWorkflow,
+    WorkflowDraft,
+    WorkflowRevisionConflictError,
+)
 from flowent.tools import ToolResult, text_tool_result
 from flowent.workflows import WorkflowRunResponse
 
@@ -17,151 +29,210 @@ if TYPE_CHECKING:
 MAX_WORKFLOW_TOOL_DEPTH = 3
 
 
+class StewardWorkflowNodeBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str
+    id: str
+    name: str
+
+
+class StewardInputNode(StewardWorkflowNodeBase):
+    config: WorkflowInputNodeConfig
+    kind: Literal["input"]
+
+
+class StewardAgentNode(StewardWorkflowNodeBase):
+    config: WorkflowAgentNodeConfig
+    kind: Literal["agent"]
+
+
+class StewardMergeNode(StewardWorkflowNodeBase):
+    config: WorkflowMergeNodeConfig
+    kind: Literal["merge"]
+
+
+class StewardCodeNode(StewardWorkflowNodeBase):
+    config: WorkflowCodeNodeConfig
+    kind: Literal["code"]
+
+
+class StewardTimerNode(StewardWorkflowNodeBase):
+    config: WorkflowTimerNodeConfig
+    kind: Literal["timer"]
+
+
+class StewardOutputNode(StewardWorkflowNodeBase):
+    config: WorkflowOutputNodeConfig
+    kind: Literal["output"]
+
+
+StewardWorkflowNode = Annotated[
+    StewardInputNode
+    | StewardAgentNode
+    | StewardMergeNode
+    | StewardCodeNode
+    | StewardTimerNode
+    | StewardOutputNode,
+    Field(discriminator="kind"),
+]
+
+
+class StewardWorkflowConnectionEnd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    port: Literal["input", "output"]
+
+
+class StewardWorkflowConnection(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, serialize_by_alias=True
+    )
+
+    from_: StewardWorkflowConnectionEnd = Field(alias="from")
+    id: str = ""
+    label: str = ""
+    to: StewardWorkflowConnectionEnd
+
+
+class StewardWorkflow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connections: list[StewardWorkflowConnection]
+    name: str
+    nodes: list[StewardWorkflowNode]
+
+
+def strict_parameters(properties: dict[str, object], required: list[str]):
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
 def workflow_tool_specs() -> list[dict[str, object]]:
-    workflow_schema: dict[str, object] = {"type": "object"}
+    workflow_schema = compact_json_schema(StewardWorkflow.model_json_schema())
+    string_map_schema = {
+        "type": "object",
+        "additionalProperties": {"type": "string"},
+    }
     return [
-        {
-            "type": "function",
-            "function": {
-                "name": "list_workflows",
-                "description": "List saved workflows with their ids, names, node counts, and edge counts.",
-                "parameters": {"type": "object", "properties": {}},
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_workflow",
-                "description": "Read a saved workflow definition by id before answering questions or editing it.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"workflow_id": {"type": "string"}},
-                    "required": ["workflow_id"],
+        tool_spec(
+            "list_workflows",
+            "List saved workflows with their ids, names, node counts, and connection counts.",
+            strict_parameters({}, []),
+        ),
+        tool_spec(
+            "get_workflow",
+            "Read a saved workflow by id before answering questions or editing it.",
+            strict_parameters({"workflow_id": {"type": "string"}}, ["workflow_id"]),
+        ),
+        tool_spec(
+            "get_workflow_run",
+            "Read a workflow run by id with its complete trace and the immutable revision spec that was executed.",
+            strict_parameters({"run_id": {"type": "string"}}, ["run_id"]),
+        ),
+        tool_spec(
+            "run_workflow",
+            "Run the active content of a saved workflow once. For a Timer workflow, use start_workflow_schedule instead.",
+            strict_parameters(
+                {
+                    "workflow_id": {"type": "string"},
+                    "workflow_revision": {"type": "integer", "minimum": 1},
+                    "input": {"type": "string"},
+                    "inputs": string_map_schema,
                 },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "run_workflow",
-                "description": "Run a saved workflow once. For a Timer workflow, use start_workflow_schedule instead.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": {"type": "string"},
-                        "input": {"type": "string"},
-                        "inputs": {
-                            "type": "object",
-                            "additionalProperties": {"type": "string"},
-                        },
-                    },
-                    "required": ["workflow_id"],
+                ["workflow_id"],
+            ),
+        ),
+        tool_spec(
+            "start_workflow_schedule",
+            "Start or restart a Timer workflow schedule.",
+            strict_parameters(
+                {
+                    "workflow_id": {"type": "string"},
+                    "workflow_revision": {"type": "integer", "minimum": 1},
+                    "input": {"type": "string"},
+                    "inputs": string_map_schema,
+                    "timezone": {"type": "string"},
                 },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "start_workflow_schedule",
-                "description": "Start or restart a Timer workflow schedule.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": {"type": "string"},
-                        "input": {"type": "string"},
-                        "inputs": {
-                            "type": "object",
-                            "additionalProperties": {"type": "string"},
-                        },
-                        "timezone": {"type": "string"},
-                    },
-                    "required": ["workflow_id"],
+                ["workflow_id"],
+            ),
+        ),
+        tool_spec(
+            "stop_workflow_schedule",
+            "Stop a Timer workflow schedule.",
+            strict_parameters({"workflow_id": {"type": "string"}}, ["workflow_id"]),
+        ),
+        tool_spec(
+            "get_workflow_schedule",
+            "Get the current Timer workflow schedule and latest run trace.",
+            strict_parameters({"workflow_id": {"type": "string"}}, ["workflow_id"]),
+        ),
+        tool_spec(
+            "create_workflow",
+            "Create a complete workflow with semantic nodes and canonical connections.",
+            strict_parameters({"workflow": workflow_schema}, ["workflow"]),
+        ),
+        tool_spec(
+            "update_workflow",
+            "Replace a complete workflow after reading its latest revision.",
+            strict_parameters(
+                {
+                    "workflow_id": {"type": "string"},
+                    "base_revision": {"type": "integer", "minimum": 1},
+                    "workflow": workflow_schema,
                 },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "stop_workflow_schedule",
-                "description": "Stop a Timer workflow schedule.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"workflow_id": {"type": "string"}},
-                    "required": ["workflow_id"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_workflow_schedule",
-                "description": "Get the current Timer workflow schedule and latest run trace.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"workflow_id": {"type": "string"}},
-                    "required": ["workflow_id"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_workflow",
-                "description": "Create a workflow. workflow must include id, name, and definition with version, nodes, and edges.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"workflow": workflow_schema},
-                    "required": ["workflow"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "update_workflow",
-                "description": "Replace an existing workflow. Read it first and provide the complete updated workflow object.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"workflow": workflow_schema},
-                    "required": ["workflow"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "delete_workflow",
-                "description": "Delete a saved workflow by id after the user clearly asks to remove it. List workflows first when the name is ambiguous.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"workflow_id": {"type": "string"}},
-                    "required": ["workflow_id"],
-                },
-            },
-        },
+                ["workflow_id", "base_revision", "workflow"],
+            ),
+        ),
+        tool_spec(
+            "delete_workflow",
+            "Delete a saved workflow by id after the user clearly asks to remove it. List workflows first when the name is ambiguous.",
+            strict_parameters({"workflow_id": {"type": "string"}}, ["workflow_id"]),
+        ),
     ]
 
 
+def compact_json_schema(value):
+    if isinstance(value, dict):
+        return {
+            key: compact_json_schema(item)
+            for key, item in value.items()
+            if key not in {"default", "title"}
+        }
+    if isinstance(value, list):
+        return [compact_json_schema(item) for item in value]
+    return value
+
+
+def tool_spec(name: str, description: str, parameters: dict[str, object]):
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+        },
+    }
+
+
 def workflow_tool_title(name: str) -> str | None:
-    if name == "list_workflows":
-        return "Listing workflows"
-    if name == "get_workflow":
-        return "Reading workflow"
-    if name == "run_workflow":
-        return "Running workflow"
-    if name == "start_workflow_schedule":
-        return "Starting workflow schedule"
-    if name == "stop_workflow_schedule":
-        return "Stopping workflow schedule"
-    if name == "get_workflow_schedule":
-        return "Reading workflow schedule"
-    if name == "create_workflow":
-        return "Creating workflow"
-    if name == "update_workflow":
-        return "Updating workflow"
-    if name == "delete_workflow":
-        return "Deleting workflow"
-    return None
+    return {
+        "list_workflows": "Listing workflows",
+        "get_workflow": "Reading workflow",
+        "get_workflow_run": "Reading workflow run",
+        "run_workflow": "Running workflow",
+        "start_workflow_schedule": "Starting workflow schedule",
+        "stop_workflow_schedule": "Stopping workflow schedule",
+        "get_workflow_schedule": "Reading workflow schedule",
+        "create_workflow": "Creating workflow",
+        "update_workflow": "Updating workflow",
+        "delete_workflow": "Deleting workflow",
+    }.get(name)
 
 
 class WorkflowAgentTools:
@@ -180,6 +251,8 @@ class WorkflowAgentTools:
                 return self.list_workflows()
             if name == "get_workflow":
                 return self.get_workflow(arguments)
+            if name == "get_workflow_run":
+                return self.get_workflow_run(arguments)
             if name == "run_workflow":
                 return await self.run_workflow(arguments)
             if name == "start_workflow_schedule":
@@ -194,6 +267,8 @@ class WorkflowAgentTools:
                 return await self.update_workflow(arguments)
             if name == "delete_workflow":
                 return await self.delete_workflow(arguments)
+        except WorkflowRevisionConflictError as error:
+            return workflow_conflict_result(error.workflow, title)
         except Exception as error:
             return ToolResult(
                 result=text_tool_result(str(error) or "Workflow tool failed."),
@@ -205,13 +280,14 @@ class WorkflowAgentTools:
     def list_workflows(self) -> ToolResult:
         workflows = self.service.list_workflows()
         summaries = [workflow_summary(workflow) for workflow in workflows]
-        if summaries:
-            output = "\n".join(
-                f"{summary['id']}: {summary['name']} ({summary['node_count']} nodes, {summary['edge_count']} edges)"
+        output = (
+            "\n".join(
+                f"{summary['id']}: {summary['name']} ({summary['node_count']} nodes, {summary['connection_count']} connections)"
                 for summary in summaries
             )
-        else:
-            output = "No workflows are saved."
+            if summaries
+            else "No workflows are saved."
+        )
         return ToolResult(
             result={
                 "type": "workflow_list",
@@ -226,16 +302,38 @@ class WorkflowAgentTools:
         summary = workflow_summary(workflow)
         output = (
             f"{workflow.name} has {summary['node_count']} nodes and "
-            f"{summary['edge_count']} edges."
+            f"{summary['connection_count']} connections."
         )
         return ToolResult(
             result={
-                "type": "workflow",
+                "type": "workflow_read",
                 "output": output,
                 "summary": summary,
-                "workflow": workflow.model_dump(mode="json"),
+                "workflow_id": workflow.id,
+                "base_revision": workflow.revision,
+                "workflow": steward_workflow_from_stored(workflow),
             },
             title=f"Read {workflow.name}",
+        )
+
+    def get_workflow_run(self, arguments: dict[str, object]) -> ToolResult:
+        run = self.service.store.read_workflow_run(str(arguments["run_id"]))
+        if run is None:
+            raise ValueError("Workflow run not found.")
+        revision = self.service.get_workflow_revision(
+            run.workflow_id, run.workflow_revision
+        )
+        return ToolResult(
+            result={
+                "type": "workflow_run_read",
+                "output": (
+                    f"Read workflow run {run.run_id} for revision "
+                    f"{run.workflow_revision}."
+                ),
+                "trace": run.model_dump(mode="json"),
+                "workflow_revision": revision.model_dump(mode="json", by_alias=True),
+            },
+            title="Read workflow run",
         )
 
     async def run_workflow(self, arguments: dict[str, object]) -> ToolResult:
@@ -247,49 +345,67 @@ class WorkflowAgentTools:
             workflow_id,
             default_input=string_argument(arguments, "input"),
             input_values=string_map_argument(arguments, "inputs"),
+            workflow_revision=positive_int_argument(arguments, "workflow_revision"),
             workflow_depth=self.workflow_depth + 1,
         )
         output = workflow_run_output(workflow.name, result)
-        return ToolResult(
-            result={
+        payload = result.model_dump(mode="json")
+        payload.update(
+            {
                 "type": "workflow_run",
-                "node_results": [
-                    node_result.model_dump(mode="json")
-                    for node_result in result.node_results
-                ],
                 "output": output,
-                "outputs": dict(result.outputs),
-                "status": result.status,
-                "workflow_id": workflow.id,
                 "workflow_name": workflow.name,
-            },
+            }
+        )
+        return ToolResult(
+            result=payload,
             ok=result.status == "success",
             title=f"Ran {workflow.name}",
         )
 
     async def create_workflow(self, arguments: dict[str, object]) -> ToolResult:
-        workflow = workflow_argument(arguments)
+        semantic = steward_workflow_argument(arguments)
+        workflow = workflow_draft_from_steward(
+            semantic,
+            workflow_id=str(uuid4()),
+        )
         saved = await self.service.save_workflow(
-            workflow.model_copy(update={"id": str(uuid4())})
+            workflow,
+            base_revision=None,
+            require_executable=True,
         )
         return saved_workflow_result(saved, "Created")
 
     async def update_workflow(self, arguments: dict[str, object]) -> ToolResult:
-        workflow = workflow_argument(arguments)
-        self.service.get_workflow(workflow.id)
-        saved = await self.service.save_workflow(workflow)
+        workflow_id = str(arguments["workflow_id"])
+        base_revision_value = arguments["base_revision"]
+        if isinstance(base_revision_value, bool) or not isinstance(
+            base_revision_value, int
+        ):
+            raise ValueError("base_revision must be an integer.")
+        base_revision = base_revision_value
+        current = self.service.get_workflow(workflow_id)
+        semantic = steward_workflow_argument(arguments)
+        workflow = workflow_draft_from_steward(
+            semantic,
+            workflow_id=workflow_id,
+            current=current,
+        )
+        saved = await self.service.save_workflow(
+            workflow,
+            base_revision=base_revision,
+            require_executable=True,
+        )
         return saved_workflow_result(saved, "Updated")
 
     async def delete_workflow(self, arguments: dict[str, object]) -> ToolResult:
         workflow_id = str(arguments["workflow_id"])
         workflow = await self.service.delete_workflow(workflow_id)
-        summary = workflow_summary(workflow)
-        output = f"Deleted {workflow.name}."
         return ToolResult(
             result={
                 "type": "workflow_delete",
-                "output": output,
-                "summary": summary,
+                "output": f"Deleted {workflow.name}.",
+                "summary": workflow_summary(workflow),
             },
             title=f"Deleted {workflow.name}",
         )
@@ -306,6 +422,7 @@ class WorkflowAgentTools:
             timezone=string_argument(arguments, "timezone")
             if "timezone" in arguments
             else None,
+            workflow_revision=positive_int_argument(arguments, "workflow_revision"),
         )
         return ToolResult(
             result=schedule_result(schedule), title="Started workflow schedule"
@@ -326,6 +443,143 @@ class WorkflowAgentTools:
         )
 
 
+def workflow_draft_from_steward(
+    workflow: StewardWorkflow,
+    *,
+    workflow_id: str,
+    current: StoredWorkflow | None = None,
+) -> WorkflowDraft:
+    current_positions = current.presentation.nodes if current else {}
+    current_connection_ids = (
+        {
+            (connection.from_.node_id, connection.to.node_id): connection.id
+            for connection in current.spec.connections
+        }
+        if current
+        else {}
+    )
+    resolved_connections = [
+        (
+            connection.id.strip()
+            or current_connection_ids.get(
+                (connection.from_.node_id, connection.to.node_id)
+            )
+            or str(uuid4()),
+            connection,
+        )
+        for connection in workflow.connections
+    ]
+    nodes = [
+        {
+            "id": node.id,
+            "kind": node.kind,
+            "config": node.config.model_dump(mode="json", exclude_none=True),
+        }
+        for node in workflow.nodes
+    ]
+    presentation_nodes = {}
+    for index, node in enumerate(workflow.nodes):
+        existing = current_positions.get(node.id)
+        position = (
+            existing.position.model_dump(mode="json")
+            if existing
+            else {"x": float(index * 260), "y": 0.0}
+        )
+        presentation_nodes[node.id] = {
+            "name": node.name,
+            "description": node.description,
+            "position": position,
+        }
+    return WorkflowDraft.model_validate(
+        {
+            "id": workflow_id,
+            "name": workflow.name,
+            "spec": {
+                "nodes": nodes,
+                "connections": [
+                    {
+                        "id": connection_id,
+                        "from": connection.from_.model_dump(mode="json"),
+                        "to": connection.to.model_dump(mode="json"),
+                    }
+                    for connection_id, connection in resolved_connections
+                ],
+            },
+            "presentation": {
+                "nodes": presentation_nodes,
+                "connections": {
+                    connection_id: {"label": connection.label}
+                    for connection_id, connection in resolved_connections
+                },
+            },
+        }
+    )
+
+
+def steward_workflow_from_stored(workflow: StoredWorkflow) -> dict[str, object]:
+    return StewardWorkflow.model_validate(
+        {
+            "name": workflow.name,
+            "nodes": [
+                {
+                    "id": node.id,
+                    "name": workflow.presentation.nodes[node.id].name,
+                    "description": workflow.presentation.nodes[node.id].description,
+                    "kind": node.kind,
+                    "config": node.config.model_dump(mode="json"),
+                }
+                for node in workflow.spec.nodes
+            ],
+            "connections": [
+                {
+                    "id": connection.id,
+                    "label": workflow.presentation.connections[connection.id].label,
+                    "from": connection.from_.model_dump(mode="json"),
+                    "to": connection.to.model_dump(mode="json"),
+                }
+                for connection in workflow.spec.connections
+            ],
+        }
+    ).model_dump(mode="json", by_alias=True)
+
+
+def steward_workflow_argument(arguments: dict[str, object]) -> StewardWorkflow:
+    value = arguments.get("workflow")
+    if not isinstance(value, dict):
+        raise ValueError("Workflow must be an object.")
+    try:
+        return StewardWorkflow.model_validate(value)
+    except ValidationError as error:
+        location = error.errors()[0].get("loc", ())
+        context = workflow_validation_context(value, location)
+        raise ValueError(f"{context}{error}") from error
+
+
+def workflow_validation_context(value: dict[str, object], location: tuple) -> str:
+    if "nodes" in location:
+        index = location[location.index("nodes") + 1]
+        nodes = value.get("nodes")
+        if isinstance(index, int) and isinstance(nodes, list) and index < len(nodes):
+            node = nodes[index]
+            if isinstance(node, dict):
+                return f"Node {node.get('id', index)}: "
+    if "connections" in location:
+        index = location[location.index("connections") + 1]
+        connections = value.get("connections")
+        if (
+            isinstance(index, int)
+            and isinstance(connections, list)
+            and index < len(connections)
+        ):
+            connection = connections[index]
+            if isinstance(connection, dict):
+                endpoint = "to" if "to" in location else "from"
+                end = connection.get(endpoint)
+                node_id = end.get("node_id") if isinstance(end, dict) else index
+                return f"Node {node_id}: "
+    return ""
+
+
 def schedule_result(schedule) -> dict[str, object]:
     next_run = min(
         (item.next_run_at for item in schedule.timers if item.next_run_at is not None),
@@ -335,8 +589,7 @@ def schedule_result(schedule) -> dict[str, object]:
     if schedule.last_error:
         details = f" Last failure: {schedule.last_error}"
     elif schedule.last_result:
-        outputs = schedule.last_result.get("outputs", {})
-        details = f" Latest outputs: {outputs}"
+        details = f" Latest outputs: {schedule.last_result.get('outputs', {})}"
     next_text = (
         f" Next run: {datetime.fromtimestamp(next_run, ZoneInfo(schedule.timezone)).isoformat()}."
         if next_run is not None
@@ -371,25 +624,30 @@ def string_map_argument(
     return {str(key): str(item) for key, item in value.items()}
 
 
-def workflow_argument(arguments: dict[str, object]) -> StoredWorkflow:
-    value = arguments.get("workflow")
-    if not isinstance(value, dict):
-        raise ValueError("Workflow must be an object.")
-    try:
-        return StoredWorkflow.model_validate(value)
-    except ValidationError as error:
-        raise ValueError(error.errors()[0]["msg"]) from error
+def positive_int_argument(arguments: dict[str, object], name: str) -> int | None:
+    value = arguments.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return value
 
 
 def workflow_summary(workflow: StoredWorkflow) -> dict[str, object]:
     return {
-        "edge_count": len(workflow.definition.edges),
+        "connection_count": len(workflow.spec.connections),
         "id": workflow.id,
         "name": workflow.name,
-        "node_count": len(workflow.definition.nodes),
+        "node_count": len(workflow.spec.nodes),
+        "revision": workflow.revision,
+        "active_revision": workflow.active_revision,
         "nodes": [
-            {"id": node.id, "name": node.name, "type": node.type}
-            for node in workflow.definition.nodes
+            {
+                "id": node.id,
+                "name": workflow.presentation.nodes[node.id].name,
+                "kind": node.kind,
+            }
+            for node in workflow.spec.nodes
         ],
     }
 
@@ -403,9 +661,9 @@ def workflow_run_output(name: str, result: WorkflowRunResponse) -> str:
             return f"{name} completed.\n{rendered_outputs}"
         return f"{name} completed."
     failures = [
-        f"{node_result.id}: {node_result.error}"
+        f"{node_result.id}: {node_result.error.message}"
         for node_result in result.node_results
-        if node_result.status == "failed"
+        if node_result.error is not None
     ]
     return f"{name} failed.\n" + ("\n".join(failures) or "No failure details.")
 
@@ -414,14 +672,28 @@ def saved_workflow_result(workflow: StoredWorkflow, action: str) -> ToolResult:
     summary = workflow_summary(workflow)
     output = (
         f"{action} {workflow.name} with {summary['node_count']} nodes and "
-        f"{summary['edge_count']} edges."
+        f"{summary['connection_count']} connections."
     )
     return ToolResult(
         result={
             "type": "workflow",
             "output": output,
             "summary": summary,
-            "workflow": workflow.model_dump(mode="json"),
+            "workflow": workflow.model_dump(mode="json", by_alias=True),
         },
         title=f"{action} {workflow.name}",
+    )
+
+
+def workflow_conflict_result(workflow: StoredWorkflow, title: str) -> ToolResult:
+    return ToolResult(
+        result={
+            "type": "workflow_conflict",
+            "output": "This workflow changed elsewhere. Use the latest version to continue.",
+            "workflow_id": workflow.id,
+            "base_revision": workflow.revision,
+            "workflow": steward_workflow_from_stored(workflow),
+        },
+        ok=False,
+        title=title,
     )

@@ -117,6 +117,20 @@ def tool_result_model_content(result: ToolResult | dict[str, object]) -> str:
             {"output": output, "metadata": metadata},
             ensure_ascii=False,
         )
+    if result_type in {"workflow_read", "workflow_conflict"}:
+        return json.dumps(
+            {
+                "workflow_id": payload["workflow_id"],
+                "base_revision": payload["base_revision"],
+                "workflow": payload["workflow"],
+            },
+            ensure_ascii=False,
+        )
+    if result_type in {"workflow_run", "workflow_run_read", "workflow_schedule"}:
+        return json.dumps(
+            {key: value for key, value in payload.items() if key != "output"},
+            ensure_ascii=False,
+        )
     for key in ("text", "output"):
         value = payload.get(key)
         if value is not None:

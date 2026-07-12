@@ -21,7 +21,22 @@ import type {
 const SCHEDULE_POLL_INTERVAL_MS = 2_000;
 
 const workflowHasTimer = (workflow: Workflow | null) =>
-  Boolean(workflow?.definition.nodes.some((node) => node.type === "timer"));
+  Boolean(workflow?.spec.nodes.some((node) => node.kind === "timer"));
+
+const upsertWorkflow = (workflows: Workflow[], incomingWorkflow: Workflow) => {
+  const existing = workflows.find(
+    (workflow) => workflow.id === incomingWorkflow.id,
+  );
+  if (!existing) {
+    return [incomingWorkflow, ...workflows];
+  }
+  if (existing.revision > incomingWorkflow.revision) {
+    return workflows;
+  }
+  return workflows.map((workflow) =>
+    workflow.id === incomingWorkflow.id ? incomingWorkflow : workflow,
+  );
+};
 
 const loadWorkflowSchedule = async (
   workflowId: string,
@@ -108,26 +123,24 @@ export const useWorkflows = (initialWorkflowId = "") => {
 
   const saveWorkflow = useCallback(
     async (workflow: Workflow): Promise<RequestResult<Workflow>> => {
-      const result = await saveWorkflowRequest(workflow);
+      let result: RequestResult<Workflow>;
+      try {
+        result = await saveWorkflowRequest(workflow);
+      } catch {
+        return { data: null, error: "Workflow could not be saved." };
+      }
       if (!result.data) {
+        if (result.latest) {
+          setWorkflows((currentWorkflows) =>
+            upsertWorkflow(currentWorkflows, result.latest as Workflow),
+          );
+        }
         return result;
       }
       const savedWorkflow = result.data;
-      setWorkflows((currentWorkflows) => {
-        if (
-          currentWorkflows.some(
-            (currentWorkflow) => currentWorkflow.id === savedWorkflow.id,
-          )
-        ) {
-          return currentWorkflows.map((currentWorkflow) =>
-            currentWorkflow.id === savedWorkflow.id
-              ? savedWorkflow
-              : currentWorkflow,
-          );
-        }
-        return [savedWorkflow, ...currentWorkflows];
-      });
-      setActiveWorkflowId(savedWorkflow.id);
+      setWorkflows((currentWorkflows) =>
+        upsertWorkflow(currentWorkflows, savedWorkflow),
+      );
       if (workflowHasTimer(savedWorkflow)) {
         setScheduleRequestStateByWorkflowId((currentStates) =>
           currentStates[savedWorkflow.id]
