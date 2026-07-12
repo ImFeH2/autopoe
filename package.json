@@ -1,6 +1,6 @@
 {
   "name": "flowent",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Run tasks and build workflows by talking to Flowent.",
   "author": "ImFeH2 <i@feh2.im>",
   "license": "Apache-2.0",
