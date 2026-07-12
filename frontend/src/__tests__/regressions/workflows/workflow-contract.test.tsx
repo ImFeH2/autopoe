@@ -282,7 +282,7 @@ describe("workflow JSON contract regressions", () => {
     vi.restoreAllMocks();
   });
 
-  it("reopens Steward connections with canonical handles and saves the same ports", async () => {
+  it("reopens agent-created connections with canonical handles and saves the same ports", async () => {
     const workflow = connectedWorkflow();
     const saveBodies: SaveWorkflowBody[] = [];
     mockWorkflowApi(workflow, (body) => {

@@ -341,7 +341,7 @@ async def test_schedule_state_recovers_after_app_recreation(
 
 
 @pytest.mark.anyio
-async def test_steward_schedule_tools_start_stop_and_get(
+async def test_agent_schedule_tools_start_stop_and_get(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))

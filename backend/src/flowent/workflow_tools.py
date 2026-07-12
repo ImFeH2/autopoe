@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 MAX_WORKFLOW_TOOL_DEPTH = 3
 
 
-class StewardWorkflowNodeBase(BaseModel):
+class WorkflowToolNodeBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     description: str
@@ -37,71 +37,71 @@ class StewardWorkflowNodeBase(BaseModel):
     name: str
 
 
-class StewardInputNode(StewardWorkflowNodeBase):
+class WorkflowToolInputNode(WorkflowToolNodeBase):
     config: WorkflowInputNodeConfig
     kind: Literal["input"]
 
 
-class StewardAgentNode(StewardWorkflowNodeBase):
+class WorkflowToolAgentNode(WorkflowToolNodeBase):
     config: WorkflowAgentNodeConfig
     kind: Literal["agent"]
 
 
-class StewardMergeNode(StewardWorkflowNodeBase):
+class WorkflowToolMergeNode(WorkflowToolNodeBase):
     config: WorkflowMergeNodeConfig
     kind: Literal["merge"]
 
 
-class StewardCodeNode(StewardWorkflowNodeBase):
+class WorkflowToolCodeNode(WorkflowToolNodeBase):
     config: WorkflowCodeNodeConfig
     kind: Literal["code"]
 
 
-class StewardTimerNode(StewardWorkflowNodeBase):
+class WorkflowToolTimerNode(WorkflowToolNodeBase):
     config: WorkflowTimerNodeConfig
     kind: Literal["timer"]
 
 
-class StewardOutputNode(StewardWorkflowNodeBase):
+class WorkflowToolOutputNode(WorkflowToolNodeBase):
     config: WorkflowOutputNodeConfig
     kind: Literal["output"]
 
 
-StewardWorkflowNode = Annotated[
-    StewardInputNode
-    | StewardAgentNode
-    | StewardMergeNode
-    | StewardCodeNode
-    | StewardTimerNode
-    | StewardOutputNode,
+WorkflowToolNode = Annotated[
+    WorkflowToolInputNode
+    | WorkflowToolAgentNode
+    | WorkflowToolMergeNode
+    | WorkflowToolCodeNode
+    | WorkflowToolTimerNode
+    | WorkflowToolOutputNode,
     Field(discriminator="kind"),
 ]
 
 
-class StewardWorkflowConnectionEnd(BaseModel):
+class WorkflowToolConnectionEnd(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node_id: str
     port: Literal["input", "output"]
 
 
-class StewardWorkflowConnection(BaseModel):
+class WorkflowToolConnection(BaseModel):
     model_config = ConfigDict(
         extra="forbid", populate_by_name=True, serialize_by_alias=True
     )
 
-    from_: StewardWorkflowConnectionEnd = Field(alias="from")
+    from_: WorkflowToolConnectionEnd = Field(alias="from")
     id: str = ""
     label: str = ""
-    to: StewardWorkflowConnectionEnd
+    to: WorkflowToolConnectionEnd
 
 
-class StewardWorkflow(BaseModel):
+class WorkflowToolSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    connections: list[StewardWorkflowConnection]
+    connections: list[WorkflowToolConnection]
     name: str
-    nodes: list[StewardWorkflowNode]
+    nodes: list[WorkflowToolNode]
 
 
 def strict_parameters(properties: dict[str, object], required: list[str]):
@@ -114,7 +114,7 @@ def strict_parameters(properties: dict[str, object], required: list[str]):
 
 
 def workflow_tool_specs() -> list[dict[str, object]]:
-    workflow_schema = compact_json_schema(StewardWorkflow.model_json_schema())
+    workflow_schema = compact_json_schema(WorkflowToolSpec.model_json_schema())
     string_map_schema = {
         "type": "object",
         "additionalProperties": {"type": "string"},
@@ -311,7 +311,7 @@ class WorkflowAgentTools:
                 "summary": summary,
                 "workflow_id": workflow.id,
                 "base_revision": workflow.revision,
-                "workflow": steward_workflow_from_stored(workflow),
+                "workflow": workflow_tool_spec_from_stored(workflow),
             },
             title=f"Read {workflow.name}",
         )
@@ -364,8 +364,8 @@ class WorkflowAgentTools:
         )
 
     async def create_workflow(self, arguments: dict[str, object]) -> ToolResult:
-        semantic = steward_workflow_argument(arguments)
-        workflow = workflow_draft_from_steward(
+        semantic = workflow_tool_spec_argument(arguments)
+        workflow = workflow_draft_from_tool_spec(
             semantic,
             workflow_id=str(uuid4()),
         )
@@ -385,8 +385,8 @@ class WorkflowAgentTools:
             raise ValueError("base_revision must be an integer.")
         base_revision = base_revision_value
         current = self.service.get_workflow(workflow_id)
-        semantic = steward_workflow_argument(arguments)
-        workflow = workflow_draft_from_steward(
+        semantic = workflow_tool_spec_argument(arguments)
+        workflow = workflow_draft_from_tool_spec(
             semantic,
             workflow_id=workflow_id,
             current=current,
@@ -443,8 +443,8 @@ class WorkflowAgentTools:
         )
 
 
-def workflow_draft_from_steward(
-    workflow: StewardWorkflow,
+def workflow_draft_from_tool_spec(
+    workflow: WorkflowToolSpec,
     *,
     workflow_id: str,
     current: StoredWorkflow | None = None,
@@ -516,8 +516,8 @@ def workflow_draft_from_steward(
     )
 
 
-def steward_workflow_from_stored(workflow: StoredWorkflow) -> dict[str, object]:
-    return StewardWorkflow.model_validate(
+def workflow_tool_spec_from_stored(workflow: StoredWorkflow) -> dict[str, object]:
+    return WorkflowToolSpec.model_validate(
         {
             "name": workflow.name,
             "nodes": [
@@ -543,12 +543,12 @@ def steward_workflow_from_stored(workflow: StoredWorkflow) -> dict[str, object]:
     ).model_dump(mode="json", by_alias=True)
 
 
-def steward_workflow_argument(arguments: dict[str, object]) -> StewardWorkflow:
+def workflow_tool_spec_argument(arguments: dict[str, object]) -> WorkflowToolSpec:
     value = arguments.get("workflow")
     if not isinstance(value, dict):
         raise ValueError("Workflow must be an object.")
     try:
-        return StewardWorkflow.model_validate(value)
+        return WorkflowToolSpec.model_validate(value)
     except ValidationError as error:
         location = error.errors()[0].get("loc", ())
         context = workflow_validation_context(value, location)
@@ -692,7 +692,7 @@ def workflow_conflict_result(workflow: StoredWorkflow, title: str) -> ToolResult
             "output": "This workflow changed elsewhere. Use the latest version to continue.",
             "workflow_id": workflow.id,
             "base_revision": workflow.revision,
-            "workflow": steward_workflow_from_stored(workflow),
+            "workflow": workflow_tool_spec_from_stored(workflow),
         },
         ok=False,
         title=title,

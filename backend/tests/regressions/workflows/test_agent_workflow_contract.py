@@ -11,7 +11,7 @@ from flowent.tools import tool_result_model_content
 from flowent.workflow_tools import WorkflowAgentTools, workflow_tool_specs
 
 
-def steward_workflow() -> dict[str, object]:
+def agent_workflow() -> dict[str, object]:
     return {
         "name": "Launch Workflow",
         "nodes": [
@@ -83,7 +83,7 @@ def property_schemas(
     ]
 
 
-def test_steward_is_given_the_strict_semantic_workflow_contract() -> None:
+def test_agent_is_given_the_strict_semantic_workflow_contract() -> None:
     create_parameters = workflow_tool_parameters("create_workflow")
     workflow_schema = create_parameters["properties"]["workflow"]
 
@@ -118,14 +118,14 @@ def test_steward_is_given_the_strict_semantic_workflow_contract() -> None:
     }
     assert set(definitions["WorkflowCodeNodeConfig"]["properties"]) == {"code"}
     assert definitions["WorkflowInputNodeConfig"]["additionalProperties"] is False
-    assert set(definitions["StewardWorkflowConnection"]["required"]) == {
+    assert set(definitions["WorkflowToolConnection"]["required"]) == {
         "from",
         "to",
     }
 
 
 @pytest.mark.anyio
-async def test_steward_can_update_a_workflow_from_the_read_result(
+async def test_agent_can_update_a_workflow_from_the_read_result(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -135,7 +135,7 @@ async def test_steward_can_update_a_workflow_from_the_read_result(
         service = app.state.workflow_service
         tools = WorkflowAgentTools(service)
         created = await tools.run_tool(
-            "create_workflow", {"workflow": steward_workflow()}
+            "create_workflow", {"workflow": agent_workflow()}
         )
         assert created is not None and created.ok is True
         workflow_id = created.result["workflow"]["id"]
@@ -155,12 +155,12 @@ async def test_steward_can_update_a_workflow_from_the_read_result(
 
 
 @pytest.mark.anyio
-async def test_steward_can_create_connections_without_display_metadata(
+async def test_agent_can_create_connections_without_display_metadata(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     app = create_app(serve_frontend=False)
-    workflow = steward_workflow()
+    workflow = agent_workflow()
     workflow["connections"][0].pop("id")
     workflow["connections"][0].pop("label")
 
@@ -180,14 +180,14 @@ async def test_steward_can_create_connections_without_display_metadata(
 
 
 @pytest.mark.anyio
-async def test_steward_receives_structured_run_trace(tmp_path, monkeypatch) -> None:
+async def test_agent_receives_structured_run_trace(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     app = create_app(serve_frontend=False)
 
     async with app.router.lifespan_context(app):
         tools = WorkflowAgentTools(app.state.workflow_service)
         created = await tools.run_tool(
-            "create_workflow", {"workflow": steward_workflow()}
+            "create_workflow", {"workflow": agent_workflow()}
         )
         assert created is not None and created.ok is True
         workflow_id = created.result["workflow"]["id"]
@@ -202,7 +202,7 @@ async def test_steward_receives_structured_run_trace(tmp_path, monkeypatch) -> N
 
 
 @pytest.mark.anyio
-async def test_steward_receives_latest_workflow_after_an_update_conflict(
+async def test_agent_receives_latest_workflow_after_an_update_conflict(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -212,11 +212,11 @@ async def test_steward_receives_latest_workflow_after_an_update_conflict(
         service = app.state.workflow_service
         tools = WorkflowAgentTools(service)
         created = await tools.run_tool(
-            "create_workflow", {"workflow": steward_workflow()}
+            "create_workflow", {"workflow": agent_workflow()}
         )
         assert created is not None and created.ok is True
         workflow_id = created.result["workflow"]["id"]
-        changed = deepcopy(steward_workflow())
+        changed = deepcopy(agent_workflow())
         changed["nodes"][0]["name"] = "New Source"
         first_update = await tools.run_tool(
             "update_workflow",
@@ -233,7 +233,7 @@ async def test_steward_receives_latest_workflow_after_an_update_conflict(
             {
                 "workflow_id": workflow_id,
                 "base_revision": 1,
-                "workflow": steward_workflow(),
+                "workflow": agent_workflow(),
             },
         )
         assert conflict is not None and conflict.ok is False
@@ -250,12 +250,12 @@ async def test_steward_receives_latest_workflow_after_an_update_conflict(
 
 
 @pytest.mark.anyio
-async def test_steward_cannot_create_a_workflow_with_an_unknown_node_setting(
+async def test_agent_cannot_create_a_workflow_with_an_unknown_node_setting(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     app = create_app(serve_frontend=False)
-    workflow = steward_workflow()
+    workflow = agent_workflow()
     workflow["nodes"][0]["config"]["unexpected"] = True
 
     async with app.router.lifespan_context(app):
@@ -279,7 +279,7 @@ async def test_steward_cannot_create_a_workflow_with_an_unknown_node_setting(
         ("output", "in", "in", "result"),
     ],
 )
-async def test_steward_cannot_replace_canonical_connections_with_canvas_aliases(
+async def test_agent_cannot_replace_canonical_connections_with_canvas_aliases(
     tmp_path,
     monkeypatch,
     source_port: str,
@@ -294,13 +294,13 @@ async def test_steward_cannot_replace_canonical_connections_with_canvas_aliases(
         service = app.state.workflow_service
         tools = WorkflowAgentTools(service)
         created = await tools.run_tool(
-            "create_workflow", {"workflow": steward_workflow()}
+            "create_workflow", {"workflow": agent_workflow()}
         )
         assert created is not None and created.ok is True
         saved_workflow = created.result["workflow"]
         workflow_id = saved_workflow["id"]
         base_revision = saved_workflow["revision"]
-        changed = deepcopy(steward_workflow())
+        changed = deepcopy(agent_workflow())
         changed["connections"][0]["from"]["port"] = source_port
         changed["connections"][0]["to"]["port"] = target_port
 
@@ -324,7 +324,7 @@ async def test_steward_cannot_replace_canonical_connections_with_canvas_aliases(
 
 
 @pytest.mark.anyio
-async def test_steward_created_connections_are_saved_and_run_with_canonical_ports(
+async def test_agent_created_connections_are_saved_and_run_with_canonical_ports(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -334,7 +334,7 @@ async def test_steward_created_connections_are_saved_and_run_with_canonical_port
         service = app.state.workflow_service
         tools = WorkflowAgentTools(service)
         created = await tools.run_tool(
-            "create_workflow", {"workflow": steward_workflow()}
+            "create_workflow", {"workflow": agent_workflow()}
         )
         assert created is not None and created.ok is True
         saved_workflow = created.result["workflow"]

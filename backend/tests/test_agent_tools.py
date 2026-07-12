@@ -118,7 +118,7 @@ def input_output_workflow(workflow_id: str = "workflow-1") -> dict[str, object]:
     }
 
 
-def steward_input_output_workflow() -> dict[str, object]:
+def agent_input_output_workflow() -> dict[str, object]:
     return {
         "name": "Launch Workflow",
         "nodes": [
@@ -345,7 +345,7 @@ def test_workspace_agent_creates_workflow_with_generated_uuid(
     monkeypatch.setattr("flowent.workflow_tools.uuid4", lambda: fixed_uuid)
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
-    workflow = steward_input_output_workflow()
+    workflow = agent_input_output_workflow()
     captured_requests: list[dict[str, object]] = []
 
     async def fake_completion(**request: object) -> object:
@@ -507,7 +507,7 @@ def test_workspace_agent_rejects_invalid_workflow_update_without_saving(
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
-    invalid_workflow = steward_input_output_workflow()
+    invalid_workflow = agent_input_output_workflow()
     invalid_workflow["connections"][0]["to"]["node_id"] = "missing"
     captured_requests: list[dict[str, object]] = []
 

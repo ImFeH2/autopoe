@@ -10,7 +10,7 @@ from flowent.tools import tool_result_model_content
 from flowent.workflow_tools import WorkflowAgentTools, workflow_tool_specs
 
 
-def steward_workflow() -> dict[str, object]:
+def agent_workflow() -> dict[str, object]:
     return {
         "name": "Historical Run Workflow",
         "nodes": [
@@ -41,7 +41,7 @@ def steward_workflow() -> dict[str, object]:
     }
 
 
-def test_steward_has_a_strict_workflow_run_reader() -> None:
+def test_agent_has_a_strict_workflow_run_reader() -> None:
     specification = next(
         item
         for item in workflow_tool_specs()
@@ -57,7 +57,7 @@ def test_steward_has_a_strict_workflow_run_reader() -> None:
 
 
 @pytest.mark.anyio
-async def test_steward_reads_the_trace_and_immutable_revision_for_a_run(
+async def test_agent_reads_the_trace_and_immutable_revision_for_a_run(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
@@ -67,7 +67,7 @@ async def test_steward_reads_the_trace_and_immutable_revision_for_a_run(
         service = app.state.workflow_service
         tools = WorkflowAgentTools(service)
         created = await tools.run_tool(
-            "create_workflow", {"workflow": steward_workflow()}
+            "create_workflow", {"workflow": agent_workflow()}
         )
         assert created is not None and created.ok is True
         workflow_id = created.result["workflow"]["id"]
@@ -86,7 +86,7 @@ async def test_steward_reads_the_trace_and_immutable_revision_for_a_run(
             "values": {},
         }
 
-        changed = deepcopy(steward_workflow())
+        changed = deepcopy(agent_workflow())
         changed["nodes"][0]["config"]["default_value"] = "changed later"
         updated = await tools.run_tool(
             "update_workflow",
@@ -122,7 +122,7 @@ async def test_steward_reads_the_trace_and_immutable_revision_for_a_run(
 
 
 @pytest.mark.anyio
-async def test_steward_reports_a_missing_workflow_run(tmp_path, monkeypatch) -> None:
+async def test_agent_reports_a_missing_workflow_run(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
     app = create_app(serve_frontend=False)
 
