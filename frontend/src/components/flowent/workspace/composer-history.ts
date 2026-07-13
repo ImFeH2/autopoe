@@ -1,4 +1,4 @@
-import type { Message } from "@/components/flowent/types";
+import type { Message } from "@/features/workspace/model/message-types";
 
 export function promptHistoryFromMessages(messages: Message[]) {
   const history: string[] = [];

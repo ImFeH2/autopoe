@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { ToolItem } from "@/components/flowent/types";
 import { AnimatedExpandableContent } from "@/components/flowent/workspace/animated-expandable-content";
+import type { ToolItem } from "@/features/workspace/model/message-types";
 import { cn } from "@/lib/utils";
 
 export function ToolProcessItem({ tool }: { tool: ToolItem }) {

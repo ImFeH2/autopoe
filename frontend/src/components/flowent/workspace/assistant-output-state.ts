@@ -2,7 +2,7 @@ import type {
   AssistantOutputGroup,
   AssistantOutputItem,
   Message,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 
 export function assistantOutputGroups(
   message: Message,

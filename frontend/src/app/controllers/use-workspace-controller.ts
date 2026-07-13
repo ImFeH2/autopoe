@@ -29,13 +29,15 @@ import {
   type WorkspaceStreamHandlers,
 } from "@/app/workspace/stream";
 import type {
-  ContextUsageInfo,
+  WorkspaceCommand,
+  WorkspaceCommandId,
+} from "@/features/workspace/model/command-types";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
+import type {
   Message,
   MessageActionRequest,
   MessageErrorRetryRequest,
-  WorkspaceCommand,
-  WorkspaceCommandId,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 import { createClientId } from "@/lib/utils";
 
 type TrackedUsageInfoUpdate =

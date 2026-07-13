@@ -7,7 +7,7 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { Message } from "@/components/flowent/types";
+import type { Message } from "@/features/workspace/model/message-types";
 import { cn } from "@/lib/utils";
 
 export function MessageShortcutRail({

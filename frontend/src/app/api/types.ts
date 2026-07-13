@@ -1,4 +1,3 @@
-import type { ContextUsageInfo, Message } from "@/components/flowent/types";
 import type { ApiTelegramBot } from "@/features/channels/api/channel-api-types";
 import type { ApiMcpServer } from "@/features/mcp/api/mcp-api-types";
 import type { ApiWritablePath } from "@/features/permissions/api/permission-api-types";
@@ -11,6 +10,8 @@ import type {
 } from "@/features/workflows/model/workflow-run-types";
 import type { WorkflowSchedule } from "@/features/workflows/model/workflow-schedule-types";
 import type { WorkflowNodeKind } from "@/features/workflows/model/workflow-types";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
+import type { Message } from "@/features/workspace/model/message-types";
 
 export type ApiWorkflowNode = {
   config: Record<string, unknown>;

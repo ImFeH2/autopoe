@@ -1,4 +1,5 @@
-import type { ContextUsageInfo, Message } from "@/components/flowent/types";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
+import type { Message } from "@/features/workspace/model/message-types";
 
 const CONTEXT_CAPACITY_LIMIT = 120_000;
 const CONTEXT_BASELINE_UNITS = 12_000;

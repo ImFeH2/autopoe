@@ -1,8 +1,8 @@
 import { Sparkles, Terminal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { WorkspaceCommand } from "@/components/flowent/types";
 import type { Skill } from "@/features/skills/model/skill-types";
+import type { WorkspaceCommand } from "@/features/workspace/model/command-types";
 import { cn } from "@/lib/utils";
 
 export function CommandMenu({

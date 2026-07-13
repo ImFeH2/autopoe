@@ -6,10 +6,10 @@ import type {
   ApiWorkflowRunResult,
   ApiWorkflowSchedule,
 } from "@/app/api/types";
-import type { ContextUsageInfo } from "@/components/flowent/types";
 import type { TelegramBot } from "@/features/channels/model/channel-types";
 import type { McpServer } from "@/features/mcp/model/mcp-types";
 import type { Skill } from "@/features/skills/model/skill-types";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
 import type {
   WorkflowRunRequest,
   WorkflowRunResult,

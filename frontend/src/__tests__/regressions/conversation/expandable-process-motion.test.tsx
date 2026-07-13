@@ -6,7 +6,7 @@ import {
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AssistantOutputGroup } from "@/components/flowent/types";
+import type { AssistantOutputGroup } from "@/features/workspace/model/message-types";
 import { AssistantOutputTimeline } from "@/components/flowent/workspace/assistant-output";
 import { ToolProcessItem } from "@/components/flowent/workspace/tool-process";
 

@@ -1,11 +1,11 @@
 import type { ApiMessage } from "@/app/api/types";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
-  ContextUsageInfo,
   Message,
   ToolItem,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 import { createClientId } from "@/lib/utils";
 
 export const assistantGroupsFromMessage = (

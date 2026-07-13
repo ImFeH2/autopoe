@@ -1,8 +1,8 @@
-import type { Message } from "@/components/flowent/types";
 import type {
   WorkspacePlan,
   WorkspacePlanItem,
 } from "@/components/flowent/workspace/plan-tray";
+import type { Message } from "@/features/workspace/model/message-types";
 
 export function latestPlanFromMessages(
   messages: Message[],

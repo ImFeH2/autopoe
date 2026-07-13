@@ -26,14 +26,16 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import { stableScrollbarClassName } from "@/components/flowent/styles";
 import type {
+  WorkspaceCommand,
+  WorkspaceCommandId,
+} from "@/features/workspace/model/command-types";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
+import type {
   AssistantOutputGroup,
-  ContextUsageInfo,
   Message,
   MessageActionRequest,
   MessageErrorRetryRequest,
-  WorkspaceCommand,
-  WorkspaceCommandId,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 import {
   AssistantOutputTimeline,
   AssistantWaitingIndicator,

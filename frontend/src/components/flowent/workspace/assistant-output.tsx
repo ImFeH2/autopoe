@@ -6,7 +6,7 @@ import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 import { AnimatedExpandableContent } from "@/components/flowent/workspace/animated-expandable-content";
 import { MessageIconButton } from "@/components/flowent/workspace/message-icon-button";
 import { ToolProcessItem } from "@/components/flowent/workspace/tool-process";

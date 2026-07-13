@@ -2,7 +2,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { WorkspaceView } from "@/components/flowent/workspace-view";
-import type { AssistantOutputItem, Message } from "@/components/flowent/types";
+import type {
+  AssistantOutputItem,
+  Message,
+} from "@/features/workspace/model/message-types";
 
 const renderWorkspace = (messages: Message[]) =>
   render(

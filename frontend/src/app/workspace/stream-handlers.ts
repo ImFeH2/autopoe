@@ -5,13 +5,13 @@ import {
   latestAssistantOutputItem,
 } from "@/app/workspace/messages";
 import type { WorkspaceStreamHandlers } from "@/app/workspace/stream";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
 import type {
   AssistantOutputGroup,
   AssistantOutputItem,
-  ContextUsageInfo,
   Message,
   ToolItem,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 import { createClientId } from "@/lib/utils";
 
 type MutableValue<T> = {

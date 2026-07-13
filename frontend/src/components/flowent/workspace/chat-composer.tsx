@@ -10,11 +10,11 @@ import { ArrowUp, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type {
-  ContextUsageInfo,
-  Message,
   WorkspaceCommand,
   WorkspaceCommandId,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/command-types";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
+import type { Message } from "@/features/workspace/model/message-types";
 import { contextCapacityFromMessages } from "@/components/flowent/workspace/context-capacity";
 import { ContextCapacityTray } from "@/components/flowent/workspace/context-capacity-tray";
 import {

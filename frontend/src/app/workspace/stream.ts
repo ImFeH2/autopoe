@@ -4,12 +4,12 @@ import {
   WorkspaceStreamError,
   type WorkspaceToolUpdate,
 } from "@/app/workspace/messages";
+import type { ContextUsageInfo } from "@/features/workspace/model/context-usage-types";
 import type {
   AssistantOutputItem,
-  ContextUsageInfo,
   Message,
   ToolItem,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 
 export type WorkspaceStreamEvent =
   | {

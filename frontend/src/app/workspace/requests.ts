@@ -7,7 +7,7 @@ import {
 import type {
   MessageActionRequest,
   MessageErrorRetryRequest,
-} from "@/components/flowent/types";
+} from "@/features/workspace/model/message-types";
 
 export const responseErrorFromApi = async (response: Response) => {
   try {

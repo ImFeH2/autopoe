@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
-import type { AssistantOutputItem, Message } from "@/components/flowent/types";
+import type {
+  AssistantOutputItem,
+  Message,
+} from "@/features/workspace/model/message-types";
 
 const deferred = () => {
   let resolve!: () => void;
