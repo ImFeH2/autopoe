@@ -6,7 +6,7 @@ import {
 } from "@/app/api/mappers";
 import { fetchAbout, fetchAppState } from "@/app/api/state-requests";
 import type { ApiState } from "@/app/api/types";
-import type { RuntimeSettings, Workflow } from "@/components/flowent/types";
+import type { Workflow } from "@/components/flowent/types";
 import { telegramBotFromApi } from "@/features/channels/api/channel-mappers";
 import type { TelegramBot } from "@/features/channels/model/channel-types";
 import { mcpServerFromApi } from "@/features/mcp/api/mcp-mappers";
@@ -15,6 +15,7 @@ import { writablePathFromApi } from "@/features/permissions/api/permission-mappe
 import type { WritablePath } from "@/features/permissions/model/permission-types";
 import { providerFromApi } from "@/features/providers/api/provider-mappers";
 import type { Provider } from "@/features/providers/model/provider-types";
+import type { RuntimeSettings } from "@/features/settings/model/runtime-settings-types";
 import type { Skill } from "@/features/skills/model/skill-types";
 
 type LoadWorkspaceState = (

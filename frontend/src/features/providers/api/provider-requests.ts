@@ -30,13 +30,15 @@ const providerModelFetchFailureMessages = {
 
 type ProviderModelFetchFailure = keyof typeof providerModelFetchFailureMessages;
 
-type ProviderModelFetchFailureMessage =
-  (typeof providerModelFetchFailureMessages)[ProviderModelFetchFailure];
+export type ProviderNotification = {
+  description?: string;
+  message: string;
+};
 
 export class ProviderModelFetchError extends Error {
-  notification: ProviderModelFetchFailureMessage;
+  notification: ProviderNotification;
 
-  constructor(notification: ProviderModelFetchFailureMessage) {
+  constructor(notification: ProviderNotification) {
     super(notification.message);
     this.name = "ProviderModelFetchError";
     this.notification = notification;

@@ -25,7 +25,8 @@ import { TabsContent } from "@/components/ui/tabs";
 import { useTelegramChannel } from "@/features/channels/hooks/use-telegram-channel";
 import { useMcpServers } from "@/features/mcp/hooks/use-mcp-servers";
 import { useWritablePaths } from "@/features/permissions/hooks/use-writable-paths";
-import { useProviderSettings } from "@/features/providers/hooks/use-provider-settings";
+import { useProviders } from "@/features/providers/hooks/use-providers";
+import { useRuntimeSettings } from "@/features/settings/hooks/use-runtime-settings";
 import { useSkills } from "@/features/skills/hooks/use-skills";
 
 function FlowentApp() {
@@ -72,33 +73,51 @@ function FlowentApp() {
     [setWorkspaceContextWindowLimit],
   );
   const {
-    activeProvider,
-    agentPrompt,
-    contextWindowLimit,
     fetchProviderModels,
-    handleActiveModelChange,
-    handleActiveProviderChange,
-    handleReasoningEffortChange,
     isCreatingProvider,
     isFetchingModels,
     loadProviderEditor,
     openNewProviderEditor,
     providerDraft,
     providers,
-    reasoningEffort,
-    removeProvider,
     replaceProviders,
+    removeProvider: removeProviderFromState,
+    saveProvider: saveProviderToState,
+    updateProviderDraft,
+  } = useProviders({
+    showError: toast.error,
+  });
+  const {
+    activeProvider,
+    agentPrompt,
+    contextWindowLimit,
+    handleActiveModelChange,
+    handleActiveProviderChange,
+    handleProviderRemoved,
+    handleProviderSaved,
+    handleReasoningEffortChange,
+    reasoningEffort,
     replaceRuntimeSettings,
-    saveProvider,
     saveRuntimeSettings,
     selectedModel,
     selectedProviderId,
-    updateProviderDraft,
-  } = useProviderSettings({
+  } = useRuntimeSettings({
     onContextWindowLimitChange: handleWorkspaceContextWindowLimitChange,
+    providers,
     refreshAppState: refreshProviderSettingsState,
-    showError: toast.error,
   });
+  const saveProvider = useCallback(async () => {
+    const savedProvider = await saveProviderToState();
+    if (savedProvider) {
+      handleProviderSaved(savedProvider.id);
+    }
+  }, [handleProviderSaved, saveProviderToState]);
+  const removeProvider = useCallback(async () => {
+    const result = await removeProviderFromState();
+    if (result) {
+      handleProviderRemoved(result.removedProviderId, result.nextProvider);
+    }
+  }, [handleProviderRemoved, removeProviderFromState]);
   const {
     approveTelegramSession,
     replaceTelegramBot,

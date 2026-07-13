@@ -18,8 +18,6 @@ export type FlowentToast = {
   tone: FlowentToastTone;
 };
 
-export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
-
 export type ToolItemStatus = "failed" | "running" | "success" | "waiting";
 
 export type ToolItem = {
@@ -111,14 +109,6 @@ export type WorkspaceCommand = {
   id: WorkspaceCommandId;
   label: string;
   name: string;
-};
-
-export type RuntimeSettings = {
-  agentPrompt: string;
-  contextWindowLimit: number | null;
-  reasoningEffort: ReasoningEffort;
-  selectedModel: string;
-  selectedProviderId: string;
 };
 
 export type WorkflowNodeKind =

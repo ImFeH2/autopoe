@@ -1,7 +1,6 @@
 import type {
   ContextUsageInfo,
   Message,
-  ReasoningEffort,
   Workflow,
   WorkflowConnection,
   WorkflowEdge,
@@ -16,6 +15,7 @@ import type { ApiTelegramBot } from "@/features/channels/api/channel-api-types";
 import type { ApiMcpServer } from "@/features/mcp/api/mcp-api-types";
 import type { ApiWritablePath } from "@/features/permissions/api/permission-api-types";
 import type { ApiProvider } from "@/features/providers/api/provider-api-types";
+import type { ReasoningEffort } from "@/features/settings/model/runtime-settings-types";
 import type { ApiSkill } from "@/features/skills/api/skill-api-types";
 
 export type ApiWorkflowNode = {
