@@ -417,4 +417,27 @@ describe("Provider management", () => {
       screen.getByRole("combobox", { name: "Reasoning" }),
     ).toHaveTextContent("XHigh");
   });
+
+  it("persists the model list when a provider is saved", async () => {
+    const user = userEvent.setup();
+    mockProviderAppRequests({ modelResults: ["gpt-5.1"] });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Providers" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Provider name" }),
+      "OpenAI",
+    );
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+    expect(await screen.findByText("gpt-5.1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(window.fetch).toHaveBeenCalledWith(
+      "/api/providers",
+      expect.objectContaining({
+        body: expect.stringContaining('"models":["gpt-5.1"]'),
+        method: "POST",
+      }),
+    );
+  });
 });
