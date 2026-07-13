@@ -16,6 +16,10 @@ import {
   writePinnedWorkflowIds,
 } from "@/components/flowent/app-shell/app-shell-storage";
 import {
+  sidebarMotionTransition,
+  sidebarTransitionClassName,
+} from "@/components/flowent/app-shell/sidebar-motion";
+import {
   fieldInputClassName,
   navigationLabelClassName,
 } from "@/components/flowent/styles";
@@ -40,13 +44,6 @@ import {
 import { Input } from "@/components/ui/input";
 import type { Workflow } from "@/features/workflows/model/workflow-types";
 import { cn } from "@/lib/utils";
-
-const sidebarTransitionClassName =
-  "[transition-timing-function:cubic-bezier(0.22,1,0.36,1)]";
-const sidebarMotionTransition = {
-  duration: 0.28,
-  ease: [0.22, 1, 0.36, 1] as const,
-};
 
 function WorkflowNavigationMenuItems({
   isPinned,
