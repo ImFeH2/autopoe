@@ -854,189 +854,27 @@ export function AppShell({
       </Dialog>
       <aside
         className={cn(
-          "relative flex min-h-0 flex-col border-r border-white/10 bg-black px-3 py-3 max-[900px]:hidden max-[900px]:min-h-auto max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:px-3 max-[900px]:py-3",
+          "relative min-h-0 max-[900px]:hidden",
           shouldReduceMotion
             ? "duration-0"
             : cn("duration-300", sidebarTransitionClassName),
         )}
       >
-        <div
-          className={cn(
-            "flex h-10 min-h-10 items-center bg-black px-1 transition-[gap] max-[560px]:min-h-10",
-            shouldReduceMotion
-              ? "duration-0"
-              : cn("duration-300", sidebarTransitionClassName),
-            "gap-2.5",
-          )}
-        >
-          <div
-            className={cn(
-              "grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border border-white/10 bg-input/30 transition-transform",
-              shouldReduceMotion
-                ? "duration-0"
-                : cn("duration-300", sidebarTransitionClassName),
-              isSidebarCollapsed && "flowent-sidebar-rail-logo -translate-x-1",
-            )}
-          >
-            <img alt="" className="size-full object-cover" src="/flowent.png" />
-          </div>
-          <SidebarText
-            className="min-w-0 flex-1 self-center"
-            isVisible={!isSidebarCollapsed}
-            shouldReduceMotion={shouldReduceMotion}
-          >
-            <div className="flowent-sidebar-brand truncate">Flowent</div>
-          </SidebarText>
-          <AnimatePresence initial={false}>
-            {!isSidebarCollapsed ? (
-              <motion.div
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                initial={shouldReduceMotion ? false : { opacity: 0 }}
-                key="collapse-sidebar-button"
-                transition={
-                  shouldReduceMotion ? { duration: 0 } : sidebarMotionTransition
-                }
-              >
-                <Button
-                  aria-label="Collapse sidebar"
-                  className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08] max-[900px]:hidden"
-                  onClick={toggleSidebar}
-                  size="icon"
-                  title="Collapse sidebar"
-                  type="button"
-                  variant="ghost"
-                >
-                  <ChevronsLeft aria-hidden="true" />
-                </Button>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
-        </div>
-
-        <nav aria-label="Primary navigation">
-          <TabsList
-            className={cn(
-              "mt-4 flex w-auto flex-none flex-col items-stretch gap-0 p-0 max-[900px]:mt-3 max-[900px]:mx-0 max-[900px]:flex-row max-[560px]:justify-start max-[560px]:overflow-x-auto",
-              "-mx-1",
-            )}
-            variant="line"
-          >
-            <NavigationTrigger
-              isSidebarCollapsed={isSidebarCollapsed}
-              item={workspaceNavigationItem}
-              shouldReduceMotion={shouldReduceMotion}
-            />
-            <NavigationTrigger
-              isSidebarCollapsed={isSidebarCollapsed}
-              item={workflowsNavigationItem}
-              onClick={
-                activeView === "workflows" && activeWorkflowId
-                  ? onNewWorkflow
-                  : undefined
-              }
-              shouldReduceMotion={shouldReduceMotion}
-              suppressActiveStyle={
-                activeView === "workflows" && Boolean(activeWorkflowId)
-              }
-            />
-            {navigationGroups.map((group) => (
-              <Fragment key={group.label}>
-                <SidebarBlock
-                  className="flowent-sidebar-section-label px-2 pt-4 pb-1"
-                  isDecorative
-                  isVisible={!isSidebarCollapsed}
-                  shouldReduceMotion={shouldReduceMotion}
-                  wrapperClassName="max-[900px]:hidden"
-                >
-                  {group.label}
-                </SidebarBlock>
-                {group.items.map((item) => (
-                  <NavigationTrigger
-                    isSidebarCollapsed={isSidebarCollapsed}
-                    key={item.id}
-                    item={item}
-                    shouldReduceMotion={shouldReduceMotion}
-                  />
-                ))}
-              </Fragment>
-            ))}
-            <SidebarBlock
-              className="pt-4"
-              isVisible={!isSidebarCollapsed}
-              shouldReduceMotion={shouldReduceMotion}
-              wrapperClassName="max-[900px]:hidden"
-            >
-              <WorkflowsNavigationSection
-                activeView={activeView}
-                activeWorkflowId={activeWorkflowId}
-                isOpen={isWorkflowSectionOpen}
-                onOpenChange={setIsWorkflowSectionOpen}
-                onWorkflowDelete={onWorkflowDelete}
-                onWorkflowRename={onWorkflowRename}
-                onWorkflowSelect={onWorkflowSelect}
-                shouldReduceMotion={shouldReduceMotion}
-                workflows={workflows}
-              />
-            </SidebarBlock>
-          </TabsList>
-        </nav>
-
-        <div className="mt-auto flex flex-col gap-2 max-[900px]:hidden">
-          <AnimatePresence initial={false}>
-            {isSidebarCollapsed ? (
-              <motion.div
-                animate={{ opacity: 1 }}
-                className="-mx-1"
-                exit={{ opacity: 0 }}
-                initial={shouldReduceMotion ? false : { opacity: 0 }}
-                key="expand-sidebar-button"
-                transition={
-                  shouldReduceMotion
-                    ? { duration: 0 }
-                    : {
-                        ...sidebarMotionTransition,
-                        delay: 0.08,
-                      }
-                }
-              >
-                <Button
-                  aria-label="Expand sidebar"
-                  className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
-                  onClick={toggleSidebar}
-                  size="icon"
-                  title="Expand sidebar"
-                  type="button"
-                  variant="ghost"
-                >
-                  <ChevronsRight aria-hidden="true" />
-                </Button>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
-          <div
-            className={cn(
-              "flowent-sidebar-status -mx-1 flex h-8 items-center gap-2 px-2 transition-[padding,color]",
-              shouldReduceMotion
-                ? "duration-0"
-                : cn("duration-300", sidebarTransitionClassName),
-              isSidebarCollapsed &&
-                "flowent-sidebar-rail-status pl-[17px] pr-0",
-            )}
-            title={activeProviderName ?? "No provider"}
-          >
-            <div
-              className="size-1.5 rounded-full bg-[#7ddf89]"
-              aria-hidden="true"
-            />
-            <SidebarText
-              isVisible={!isSidebarCollapsed}
-              shouldReduceMotion={shouldReduceMotion}
-            >
-              <span>{activeProviderName ?? "No provider"}</span>
-            </SidebarText>
-          </div>
-        </div>
+        <SidebarPanel
+          activeProviderName={activeProviderName}
+          activeView={activeView}
+          activeWorkflowId={activeWorkflowId}
+          isSidebarCollapsed={isSidebarCollapsed}
+          isWorkflowSectionOpen={isWorkflowSectionOpen}
+          onNewWorkflow={onNewWorkflow}
+          onWorkflowDelete={onWorkflowDelete}
+          onWorkflowRename={onWorkflowRename}
+          onWorkflowSectionOpenChange={setIsWorkflowSectionOpen}
+          onWorkflowSelect={onWorkflowSelect}
+          shouldReduceMotion={shouldReduceMotion}
+          toggleSidebar={toggleSidebar}
+          workflows={workflows}
+        />
         {!isSidebarNarrowLayout ? (
           <Button
             aria-label="Toggle sidebar from boundary"
