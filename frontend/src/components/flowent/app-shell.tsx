@@ -54,6 +54,19 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ViewId } from "@/app/navigation/view-types";
 import {
+  clampSidebarWidth,
+  isSidebarNarrowViewport,
+  readPinnedWorkflowIds,
+  readStoredSidebarWidth,
+  sidebarClickDelayMs,
+  sidebarCollapsedWidth,
+  sidebarDefaultWidth,
+  sidebarDragThreshold,
+  sidebarNarrowLayoutQuery,
+  writePinnedWorkflowIds,
+  writeStoredSidebarWidth,
+} from "@/components/flowent/app-shell/app-shell-storage";
+import {
   fieldInputClassName,
   navigationLabelClassName,
 } from "@/components/flowent/styles";
@@ -104,16 +117,6 @@ const sidebarMotionTransition = {
   duration: 0.28,
   ease: sidebarMotionEase,
 };
-const pinnedWorkflowStorageKey = "flowent:pinned-workflows";
-const sidebarWidthStorageKey = "flowent:sidebar-width";
-const sidebarCollapsedWidth = 64;
-const sidebarDefaultWidth = 232;
-const sidebarMinWidth = 196;
-const sidebarMaxWidth = 360;
-const sidebarDragThreshold = 4;
-const sidebarClickDelayMs = 180;
-const sidebarNarrowLayoutQuery = "(max-width: 900px)";
-
 function NavigationTrigger({
   isMobileDrawer = false,
   isSidebarCollapsed,
@@ -1316,73 +1319,5 @@ function WorkflowsNavigationSection({
         </AnimatePresence>
       </CollapsibleContent>
     </Collapsible>
-  );
-}
-
-function readPinnedWorkflowIds() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-  try {
-    const value = window.localStorage.getItem(pinnedWorkflowStorageKey);
-    if (!value) {
-      return [];
-    }
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.filter(
-      (workflowId): workflowId is string => typeof workflowId === "string",
-    );
-  } catch {
-    return [];
-  }
-}
-
-function writePinnedWorkflowIds(workflowIds: string[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(
-    pinnedWorkflowStorageKey,
-    JSON.stringify(workflowIds),
-  );
-}
-
-function clampSidebarWidth(width: number) {
-  return Math.min(sidebarMaxWidth, Math.max(sidebarMinWidth, width));
-}
-
-function readStoredSidebarWidth() {
-  if (typeof window === "undefined") {
-    return sidebarDefaultWidth;
-  }
-  const storedValue = window.localStorage.getItem(sidebarWidthStorageKey);
-  if (!storedValue) {
-    return sidebarDefaultWidth;
-  }
-  const storedWidth = Number(storedValue);
-  if (!Number.isFinite(storedWidth)) {
-    return sidebarDefaultWidth;
-  }
-  return clampSidebarWidth(storedWidth);
-}
-
-function writeStoredSidebarWidth(width: number) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(
-    sidebarWidthStorageKey,
-    String(clampSidebarWidth(width)),
-  );
-}
-
-function isSidebarNarrowViewport() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia(sidebarNarrowLayoutQuery).matches
   );
 }
