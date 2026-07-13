@@ -1,4 +1,7 @@
-import type { Provider, ProviderOption } from "@/components/flowent/types";
+import type {
+  Provider,
+  ProviderOption,
+} from "@/features/providers/model/provider-types";
 
 export const providerOptions: ProviderOption[] = [
   { id: "openai", label: "OpenAI" },

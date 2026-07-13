@@ -1,6 +1,9 @@
-import { providerFromApi, providerToApi } from "@/app/api/mappers";
-import type { ApiProvider } from "@/app/api/types";
-import type { Provider } from "@/components/flowent/types";
+import type { ApiProvider } from "@/features/providers/api/provider-api-types";
+import {
+  providerFromApi,
+  providerToApi,
+} from "@/features/providers/api/provider-mappers";
+import type { Provider } from "@/features/providers/model/provider-types";
 
 const providerModelFetchFailureMessages = {
   access_denied: {

@@ -10,7 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { providerOptions } from "@/components/flowent/provider-options";
 import {
   dashedPanelClassName,
   dataRowClassName,
@@ -26,7 +25,8 @@ import {
   stableScrollbarClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
-import type { Provider } from "@/components/flowent/types";
+import { providerOptions } from "@/features/providers/model/provider-options";
+import type { Provider } from "@/features/providers/model/provider-types";
 import { cn } from "@/lib/utils";
 
 export function ProvidersView({

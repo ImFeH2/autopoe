@@ -1,7 +1,6 @@
 import type {
   ContextUsageInfo,
   Message,
-  Provider,
   ReasoningEffort,
   Skill,
   TelegramBot,
@@ -17,19 +16,7 @@ import type {
   WorkflowSpec,
 } from "@/components/flowent/types";
 import type { ApiMcpServer } from "@/features/mcp/api/mcp-api-types";
-
-export type ApiProvider = {
-  base_url: string;
-  has_api_key: boolean;
-  id: string;
-  models: string[];
-  name: string;
-  type: Provider["type"];
-};
-
-export type ApiProviderSaveRequest = Omit<ApiProvider, "has_api_key"> & {
-  api_key?: string;
-};
+import type { ApiProvider } from "@/features/providers/api/provider-api-types";
 
 export type ApiTelegramSession = {
   chat_id: string;

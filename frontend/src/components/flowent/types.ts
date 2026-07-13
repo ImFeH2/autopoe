@@ -20,27 +20,6 @@ export type FlowentToast = {
 
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
 
-export type ProviderKind =
-  | "openai"
-  | "openai_responses"
-  | "anthropic"
-  | "gemini";
-
-export type ProviderOption = {
-  id: ProviderKind;
-  label: string;
-};
-
-export type Provider = {
-  apiKey: string;
-  id: string;
-  name: string;
-  type: ProviderKind;
-  baseUrl: string;
-  hasAccessKey: boolean;
-  models: string[];
-};
-
 export type TelegramBotStatus = "disabled" | "error" | "running" | "starting";
 
 export type TelegramSessionStatus = "approved" | "pending";

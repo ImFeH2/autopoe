@@ -5,14 +5,14 @@ import {
   ProviderModelFetchError,
   removeProviderRequest,
   saveProviderRequest,
-} from "@/app/api/provider-requests";
+} from "@/features/providers/api/provider-requests";
 import { saveRuntimeSettingsRequest } from "@/app/api/state-requests";
 import {
   createEmptyProvider,
   providerOptions,
-} from "@/components/flowent/provider-options";
+} from "@/features/providers/model/provider-options";
+import type { Provider } from "@/features/providers/model/provider-types";
 import type {
-  Provider,
   ReasoningEffort,
   RuntimeSettings,
 } from "@/components/flowent/types";

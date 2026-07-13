@@ -24,10 +24,10 @@ import {
   stableScrollbarClassName,
 } from "@/components/flowent/styles";
 import type {
-  Provider,
   ReasoningEffort,
   RuntimeSettings,
 } from "@/components/flowent/types";
+import type { Provider } from "@/features/providers/model/provider-types";
 import { cn } from "@/lib/utils";
 
 const reasoningOptions: Array<{ label: string; value: ReasoningEffort }> = [
