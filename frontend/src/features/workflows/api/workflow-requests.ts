@@ -3,17 +3,15 @@ import type {
   ApiWorkflowRunResult,
   ApiWorkflowSaveRequest,
   ApiWorkflowSchedule,
-  RequestResult,
-} from "@/app/api/types";
+} from "@/features/workflows/api/workflow-api-types";
 import {
-  errorMessageFromResponse,
   workflowFromApi,
   workflowRunRequestToApi,
   workflowRunResultFromApi,
   workflowScheduleFromApi,
   workflowScheduleStartRequestToApi,
   workflowToApi,
-} from "@/app/api/mappers";
+} from "@/features/workflows/api/workflow-mappers";
 import type {
   WorkflowRunRequest,
   WorkflowRunResult,
@@ -23,6 +21,22 @@ import type {
   WorkflowScheduleStartRequest,
 } from "@/features/workflows/model/workflow-schedule-types";
 import type { Workflow } from "@/features/workflows/model/workflow-types";
+import type { RequestResult } from "@/shared/api/request-result";
+
+const errorMessageFromResponse = async (
+  response: Response,
+  fallback: string,
+) => {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string" && body.detail.trim()) {
+      return body.detail;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+};
 
 export const saveWorkflowRequest = async (
   workflow: Workflow,

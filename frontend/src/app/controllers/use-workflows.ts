@@ -7,8 +7,7 @@ import {
   saveWorkflowRequest,
   startWorkflowScheduleRequest,
   stopWorkflowScheduleRequest,
-} from "@/app/api/workflow-requests";
-import type { RequestResult } from "@/app/api/types";
+} from "@/features/workflows/api/workflow-requests";
 import type {
   WorkflowRunRequest,
   WorkflowRunResult,
@@ -19,6 +18,7 @@ import type {
   WorkflowScheduleStartRequest,
 } from "@/features/workflows/model/workflow-schedule-types";
 import type { Workflow } from "@/features/workflows/model/workflow-types";
+import type { RequestResult } from "@/shared/api/request-result";
 
 const SCHEDULE_POLL_INTERVAL_MS = 2_000;
 
