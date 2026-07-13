@@ -45,7 +45,7 @@ describe("Telegram Bot channel management", () => {
     await user.click(screen.getByRole("tab", { name: "Channels" }));
 
     expect(
-      screen.getByRole("form", { name: "Telegram Bot" }),
+      await screen.findByRole("form", { name: "Telegram Bot" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Enabled" })).toHaveTextContent(
       "Off",

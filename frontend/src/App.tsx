@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { fetchAppState } from "@/app/api/state-requests";
 import type { ApiState } from "@/app/api/types";
@@ -11,17 +19,9 @@ import {
 } from "@/app/navigation-state";
 import type { ViewId } from "@/app/navigation/view-types";
 import { AppShell } from "@/components/flowent/app-shell";
-import { ChannelsView } from "@/components/flowent/channels-view";
-import { McpView } from "@/components/flowent/mcp-view";
-import { PermissionsView } from "@/components/flowent/permissions-view";
-import { ProvidersView } from "@/components/flowent/providers-view";
-import { SettingsView } from "@/components/flowent/settings-view";
-import { SkillsView } from "@/components/flowent/skills-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
 import { FlowentToastProvider } from "@/components/flowent/toast";
 import { useFlowentToast } from "@/components/flowent/toast-context";
-import { WorkflowsView } from "@/components/flowent/workflows-view";
-import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
 import { useTelegramChannel } from "@/features/channels/hooks/use-telegram-channel";
 import { mcpServerFromApi } from "@/features/mcp/api/mcp-mappers";
@@ -30,6 +30,51 @@ import { useWritablePaths } from "@/features/permissions/hooks/use-writable-path
 import { useProviders } from "@/features/providers/hooks/use-providers";
 import { useRuntimeSettings } from "@/features/settings/hooks/use-runtime-settings";
 import { useSkills } from "@/features/skills/hooks/use-skills";
+
+const ChannelsView = lazy(() =>
+  import("@/components/flowent/channels-view").then((module) => ({
+    default: module.ChannelsView,
+  })),
+);
+const McpView = lazy(() =>
+  import("@/components/flowent/mcp-view").then((module) => ({
+    default: module.McpView,
+  })),
+);
+const PermissionsView = lazy(() =>
+  import("@/components/flowent/permissions-view").then((module) => ({
+    default: module.PermissionsView,
+  })),
+);
+const ProvidersView = lazy(() =>
+  import("@/components/flowent/providers-view").then((module) => ({
+    default: module.ProvidersView,
+  })),
+);
+const SettingsView = lazy(() =>
+  import("@/components/flowent/settings-view").then((module) => ({
+    default: module.SettingsView,
+  })),
+);
+const SkillsView = lazy(() =>
+  import("@/components/flowent/skills-view").then((module) => ({
+    default: module.SkillsView,
+  })),
+);
+const WorkflowsView = lazy(() =>
+  import("@/components/flowent/workflows-view").then((module) => ({
+    default: module.WorkflowsView,
+  })),
+);
+const WorkspaceView = lazy(() =>
+  import("@/components/flowent/workspace-view").then((module) => ({
+    default: module.WorkspaceView,
+  })),
+);
+
+function ViewLoadFallback() {
+  return <div aria-hidden="true" className="h-full bg-black" />;
+}
 
 function FlowentApp() {
   const toast = useFlowentToast();
@@ -281,132 +326,148 @@ function FlowentApp() {
         className={viewPanelClassName}
         tabIndex={-1}
       >
-        <WorkspaceView
-          contextWindowLimit={contextWindowLimit}
-          draft={draft}
-          isRefiningContext={isRefiningContext}
-          isResponding={isResponding}
-          messages={messages}
-          usageInfo={usageInfo}
-          commands={workspaceCommands}
-          skills={skills}
-          onCommand={runWorkspaceCommand}
-          onCommandError={handleWorkspaceCommandError}
-          onDraftChange={setDraft}
-          onEditMessage={(request) => {
-            void editMessage(request);
-          }}
-          onRetryMessage={(messageId) => {
-            void retryMessage(messageId);
-          }}
-          onRetryError={(request) => {
-            void retryError(request);
-          }}
-          onSendMessage={(content) => {
-            void sendMessage(content);
-          }}
-          onStopResponse={stopResponse}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <WorkspaceView
+            contextWindowLimit={contextWindowLimit}
+            draft={draft}
+            isRefiningContext={isRefiningContext}
+            isResponding={isResponding}
+            messages={messages}
+            usageInfo={usageInfo}
+            commands={workspaceCommands}
+            skills={skills}
+            onCommand={runWorkspaceCommand}
+            onCommandError={handleWorkspaceCommandError}
+            onDraftChange={setDraft}
+            onEditMessage={(request) => {
+              void editMessage(request);
+            }}
+            onRetryMessage={(messageId) => {
+              void retryMessage(messageId);
+            }}
+            onRetryError={(request) => {
+              void retryError(request);
+            }}
+            onSendMessage={(content) => {
+              void sendMessage(content);
+            }}
+            onStopResponse={stopResponse}
+          />
+        </Suspense>
       </TabsContent>
       <TabsContent value="workflows" className={viewPanelClassName}>
-        <WorkflowsView
-          activeWorkflow={activeWorkflow}
-          newWorkflowKey={newWorkflowKey}
-          onWorkflowPersisted={openWorkflow}
-          onRunWorkflow={runWorkflow}
-          onSaveWorkflow={saveWorkflow}
-          onStartWorkflowSchedule={startWorkflowSchedule}
-          onStopWorkflowSchedule={stopWorkflowSchedule}
-          runningWorkflowId={runningWorkflowId}
-          workflowRunResult={workflowRunResult}
-          workflowSchedule={workflowSchedule}
-          workflowScheduleRequestState={workflowScheduleRequestState}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <WorkflowsView
+            activeWorkflow={activeWorkflow}
+            newWorkflowKey={newWorkflowKey}
+            onWorkflowPersisted={openWorkflow}
+            onRunWorkflow={runWorkflow}
+            onSaveWorkflow={saveWorkflow}
+            onStartWorkflowSchedule={startWorkflowSchedule}
+            onStopWorkflowSchedule={stopWorkflowSchedule}
+            runningWorkflowId={runningWorkflowId}
+            workflowRunResult={workflowRunResult}
+            workflowSchedule={workflowSchedule}
+            workflowScheduleRequestState={workflowScheduleRequestState}
+          />
+        </Suspense>
       </TabsContent>
       <TabsContent value="providers" className={viewPanelClassName}>
-        <ProvidersView
-          activeProvider={providerDraft}
-          isFetchingModels={isFetchingModels}
-          isCreatingProvider={isCreatingProvider}
-          onFetchModels={fetchProviderModels}
-          onNewProvider={openNewProviderEditor}
-          onProviderSelect={loadProviderEditor}
-          onRemoveProvider={removeProvider}
-          onSaveProvider={saveProvider}
-          onUpdateProvider={updateProviderDraft}
-          providers={providers}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <ProvidersView
+            activeProvider={providerDraft}
+            isFetchingModels={isFetchingModels}
+            isCreatingProvider={isCreatingProvider}
+            onFetchModels={fetchProviderModels}
+            onNewProvider={openNewProviderEditor}
+            onProviderSelect={loadProviderEditor}
+            onRemoveProvider={removeProvider}
+            onSaveProvider={saveProvider}
+            onUpdateProvider={updateProviderDraft}
+            providers={providers}
+          />
+        </Suspense>
       </TabsContent>
       <TabsContent value="channels" className={viewPanelClassName}>
-        <ChannelsView
-          onApproveSession={approveTelegramSession}
-          onSaveTelegramBot={saveTelegramBot}
-          onUpdateTelegramBot={updateTelegramBot}
-          telegramBot={telegramBot}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <ChannelsView
+            onApproveSession={approveTelegramSession}
+            onSaveTelegramBot={saveTelegramBot}
+            onUpdateTelegramBot={updateTelegramBot}
+            telegramBot={telegramBot}
+          />
+        </Suspense>
       </TabsContent>
       <TabsContent value="permissions" className={viewPanelClassName}>
-        <PermissionsView
-          onAddWritablePath={addWritablePath}
-          onRemoveWritablePath={(path) => {
-            void removeWritablePath(path);
-          }}
-          writablePaths={writablePaths}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <PermissionsView
+            onAddWritablePath={addWritablePath}
+            onRemoveWritablePath={(path) => {
+              void removeWritablePath(path);
+            }}
+            writablePaths={writablePaths}
+          />
+        </Suspense>
       </TabsContent>
       <TabsContent value="mcp" className={viewPanelClassName}>
-        <McpView
-          activeServer={mcpDraft}
-          isCreatingServer={isCreatingMcpServer}
-          isImportOpen={isMcpImportOpen}
-          importPreview={mcpImportPreview}
-          importSource={mcpImportSource}
-          importingServerId={importingMcpServerId}
-          isPreviewing={isPreviewingMcpImport}
-          onNewServer={openNewMcpEditor}
-          onImport={openMcpImport}
-          onImportSourceChange={updateMcpImportSource}
-          onImportServer={(serverId) => {
-            void importMcpServer(serverId);
-          }}
-          onReconnectServer={reconnectMcpServer}
-          onRemoveServer={removeMcpServer}
-          onSaveServer={() => {
-            void saveMcpServer();
-          }}
-          onServerSelect={loadMcpEditor}
-          onUpdateServer={updateMcpDraft}
-          servers={mcpServers}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <McpView
+            activeServer={mcpDraft}
+            isCreatingServer={isCreatingMcpServer}
+            isImportOpen={isMcpImportOpen}
+            importPreview={mcpImportPreview}
+            importSource={mcpImportSource}
+            importingServerId={importingMcpServerId}
+            isPreviewing={isPreviewingMcpImport}
+            onNewServer={openNewMcpEditor}
+            onImport={openMcpImport}
+            onImportSourceChange={updateMcpImportSource}
+            onImportServer={(serverId) => {
+              void importMcpServer(serverId);
+            }}
+            onReconnectServer={reconnectMcpServer}
+            onRemoveServer={removeMcpServer}
+            onSaveServer={() => {
+              void saveMcpServer();
+            }}
+            onServerSelect={loadMcpEditor}
+            onUpdateServer={updateMcpDraft}
+            servers={mcpServers}
+          />
+        </Suspense>
       </TabsContent>
       <TabsContent value="skills" className={viewPanelClassName}>
-        <SkillsView
-          activeSkill={activeSkill}
-          onReloadSkills={() => {
-            void reloadSkills();
-          }}
-          onSkillSelect={selectSkill}
-          onSkillToggle={(skill, enabled) => {
-            void toggleSkill(skill, enabled);
-          }}
-          skills={skills}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <SkillsView
+            activeSkill={activeSkill}
+            onReloadSkills={() => {
+              void reloadSkills();
+            }}
+            onSkillSelect={selectSkill}
+            onSkillToggle={(skill, enabled) => {
+              void toggleSkill(skill, enabled);
+            }}
+            skills={skills}
+          />
+        </Suspense>
       </TabsContent>
       <TabsContent value="settings" className={viewPanelClassName}>
-        <SettingsView
-          agentPrompt={agentPrompt}
-          appVersion={appVersion}
-          contextWindowLimit={contextWindowLimit}
-          modelOptions={activeProvider?.models ?? []}
-          onModelChange={handleActiveModelChange}
-          onProviderChange={handleActiveProviderChange}
-          onReasoningEffortChange={handleReasoningEffortChange}
-          onRuntimeSettingsSave={saveRuntimeSettings}
-          providers={providers}
-          reasoningEffort={reasoningEffort}
-          selectedModel={selectedModel}
-          selectedProviderId={selectedProviderId}
-        />
+        <Suspense fallback={<ViewLoadFallback />}>
+          <SettingsView
+            agentPrompt={agentPrompt}
+            appVersion={appVersion}
+            contextWindowLimit={contextWindowLimit}
+            modelOptions={activeProvider?.models ?? []}
+            onModelChange={handleActiveModelChange}
+            onProviderChange={handleActiveProviderChange}
+            onReasoningEffortChange={handleReasoningEffortChange}
+            onRuntimeSettingsSave={saveRuntimeSettings}
+            providers={providers}
+            reasoningEffort={reasoningEffort}
+            selectedModel={selectedModel}
+            selectedProviderId={selectedProviderId}
+          />
+        </Suspense>
       </TabsContent>
     </AppShell>
   );

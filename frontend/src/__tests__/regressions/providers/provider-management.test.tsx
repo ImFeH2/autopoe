@@ -29,7 +29,9 @@ describe("Provider management", () => {
 
     await user.click(screen.getByRole("tab", { name: "Providers" }));
 
-    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "New" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("No providers")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Provider name" })).toHaveValue(
       "",
@@ -51,7 +53,9 @@ describe("Provider management", () => {
       screen.getByRole("combobox", { name: "Provider type" }),
     ).toHaveTextContent("OpenAI");
 
-    await user.click(screen.getByRole("combobox", { name: "Provider type" }));
+    await user.click(
+      await screen.findByRole("combobox", { name: "Provider type" }),
+    );
 
     expect(screen.getByRole("option", { name: "OpenAI" })).toBeInTheDocument();
     expect(
@@ -100,14 +104,14 @@ describe("Provider management", () => {
 
     await user.click(screen.getByRole("tab", { name: "Providers" }));
     await user.type(
-      screen.getByRole("textbox", { name: "Provider name" }),
+      await screen.findByRole("textbox", { name: "Provider name" }),
       "OpenAI",
     );
     await user.click(screen.getByRole("button", { name: "Fetch" }));
     expect(await screen.findByText("gpt-5.1-mini")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save" }));
     await user.click(screen.getByRole("tab", { name: "Settings" }));
-    await user.click(screen.getByRole("combobox", { name: "Provider" }));
+    await user.click(await screen.findByRole("combobox", { name: "Provider" }));
     await user.click(screen.getByRole("option", { name: "OpenAI" }));
     await user.click(screen.getByRole("combobox", { name: "Model" }));
 

@@ -1292,7 +1292,7 @@ describe("App", () => {
     window.localStorage.clear();
   });
 
-  it("opens the Workspace as the default chat view", () => {
+  it("opens the Workspace as the default chat view", async () => {
     render(<App />);
 
     expect(
@@ -1304,7 +1304,7 @@ describe("App", () => {
     );
     expect(screen.getAllByText("No provider").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("textbox", { name: "Message Flowent" }),
+      await screen.findByRole("textbox", { name: "Message Flowent" }),
     ).toBeInTheDocument();
     const sendButton = screen.getByRole("button", { name: "Send message" });
     expect(sendButton).toBeDisabled();
@@ -1339,7 +1339,9 @@ describe("App", () => {
     expect(
       screen.queryByRole("textbox", { name: "Workflow name" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Run" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("My Workflows")).not.toBeInTheDocument();
     expect(
       screen.getByText(

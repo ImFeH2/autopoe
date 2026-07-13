@@ -201,7 +201,7 @@ describe("model context window regressions", () => {
     expect(await screen.findByText("30k / 272k")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Settings" }));
-    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("combobox", { name: "Model" }));
     await user.click(screen.getByRole("option", { name: "gpt-5.5" }));
     await user.click(screen.getByRole("tab", { name: "Workspace" }));
 

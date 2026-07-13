@@ -19,7 +19,9 @@ describe("Runtime settings", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Settings" }));
-    await user.click(screen.getByRole("combobox", { name: "Reasoning" }));
+    await user.click(
+      await screen.findByRole("combobox", { name: "Reasoning" }),
+    );
     await user.click(screen.getByRole("option", { name: "XHigh" }));
 
     expect(

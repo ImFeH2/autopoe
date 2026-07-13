@@ -42,7 +42,7 @@ describe("MCP management", () => {
     await user.click(screen.getByRole("tab", { name: "MCP" }));
 
     expect(
-      screen.getByRole("complementary", { name: "MCP servers" }),
+      await screen.findByRole("complementary", { name: "MCP servers" }),
     ).toBeInTheDocument();
     expect(screen.getByText("No servers")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument();

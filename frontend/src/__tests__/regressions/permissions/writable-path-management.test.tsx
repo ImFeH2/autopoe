@@ -25,7 +25,7 @@ describe("Writable path permissions", () => {
     await user.click(screen.getByRole("tab", { name: "Permissions" }));
 
     expect(
-      screen.getByRole("region", { name: "Permissions" }),
+      await screen.findByRole("region", { name: "Permissions" }),
     ).toBeInTheDocument();
     expect(screen.getByText("No paths")).toBeInTheDocument();
   });

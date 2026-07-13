@@ -20,7 +20,7 @@ describe("Skill management", () => {
 
     await user.click(await screen.findByRole("tab", { name: "Skills" }));
 
-    expect(screen.getAllByText("No skills").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("No skills")).length).toBeGreaterThan(0);
   });
 
   it("lists available skills with their scope and description", async () => {

@@ -266,7 +266,7 @@ describe("toast notifications", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Providers" }));
-    await user.click(screen.getByRole("button", { name: "Fetch" }));
+    await user.click(await screen.findByRole("button", { name: "Fetch" }));
 
     const notification = await screen.findByRole("alert");
     expect(notification).toHaveTextContent(message);
@@ -316,7 +316,10 @@ describe("toast notifications", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Permissions" }));
-    await user.type(screen.getByLabelText("Directory path"), "/tmp/cache");
+    await user.type(
+      await screen.findByLabelText("Directory path"),
+      "/tmp/cache",
+    );
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -339,7 +342,7 @@ describe("toast notifications", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "MCP" }));
-    await user.click(screen.getByRole("button", { name: "Import" }));
+    await user.click(await screen.findByRole("button", { name: "Import" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Scan could not be completed.",
@@ -374,7 +377,7 @@ describe("toast notifications", () => {
     await user.click(
       await screen.findByRole("button", { name: "Launch Workflow" }),
     );
-    await user.click(screen.getByRole("button", { name: "Run" }));
+    await user.click(await screen.findByRole("button", { name: "Run" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Workflow needs an output node.",
@@ -415,7 +418,7 @@ describe("toast notifications", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Channels" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(await screen.findByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Secret is invalid",
@@ -448,7 +451,7 @@ describe("toast notifications", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Skills" }));
-    await user.click(screen.getByRole("button", { name: "On" }));
+    await user.click(await screen.findByRole("button", { name: "On" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Skill could not be loaded.",

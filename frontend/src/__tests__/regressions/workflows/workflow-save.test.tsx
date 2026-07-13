@@ -301,7 +301,7 @@ describe("workflow save regressions", () => {
     await user.click(
       await screen.findByRole("button", { name: "Draft Workflow" }),
     );
-    await user.click(screen.getByRole("button", { name: "Run" }));
+    await user.click(await screen.findByRole("button", { name: "Run" }));
 
     expect(
       await screen.findByText("Workflow needs an output node."),
@@ -332,7 +332,7 @@ describe("workflow save regressions", () => {
     await user.click(
       await screen.findByRole("button", { name: "Draft Workflow" }),
     );
-    await user.click(screen.getByTestId("workflow-node-input"));
+    await user.click(await screen.findByTestId("workflow-node-input"));
 
     expect(screen.queryByText("Unsaved")).not.toBeInTheDocument();
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();

@@ -94,8 +94,8 @@ describe("saved credentials", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Providers" }));
-    await user.click(screen.getByRole("button", { name: "OpenAI" }));
-    const accessKey = screen.getByLabelText("Access key");
+    await user.click(await screen.findByRole("button", { name: "OpenAI" }));
+    const accessKey = await screen.findByLabelText("Access key");
 
     expect(accessKey).toHaveValue("");
     expect(accessKey).toHaveAttribute("placeholder", "Saved");
@@ -145,7 +145,7 @@ describe("saved credentials", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Channels" }));
-    const botSecret = screen.getByLabelText("Bot secret");
+    const botSecret = await screen.findByLabelText("Bot secret");
 
     expect(botSecret).toHaveValue("");
     expect(botSecret).toHaveAttribute("placeholder", "Saved");
