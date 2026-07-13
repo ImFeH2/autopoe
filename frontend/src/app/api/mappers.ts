@@ -6,19 +6,23 @@ import type {
   ApiWorkflowRunResult,
   ApiWorkflowSchedule,
 } from "@/app/api/types";
-import type {
-  ContextUsageInfo,
-  Workflow,
-  WorkflowConnection,
-  WorkflowRunRequest,
-  WorkflowRunResult,
-  WorkflowSchedule,
-  WorkflowScheduleStartRequest,
-  WorkflowSpec,
-} from "@/components/flowent/types";
+import type { ContextUsageInfo } from "@/components/flowent/types";
 import type { TelegramBot } from "@/features/channels/model/channel-types";
 import type { McpServer } from "@/features/mcp/model/mcp-types";
 import type { Skill } from "@/features/skills/model/skill-types";
+import type {
+  WorkflowRunRequest,
+  WorkflowRunResult,
+} from "@/features/workflows/model/workflow-run-types";
+import type {
+  WorkflowSchedule,
+  WorkflowScheduleStartRequest,
+} from "@/features/workflows/model/workflow-schedule-types";
+import type {
+  Workflow,
+  WorkflowConnection,
+  WorkflowSpec,
+} from "@/features/workflows/model/workflow-types";
 
 export const errorNotificationKeysFromState = (
   telegramBot: TelegramBot,

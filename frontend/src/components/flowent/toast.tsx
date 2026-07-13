@@ -15,12 +15,17 @@ import {
   FlowentToastContext,
   type FlowentToastApi,
   type FlowentToastInput,
+  type FlowentToastTone,
 } from "@/components/flowent/toast-context";
-import type {
-  FlowentToast,
-  FlowentToastTone,
-} from "@/components/flowent/types";
 import { cn } from "@/lib/utils";
+
+type FlowentToast = {
+  description?: string;
+  duration: number;
+  id: string;
+  message: string;
+  tone: FlowentToastTone;
+};
 
 const maxToastCount = 3;
 const defaultToastDuration = 4000;

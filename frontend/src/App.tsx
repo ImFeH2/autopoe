@@ -9,6 +9,7 @@ import {
   readNavigationState,
   writeNavigationState,
 } from "@/app/navigation-state";
+import type { ViewId } from "@/app/navigation/view-types";
 import { AppShell } from "@/components/flowent/app-shell";
 import { ChannelsView } from "@/components/flowent/channels-view";
 import { McpView } from "@/components/flowent/mcp-view";
@@ -19,7 +20,6 @@ import { SkillsView } from "@/components/flowent/skills-view";
 import { viewPanelClassName } from "@/components/flowent/styles";
 import { FlowentToastProvider } from "@/components/flowent/toast";
 import { useFlowentToast } from "@/components/flowent/toast-context";
-import type { ViewId } from "@/components/flowent/types";
 import { WorkflowsView } from "@/components/flowent/workflows-view";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";

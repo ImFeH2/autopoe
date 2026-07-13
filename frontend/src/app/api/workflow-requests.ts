@@ -15,12 +15,14 @@ import {
   workflowToApi,
 } from "@/app/api/mappers";
 import type {
-  Workflow,
   WorkflowRunRequest,
   WorkflowRunResult,
+} from "@/features/workflows/model/workflow-run-types";
+import type {
   WorkflowSchedule,
   WorkflowScheduleStartRequest,
-} from "@/components/flowent/types";
+} from "@/features/workflows/model/workflow-schedule-types";
+import type { Workflow } from "@/features/workflows/model/workflow-types";
 
 export const saveWorkflowRequest = async (
   workflow: Workflow,

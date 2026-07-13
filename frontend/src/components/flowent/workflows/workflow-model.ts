@@ -14,18 +14,20 @@ import type {
   WorkflowConnection,
   WorkflowEdge,
   WorkflowNode,
-  WorkflowNodeRunResult,
-  WorkflowNodeType,
-  WorkflowRunResult,
+  WorkflowNodeKind,
   WorkflowSpec,
-} from "@/components/flowent/types";
+} from "@/features/workflows/model/workflow-types";
+import type {
+  WorkflowNodeRunResult,
+  WorkflowRunResult,
+} from "@/features/workflows/model/workflow-run-types";
 import { createUuid } from "@/lib/utils";
 
 export type WorkflowCanvasNodeData = {
   description: string;
   label: string;
   result?: WorkflowNodeRunResult;
-  workflowType: WorkflowNodeType;
+  workflowType: WorkflowNodeKind;
 };
 
 export type WorkflowCanvasNode = Node<WorkflowCanvasNodeData, "workflowNode">;
@@ -39,7 +41,7 @@ export type WorkflowNodeTemplate = {
   description: string;
   icon: LucideIcon;
   label: string;
-  type: WorkflowNodeType;
+  type: WorkflowNodeKind;
 };
 
 export const workflowNodeTemplates: WorkflowNodeTemplate[] = [
@@ -88,10 +90,10 @@ export const workflowNodeIconByType = {
   merge: GitMerge,
   output: ClipboardList,
   timer: Timer,
-} satisfies Record<WorkflowNodeType, LucideIcon>;
+} satisfies Record<WorkflowNodeKind, LucideIcon>;
 
 export const defaultWorkflowNodeData = (
-  type: WorkflowNodeType,
+  type: WorkflowNodeKind,
 ): Record<string, unknown> => {
   if (type === "input") {
     return { default_value: "", input_type: "text" };

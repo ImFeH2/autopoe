@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  WorkflowNode,
-  WorkflowRunResult,
-} from "@/components/flowent/types";
 import {
   normalizeRunInputs,
   workflowFailureMessage,
 } from "@/components/flowent/workflow-run";
+import type { WorkflowRunResult } from "@/features/workflows/model/workflow-run-types";
+import type { WorkflowNode } from "@/features/workflows/model/workflow-types";
 
 const workflowNode = (
   updates: Partial<WorkflowNode> & Pick<WorkflowNode, "id" | "kind">,

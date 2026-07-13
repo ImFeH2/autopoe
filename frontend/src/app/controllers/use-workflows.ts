@@ -10,13 +10,15 @@ import {
 } from "@/app/api/workflow-requests";
 import type { RequestResult } from "@/app/api/types";
 import type {
-  Workflow,
   WorkflowRunRequest,
   WorkflowRunResult,
+} from "@/features/workflows/model/workflow-run-types";
+import type {
   WorkflowSchedule,
   WorkflowScheduleRequestState,
   WorkflowScheduleStartRequest,
-} from "@/components/flowent/types";
+} from "@/features/workflows/model/workflow-schedule-types";
+import type { Workflow } from "@/features/workflows/model/workflow-types";
 
 const SCHEDULE_POLL_INTERVAL_MS = 2_000;
 

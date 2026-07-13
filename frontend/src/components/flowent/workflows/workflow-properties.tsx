@@ -15,7 +15,10 @@ import {
   fieldLabelClassName,
   fieldTriggerClassName,
 } from "@/components/flowent/styles";
-import type { WorkflowEdge, WorkflowNode } from "@/components/flowent/types";
+import type {
+  WorkflowEdge,
+  WorkflowNode,
+} from "@/features/workflows/model/workflow-types";
 
 export function WorkflowNodeProperties({
   node,

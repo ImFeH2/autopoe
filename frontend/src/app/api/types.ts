@@ -1,27 +1,21 @@
-import type {
-  ContextUsageInfo,
-  Message,
-  Workflow,
-  WorkflowConnection,
-  WorkflowEdge,
-  WorkflowNode,
-  WorkflowNodeRunResult,
-  WorkflowRunRequest,
-  WorkflowRunResult,
-  WorkflowSchedule,
-  WorkflowSpec,
-} from "@/components/flowent/types";
+import type { ContextUsageInfo, Message } from "@/components/flowent/types";
 import type { ApiTelegramBot } from "@/features/channels/api/channel-api-types";
 import type { ApiMcpServer } from "@/features/mcp/api/mcp-api-types";
 import type { ApiWritablePath } from "@/features/permissions/api/permission-api-types";
 import type { ApiProvider } from "@/features/providers/api/provider-api-types";
 import type { ReasoningEffort } from "@/features/settings/model/runtime-settings-types";
 import type { ApiSkill } from "@/features/skills/api/skill-api-types";
+import type {
+  WorkflowNodeRunResult,
+  WorkflowRunResult,
+} from "@/features/workflows/model/workflow-run-types";
+import type { WorkflowSchedule } from "@/features/workflows/model/workflow-schedule-types";
+import type { WorkflowNodeKind } from "@/features/workflows/model/workflow-types";
 
 export type ApiWorkflowNode = {
   config: Record<string, unknown>;
   id: string;
-  kind: WorkflowNode["kind"];
+  kind: WorkflowNodeKind;
 };
 
 export type ApiWorkflowConnectionEnd = {
@@ -153,10 +147,3 @@ export type WorkspaceMessageEditResponse = {
   is_responding?: boolean;
   messages: ApiMessage[];
 };
-
-export type DomainWorkflow = Workflow;
-export type DomainWorkflowConnection = WorkflowConnection;
-export type DomainWorkflowEdge = WorkflowEdge;
-export type DomainWorkflowNode = WorkflowNode;
-export type DomainWorkflowRunRequest = WorkflowRunRequest;
-export type DomainWorkflowSpec = WorkflowSpec;

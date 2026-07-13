@@ -52,11 +52,12 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { ViewId } from "@/app/navigation/view-types";
 import {
   fieldInputClassName,
   navigationLabelClassName,
 } from "@/components/flowent/styles";
-import type { ViewId, Workflow } from "@/components/flowent/types";
+import type { Workflow } from "@/features/workflows/model/workflow-types";
 import { cn } from "@/lib/utils";
 
 type NavigationItem = {

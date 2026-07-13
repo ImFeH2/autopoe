@@ -69,14 +69,16 @@ import {
   sectionTitleClassName,
 } from "@/components/flowent/styles";
 import type {
+  WorkflowNodeRunResult,
+  WorkflowRunResult,
+} from "@/features/workflows/model/workflow-run-types";
+import type { WorkflowScheduleStatus } from "@/features/workflows/model/workflow-schedule-types";
+import type {
   Workflow,
   WorkflowEdge,
   WorkflowNode,
-  WorkflowNodeRunResult,
-  WorkflowNodeType,
-  WorkflowRunResult,
-  WorkflowScheduleStatus,
-} from "@/components/flowent/types";
+  WorkflowNodeKind,
+} from "@/features/workflows/model/workflow-types";
 import {
   defaultWorkflowNodeData,
   flowEdgeToWorkflowConnection,
@@ -318,7 +320,7 @@ const workflowNodeMeasuredChromeWidth = 88;
 const workflowLayoutStorageKey = "flowent:workflow-layout";
 const workflowNodeTemplateGroups: Array<{
   label: string;
-  types: WorkflowNodeType[];
+  types: WorkflowNodeKind[];
 }> = [
   { label: "Triggers", types: ["input", "timer"] },
   { label: "Actions", types: ["agent", "merge", "code"] },
@@ -453,7 +455,7 @@ function WorkflowNodePickerContent({
   onAddNode,
 }: {
   Item: typeof ContextMenuItem | typeof DropdownMenuItem;
-  onAddNode: (type: WorkflowNodeType) => void;
+  onAddNode: (type: WorkflowNodeKind) => void;
 }) {
   const [query, setQuery] = useState("");
   const [previewTemplate, setPreviewTemplate] =
@@ -581,7 +583,7 @@ function WorkflowNodePickerContent({
 function WorkflowCanvasContextAddMenu({
   onAddNode,
 }: {
-  onAddNode: (type: WorkflowNodeType) => void;
+  onAddNode: (type: WorkflowNodeKind) => void;
 }) {
   const [isNodePickerOpen, setIsNodePickerOpen] = useState(false);
 
@@ -965,7 +967,7 @@ export function WorkflowCanvas({
   );
 
   const addNode = useCallback(
-    (type: WorkflowNodeType, position = { x: 120, y: 120 }) => {
+    (type: WorkflowNodeKind, position = { x: 120, y: 120 }) => {
       const template = workflowNodeTemplates.find((item) => item.type === type);
       if (!template) {
         return;
@@ -1041,7 +1043,7 @@ export function WorkflowCanvas({
   );
 
   const addNodeAtViewportCenter = useCallback(
-    (type: WorkflowNodeType) => {
+    (type: WorkflowNodeKind) => {
       const rect = wrapperRef.current?.getBoundingClientRect();
       const position = rect
         ? screenToFlowPosition({
@@ -1055,7 +1057,7 @@ export function WorkflowCanvas({
   );
 
   const addNodeAtContextMenuPosition = useCallback(
-    (type: WorkflowNodeType) => {
+    (type: WorkflowNodeKind) => {
       addNode(type, contextMenuPositionRef.current ?? { x: 120, y: 120 });
       contextMenuPositionRef.current = null;
     },

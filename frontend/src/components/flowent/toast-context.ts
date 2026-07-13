@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-import type { FlowentToastTone } from "@/components/flowent/types";
+export type FlowentToastTone = "error" | "info" | "success";
 
 export type FlowentToastInput =
   | string
@@ -26,5 +26,3 @@ export function useFlowentToast() {
   }
   return context;
 }
-
-export type { FlowentToastTone };

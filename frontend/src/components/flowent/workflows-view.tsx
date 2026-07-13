@@ -13,14 +13,18 @@ import {
 } from "@/components/flowent/styles";
 import { useFlowentToast } from "@/components/flowent/toast-context";
 import type {
-  Workflow,
-  WorkflowNode,
   WorkflowRunRequest,
   WorkflowRunResult,
+} from "@/features/workflows/model/workflow-run-types";
+import type {
   WorkflowSchedule,
   WorkflowScheduleRequestState,
   WorkflowScheduleStartRequest,
-} from "@/components/flowent/types";
+} from "@/features/workflows/model/workflow-schedule-types";
+import type {
+  Workflow,
+  WorkflowNode,
+} from "@/features/workflows/model/workflow-types";
 import {
   cloneWorkflow,
   createDraftWorkflow,

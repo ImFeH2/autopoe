@@ -1,4 +1,4 @@
-import type { ViewId } from "@/components/flowent/types";
+import type { ViewId } from "@/app/navigation/view-types";
 
 const viewIds = new Set<ViewId>([
   "workspace",

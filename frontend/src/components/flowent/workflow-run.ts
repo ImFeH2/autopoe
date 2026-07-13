@@ -1,8 +1,8 @@
 import type {
   Workflow,
   WorkflowNode,
-  WorkflowRunResult,
-} from "@/components/flowent/types";
+} from "@/features/workflows/model/workflow-types";
+import type { WorkflowRunResult } from "@/features/workflows/model/workflow-run-types";
 import { workflowNodes } from "@/components/flowent/workflows/workflow-model";
 
 export const workflowInputNodes = (workflow: Workflow) =>
