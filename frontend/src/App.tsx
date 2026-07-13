@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ApiState } from "@/app/api/types";
 import { useWorkflows } from "@/app/controllers/use-workflows";
-import { useMcpServers } from "@/app/controllers/use-mcp-servers";
 import { useSetupSections } from "@/app/controllers/use-setup-sections";
 import { useProviderSettings } from "@/app/controllers/use-provider-settings";
 import { useWorkspaceController } from "@/app/controllers/use-workspace-controller";
@@ -25,6 +24,7 @@ import type { ViewId } from "@/components/flowent/types";
 import { WorkflowsView } from "@/components/flowent/workflows-view";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
+import { useMcpServers } from "@/features/mcp/hooks/use-mcp-servers";
 
 function FlowentApp() {
   const toast = useFlowentToast();

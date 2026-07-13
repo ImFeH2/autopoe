@@ -24,7 +24,10 @@ import {
   stableScrollbarClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
-import type { McpImportSource, McpServer } from "@/components/flowent/types";
+import type {
+  McpImportSource,
+  McpServer,
+} from "@/features/mcp/model/mcp-types";
 import { cn } from "@/lib/utils";
 
 export function McpView({

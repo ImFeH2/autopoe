@@ -1,6 +1,15 @@
-import type { ApiMcpImportPreview, ApiMcpServer } from "@/app/api/types";
-import { mcpServerFromApi, mcpServerToApi } from "@/app/api/mappers";
-import type { McpImportSource, McpServer } from "@/components/flowent/types";
+import type {
+  ApiMcpImportPreview,
+  ApiMcpServer,
+} from "@/features/mcp/api/mcp-api-types";
+import {
+  mcpServerFromApi,
+  mcpServerToApi,
+} from "@/features/mcp/api/mcp-mappers";
+import type {
+  McpImportSource,
+  McpServer,
+} from "@/features/mcp/model/mcp-types";
 
 export const previewMcpImportRequest = async (source: McpImportSource) => {
   const response = await fetch("/api/mcp/import/preview", {
@@ -9,7 +18,7 @@ export const previewMcpImportRequest = async (source: McpImportSource) => {
     method: "POST",
   });
   if (!response.ok) {
-    throw new Error("Scan could not be completed.");
+    throw new Error("MCP import preview failed");
   }
   const result = (await response.json()) as ApiMcpImportPreview;
   return (result.servers ?? []).map((server) => mcpServerFromApi(server));
@@ -23,15 +32,12 @@ export const importMcpServerRequest = async ({
   source: McpImportSource;
 }) => {
   const response = await fetch("/api/mcp/import", {
-    body: JSON.stringify({
-      server_id: serverId,
-      source,
-    }),
+    body: JSON.stringify({ server_id: serverId, source }),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   });
   if (!response.ok) {
-    throw new Error("Import could not be completed.");
+    throw new Error("MCP import failed");
   }
   const result = (await response.json()) as ApiMcpServer[];
   return result.map((server) => mcpServerFromApi(server));

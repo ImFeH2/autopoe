@@ -2,19 +2,22 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { fetchAppState } from "@/app/api/state-requests";
 import {
+  createEmptyMcpServer,
+  mcpServerFromApi,
+  mcpServerId,
+  parseCommandLine,
+} from "@/features/mcp/api/mcp-mappers";
+import {
   importMcpServerRequest,
   previewMcpImportRequest,
   reconnectMcpServerRequest,
   removeMcpServerRequest,
   saveMcpServerRequest,
-} from "@/app/api/mcp-requests";
-import {
-  createEmptyMcpServer,
-  mcpServerFromApi,
-  mcpServerId,
-  parseCommandLine,
-} from "@/app/api/mappers";
-import type { McpImportSource, McpServer } from "@/components/flowent/types";
+} from "@/features/mcp/api/mcp-requests";
+import type {
+  McpImportSource,
+  McpServer,
+} from "@/features/mcp/model/mcp-types";
 
 export const useMcpServers = ({
   showError,

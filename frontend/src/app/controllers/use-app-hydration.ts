@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   errorNotificationKeysFromState,
-  mcpServerFromApi,
   providerFromApi,
   telegramBotFromApi,
   writablePathFromApi,
@@ -11,7 +10,6 @@ import {
 import { fetchAbout, fetchAppState } from "@/app/api/state-requests";
 import type { ApiState } from "@/app/api/types";
 import type {
-  McpServer,
   Provider,
   RuntimeSettings,
   Skill,
@@ -19,6 +17,8 @@ import type {
   Workflow,
   WritablePath,
 } from "@/components/flowent/types";
+import { mcpServerFromApi } from "@/features/mcp/api/mcp-mappers";
+import type { McpServer } from "@/features/mcp/model/mcp-types";
 
 type LoadWorkspaceState = (
   state: ApiState,
