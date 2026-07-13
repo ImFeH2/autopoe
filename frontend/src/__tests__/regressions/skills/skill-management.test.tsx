@@ -60,14 +60,16 @@ describe("Skill management", () => {
 
   it("updates a skill when its enabled state changes", async () => {
     const user = userEvent.setup();
-    mockSkillsAppRequests({ initialSkills: [projectSkill()] });
+    mockSkillsAppRequests({
+      initialSkills: [projectSkill({ id: "skill project/review" })],
+    });
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: "Skills" }));
     await user.click(await screen.findByRole("button", { name: "Off" }));
 
     expect(window.fetch).toHaveBeenCalledWith(
-      "/api/skills/skill-project-review",
+      "/api/skills/skill%20project%2Freview",
       expect.objectContaining({
         body: JSON.stringify({ enabled: false }),
         method: "PUT",

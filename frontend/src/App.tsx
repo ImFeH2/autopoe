@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ApiState } from "@/app/api/types";
-import { useWorkflows } from "@/app/controllers/use-workflows";
-import { useSetupSections } from "@/app/controllers/use-setup-sections";
-import { useWorkspaceController } from "@/app/controllers/use-workspace-controller";
 import { useAppHydration } from "@/app/controllers/use-app-hydration";
+import { useWorkflows } from "@/app/controllers/use-workflows";
+import { useWorkspaceController } from "@/app/controllers/use-workspace-controller";
 import {
   readNavigationState,
   writeNavigationState,
@@ -23,8 +22,11 @@ import type { ViewId } from "@/components/flowent/types";
 import { WorkflowsView } from "@/components/flowent/workflows-view";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
+import { useTelegramChannel } from "@/features/channels/hooks/use-telegram-channel";
 import { useMcpServers } from "@/features/mcp/hooks/use-mcp-servers";
+import { useWritablePaths } from "@/features/permissions/hooks/use-writable-paths";
 import { useProviderSettings } from "@/features/providers/hooks/use-provider-settings";
+import { useSkills } from "@/features/skills/hooks/use-skills";
 
 function FlowentApp() {
   const toast = useFlowentToast();
@@ -98,22 +100,26 @@ function FlowentApp() {
     showError: toast.error,
   });
   const {
-    activeSkill,
-    addWritablePath,
     approveTelegramSession,
-    reloadSkills,
-    removeWritablePath,
-    replaceSkills,
     replaceTelegramBot,
-    replaceWritablePaths,
     saveTelegramBot,
+    telegramBot,
+    updateTelegramBot,
+  } = useTelegramChannel();
+  const {
+    activeSkill,
+    reloadSkills,
+    replaceSkills,
     selectSkill,
     skills,
-    telegramBot,
     toggleSkill,
-    updateTelegramBot,
+  } = useSkills();
+  const {
+    addWritablePath,
+    removeWritablePath,
+    replaceWritablePaths,
     writablePaths,
-  } = useSetupSections();
+  } = useWritablePaths();
   const {
     importMcpServer,
     importingMcpServerId,

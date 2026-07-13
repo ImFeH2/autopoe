@@ -2,9 +2,6 @@ import type {
   ContextUsageInfo,
   Message,
   ReasoningEffort,
-  Skill,
-  TelegramBot,
-  TelegramSession,
   Workflow,
   WorkflowConnection,
   WorkflowEdge,
@@ -15,38 +12,11 @@ import type {
   WorkflowSchedule,
   WorkflowSpec,
 } from "@/components/flowent/types";
+import type { ApiTelegramBot } from "@/features/channels/api/channel-api-types";
 import type { ApiMcpServer } from "@/features/mcp/api/mcp-api-types";
+import type { ApiWritablePath } from "@/features/permissions/api/permission-api-types";
 import type { ApiProvider } from "@/features/providers/api/provider-api-types";
-
-export type ApiTelegramSession = {
-  chat_id: string;
-  display_name: string;
-  recent_message: string;
-  status: TelegramSession["status"];
-  updated_at?: number;
-  user_id: string;
-  username: string;
-};
-
-export type ApiTelegramBot = {
-  enabled: boolean;
-  error?: string;
-  has_bot_token: boolean;
-  sessions?: ApiTelegramSession[];
-  status?: TelegramBot["status"];
-};
-
-export type ApiTelegramBotSaveRequest = {
-  bot_token?: string;
-  enabled: boolean;
-};
-
-export type ApiSkill = Skill;
-
-export type ApiWritablePath = {
-  created_at: number;
-  path: string;
-};
+import type { ApiSkill } from "@/features/skills/api/skill-api-types";
 
 export type ApiWorkflowNode = {
   config: Record<string, unknown>;

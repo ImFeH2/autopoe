@@ -12,7 +12,6 @@ import { Textarea } from "@/components/ui/textarea";
 import type {
   ContextUsageInfo,
   Message,
-  Skill,
   WorkspaceCommand,
   WorkspaceCommandId,
 } from "@/components/flowent/types";
@@ -33,6 +32,7 @@ import {
   PlanTray,
   type WorkspacePlan,
 } from "@/components/flowent/workspace/plan-tray";
+import type { Skill } from "@/features/skills/model/skill-types";
 import { cn } from "@/lib/utils";
 
 export function ChatComposer({

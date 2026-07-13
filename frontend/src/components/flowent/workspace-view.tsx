@@ -31,7 +31,6 @@ import type {
   Message,
   MessageActionRequest,
   MessageErrorRetryRequest,
-  Skill,
   WorkspaceCommand,
   WorkspaceCommandId,
 } from "@/components/flowent/types";
@@ -44,6 +43,7 @@ import { ChatComposer } from "@/components/flowent/workspace/chat-composer";
 import { MessageIconButton } from "@/components/flowent/workspace/message-icon-button";
 import { MessageShortcutRail } from "@/components/flowent/workspace/message-shortcut-rail";
 import { latestPlanFromMessages } from "@/components/flowent/workspace/plan-state";
+import type { Skill } from "@/features/skills/model/skill-types";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceView({

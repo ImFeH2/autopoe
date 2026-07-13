@@ -12,7 +12,7 @@ import {
   stableScrollbarClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
-import type { Skill } from "@/components/flowent/types";
+import type { Skill } from "@/features/skills/model/skill-types";
 import { cn } from "@/lib/utils";
 
 export function SkillsView({

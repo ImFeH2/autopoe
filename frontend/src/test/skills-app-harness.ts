@@ -46,7 +46,7 @@ export const mockSkillsAppRequests = ({
 
     if (url.startsWith("/api/skills/") && init?.method === "PUT") {
       const request = JSON.parse(String(init.body)) as { enabled: boolean };
-      const skillId = url.replace("/api/skills/", "");
+      const skillId = decodeURIComponent(url.replace("/api/skills/", ""));
       const currentSkill =
         skills.find((skill) => skill.id === skillId) ?? projectSkill();
       const updatedSkill = { ...currentSkill, enabled: request.enabled };

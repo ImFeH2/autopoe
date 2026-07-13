@@ -23,7 +23,10 @@ import {
   stableScrollbarClassName,
   subtleButtonClassName,
 } from "@/components/flowent/styles";
-import type { TelegramBot, TelegramSession } from "@/components/flowent/types";
+import type {
+  TelegramBot,
+  TelegramSession,
+} from "@/features/channels/model/channel-types";
 import { cn } from "@/lib/utils";
 
 export function ChannelsView({

@@ -20,47 +20,6 @@ export type FlowentToast = {
 
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
 
-export type TelegramBotStatus = "disabled" | "error" | "running" | "starting";
-
-export type TelegramSessionStatus = "approved" | "pending";
-
-export type TelegramSession = {
-  chatId: string;
-  displayName: string;
-  recentMessage: string;
-  status: TelegramSessionStatus;
-  updatedAt: number;
-  userId: string;
-  username: string;
-};
-
-export type TelegramBot = {
-  botSecret: string;
-  enabled: boolean;
-  error: string;
-  hasBotSecret: boolean;
-  sessions: TelegramSession[];
-  status: TelegramBotStatus;
-};
-
-export type SkillScope = "project" | "user";
-
-export type Skill = {
-  description: string;
-  enabled: boolean;
-  error: string;
-  id: string;
-  name: string;
-  path: string;
-  scope: SkillScope;
-  slug: string;
-};
-
-export type WritablePath = {
-  createdAt: number;
-  path: string;
-};
-
 export type ToolItemStatus = "failed" | "running" | "success" | "waiting";
 
 export type ToolItem = {

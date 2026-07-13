@@ -14,7 +14,7 @@ import {
   subtleButtonClassName,
 } from "@/components/flowent/styles";
 import { useFlowentToast } from "@/components/flowent/toast-context";
-import type { WritablePath } from "@/components/flowent/types";
+import type { WritablePath } from "@/features/permissions/model/permission-types";
 import { cn } from "@/lib/utils";
 
 export function PermissionsView({

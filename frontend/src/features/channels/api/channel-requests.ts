@@ -1,10 +1,13 @@
-import type { ApiTelegramBot, ApiTelegramSession } from "@/app/api/types";
+import type {
+  ApiTelegramBot,
+  ApiTelegramSession,
+} from "@/features/channels/api/channel-api-types";
 import {
   telegramBotFromApi,
   telegramBotToApi,
   telegramSessionFromApi,
-} from "@/app/api/mappers";
-import type { TelegramBot } from "@/components/flowent/types";
+} from "@/features/channels/api/channel-mappers";
+import type { TelegramBot } from "@/features/channels/model/channel-types";
 
 export const saveTelegramBotRequest = async (telegramBot: TelegramBot) => {
   const response = await fetch("/api/telegram-bot", {

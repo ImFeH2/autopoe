@@ -1,4 +1,4 @@
-import type { Skill } from "@/components/flowent/types";
+import type { Skill } from "@/features/skills/model/skill-types";
 
 export const reloadSkillsRequest = async () => {
   const response = await fetch("/api/skills/reload", {
