@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { fetchAppState } from "@/app/api/state-requests";
 import type { ApiState } from "@/app/api/types";
 import { useAppHydration } from "@/app/controllers/use-app-hydration";
 import { useWorkflows } from "@/app/controllers/use-workflows";
@@ -23,6 +24,7 @@ import { WorkflowsView } from "@/components/flowent/workflows-view";
 import { WorkspaceView } from "@/components/flowent/workspace-view";
 import { TabsContent } from "@/components/ui/tabs";
 import { useTelegramChannel } from "@/features/channels/hooks/use-telegram-channel";
+import { mcpServerFromApi } from "@/features/mcp/api/mcp-mappers";
 import { useMcpServers } from "@/features/mcp/hooks/use-mcp-servers";
 import { useWritablePaths } from "@/features/permissions/hooks/use-writable-paths";
 import { useProviders } from "@/features/providers/hooks/use-providers";
@@ -45,6 +47,13 @@ function FlowentApp() {
     async () => refreshAppStateRef.current?.() ?? null,
     [],
   );
+  const refreshMcpServerState = useCallback(async () => {
+    const state = await fetchAppState();
+    if (!state) {
+      return null;
+    }
+    return (state.mcp_servers ?? []).map(mcpServerFromApi);
+  }, []);
   const {
     commands: workspaceCommands,
     draft,
@@ -158,7 +167,10 @@ function FlowentApp() {
     saveMcpServer,
     updateMcpDraft,
     updateMcpImportSource,
-  } = useMcpServers({ showError: toast.error });
+  } = useMcpServers({
+    refreshMcpServers: refreshMcpServerState,
+    showError: toast.error,
+  });
   const {
     activeWorkflow,
     activeWorkflowId,

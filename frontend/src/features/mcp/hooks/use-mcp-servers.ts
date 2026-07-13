@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchAppState } from "@/app/api/state-requests";
 import {
   createEmptyMcpServer,
-  mcpServerFromApi,
   mcpServerId,
   parseCommandLine,
 } from "@/features/mcp/api/mcp-mappers";
@@ -20,8 +18,10 @@ import type {
 } from "@/features/mcp/model/mcp-types";
 
 export const useMcpServers = ({
+  refreshMcpServers,
   showError,
 }: {
+  refreshMcpServers: () => Promise<McpServer[] | null>;
   showError: (message: string) => void;
 }) => {
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
@@ -205,15 +205,12 @@ export const useMcpServers = ({
     }
 
     let isMounted = true;
-    const refreshMcpServers = async () => {
+    const refreshStartingMcpServers = async () => {
       try {
-        const state = await fetchAppState();
-        if (!state || !isMounted) {
+        const loadedMcpServers = await refreshMcpServers();
+        if (!loadedMcpServers || !isMounted) {
           return;
         }
-        const loadedMcpServers = (state.mcp_servers ?? []).map(
-          mcpServerFromApi,
-        );
         setMcpServers(loadedMcpServers);
         setMcpDraft((currentDraft) => {
           const refreshedServer = loadedMcpServers.find(
@@ -234,16 +231,16 @@ export const useMcpServers = ({
       }
     };
 
-    void refreshMcpServers();
+    void refreshStartingMcpServers();
     const intervalId = window.setInterval(() => {
-      void refreshMcpServers();
+      void refreshStartingMcpServers();
     }, 1000);
 
     return () => {
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, [hasStartingMcpServer]);
+  }, [hasStartingMcpServer, refreshMcpServers]);
 
   return {
     importMcpServer,
