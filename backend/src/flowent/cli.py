@@ -10,7 +10,7 @@ from flowent.paths import WORKDIR_ENV_VAR, resolve_workdir
 HOST_ENV_VAR = "FLOWENT_HOST"
 
 
-def main(argv: list[str] | None = None) -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="flowent",
         description="Flowent",
@@ -48,45 +48,48 @@ def main(argv: list[str] | None = None) -> None:
         default="",
         help="Agent working directory (default: $FLOWENT_WORKDIR or current directory)",
     )
-    args = parser.parse_args(argv)
+    return parser
 
-    if args.command == "apply-patch":
-        from flowent.patch import run_apply_patch_cli
 
-        raise SystemExit(
-            run_apply_patch_cli(cwd=Path(args.cwd), patch=sys.stdin.read())
-        )
+def run_apply_patch(args: argparse.Namespace) -> None:
+    from flowent.patch import run_apply_patch_cli
 
-    if args.command == "doctor":
-        from flowent.sandbox import SANDBOX_INSTALL_HINT, sandbox_binary
-        from flowent.system_tools import RIPGREP_INSTALL_HINT, ripgrep_binary
+    raise SystemExit(run_apply_patch_cli(cwd=Path(args.cwd), patch=sys.stdin.read()))
 
-        bwrap = sandbox_binary()
-        rg = ripgrep_binary()
 
-        if bwrap:
-            print(f"Sandbox: {bwrap}")
-        else:
-            print(f"Sandbox: missing. {SANDBOX_INSTALL_HINT}", file=sys.stderr)
+def run_doctor() -> None:
+    from flowent.sandbox import SANDBOX_INSTALL_HINT, sandbox_binary
+    from flowent.system_tools import RIPGREP_INSTALL_HINT, ripgrep_binary
 
-        if rg:
-            print(f"Search: {rg}")
-        else:
-            print(f"Search: missing. {RIPGREP_INSTALL_HINT}", file=sys.stderr)
+    bwrap = sandbox_binary()
+    rg = ripgrep_binary()
 
-        raise SystemExit(0 if bwrap and rg else 1)
+    if bwrap:
+        print(f"Sandbox: {bwrap}")
+    else:
+        print(f"Sandbox: missing. {SANDBOX_INSTALL_HINT}", file=sys.stderr)
 
-    if args.version:
-        try:
-            from importlib.metadata import version
+    if rg:
+        print(f"Search: {rg}")
+    else:
+        print(f"Search: missing. {RIPGREP_INSTALL_HINT}", file=sys.stderr)
 
-            ver = version("flowent")
-        except Exception:
-            from flowent._version import __version__ as ver
+    raise SystemExit(0 if bwrap and rg else 1)
 
-        print(f"flowent {ver}")
-        sys.exit(0)
 
+def show_version() -> None:
+    try:
+        from importlib.metadata import version
+
+        ver = version("flowent")
+    except Exception:
+        from flowent._version import __version__ as ver
+
+    print(f"flowent {ver}")
+    raise SystemExit(0)
+
+
+def run_server(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     from flowent.logging import configure_logging
 
     configure_logging()
@@ -108,6 +111,22 @@ def main(argv: list[str] | None = None) -> None:
         host=args.host,
         port=args.port,
     )
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "apply-patch":
+        run_apply_patch(args)
+
+    if args.command == "doctor":
+        run_doctor()
+
+    if args.version:
+        show_version()
+
+    run_server(args, parser)
 
 
 if __name__ == "__main__":

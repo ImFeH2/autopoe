@@ -6,6 +6,7 @@ from flowent._version import __version__
 from flowent.api_models import AboutResponse, AppStateResponse
 from flowent.channels import TelegramBotManager
 from flowent.mcp import McpManager
+from flowent.routes.errors import register_application_error_handler
 from flowent.skills import discover_skills
 from flowent.storage import StateStore
 from flowent.workspace.context import state_with_current_model_context_window
@@ -21,6 +22,8 @@ def register_system_routes(
     store: StateStore,
     telegram_bot_manager: TelegramBotManager,
 ) -> None:
+    register_application_error_handler(app)
+
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}

@@ -13,6 +13,8 @@ from flowent.storage import (
     StateStore,
     StoredWorkflow,
     StoredWorkflowRevision,
+    StoredWorkflowRun,
+    StoredWorkflowSchedule,
     WorkflowDraft,
 )
 from flowent.workflow_scheduler import WorkflowScheduler
@@ -51,14 +53,7 @@ class WorkflowService:
         return self.store.read_workflows()
 
     def get_workflow(self, workflow_id: str) -> StoredWorkflow:
-        workflow = next(
-            (
-                current_workflow
-                for current_workflow in self.store.read_workflows()
-                if current_workflow.id == workflow_id
-            ),
-            None,
-        )
+        workflow = self.store.read_workflow(workflow_id)
         if workflow is None:
             raise ValueError("Workflow not found.")
         return workflow
@@ -84,6 +79,15 @@ class WorkflowService:
                 return active_revision
             raise ValueError("Workflow revision is not ready to run.")
         raise ValueError("Workflow revision not found.")
+
+    def get_workflow_run(self, run_id: str) -> StoredWorkflowRun:
+        run = self.store.read_workflow_run(run_id)
+        if run is None:
+            raise ValueError("Workflow run not found.")
+        return run
+
+    def get_workflow_schedule(self, workflow_id: str) -> StoredWorkflowSchedule:
+        return self.scheduler.get(workflow_id)
 
     async def save_workflow(
         self,
@@ -116,6 +120,26 @@ class WorkflowService:
         await self.scheduler.delete(workflow_id)
         self.store.delete_workflow(workflow_id)
         return workflow
+
+    async def start_workflow_schedule(
+        self,
+        workflow_id: str,
+        *,
+        default_input: str | None = None,
+        inputs: dict[str, str] | None = None,
+        timezone: str | None = None,
+        workflow_revision: int | None = None,
+    ) -> StoredWorkflowSchedule:
+        return await self.scheduler.start_schedule(
+            workflow_id,
+            default_input=default_input,
+            inputs=inputs,
+            timezone=timezone,
+            workflow_revision=workflow_revision,
+        )
+
+    async def stop_workflow_schedule(self, workflow_id: str) -> StoredWorkflowSchedule:
+        return await self.scheduler.stop_schedule(workflow_id)
 
     async def run_workflow(
         self,

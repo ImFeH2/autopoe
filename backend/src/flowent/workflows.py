@@ -6,26 +6,49 @@ import re
 import sys
 import tempfile
 from collections import defaultdict, deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from flowent.context import runtime_context_messages
-from flowent.llm import ProviderConnection
+from flowent.llm import ChatMessage, ProviderConnection
 from flowent.sandbox import SandboxRunner
 from flowent.storage import (
+    StateStore,
     StoredWorkflowConnection,
     StoredWorkflowNode,
     StoredWorkflowPresentation,
     StoredWorkflowSpec,
     WorkflowDraft,
 )
+from flowent.workflow_schedule_rules import next_cron_run_at
 
-if TYPE_CHECKING:
-    from flowent.agent_runtime import FlowentAgentRuntime
+
+class WorkflowAgentResult(Protocol):
+    @property
+    def content(self) -> str: ...
+
+    @property
+    def history(self) -> Sequence[Mapping[str, object]]: ...
+
+
+class WorkflowAgentRuntime(Protocol):
+    cwd: Path
+    store: StateStore
+
+    async def complete(
+        self,
+        *,
+        connection: ProviderConnection,
+        history_start_index: int = 0,
+        messages: Sequence[ChatMessage | Mapping[str, object]],
+        user_request: str,
+        workflow_depth: int = 0,
+    ) -> WorkflowAgentResult: ...
 
 
 class WorkflowNodeRunError(BaseModel):
@@ -205,8 +228,6 @@ def compile_workflow_spec(spec: StoredWorkflowSpec) -> list[str]:
 
 
 def validate_timer_configs(spec: StoredWorkflowSpec) -> None:
-    from flowent.workflow_scheduler import next_cron_run_at
-
     for node in spec.nodes:
         if node.kind != "timer":
             continue
@@ -217,8 +238,6 @@ def validate_timer_configs(spec: StoredWorkflowSpec) -> None:
             ):
                 raise ValueError("Timer interval must be at least 1 second.")
             continue
-        from datetime import UTC, datetime
-
         next_cron_run_at(node.config.cron, datetime.now(UTC))
 
 
@@ -325,7 +344,7 @@ async def run_workflow_spec(
     connection: ProviderConnection | None,
     default_input: str = "",
     input_values: Mapping[str, str] | None = None,
-    runtime: FlowentAgentRuntime | None = None,
+    runtime: WorkflowAgentRuntime | None = None,
     run_id: str | None = None,
     spec: StoredWorkflowSpec,
     timer_node_id: str = "",
@@ -361,7 +380,7 @@ async def run_workflow_once(
     input_values: WorkflowRunRequestValues,
     ordered_ids: list[str],
     run_id: str | None,
-    runtime: FlowentAgentRuntime | None,
+    runtime: WorkflowAgentRuntime | None,
     spec: StoredWorkflowSpec,
     timer_node_id: str,
     trigger: Literal["manual", "schedule"],
@@ -451,7 +470,7 @@ async def run_node(
     node: StoredWorkflowNode,
     node_inputs: list[str],
     outputs: Mapping[str, str],
-    runtime: FlowentAgentRuntime | None,
+    runtime: WorkflowAgentRuntime | None,
     workflow_depth: int,
     workflow_id: str,
 ) -> str:

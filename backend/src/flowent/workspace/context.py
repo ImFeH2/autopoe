@@ -2,8 +2,7 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 
-from fastapi import HTTPException
-
+from flowent.application_errors import InvalidRequestError
 from flowent.compact import transcript_messages_after
 from flowent.llm import ChatMessage
 from flowent.storage import (
@@ -214,7 +213,7 @@ def model_visible_workspace_message(message: StoredMessage) -> list[dict[str, ob
     if message.author == "user":
         return [{"role": "user", "content": message.content}]
     if message.author != "assistant":
-        raise HTTPException(status_code=400, detail="Message history is invalid.")
+        raise InvalidRequestError("Message history is invalid.")
     errors = message_error_items(message)
     if errors:
         return [

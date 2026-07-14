@@ -1,7 +1,6 @@
 import logging
 
-from fastapi import HTTPException
-
+from flowent.application_errors import InvalidRequestError
 from flowent.llm import ProviderConnection
 from flowent.storage import StoredState
 
@@ -19,13 +18,10 @@ def selected_connection(state: StoredState) -> ProviderConnection:
     )
     if provider is None or not state.settings.selected_model:
         logger.warning("Workspace request blocked because provider or model is missing")
-        raise HTTPException(
-            status_code=400,
-            detail="Choose a provider and model before sending.",
-        )
+        raise InvalidRequestError("Choose a provider and model before sending.")
     if not provider.api_key:
         logger.warning("Workspace request blocked because selected provider has no key")
-        raise HTTPException(status_code=400, detail="Add a key before sending.")
+        raise InvalidRequestError("Add a key before sending.")
 
     logger.debug(
         "Workspace request using provider=%s model=%s",

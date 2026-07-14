@@ -186,6 +186,21 @@ class StateStore:
         with self.connect() as connection:
             return self._read_workflows(connection)
 
+    def read_workflow(self, workflow_id: str) -> StoredWorkflow | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, name, spec, presentation, revision, active_revision,
+                       created_at, updated_at
+                FROM workflows
+                WHERE id = ?
+                """,
+                (workflow_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._workflow_from_row(row)
+
     def read_workflow_agent_history(
         self, workflow_id: str, node_id: str
     ) -> list[dict[str, object]]:

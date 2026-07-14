@@ -1,45 +1,34 @@
 import logging
-import os
-from collections.abc import AsyncIterator, Awaitable
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from flowent.channels import TelegramBotManager, TelegramTransport
-from flowent.compact import LocalSummaryCompactProvider
+from flowent.bootstrap import (
+    AppConfig,
+    AppDependencies,
+    bind_app_state,
+    build_app_dependencies,
+    create_application_lifespan,
+    ensure_application_requirements,
+    resolve_app_config,
+)
+from flowent.bootstrap import (
+    frontend_static_directory as resolve_frontend_static_directory,
+)
+from flowent.channels import TelegramTransport
 from flowent.llm import CompletionCallable
-from flowent.logging import ensure_logging_configured
-from flowent.mcp import McpManager, McpTransport
-from flowent.paths import resolve_workdir
+from flowent.mcp import McpTransport
 from flowent.routes.integrations import register_integration_routes
 from flowent.routes.permissions import register_permission_routes
 from flowent.routes.providers import register_provider_routes
 from flowent.routes.system import register_system_routes
 from flowent.routes.workflow_routes import register_workflow_routes
 from flowent.routes.workspace import register_workspace_routes
-from flowent.sandbox import ensure_sandbox_available
-from flowent.storage import StateStore
-from flowent.system_tools import ensure_ripgrep_available
-from flowent.workflow_service import WorkflowService
-from flowent.workspace.runtime import WorkspaceRuntime
 
 logger = logging.getLogger("flowent.app")
-
-
-DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
-
-
-def frontend_static_directory() -> Path:
-    configured_directory = os.environ.get("FLOWENT_STATIC_DIR")
-    if configured_directory:
-        return Path(configured_directory)
-    repository_frontend_dist = Path(__file__).resolve().parents[3] / "frontend" / "dist"
-    if repository_frontend_dist.is_dir():
-        return repository_frontend_dist
-    return DEFAULT_STATIC_DIR
+frontend_static_directory = resolve_frontend_static_directory
 
 
 def create_app(
@@ -49,108 +38,71 @@ def create_app(
     mcp_transport: McpTransport | None = None,
     telegram_transport: TelegramTransport | None = None,
     workdir: Path | str | None = None,
+    config: AppConfig | None = None,
+    dependencies: AppDependencies | None = None,
 ) -> FastAPI:
-    ensure_logging_configured()
-    ensure_sandbox_available()
-    ensure_ripgrep_available()
-
-    cwd = resolve_workdir(workdir)
-    store = StateStore()
-    compact_provider = LocalSummaryCompactProvider()
-    mcp_manager = McpManager(store=store, transport=mcp_transport)
-    workflow_service = WorkflowService(
-        chat_completion=chat_completion,
-        cwd=cwd,
-        mcp_manager=mcp_manager,
-        store=store,
+    ensure_application_requirements()
+    resolved_config = config or resolve_app_config(
+        serve_frontend=serve_frontend,
+        workdir=workdir,
     )
-
-    static_dir = frontend_static_directory().resolve(strict=False)
-    logger.debug("Flowent app created serve_frontend=%s", serve_frontend)
-    logger.info("Workdir: %s", cwd)
-    logger.info("Static directory: %s", static_dir)
-
-    runtime = WorkspaceRuntime(
+    resolved_dependencies = dependencies or build_app_dependencies(
+        resolved_config,
         chat_completion=chat_completion,
-        compact_provider=compact_provider,
-        cwd=cwd,
-        mcp_manager=mcp_manager,
-        store=store,
-        workflow_service=workflow_service,
-    )
-
-    telegram_bot_manager = TelegramBotManager(
-        message_handler=runtime.reply_text,
-        store=store,
+        mcp_transport=mcp_transport,
         telegram_transport=telegram_transport,
     )
 
-    async def run_shutdown_step(label: str, cleanup: Awaitable[object]) -> None:
-        try:
-            await cleanup
-        except Exception:
-            logger.exception("%s cleanup failed during shutdown", label)
+    logger.debug(
+        "Flowent app created serve_frontend=%s", resolved_config.serve_frontend
+    )
+    logger.info("Workdir: %s", resolved_config.cwd)
+    logger.info("Static directory: %s", resolved_config.static_dir)
 
-    async def graceful_shutdown() -> None:
-        await run_shutdown_step(
-            "Workflow scheduler", workflow_service.scheduler.shutdown()
-        )
-        await run_shutdown_step("Workspace", runtime.stop_for_shutdown())
-        await run_shutdown_step("Telegram", telegram_bot_manager.stop_all())
-        await run_shutdown_step("MCP", mcp_manager.stop_all())
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.mcp_manager = mcp_manager
-        app.state.telegram_bot_manager = telegram_bot_manager
-        app.state.workflow_service = workflow_service
-        await mcp_manager.start_enabled()
-        await telegram_bot_manager.start_enabled()
-        await workflow_service.scheduler.start()
-        try:
-            yield
-        finally:
-            await graceful_shutdown()
-
-    app = FastAPI(title="Flowent", lifespan=lifespan)
-    app.state.mcp_manager = mcp_manager
-    app.state.telegram_bot_manager = telegram_bot_manager
-    app.state.workflow_service = workflow_service
+    app = FastAPI(
+        title="Flowent",
+        lifespan=create_application_lifespan(resolved_dependencies),
+    )
+    bind_app_state(app, resolved_dependencies)
 
     register_system_routes(
         app,
-        cwd=cwd,
-        mcp_manager=mcp_manager,
-        runtime=runtime,
-        store=store,
-        telegram_bot_manager=telegram_bot_manager,
+        cwd=resolved_config.cwd,
+        mcp_manager=resolved_dependencies.mcp_manager,
+        runtime=resolved_dependencies.runtime,
+        store=resolved_dependencies.store,
+        telegram_bot_manager=resolved_dependencies.telegram_bot_manager,
     )
-    register_provider_routes(app, store=store)
+    register_provider_routes(app, store=resolved_dependencies.store)
     register_integration_routes(
         app,
-        cwd=cwd,
-        mcp_manager=mcp_manager,
-        store=store,
-        telegram_bot_manager=telegram_bot_manager,
+        cwd=resolved_config.cwd,
+        mcp_manager=resolved_dependencies.mcp_manager,
+        store=resolved_dependencies.store,
+        telegram_bot_manager=resolved_dependencies.telegram_bot_manager,
     )
     register_workflow_routes(
         app,
-        workflow_service=workflow_service,
+        workflow_service=resolved_dependencies.workflow_service,
     )
-    register_permission_routes(app, cwd=cwd, store=store)
-    register_workspace_routes(app, runtime=runtime)
+    register_permission_routes(
+        app,
+        cwd=resolved_config.cwd,
+        store=resolved_dependencies.store,
+    )
+    register_workspace_routes(app, runtime=resolved_dependencies.runtime)
 
-    if serve_frontend and static_dir.is_dir():
-        assets_dir = static_dir / "assets"
+    if resolved_config.serve_frontend and resolved_config.static_dir.is_dir():
+        assets_dir = resolved_config.static_dir / "assets"
         if assets_dir.is_dir():
             app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
         @app.get("/{path:path}")
         async def spa_fallback(path: str) -> FileResponse:
-            file = (static_dir / path).resolve(strict=False)
-            if file.is_file() and file.is_relative_to(static_dir):
+            file = (resolved_config.static_dir / path).resolve(strict=False)
+            if file.is_file() and file.is_relative_to(resolved_config.static_dir):
                 return FileResponse(file)
-            return FileResponse(static_dir / "index.html")
+            return FileResponse(resolved_config.static_dir / "index.html")
 
     return app
 

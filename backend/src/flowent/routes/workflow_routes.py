@@ -8,6 +8,7 @@ from flowent.api_models import (
 )
 from flowent.storage import (
     StoredWorkflow,
+    StoredWorkflowSchedule,
     WorkflowRevisionConflictError,
     WorkflowSaveRequest,
 )
@@ -18,7 +19,7 @@ OPTIONAL_WORKFLOW_RUN_BODY = Body(default=None)
 OPTIONAL_WORKFLOW_SCHEDULE_BODY = Body(default=None)
 
 
-def schedule_response(schedule) -> WorkflowScheduleResponse:
+def schedule_response(schedule: StoredWorkflowSchedule) -> WorkflowScheduleResponse:
     return WorkflowScheduleResponse(
         workflow_id=schedule.workflow_id,
         status=schedule.status,
@@ -32,7 +33,11 @@ def schedule_response(schedule) -> WorkflowScheduleResponse:
             default=None,
         ),
         last_run_at=schedule.last_run_at,
-        last_result=schedule.last_result,
+        last_result=(
+            WorkflowRunResponse.model_validate(schedule.last_result)
+            if schedule.last_result is not None
+            else None
+        ),
         last_error=schedule.last_error,
     )
 
@@ -73,7 +78,9 @@ def register_workflow_routes(
     @app.get("/api/workflows/{workflow_id}/schedule")
     async def get_schedule(workflow_id: str) -> WorkflowScheduleResponse:
         try:
-            return schedule_response(workflow_service.scheduler.get(workflow_id))
+            return schedule_response(
+                workflow_service.get_workflow_schedule(workflow_id)
+            )
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -84,7 +91,7 @@ def register_workflow_routes(
     ) -> WorkflowScheduleResponse:
         body = request or WorkflowScheduleStartRequest()
         try:
-            schedule = await workflow_service.scheduler.start_schedule(
+            schedule = await workflow_service.start_workflow_schedule(
                 workflow_id,
                 default_input=body.input,
                 inputs=body.inputs,
@@ -100,7 +107,7 @@ def register_workflow_routes(
     async def stop_schedule(workflow_id: str) -> WorkflowScheduleResponse:
         try:
             return schedule_response(
-                await workflow_service.scheduler.stop_schedule(workflow_id)
+                await workflow_service.stop_workflow_schedule(workflow_id)
             )
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error

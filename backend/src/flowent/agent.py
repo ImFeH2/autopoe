@@ -1,36 +1,32 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
-from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
-
-from flowent.llm import (
-    CompletionCallable,
-    ProviderConnection,
-    ToolCallDelta,
-    chunk_delta_content,
-    chunk_delta_reasoning,
-    chunk_delta_tool_calls,
-    chunk_token_usage,
-    stream_chat_chunks,
+from flowent.agent_events import (
+    AgentStreamEvent,
+    content_delta_event,
+    context_optimized_event,
+    done_event,
+    output_done_event,
+    output_start_event,
+    start_event,
+    thinking_delta_event,
+    usage_event,
 )
+from flowent.agent_loop_state import AgentContextUpdate, AgentLoopState
+from flowent.agent_tool_execution import (
+    AgentToolExecution,
+    AgentToolServices,
+    ExtraToolRunner,
+    ExtraToolTitle,
+    ToolRunner,
+    WebSearcher,
+)
+from flowent.llm import CompletionCallable, ProviderConnection, stream_chat_chunks
 from flowent.logging import TRACE_LEVEL
-from flowent.tools import (
-    ToolContext,
-    ToolResult,
-    new_tool_item,
-    parse_tool_arguments,
-    run_tool_async,
-    text_tool_result,
-    tool_result_model_content,
-    tool_specs,
-)
+from flowent.tools import tool_specs
 
 logger = logging.getLogger("flowent.agent")
 EMPTY_MODEL_RESPONSE_ERROR = "The model did not return a response."
@@ -57,66 +53,6 @@ Use tools deliberately:
 After each tool result, decide whether the task is complete, whether another tool is needed, or whether you need to explain a blocker. A tool call is not a final response. After every tool result, continue the same turn until you either call another tool, explain a blocker, or provide a final response. If a tool fails, use the error as context and continue deciding whether to retry, use another tool, or explain the blocker. When no more tool work is needed, provide the final response."""
 
 
-class AgentStreamEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    data: dict[str, object]
-    event: str
-
-
-@dataclass
-class PendingToolCall:
-    arguments: str = ""
-    id: str = ""
-    name: str = ""
-    type: str = "function"
-
-    def apply_delta(self, delta: ToolCallDelta) -> None:
-        if delta.id:
-            self.id = delta.id
-        if delta.name:
-            self.name = delta.name
-        if delta.type:
-            self.type = delta.type
-        if delta.arguments:
-            self.arguments += delta.arguments
-
-
-@dataclass(frozen=True)
-class AgentContextUpdate:
-    conversation: Sequence[Mapping[str, object]]
-    message: Mapping[str, object]
-
-
-def assistant_tool_call_message(
-    tool_calls: Sequence[PendingToolCall],
-    content: str,
-) -> dict[str, object]:
-    return {
-        "role": "assistant",
-        "content": content or None,
-        "tool_calls": [
-            {
-                "id": tool_call.id or f"call_{index}",
-                "type": tool_call.type,
-                "function": {
-                    "name": tool_call.name,
-                    "arguments": tool_call.arguments,
-                },
-            }
-            for index, tool_call in enumerate(tool_calls)
-        ],
-    }
-
-
-def tool_result_message(tool_call_id: str, content: str) -> dict[str, object]:
-    return {
-        "role": "tool",
-        "tool_call_id": tool_call_id,
-        "content": content,
-    }
-
-
 async def run_agent_stream(
     *,
     completion: CompletionCallable | None,
@@ -125,330 +61,170 @@ async def run_agent_stream(
     | None = None,
     cwd: Path,
     messages: Sequence[Mapping[str, object]],
-    extra_tool_runner: Callable[[str, dict[str, object]], Awaitable[ToolResult | None]]
-    | None = None,
+    extra_tool_runner: ExtraToolRunner | None = None,
     extra_tool_specs: Sequence[Mapping[str, object]] | None = None,
-    extra_tool_title: Callable[[str], str | None] | None = None,
+    extra_tool_title: ExtraToolTitle | None = None,
     context_compactor: Callable[
         [Sequence[Mapping[str, object]]], Awaitable[AgentContextUpdate | None]
     ]
     | None = None,
-    tool_runner: Callable[[str, dict[str, object], ToolContext], Awaitable[ToolResult]]
-    | None = None,
-    web_searcher: Callable[[str], Sequence[dict[str, str]]] | None = None,
+    tool_runner: ToolRunner | None = None,
+    web_searcher: WebSearcher | None = None,
 ) -> AsyncIterator[AgentStreamEvent]:
-    conversation: list[Mapping[str, object]] = [
-        {"role": "system", "content": FLOWENT_AGENT_SYSTEM_PROMPT},
-        *[dict(message) for message in messages],
-    ]
-    assistant_id = str(uuid4())
+    state = AgentLoopState.create(
+        system_prompt=FLOWENT_AGENT_SYSTEM_PROMPT,
+        messages=messages,
+    )
+    tool_services = AgentToolServices(
+        cwd=cwd,
+        extra_tool_runner=extra_tool_runner,
+        extra_tool_title=extra_tool_title,
+        tool_runner=tool_runner,
+        web_searcher=web_searcher,
+    )
     logger.info(
         "Agent response started id=%s provider=%s model=%s",
-        assistant_id,
+        state.assistant_id,
         connection.provider,
         connection.model,
     )
-    logger.log(TRACE_LEVEL, "Agent initial messages=%r", conversation)
-    yield AgentStreamEvent(event="start", data={"id": assistant_id})
+    logger.log(TRACE_LEVEL, "Agent initial messages=%r", state.conversation)
+    yield start_event(state.assistant_id)
 
-    final_content = ""
-    final_thinking = ""
-
-    round_number = 0
     while True:
-        round_number += 1
-        logger.debug("Agent round started id=%s round=%s", assistant_id, round_number)
+        round_state = state.start_round()
+        logger.debug(
+            "Agent round started id=%s round=%s",
+            state.assistant_id,
+            round_state.number,
+        )
         logger.info(
             "Agent model call started id=%s round=%s conversation_messages=%s",
-            assistant_id,
-            round_number,
-            len(conversation),
+            state.assistant_id,
+            round_state.number,
+            len(state.conversation),
         )
-        yield AgentStreamEvent(event="output_start", data={"index": round_number})
-        round_content = ""
-        pending: dict[int, PendingToolCall] = {}
-        chunk_count = 0
-        content_delta_count = 0
-        reasoning_delta_count = 0
-        tool_delta_count = 0
+        yield output_start_event(round_state.number)
 
         try:
             async for chunk in stream_chat_chunks(
                 connection,
-                conversation,
+                state.conversation,
                 completion=completion,
                 tools=[*tool_specs(), *list(extra_tool_specs or [])],
             ):
-                chunk_count += 1
-                usage = chunk_token_usage(chunk)
-                if usage is not None:
-                    yield AgentStreamEvent(
-                        event="usage",
-                        data={"usage": usage.model_dump()},
-                    )
-                reasoning = chunk_delta_reasoning(chunk)
-                if reasoning:
-                    reasoning_delta_count += 1
-                    final_thinking += reasoning
+                update = round_state.apply_chunk(chunk)
+                state.apply_round_update(update)
+                if update.usage is not None:
+                    yield usage_event(update.usage)
+                if update.reasoning:
                     logger.log(
                         TRACE_LEVEL,
                         "Agent stream reasoning id=%s round=%s content=%r",
-                        assistant_id,
-                        round_number,
-                        reasoning,
+                        state.assistant_id,
+                        round_state.number,
+                        update.reasoning,
                     )
-                    yield AgentStreamEvent(
-                        event="thinking_delta", data={"content": reasoning}
-                    )
-                content = chunk_delta_content(chunk)
-                if content:
-                    content_delta_count += 1
-                    round_content += content
-                    final_content += content
+                    yield thinking_delta_event(update.reasoning)
+                if update.content:
                     logger.log(
                         TRACE_LEVEL,
                         "Agent stream delta id=%s round=%s content=%r",
-                        assistant_id,
-                        round_number,
-                        content,
+                        state.assistant_id,
+                        round_state.number,
+                        update.content,
                     )
-                    yield AgentStreamEvent(event="delta", data={"content": content})
-                for delta in chunk_delta_tool_calls(chunk):
-                    tool_delta_count += 1
-                    pending.setdefault(delta.index, PendingToolCall()).apply_delta(
-                        delta
-                    )
+                    yield content_delta_event(update.content)
         except Exception:
             logger.exception(
                 "Agent model call failed id=%s round=%s chunk_count=%s content_deltas=%s reasoning_deltas=%s tool_deltas=%s conversation_messages=%s",
-                assistant_id,
-                round_number,
-                chunk_count,
-                content_delta_count,
-                reasoning_delta_count,
-                tool_delta_count,
-                len(conversation),
+                state.assistant_id,
+                round_state.number,
+                round_state.chunk_count,
+                round_state.content_delta_count,
+                round_state.reasoning_delta_count,
+                round_state.tool_delta_count,
+                len(state.conversation),
             )
             raise
 
-        tool_calls = [pending[index] for index in sorted(pending)]
+        tool_calls = round_state.tool_calls
         logger.info(
             "Agent model call completed id=%s round=%s chunk_count=%s content_deltas=%s reasoning_deltas=%s tool_deltas=%s tool_calls=%s content_length=%s decision=%s",
-            assistant_id,
-            round_number,
-            chunk_count,
-            content_delta_count,
-            reasoning_delta_count,
-            tool_delta_count,
+            state.assistant_id,
+            round_state.number,
+            round_state.chunk_count,
+            round_state.content_delta_count,
+            round_state.reasoning_delta_count,
+            round_state.tool_delta_count,
             len(tool_calls),
-            len(round_content),
+            len(round_state.content),
             "run_tools" if tool_calls else "final_response",
         )
         logger.log(
             TRACE_LEVEL,
             "Agent round tool calls id=%s round=%s tool_calls=%r",
-            assistant_id,
-            round_number,
+            state.assistant_id,
+            round_state.number,
             tool_calls,
         )
-        yield AgentStreamEvent(event="output_done", data={"index": round_number})
+        yield output_done_event(round_state.number)
+
         if not tool_calls:
-            if not final_content and not final_thinking:
+            if not state.content and not state.thinking:
                 raise RuntimeError(EMPTY_MODEL_RESPONSE_ERROR)
-            conversation.append({"role": "assistant", "content": final_content})
+            state.append_final_response()
             if conversation_recorder is not None:
-                conversation_recorder([dict(message) for message in conversation])
+                conversation_recorder(state.conversation_copy())
             logger.info(
                 "Agent response completed id=%s rounds=%s content_length=%s thinking_length=%s decision=final_response",
-                assistant_id,
-                round_number,
-                len(final_content),
-                len(final_thinking),
+                state.assistant_id,
+                round_state.number,
+                len(state.content),
+                len(state.thinking),
             )
             logger.log(
                 TRACE_LEVEL,
                 "Agent final content id=%s content=%r",
-                assistant_id,
-                final_content,
+                state.assistant_id,
+                state.content,
             )
-            yield AgentStreamEvent(
-                event="done",
-                data={
-                    "message": {
-                        "author": "assistant",
-                        "content": final_content,
-                        "id": assistant_id,
-                        "thinking": final_thinking,
-                    }
-                },
+            yield done_event(
+                assistant_id=state.assistant_id,
+                content=state.content,
+                thinking=state.thinking,
             )
             return
 
-        conversation.append(assistant_tool_call_message(tool_calls, round_content))
+        state.append_tool_calls(round_state)
         for index, tool_call in enumerate(tool_calls):
-            tool_call_id = tool_call.id or f"call_{index}"
-            try:
-                arguments = parse_tool_arguments(tool_call.arguments)
-            except Exception as error:
-                arguments = {}
-                result = ToolResult(
-                    result=text_tool_result(str(error)),
-                    ok=False,
-                    title=tool_call.name or "Tool failed",
-                )
-                result_content = tool_result_model_content(result)
-                tool_item = new_tool_item(tool_call.name, arguments)
-                logger.debug("Tool call argument parse failed name=%s", tool_call.name)
-                logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
-                yield AgentStreamEvent(event="tool_start", data={"tool": tool_item})
-                logger.log(
-                    TRACE_LEVEL,
-                    "Tool error id=%s content=%r",
-                    tool_item["id"],
-                    result_content,
-                )
-                yield AgentStreamEvent(
-                    event="tool_error",
-                    data={
-                        "id": tool_item["id"],
-                        "result": result.result,
-                        "status": "failed",
-                        "title": result.title,
-                    },
-                )
-            else:
-                tool_item = new_tool_item(
-                    tool_call.name,
-                    arguments,
-                    extra_tool_title(tool_call.name) if extra_tool_title else None,
-                )
-                logger.debug(
-                    "Tool call started name=%s id=%s", tool_call.name, tool_item["id"]
-                )
-                logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
-                yield AgentStreamEvent(event="tool_start", data={"tool": tool_item})
-                tool_event_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
-
-                async def emit_tool_event(
-                    data: dict[str, object],
-                    *,
-                    queue: asyncio.Queue[dict[str, object]] = tool_event_queue,
-                    tool_id: str = str(tool_item["id"]),
-                ) -> None:
-                    yield_data = {
-                        "id": tool_id,
-                        **data,
-                    }
-                    await queue.put(yield_data)
-
-                extra_result = (
-                    await extra_tool_runner(tool_call.name, arguments)
-                    if extra_tool_runner is not None
-                    else None
-                )
-                tool_result: ToolResult | None = (
-                    extra_result if isinstance(extra_result, ToolResult) else None
-                )
-                if tool_result is None:
-                    context = ToolContext(
-                        cwd=cwd,
-                        emit_event=emit_tool_event,
-                        web_searcher=web_searcher,
-                    )
-                    tool_task: asyncio.Future[ToolResult] = asyncio.ensure_future(
-                        tool_runner(
-                            tool_call.name,
-                            arguments,
-                            context,
-                        )
-                        if tool_runner is not None
-                        else run_tool_async(
-                            tool_call.name,
-                            arguments,
-                            context,
-                        )
-                    )
-                    pending_event_task: asyncio.Future[dict[str, object]] | None = None
-                    try:
-                        while True:
-                            if pending_event_task is None:
-                                pending_event_task = asyncio.create_task(
-                                    tool_event_queue.get()
-                                )
-                            done, _ = await asyncio.wait(
-                                {
-                                    cast(asyncio.Future[object], tool_task),
-                                    cast(asyncio.Future[object], pending_event_task),
-                                },
-                                return_when=asyncio.FIRST_COMPLETED,
-                            )
-                            if pending_event_task in done:
-                                yield AgentStreamEvent(
-                                    event="tool_update",
-                                    data=pending_event_task.result(),
-                                )
-                                pending_event_task = None
-                            if tool_task in done:
-                                if pending_event_task is not None:
-                                    pending_event_task.cancel()
-                                break
-                    except asyncio.CancelledError:
-                        tool_task.cancel()
-                        if pending_event_task is not None:
-                            pending_event_task.cancel()
-                        raise
-                    tool_result = await tool_task
-                    while not tool_event_queue.empty():
-                        yield AgentStreamEvent(
-                            event="tool_update",
-                            data=tool_event_queue.get_nowait(),
-                        )
-                result_content = tool_result_model_content(tool_result)
-                logger.debug(
-                    "Tool call finished name=%s id=%s ok=%s",
-                    tool_call.name,
-                    tool_item["id"],
-                    tool_result.ok,
-                )
-                logger.log(
-                    TRACE_LEVEL,
-                    "Tool result id=%s result=%r",
-                    tool_item["id"],
-                    tool_result.model_dump(),
-                )
-                yield AgentStreamEvent(
-                    event="tool_done" if tool_result.ok else "tool_error",
-                    data={
-                        "id": tool_item["id"],
-                        "result": tool_result.result,
-                        "status": "success" if tool_result.ok else "failed",
-                        "title": tool_result.title,
-                    },
-                )
-            conversation.append(tool_result_message(tool_call_id, result_content))
+            execution = AgentToolExecution(
+                index=index,
+                services=tool_services,
+                tool_call=tool_call,
+            )
+            async for event in execution.stream():
+                yield event
+            state.append_tool_result(execution.tool_call_id, execution.model_content)
 
         logger.info(
             "Agent continuing after tools id=%s completed_round=%s tool_results=%s conversation_messages=%s decision=continue",
-            assistant_id,
-            round_number,
+            state.assistant_id,
+            round_state.number,
             len(tool_calls),
-            len(conversation),
+            len(state.conversation),
         )
 
         if context_compactor is not None:
-            compaction = await context_compactor(conversation)
+            compaction = await context_compactor(state.conversation)
             if compaction is not None:
+                conversation_length_before = len(state.conversation)
+                state.replace_conversation(compaction.conversation)
                 logger.info(
                     "Agent context optimized id=%s round=%s conversation_messages_before=%s conversation_messages_after=%s",
-                    assistant_id,
-                    round_number,
-                    len(conversation),
-                    len(compaction.conversation),
+                    state.assistant_id,
+                    round_state.number,
+                    conversation_length_before,
+                    len(state.conversation),
                 )
-                conversation = [dict(message) for message in compaction.conversation]
-                compaction_message = dict(compaction.message)
-                usage_info = compaction_message.pop("usage_info", None)
-                event_data: dict[str, object] = {"message": compaction_message}
-                if isinstance(usage_info, dict):
-                    event_data["usage_info"] = usage_info
-                yield AgentStreamEvent(event="context_optimized", data=event_data)
+                yield context_optimized_event(compaction.message)

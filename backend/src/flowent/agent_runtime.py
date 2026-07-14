@@ -9,7 +9,7 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 from flowent.agent import AgentContextUpdate, AgentStreamEvent, run_agent_stream
 from flowent.approval import (
@@ -23,12 +23,10 @@ from flowent.storage import StateStore
 from flowent.tools import ToolContext, ToolResult, tool_specs
 from flowent.workflow_tools import (
     WorkflowAgentTools,
+    WorkflowOperations,
     workflow_tool_specs,
     workflow_tool_title,
 )
-
-if TYPE_CHECKING:
-    from flowent.workflow_service import WorkflowService
 
 
 class AgentMcpManager(Protocol):
@@ -56,7 +54,7 @@ class FlowentAgentRuntime:
         cwd: Path,
         mcp_manager: AgentMcpManager | None,
         store: StateStore,
-        workflow_service: WorkflowService | None,
+        workflow_service: WorkflowOperations | None,
     ) -> None:
         self.chat_completion = chat_completion
         self.cwd = cwd

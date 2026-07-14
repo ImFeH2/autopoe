@@ -13,7 +13,7 @@ import pytest
 from flowent.main import create_app
 from flowent.sandbox import CommandResult
 from flowent.storage import WorkflowDraft
-from flowent.workflow_scheduler import next_cron_run_at
+from flowent.workflow_schedule_rules import next_cron_run_at
 from flowent.workflow_tools import WorkflowAgentTools, workflow_tool_specs
 
 

@@ -8,10 +8,14 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import HTTPException
-
 from flowent.agent import AgentContextUpdate
 from flowent.agent_runtime import FlowentAgentRuntime
+from flowent.application_errors import (
+    ApplicationError,
+    InvalidRequestError,
+    OperationConflictError,
+    ResourceNotFoundError,
+)
 from flowent.compact import CompactInput, CompactProvider
 from flowent.context import runtime_context_messages
 from flowent.llm import ChatMessage, CompletionCallable, ProviderConnection
@@ -437,10 +441,7 @@ class WorkspaceRuntime:
 
     def reserve_response(self) -> WorkspacePendingResponse:
         if self.response_reserved or self.has_active_response():
-            raise HTTPException(
-                status_code=409,
-                detail="Response in progress",
-            )
+            raise OperationConflictError("Response in progress")
         task = asyncio.current_task()
         if task is None:
             raise RuntimeError("Workspace response task is unavailable.")
@@ -475,11 +476,11 @@ class WorkspaceRuntime:
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if pending_response.stop_event.is_set():
-                raise HTTPException(status_code=409, detail="Response stopped.")
+                raise OperationConflictError("Response stopped.")
             await acquire_task
             acquired = True
             if pending_response.stop_event.is_set():
-                raise HTTPException(status_code=409, detail="Response stopped.")
+                raise OperationConflictError("Response stopped.")
         except BaseException:
             if not acquire_task.done():
                 acquire_task.cancel()
@@ -515,10 +516,7 @@ class WorkspaceRuntime:
         self, messages: list[StoredMessage]
     ) -> list[StoredMessage]:
         if self.response_reserved or self.turn_lock.locked():
-            raise HTTPException(
-                status_code=409,
-                detail="Response in progress",
-            )
+            raise OperationConflictError("Response in progress")
         async with self.turn_lock:
             return self.store.save_messages(messages)
 
@@ -556,21 +554,19 @@ class WorkspaceRuntime:
         response_started = False
         try:
             if self.store.read_is_compacting():
-                raise HTTPException(
-                    status_code=409,
-                    detail="Context refining in progress. Please wait a moment.",
+                raise OperationConflictError(
+                    "Context refining in progress. Please wait a moment."
                 )
             await self.acquire_response_turn(pending_response)
             lock_acquired = True
             if self.store.read_is_compacting():
-                raise HTTPException(
-                    status_code=409,
-                    detail="Context refining in progress. Please wait a moment.",
+                raise OperationConflictError(
+                    "Context refining in progress. Please wait a moment."
                 )
             state = self.store.read_state()
             user_message_id = message_id or str(uuid4())
             if any(message.id == user_message_id for message in state.messages):
-                raise HTTPException(status_code=409, detail="Message already exists.")
+                raise OperationConflictError("Message already exists.")
             user_message = StoredMessage(
                 author="user",
                 content=content,
@@ -604,16 +600,12 @@ class WorkspaceRuntime:
         if pending_response is None and (
             self.response_reserved or self.has_active_response()
         ):
-            raise HTTPException(
-                status_code=409,
-                detail="Response in progress",
-            )
+            raise OperationConflictError("Response in progress")
         lock_acquired = False
         try:
             if self.store.read_is_compacting():
-                raise HTTPException(
-                    status_code=409,
-                    detail="Context refining in progress. Please wait a moment.",
+                raise OperationConflictError(
+                    "Context refining in progress. Please wait a moment."
                 )
             if pending_response is None:
                 await self.turn_lock.acquire()
@@ -646,14 +638,10 @@ class WorkspaceRuntime:
         content: str,
     ) -> tuple[list[StoredMessage], WorkspaceResponse | None]:
         if self.has_active_response():
-            raise HTTPException(
-                status_code=409,
-                detail="Response in progress",
-            )
+            raise OperationConflictError("Response in progress")
         if self.store.read_is_compacting():
-            raise HTTPException(
-                status_code=409,
-                detail="Context refining in progress. Please wait a moment.",
+            raise OperationConflictError(
+                "Context refining in progress. Please wait a moment."
             )
         state = self.store.read_state()
         message_index = next(
@@ -665,12 +653,10 @@ class WorkspaceRuntime:
             -1,
         )
         if message_index < 0:
-            raise HTTPException(status_code=404, detail="Message not found.")
+            raise ResourceNotFoundError("Message not found.")
         message = state.messages[message_index]
         if message.author != "user":
-            raise HTTPException(
-                status_code=400, detail="Only user messages can be edited."
-            )
+            raise InvalidRequestError("Only user messages can be edited.")
 
         updated_message = message.model_copy(update={"content": content})
         if action == "save":
@@ -702,9 +688,8 @@ class WorkspaceRuntime:
         lock_acquired = False
         try:
             if self.store.read_is_compacting():
-                raise HTTPException(
-                    status_code=409,
-                    detail="Context refining in progress. Please wait a moment.",
+                raise OperationConflictError(
+                    "Context refining in progress. Please wait a moment."
                 )
             await self.acquire_response_turn(pending_response)
             lock_acquired = True
@@ -724,14 +709,10 @@ class WorkspaceRuntime:
         error_id: str,
     ) -> tuple[list[StoredMessage], WorkspaceResponse]:
         if self.has_active_response():
-            raise HTTPException(
-                status_code=409,
-                detail="Response in progress",
-            )
+            raise OperationConflictError("Response in progress")
         if self.store.read_is_compacting():
-            raise HTTPException(
-                status_code=409,
-                detail="Context refining in progress. Please wait a moment.",
+            raise OperationConflictError(
+                "Context refining in progress. Please wait a moment."
             )
         state = self.store.read_state()
         message_index = next(
@@ -743,12 +724,10 @@ class WorkspaceRuntime:
             -1,
         )
         if message_index < 0:
-            raise HTTPException(status_code=404, detail="Message not found.")
+            raise ResourceNotFoundError("Message not found.")
         message = state.messages[message_index]
         if message.author != "assistant":
-            raise HTTPException(
-                status_code=400, detail="Only assistant errors can be retried."
-            )
+            raise InvalidRequestError("Only assistant errors can be retried.")
         previous_user_message = next(
             (
                 current_message
@@ -758,14 +737,14 @@ class WorkspaceRuntime:
             None,
         )
         if previous_user_message is None:
-            raise HTTPException(status_code=400, detail="Message history is invalid.")
+            raise InvalidRequestError("Message history is invalid.")
         trimmed_message = trim_assistant_message_at_error(
             message,
             error_id,
             status="running",
         )
         if trimmed_message is None:
-            raise HTTPException(status_code=404, detail="Error block not found.")
+            raise ResourceNotFoundError("Error block not found.")
 
         previous_messages = state.messages[:message_index]
         next_messages = [*previous_messages, trimmed_message]
@@ -793,8 +772,8 @@ class WorkspaceRuntime:
                 usage_request_messages=base_request_messages,
                 user_message=previous_user_message,
             )
-        except HTTPException as error:
-            error_detail = str(error.detail or "")
+        except ApplicationError as error:
+            error_detail = str(error)
             assistant_output = AssistantOutputBuilder.from_message(trimmed_message)
             assistant_output.append_error(
                 run_error_output_item(trimmed_message.id, error_detail).model_copy(
@@ -1316,7 +1295,7 @@ class WorkspaceRuntime:
     def stream_current_response(self) -> WorkspaceResponse:
         response = self.current_response()
         if response is None:
-            raise HTTPException(status_code=404, detail="Response not found.")
+            raise ResourceNotFoundError("Response not found.")
         return response
 
     def stop_response(self) -> None:
@@ -1389,9 +1368,8 @@ class WorkspaceRuntime:
 
         if self.active_compact_task is None:
             if self.response_reserved or self.current_response() is not None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Compact is unavailable while Flowent is responding.",
+                raise OperationConflictError(
+                    "Compact is unavailable while Flowent is responding."
                 )
             self.store.save_is_compacting(True)
             compact_task = asyncio.create_task(run_manual_compact())

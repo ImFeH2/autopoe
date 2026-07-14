@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -17,16 +18,64 @@ from flowent.state.models import (
 )
 from flowent.storage import (
     StoredWorkflow,
+    StoredWorkflowRevision,
+    StoredWorkflowRun,
+    StoredWorkflowSchedule,
     WorkflowDraft,
     WorkflowRevisionConflictError,
 )
 from flowent.tools import ToolResult, text_tool_result
 from flowent.workflows import WorkflowRunResponse
 
-if TYPE_CHECKING:
-    from flowent.workflow_service import WorkflowService
-
 MAX_WORKFLOW_TOOL_DEPTH = 3
+
+
+class WorkflowOperations(Protocol):
+    def list_workflows(self) -> list[StoredWorkflow]: ...
+
+    def get_workflow(self, workflow_id: str) -> StoredWorkflow: ...
+
+    def get_workflow_revision(
+        self, workflow_id: str, revision: int
+    ) -> StoredWorkflowRevision: ...
+
+    def get_workflow_run(self, run_id: str) -> StoredWorkflowRun: ...
+
+    def get_workflow_schedule(self, workflow_id: str) -> StoredWorkflowSchedule: ...
+
+    async def save_workflow(
+        self,
+        workflow: WorkflowDraft,
+        *,
+        base_revision: int | None,
+        require_executable: bool = False,
+    ) -> StoredWorkflow: ...
+
+    async def delete_workflow(self, workflow_id: str) -> StoredWorkflow: ...
+
+    async def run_workflow(
+        self,
+        workflow_id: str,
+        *,
+        default_input: str = "",
+        input_values: Mapping[str, str] | None = None,
+        workflow_revision: int | None = None,
+        workflow_depth: int = 0,
+    ) -> WorkflowRunResponse: ...
+
+    async def start_workflow_schedule(
+        self,
+        workflow_id: str,
+        *,
+        default_input: str | None = None,
+        inputs: dict[str, str] | None = None,
+        timezone: str | None = None,
+        workflow_revision: int | None = None,
+    ) -> StoredWorkflowSchedule: ...
+
+    async def stop_workflow_schedule(
+        self, workflow_id: str
+    ) -> StoredWorkflowSchedule: ...
 
 
 class WorkflowToolNodeBase(BaseModel):
@@ -236,7 +285,7 @@ def workflow_tool_title(name: str) -> str | None:
 
 
 class WorkflowAgentTools:
-    def __init__(self, service: WorkflowService, *, workflow_depth: int = 0) -> None:
+    def __init__(self, service: WorkflowOperations, *, workflow_depth: int = 0) -> None:
         self.service = service
         self.workflow_depth = workflow_depth
 
@@ -317,9 +366,7 @@ class WorkflowAgentTools:
         )
 
     def get_workflow_run(self, arguments: dict[str, object]) -> ToolResult:
-        run = self.service.store.read_workflow_run(str(arguments["run_id"]))
-        if run is None:
-            raise ValueError("Workflow run not found.")
+        run = self.service.get_workflow_run(str(arguments["run_id"]))
         revision = self.service.get_workflow_revision(
             run.workflow_id, run.workflow_revision
         )
@@ -411,7 +458,7 @@ class WorkflowAgentTools:
         )
 
     async def start_workflow_schedule(self, arguments: dict[str, object]) -> ToolResult:
-        schedule = await self.service.scheduler.start_schedule(
+        schedule = await self.service.start_workflow_schedule(
             str(arguments["workflow_id"]),
             default_input=string_argument(arguments, "input")
             if "input" in arguments
@@ -429,7 +476,7 @@ class WorkflowAgentTools:
         )
 
     async def stop_workflow_schedule(self, arguments: dict[str, object]) -> ToolResult:
-        schedule = await self.service.scheduler.stop_schedule(
+        schedule = await self.service.stop_workflow_schedule(
             str(arguments["workflow_id"])
         )
         return ToolResult(
@@ -437,7 +484,7 @@ class WorkflowAgentTools:
         )
 
     def get_workflow_schedule(self, arguments: dict[str, object]) -> ToolResult:
-        schedule = self.service.scheduler.get(str(arguments["workflow_id"]))
+        schedule = self.service.get_workflow_schedule(str(arguments["workflow_id"]))
         return ToolResult(
             result=schedule_result(schedule), title="Read workflow schedule"
         )
