@@ -13,7 +13,7 @@ from flowent.storage import (
     StoredToolItem,
     StoredToolOutputItem,
 )
-from flowent.tools import tool_result_model_content
+from flowent.tool_protocol import tool_result_model_content
 
 APPROVAL_TRANSCRIPT_MESSAGE_LIMIT = 12
 APPROVAL_TRANSCRIPT_TEXT_LIMIT = 2_000

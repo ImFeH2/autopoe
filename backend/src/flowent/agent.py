@@ -26,7 +26,7 @@ from flowent.agent_tool_execution import (
 )
 from flowent.llm import CompletionCallable, ProviderConnection, stream_chat_chunks
 from flowent.logging import TRACE_LEVEL
-from flowent.tools import tool_specs
+from flowent.tool_catalog import tool_specs
 
 logger = logging.getLogger("flowent.agent")
 EMPTY_MODEL_RESPONSE_ERROR = "The model did not return a response."

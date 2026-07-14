@@ -17,7 +17,7 @@ from flowent.logging import ensure_logging_configured
 from flowent.mcp import McpManager, McpTransport
 from flowent.paths import resolve_workdir
 from flowent.sandbox import ensure_sandbox_available
-from flowent.storage import StateStore
+from flowent.storage import StateStore, WorkflowRepository
 from flowent.system_tools import ensure_ripgrep_available
 from flowent.workflow_service import WorkflowService
 from flowent.workspace.runtime import WorkspaceRuntime
@@ -37,6 +37,7 @@ class AppConfig:
 @dataclass(frozen=True, slots=True)
 class AppDependencies:
     store: StateStore
+    workflow_repository: WorkflowRepository
     mcp_manager: McpManager
     workflow_service: WorkflowService
     runtime: WorkspaceRuntime
@@ -81,6 +82,7 @@ def build_app_dependencies(
     telegram_transport: TelegramTransport | None = None,
 ) -> AppDependencies:
     resolved_store = store if store is not None else StateStore()
+    workflow_repository = WorkflowRepository(resolved_store.database)
     resolved_compact_provider = (
         compact_provider
         if compact_provider is not None
@@ -91,7 +93,8 @@ def build_app_dependencies(
         chat_completion=chat_completion,
         cwd=config.cwd,
         mcp_manager=mcp_manager,
-        store=resolved_store,
+        state_store=resolved_store,
+        workflow_repository=workflow_repository,
     )
     runtime = WorkspaceRuntime(
         chat_completion=chat_completion,
@@ -99,6 +102,7 @@ def build_app_dependencies(
         cwd=config.cwd,
         mcp_manager=mcp_manager,
         store=resolved_store,
+        workflow_repository=workflow_repository,
         workflow_service=workflow_service,
     )
     telegram_bot_manager = TelegramBotManager(
@@ -108,6 +112,7 @@ def build_app_dependencies(
     )
     return AppDependencies(
         store=resolved_store,
+        workflow_repository=workflow_repository,
         mcp_manager=mcp_manager,
         workflow_service=workflow_service,
         runtime=runtime,
@@ -165,4 +170,5 @@ def create_application_lifespan(dependencies: AppDependencies) -> Lifespan[FastA
 def bind_app_state(app: FastAPI, dependencies: AppDependencies) -> None:
     app.state.mcp_manager = dependencies.mcp_manager
     app.state.telegram_bot_manager = dependencies.telegram_bot_manager
+    app.state.workflow_repository = dependencies.workflow_repository
     app.state.workflow_service = dependencies.workflow_service

@@ -19,8 +19,9 @@ from flowent.approval import (
 )
 from flowent.llm import ChatMessage, CompletionCallable, ProviderConnection
 from flowent.permissions import run_tool_with_path_permissions
-from flowent.storage import StateStore
-from flowent.tools import ToolContext, ToolResult, tool_specs
+from flowent.storage import StateStore, WorkflowRepository
+from flowent.tool_catalog import tool_specs
+from flowent.tool_protocol import ToolContext, ToolResult
 from flowent.workflow_tools import (
     WorkflowAgentTools,
     WorkflowOperations,
@@ -54,12 +55,14 @@ class FlowentAgentRuntime:
         cwd: Path,
         mcp_manager: AgentMcpManager | None,
         store: StateStore,
+        workflow_repository: WorkflowRepository,
         workflow_service: WorkflowOperations | None,
     ) -> None:
         self.chat_completion = chat_completion
         self.cwd = cwd
         self.mcp_manager = mcp_manager
         self.store = store
+        self.workflow_repository = workflow_repository
         self.workflow_service = workflow_service
 
     def extra_tool_specs(

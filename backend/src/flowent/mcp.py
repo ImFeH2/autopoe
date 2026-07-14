@@ -13,7 +13,7 @@ from importlib import import_module
 from typing import Any, Protocol, TextIO, cast
 
 from flowent.storage import StateStore, StoredMcpServer, StoredMcpTool
-from flowent.tools import ToolResult
+from flowent.tool_protocol import ToolResult
 
 logger = logging.getLogger("flowent.mcp")
 MCP_CONNECT_TIMEOUT_SECONDS = 10

@@ -49,6 +49,7 @@ def fake_dependencies(events: list[str]) -> AppDependencies:
             runtime=Workspace(events),
             store=SimpleNamespace(),
             telegram_bot_manager=EnabledManager("telegram", events),
+            workflow_repository=SimpleNamespace(),
             workflow_service=SimpleNamespace(scheduler=scheduler),
         ),
     )
@@ -86,5 +87,6 @@ def test_create_app_accepts_explicit_config_and_dependencies(tmp_path) -> None:
 
     assert app.state.mcp_manager is dependencies.mcp_manager
     assert app.state.telegram_bot_manager is dependencies.telegram_bot_manager
+    assert app.state.workflow_repository is dependencies.workflow_repository
     assert app.state.workflow_service is dependencies.workflow_service
     assert not any(route.path == "/{path:path}" for route in app.routes)

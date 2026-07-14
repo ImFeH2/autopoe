@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flowent.llm import ChatMessage
 from flowent.shell import shell_invocation_description
-from flowent.tools import tool_specs
+from flowent.tool_catalog import tool_specs
 
 DEFAULT_PROJECT_INSTRUCTIONS_MAX_BYTES = 32768
 PROJECT_DOC_FILENAME = "AGENTS.md"

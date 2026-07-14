@@ -2,35 +2,37 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
 from flowent.agent_events import (
     AgentStreamEvent,
+    new_tool_item,
     tool_result_event,
     tool_start_event,
     tool_update_event,
 )
 from flowent.agent_loop_state import PendingToolCall
+from flowent.builtin_tools import run_tool_async
 from flowent.logging import TRACE_LEVEL
-from flowent.tools import (
+from flowent.tool_catalog import tool_call_title
+from flowent.tool_protocol import (
+    ToolArguments,
     ToolContext,
     ToolResult,
-    new_tool_item,
+    WebSearcher,
     parse_tool_arguments,
-    run_tool_async,
     text_tool_result,
     tool_result_model_content,
 )
 
 logger = logging.getLogger("flowent.agent")
 
-ExtraToolRunner = Callable[[str, dict[str, object]], Awaitable[ToolResult | None]]
+ExtraToolRunner = Callable[[str, ToolArguments], Awaitable[ToolResult | None]]
 ExtraToolTitle = Callable[[str], str | None]
-ToolRunner = Callable[[str, dict[str, object], ToolContext], Awaitable[ToolResult]]
-WebSearcher = Callable[[str], Sequence[dict[str, str]]]
+ToolRunner = Callable[[str, ToolArguments, ToolContext], Awaitable[ToolResult]]
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,11 @@ class AgentToolExecution:
                 title=self.tool_call.name or "Tool failed",
             )
             self.model_content = tool_result_model_content(result)
-            tool_item = new_tool_item(self.tool_call.name, {})
+            tool_item = new_tool_item(
+                self.tool_call.name,
+                {},
+                tool_call_title(self.tool_call.name, {}),
+            )
             logger.debug("Tool call argument parse failed name=%s", self.tool_call.name)
             logger.log(TRACE_LEVEL, "Tool start item=%r", tool_item)
             yield tool_start_event(tool_item)
@@ -82,7 +88,11 @@ class AgentToolExecution:
             if self.services.extra_tool_title
             else None
         )
-        tool_item = new_tool_item(self.tool_call.name, arguments, title)
+        tool_item = new_tool_item(
+            self.tool_call.name,
+            arguments,
+            title or tool_call_title(self.tool_call.name, arguments),
+        )
         logger.debug(
             "Tool call started name=%s id=%s",
             self.tool_call.name,
@@ -119,7 +129,7 @@ class AgentToolExecution:
 
     async def _stream_tool(
         self,
-        arguments: dict[str, object],
+        arguments: ToolArguments,
         tool_id: str,
     ) -> AsyncIterator[AgentStreamEvent]:
         event_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()

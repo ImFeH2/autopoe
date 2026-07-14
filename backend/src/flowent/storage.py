@@ -1,4 +1,5 @@
 from flowent.state import (
+    SQLiteDatabase,
     StateStore,
     StoredAssistantOutputGroup,
     StoredCompactionCheckpoint,
@@ -32,11 +33,13 @@ from flowent.state import (
     StoredWorkflowSpec,
     StoredWritablePath,
     WorkflowDraft,
+    WorkflowRepository,
     WorkflowRevisionConflictError,
     WorkflowSaveRequest,
 )
 
 __all__ = [
+    "SQLiteDatabase",
     "StateStore",
     "StoredAssistantOutputGroup",
     "StoredCompactionCheckpoint",
@@ -70,6 +73,7 @@ __all__ = [
     "StoredWorkflowSpec",
     "StoredWritablePath",
     "WorkflowDraft",
+    "WorkflowRepository",
     "WorkflowRevisionConflictError",
     "WorkflowSaveRequest",
 ]

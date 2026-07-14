@@ -24,7 +24,7 @@ from flowent.storage import (
     WorkflowDraft,
     WorkflowRevisionConflictError,
 )
-from flowent.tools import ToolResult, text_tool_result
+from flowent.tool_protocol import ToolResult, text_tool_result
 from flowent.workflows import WorkflowRunResponse
 
 MAX_WORKFLOW_TOOL_DEPTH = 3

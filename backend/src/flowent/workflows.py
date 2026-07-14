@@ -24,6 +24,7 @@ from flowent.storage import (
     StoredWorkflowPresentation,
     StoredWorkflowSpec,
     WorkflowDraft,
+    WorkflowRepository,
 )
 from flowent.workflow_schedule_rules import next_cron_run_at
 
@@ -39,6 +40,7 @@ class WorkflowAgentResult(Protocol):
 class WorkflowAgentRuntime(Protocol):
     cwd: Path
     store: StateStore
+    workflow_repository: WorkflowRepository
 
     async def complete(
         self,
@@ -491,10 +493,14 @@ async def run_node(
         context_messages = runtime_context_messages(
             runtime.cwd, runtime.store.read_state().settings.agent_prompt
         )
-        history = runtime.store.read_workflow_agent_history(workflow_id, node.id)
+        history = runtime.workflow_repository.read_workflow_agent_history(
+            workflow_id, node.id
+        )
         current_message: Mapping[str, object] = {"role": "user", "content": prompt}
         pending_history: list[Mapping[str, object]] = [*history, current_message]
-        runtime.store.save_workflow_agent_history(workflow_id, node.id, pending_history)
+        runtime.workflow_repository.save_workflow_agent_history(
+            workflow_id, node.id, pending_history
+        )
         result = await runtime.complete(
             connection=connection,
             messages=[*context_messages, *pending_history],
@@ -502,7 +508,7 @@ async def run_node(
             user_request=prompt,
             workflow_depth=workflow_depth,
         )
-        runtime.store.save_workflow_agent_history(
+        runtime.workflow_repository.save_workflow_agent_history(
             workflow_id, node.id, list(result.history)
         )
         return result.content

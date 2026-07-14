@@ -1,6 +1,6 @@
 import sqlite3
 
-from flowent.storage import StateStore
+from flowent.storage import SQLiteDatabase, StateStore
 
 
 def test_workflow_contract_migration_clears_only_workflow_records(tmp_path) -> None:
@@ -90,12 +90,13 @@ def test_workflow_contract_migration_clears_only_workflow_records(tmp_path) -> N
             """
         )
 
-    store = StateStore(tmp_path)
+    database = SQLiteDatabase(tmp_path)
+    store = StateStore(database=database)
     state = store.read_state()
 
     assert state.workflows == []
     assert [provider.id for provider in state.providers] == ["provider"]
-    with store.connect() as connection:
+    with database.connect() as connection:
         assert (
             connection.execute("SELECT COUNT(*) FROM workflow_runs").fetchone()[0] == 0
         )

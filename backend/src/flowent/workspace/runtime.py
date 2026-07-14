@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 from uuid import uuid4
 
 from flowent.agent import AgentContextUpdate
@@ -29,8 +29,9 @@ from flowent.storage import (
     StoredMessage,
     StoredState,
     StoredToolItem,
+    WorkflowRepository,
 )
-from flowent.tools import text_tool_result
+from flowent.tool_protocol import text_tool_result
 from flowent.usage import (
     TokenUsage,
     TokenUsageInfo,
@@ -55,7 +56,6 @@ from flowent.workspace.context import (
 from flowent.workspace.events import (
     WorkspaceResponse,
     append_or_replace_message,
-    response_snapshot_data_at,
     stream_event,
     stream_message_data,
 )
@@ -68,6 +68,7 @@ from flowent.workspace.output import (
     run_error_output_item,
     trim_assistant_message_at_error,
 )
+from flowent.workspace.response_session import WorkspaceTurnCoordinator
 
 logger = logging.getLogger("flowent.workspace.runtime")
 
@@ -81,12 +82,6 @@ class WorkspaceCompactTask:
     task: asyncio.Task[tuple[StoredMessage, TokenUsageInfo]]
 
 
-@dataclass
-class WorkspacePendingResponse:
-    stop_event: asyncio.Event
-    task: asyncio.Task[Any]
-
-
 class WorkspaceRuntime:
     def __init__(
         self,
@@ -96,6 +91,7 @@ class WorkspaceRuntime:
         cwd: Path,
         mcp_manager: McpManager,
         store: StateStore,
+        workflow_repository: WorkflowRepository,
         workflow_service: WorkflowService,
     ) -> None:
         self.chat_completion = chat_completion
@@ -108,15 +104,15 @@ class WorkspaceRuntime:
             cwd=cwd,
             mcp_manager=mcp_manager,
             store=store,
+            workflow_repository=workflow_repository,
             workflow_service=workflow_service,
         )
-        self.active_response: WorkspaceResponse | None = None
-        self.generation = 0
         self.active_compact_task: WorkspaceCompactTask | None = None
-        self.turn_lock = asyncio.Lock()
-        self.response_reserved = False
-        self.pending_response: WorkspacePendingResponse | None = None
-        self.background_tasks: set[asyncio.Task[Any]] = set()
+        self.turns = WorkspaceTurnCoordinator()
+
+    @property
+    def response_reserved(self) -> bool:
+        return self.turns.response_reserved
 
     def extra_tool_specs(self) -> list[Mapping[str, object]]:
         return self.agent_runtime.extra_tool_specs()
@@ -250,7 +246,7 @@ class WorkspaceRuntime:
             raise RuntimeError("Context could not be optimized.") from error
 
     async def run_turn(self, content: str) -> StoredMessage:
-        async with self.turn_lock:
+        async with self.turns.serialized_turn():
             return await self._run_turn(content)
 
     async def _run_turn(self, content: str) -> StoredMessage:
@@ -377,35 +373,6 @@ class WorkspaceRuntime:
     async def reply_text(self, content: str) -> str:
         return (await self.run_turn(content)).content
 
-    async def gather_shutdown_tasks(
-        self, label: str, tasks: Sequence[asyncio.Task[Any]]
-    ) -> None:
-        if not tasks:
-            return
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if result is None or isinstance(result, asyncio.CancelledError):
-                continue
-            if isinstance(result, BaseException):
-                logger.error(
-                    "%s cleanup task failed",
-                    label,
-                    exc_info=(type(result), result, result.__traceback__),
-                )
-
-    async def stop_response_for_shutdown(self) -> None:
-        tasks: list[asyncio.Task[Any]] = []
-        pending_response = self.pending_response
-        if pending_response is not None and not pending_response.task.done():
-            pending_response.stop_event.set()
-            tasks.append(pending_response.task)
-        response = self.active_response
-        if response is not None and response.task is not None:
-            if not response.task.done():
-                response.task.cancel()
-            tasks.append(response.task)
-        await self.gather_shutdown_tasks("Workspace response", tasks)
-
     async def stop_compact_for_shutdown(self) -> None:
         if self.active_compact_task is None:
             self.store.save_is_compacting(False)
@@ -414,142 +381,40 @@ class WorkspaceRuntime:
         self.active_compact_task = None
         if not task.done():
             task.cancel()
-        await self.gather_shutdown_tasks("Workspace compact", [task])
+        await self.turns.gather_tasks("Workspace compact", [task])
         self.store.save_is_compacting(False)
 
     async def stop_for_shutdown(self) -> None:
-        await self.stop_response_for_shutdown()
+        await self.turns.stop_response_for_shutdown()
         await self.stop_compact_for_shutdown()
-        await self.gather_shutdown_tasks(
-            "Workspace background", list(self.background_tasks)
-        )
+        await self.turns.stop_background_tasks_for_shutdown()
 
     def current_response(self) -> WorkspaceResponse | None:
-        response = self.active_response
-        if response is None or response.is_done:
-            return None
-        return response
+        return self.turns.current_response()
 
     def has_active_response(self) -> bool:
-        response = self.active_response
-        return (
-            response is not None
-            and not response.is_done
-            and response.task is not None
-            and not response.task.done()
-        )
-
-    def reserve_response(self) -> WorkspacePendingResponse:
-        if self.response_reserved or self.has_active_response():
-            raise OperationConflictError("Response in progress")
-        task = asyncio.current_task()
-        if task is None:
-            raise RuntimeError("Workspace response task is unavailable.")
-        pending_response = WorkspacePendingResponse(
-            stop_event=asyncio.Event(),
-            task=task,
-        )
-        self.response_reserved = True
-        self.pending_response = pending_response
-        return pending_response
-
-    def activate_response(self, pending_response: WorkspacePendingResponse) -> None:
-        if self.pending_response is pending_response:
-            self.pending_response = None
-
-    def release_response(
-        self, pending_response: WorkspacePendingResponse | None = None
-    ) -> None:
-        self.response_reserved = False
-        if pending_response is None or self.pending_response is pending_response:
-            self.pending_response = None
-
-    async def acquire_response_turn(
-        self, pending_response: WorkspacePendingResponse
-    ) -> None:
-        acquire_task = asyncio.create_task(self.turn_lock.acquire())
-        stop_task = asyncio.create_task(pending_response.stop_event.wait())
-        acquired = False
-        try:
-            await asyncio.wait(
-                {acquire_task, stop_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if pending_response.stop_event.is_set():
-                raise OperationConflictError("Response stopped.")
-            await acquire_task
-            acquired = True
-            if pending_response.stop_event.is_set():
-                raise OperationConflictError("Response stopped.")
-        except BaseException:
-            if not acquire_task.done():
-                acquire_task.cancel()
-            if not stop_task.done():
-                stop_task.cancel()
-            acquire_result, _ = await asyncio.gather(
-                acquire_task,
-                stop_task,
-                return_exceptions=True,
-            )
-            if acquired or acquire_result is True:
-                self.turn_lock.release()
-            raise
-        else:
-            stop_task.cancel()
-            await asyncio.gather(stop_task, return_exceptions=True)
+        return self.turns.has_active_response()
 
     async def clear(self) -> list[StoredMessage]:
-        self.generation += 1
-        pending_response = self.pending_response
-        if pending_response is not None:
-            pending_response.stop_event.set()
-        response = self.active_response
-        if response is not None:
-            response.is_done = True
-            if response.task is not None and not response.task.done():
-                response.discard_on_cancel = True
-                response.task.cancel()
-        async with self.turn_lock:
+        self.turns.cancel_for_clear()
+        async with self.turns.serialized_turn():
             return self.store.save_messages([])
 
     async def replace_messages(
         self, messages: list[StoredMessage]
     ) -> list[StoredMessage]:
-        if self.response_reserved or self.turn_lock.locked():
+        if not self.turns.can_replace_messages():
             raise OperationConflictError("Response in progress")
-        async with self.turn_lock:
+        async with self.turns.serialized_turn():
             return self.store.save_messages(messages)
 
     async def notify_cleared_response(self) -> None:
-        response = self.active_response
-        if response is None:
-            return
-        async with response.condition:
-            response.condition.notify_all()
-
-    async def append_event(
-        self, response: WorkspaceResponse, event: str, data: dict[str, object]
-    ) -> None:
-        async with response.condition:
-            response.events.append((response.latest_event_index + 1, event, data))
-            response.condition.notify_all()
-
-    async def append_snapshot(
-        self, response: WorkspaceResponse, message: StoredMessage
-    ) -> None:
-        if message.author != "assistant":
-            return
-        response.latest_snapshot = message
-        await self.append_event(
-            response,
-            "snapshot",
-            {"message": stream_message_data(message, response.active_output)},
-        )
+        await self.turns.notify_cleared_response()
 
     async def start_response(
         self, content: str, *, message_id: str | None = None
     ) -> WorkspaceResponse:
-        pending_response = self.reserve_response()
+        pending_response = self.turns.reserve_response()
         lock_acquired = False
         response_started = False
         try:
@@ -557,7 +422,7 @@ class WorkspaceRuntime:
                 raise OperationConflictError(
                     "Context refining in progress. Please wait a moment."
                 )
-            await self.acquire_response_turn(pending_response)
+            await self.turns.acquire_response_turn(pending_response)
             lock_acquired = True
             if self.store.read_is_compacting():
                 raise OperationConflictError(
@@ -580,14 +445,14 @@ class WorkspaceRuntime:
                 state=state,
                 user_message=user_message,
             )
-            self.activate_response(pending_response)
+            self.turns.activate_response(pending_response)
             response_started = True
             return response
         finally:
             if not response_started:
                 if lock_acquired:
-                    self.turn_lock.release()
-                self.release_response(pending_response)
+                    self.turns.release_turn()
+                self.turns.release_response(pending_response)
 
     async def edit_message(
         self,
@@ -596,9 +461,9 @@ class WorkspaceRuntime:
         action: Literal["resend", "save"],
         content: str,
     ) -> tuple[list[StoredMessage], WorkspaceResponse | None]:
-        pending_response = self.reserve_response() if action == "resend" else None
+        pending_response = self.turns.reserve_response() if action == "resend" else None
         if pending_response is None and (
-            self.response_reserved or self.has_active_response()
+            self.turns.response_reserved or self.has_active_response()
         ):
             raise OperationConflictError("Response in progress")
         lock_acquired = False
@@ -608,9 +473,9 @@ class WorkspaceRuntime:
                     "Context refining in progress. Please wait a moment."
                 )
             if pending_response is None:
-                await self.turn_lock.acquire()
+                await self.turns.acquire_turn()
             else:
-                await self.acquire_response_turn(pending_response)
+                await self.turns.acquire_response_turn(pending_response)
             lock_acquired = True
             result = self._edit_message_locked(
                 message_id,
@@ -618,16 +483,16 @@ class WorkspaceRuntime:
                 content=content,
             )
             if result[1] is None:
-                self.turn_lock.release()
+                self.turns.release_turn()
                 lock_acquired = False
             elif pending_response is not None:
-                self.activate_response(pending_response)
+                self.turns.activate_response(pending_response)
             return result
         except BaseException:
             if lock_acquired:
-                self.turn_lock.release()
+                self.turns.release_turn()
             if pending_response is not None:
-                self.release_response(pending_response)
+                self.turns.release_response(pending_response)
             raise
 
     def _edit_message_locked(
@@ -684,22 +549,22 @@ class WorkspaceRuntime:
         *,
         error_id: str,
     ) -> tuple[list[StoredMessage], WorkspaceResponse]:
-        pending_response = self.reserve_response()
+        pending_response = self.turns.reserve_response()
         lock_acquired = False
         try:
             if self.store.read_is_compacting():
                 raise OperationConflictError(
                     "Context refining in progress. Please wait a moment."
                 )
-            await self.acquire_response_turn(pending_response)
+            await self.turns.acquire_response_turn(pending_response)
             lock_acquired = True
             result = self._retry_error_locked(message_id, error_id=error_id)
-            self.activate_response(pending_response)
+            self.turns.activate_response(pending_response)
             return result
         except BaseException:
             if lock_acquired:
-                self.turn_lock.release()
-            self.release_response(pending_response)
+                self.turns.release_turn()
+            self.turns.release_response(pending_response)
             raise
 
     def _retry_error_locked(
@@ -808,20 +673,8 @@ class WorkspaceRuntime:
     ) -> WorkspaceResponse:
         connection = selected_connection(state)
         context_window_limit = context_window_for_settings(state.settings)
-        response = WorkspaceResponse(
-            condition=asyncio.Condition(),
-            generation=self.generation,
-        )
-        self.active_response = response
-        turn_released = False
-
-        def release_turn() -> None:
-            nonlocal turn_released
-            if turn_released:
-                return
-            turn_released = True
-            self.release_response()
-            self.turn_lock.release()
+        response_session = self.turns.start_response_session()
+        response = response_session.response
 
         async def response_task() -> None:
             nonlocal next_messages
@@ -845,7 +698,7 @@ class WorkspaceRuntime:
             last_progress_flush_at = 0.0
 
             def is_current_generation() -> bool:
-                return response.generation == self.generation
+                return response_session.is_current_generation()
 
             def update_assistant_message(
                 status: str = "running", *, persist: bool
@@ -930,8 +783,7 @@ class WorkspaceRuntime:
                         marker, _, usage_info = auto_compaction
                         next_messages = [*state.messages, marker, user_message]
                         self.store.save_messages(next_messages)
-                        await self.append_event(
-                            response,
+                        await response_session.append_event(
                             "context_optimized",
                             {
                                 "message": marker.model_dump(),
@@ -964,8 +816,7 @@ class WorkspaceRuntime:
                             [*next_messages, marker], assistant_message
                         )
                         self.store.save_messages(next_messages)
-                        await self.append_event(
-                            response,
+                        await response_session.append_event(
                             "context_optimized",
                             {
                                 "message": marker.model_dump(),
@@ -1170,23 +1021,22 @@ class WorkspaceRuntime:
                                     "message": stream_message_data(snapshot_after_event)
                                 }
                     if event.event == "done" and snapshot_after_event is not None:
-                        await self.append_snapshot(response, snapshot_after_event)
-                        await self.append_event(response, event.event, run_event_data)
+                        await response_session.append_snapshot(snapshot_after_event)
+                        await response_session.append_event(event.event, run_event_data)
                     else:
                         if should_append_run_event:
-                            await self.append_event(
-                                response, event.event, run_event_data
+                            await response_session.append_event(
+                                event.event, run_event_data
                             )
                         if snapshot_after_event is not None:
-                            await self.append_snapshot(response, snapshot_after_event)
+                            await response_session.append_snapshot(snapshot_after_event)
             except asyncio.CancelledError:
                 logger.info("Workspace response stopped")
                 if not response.discard_on_cancel:
                     interrupted_snapshot = persist_assistant("interrupted")
                     if interrupted_snapshot is not None:
-                        await self.append_snapshot(response, interrupted_snapshot)
-                    await self.append_event(
-                        response,
+                        await response_session.append_snapshot(interrupted_snapshot)
+                    await response_session.append_event(
                         "error",
                         {"message": "Response stopped."},
                     )
@@ -1219,38 +1069,15 @@ class WorkspaceRuntime:
                 )
                 failed_snapshot = persist_assistant("failed")
                 if failed_snapshot is not None:
-                    await self.append_snapshot(response, failed_snapshot)
-                await self.append_event(
-                    response, "error", run_error_event_data(error_item)
+                    await response_session.append_snapshot(failed_snapshot)
+                await response_session.append_event(
+                    "error", run_error_event_data(error_item)
                 )
             finally:
-                response.is_done = True
-                async with response.condition:
-                    response.condition.notify_all()
-                if self.active_response is response:
-                    self.active_response = None
-                release_turn()
+                await response_session.finish()
 
-        response.task = asyncio.create_task(response_task())
-
-        def response_task_done(_: asyncio.Task[None]) -> None:
-            if turn_released:
-                return
-            response.is_done = True
-            if self.active_response is response:
-                self.active_response = None
-            release_turn()
-
-            async def notify_response_done() -> None:
-                async with response.condition:
-                    response.condition.notify_all()
-
-            notify_task = asyncio.create_task(notify_response_done())
-            self.background_tasks.add(notify_task)
-            notify_task.add_done_callback(self.background_tasks.discard)
-
-        response.task.add_done_callback(response_task_done)
-        return response
+        response_task_handle = asyncio.create_task(response_task())
+        return response_session.attach_task(response_task_handle)
 
     async def response_stream(
         self,
@@ -1258,62 +1085,23 @@ class WorkspaceRuntime:
         after: int = 0,
         include_snapshots: bool = True,
     ) -> AsyncIterator[str]:
-        next_event_index = after + 1
-        reconnect_snapshot = (
-            response_snapshot_data_at(response, after) if after > 0 else None
-        )
-        if include_snapshots and reconnect_snapshot is not None:
-            yield stream_event(
-                "snapshot",
-                {"message": reconnect_snapshot},
-                event_id=after,
-            )
-        while True:
-            async with response.condition:
-
-                def has_next_event(index: int = next_event_index) -> bool:
-                    return response.is_done or any(
-                        event_index >= index for event_index, _, _ in response.events
-                    )
-
-                await response.condition.wait_for(has_next_event)
-                events = [
-                    event for event in response.events if event[0] >= next_event_index
-                ]
-
-            for index, event, data in events:
-                next_event_index = index + 1
-                if event == "snapshot" and not include_snapshots:
-                    continue
-                yield stream_event(event, data, event_id=index)
-                if event in {"done", "error"}:
-                    return
-
-            if response.is_done and not events:
-                return
+        async for event in self.turns.response_stream(
+            response,
+            after=after,
+            include_snapshots=include_snapshots,
+        ):
+            yield event
 
     def stream_current_response(self) -> WorkspaceResponse:
-        response = self.current_response()
-        if response is None:
-            raise ResourceNotFoundError("Response not found.")
-        return response
+        return self.turns.stream_current_response()
 
     def stop_response(self) -> None:
-        pending_response = self.pending_response
-        if pending_response is not None:
-            pending_response.stop_event.set()
-        response = self.current_response()
-        if (
-            response is not None
-            and response.task is not None
-            and not response.task.done()
-        ):
-            response.task.cancel()
+        self.turns.stop_response()
 
     def compact_stream(self) -> AsyncIterator[str]:
         async def run_manual_compact() -> tuple[StoredMessage, TokenUsageInfo]:
             try:
-                async with self.turn_lock:
+                async with self.turns.serialized_turn():
                     state = self.store.read_state()
                     connection = selected_connection(state)
                     context_window_limit = context_window_for_settings(state.settings)

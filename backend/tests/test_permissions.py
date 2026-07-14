@@ -9,7 +9,7 @@ from flowent.main import create_app
 from flowent.permissions import run_tool_with_path_permissions
 from flowent.sandbox import CommandResult, SandboxRunner
 from flowent.storage import StateStore
-from flowent.tools import ToolContext, tool_result_model_content
+from flowent.tool_protocol import ToolContext, tool_result_model_content
 
 
 class UserRecord:

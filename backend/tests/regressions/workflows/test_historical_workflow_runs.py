@@ -6,7 +6,7 @@ from copy import deepcopy
 import pytest
 
 from flowent.main import create_app
-from flowent.tools import tool_result_model_content
+from flowent.tool_protocol import tool_result_model_content
 from flowent.workflow_tools import WorkflowAgentTools, workflow_tool_specs
 
 
@@ -79,7 +79,7 @@ async def test_agent_reads_the_trace_and_immutable_revision_for_a_run(
         assert completed is not None and completed.ok is True
         run_id = completed.result["run_id"]
 
-        stored_run = service.store.read_workflow_run(run_id)
+        stored_run = service.workflow_repository.read_workflow_run(run_id)
         assert stored_run is not None
         assert stored_run.inputs.model_dump(mode="json") == {
             "default_input": "first run input",

@@ -12,15 +12,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from flowent.agent import FLOWENT_AGENT_SYSTEM_PROMPT, run_agent_stream
+from flowent.builtin_tools import default_web_search, run_tool
 from flowent.llm import ProviderConnection, ProviderFormat
 from flowent.main import create_app
 from flowent.network import flowent_user_agent
 from flowent.sandbox import CommandResult, SandboxCommand, SandboxRunner
-from flowent.tools import (
+from flowent.tool_protocol import (
     ToolContext,
     ToolResult,
-    default_web_search,
-    run_tool,
     text_tool_result,
     tool_result_model_content,
 )

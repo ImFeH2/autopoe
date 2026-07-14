@@ -16,6 +16,7 @@ from flowent.storage import (
     StoredWorkflowRun,
     StoredWorkflowSchedule,
     WorkflowDraft,
+    WorkflowRepository,
 )
 from flowent.workflow_scheduler import WorkflowScheduler
 from flowent.workflows import (
@@ -34,33 +35,36 @@ class WorkflowService:
         chat_completion: CompletionCallable | None,
         cwd: Path,
         mcp_manager: McpManager,
-        store: StateStore,
+        state_store: StateStore,
+        workflow_repository: WorkflowRepository,
     ) -> None:
         self.chat_completion = chat_completion
         self.cwd = cwd
         self.mcp_manager = mcp_manager
-        self.store = store
+        self.state_store = state_store
+        self.workflow_repository = workflow_repository
         self.agent_runtime = FlowentAgentRuntime(
             chat_completion=chat_completion,
             cwd=cwd,
             mcp_manager=mcp_manager,
-            store=store,
+            store=state_store,
+            workflow_repository=workflow_repository,
             workflow_service=self,
         )
         self.scheduler = WorkflowScheduler(self)
 
     def list_workflows(self) -> list[StoredWorkflow]:
-        return self.store.read_workflows()
+        return self.workflow_repository.read_workflows()
 
     def get_workflow(self, workflow_id: str) -> StoredWorkflow:
-        workflow = self.store.read_workflow(workflow_id)
+        workflow = self.workflow_repository.read_workflow(workflow_id)
         if workflow is None:
             raise ValueError("Workflow not found.")
         return workflow
 
     def get_active_revision(self, workflow_id: str) -> StoredWorkflowRevision:
         self.get_workflow(workflow_id)
-        revision = self.store.read_active_workflow_revision(workflow_id)
+        revision = self.workflow_repository.read_active_workflow_revision(workflow_id)
         if revision is None:
             raise ValueError("Workflow is not ready to run.")
         return revision
@@ -69,19 +73,23 @@ class WorkflowService:
         self, workflow_id: str, revision: int
     ) -> StoredWorkflowRevision:
         workflow = self.get_workflow(workflow_id)
-        stored_revision = self.store.read_workflow_revision(workflow_id, revision)
+        stored_revision = self.workflow_repository.read_workflow_revision(
+            workflow_id, revision
+        )
         if stored_revision is not None:
             return stored_revision
         if workflow.revision == revision:
             compile_workflow_spec(workflow.spec)
-            active_revision = self.store.read_active_workflow_revision(workflow_id)
+            active_revision = self.workflow_repository.read_active_workflow_revision(
+                workflow_id
+            )
             if active_revision is not None and active_revision.spec == workflow.spec:
                 return active_revision
             raise ValueError("Workflow revision is not ready to run.")
         raise ValueError("Workflow revision not found.")
 
     def get_workflow_run(self, run_id: str) -> StoredWorkflowRun:
-        run = self.store.read_workflow_run(run_id)
+        run = self.workflow_repository.read_workflow_run(run_id)
         if run is None:
             raise ValueError("Workflow run not found.")
         return run
@@ -118,7 +126,7 @@ class WorkflowService:
     async def delete_workflow(self, workflow_id: str) -> StoredWorkflow:
         workflow = self.get_workflow(workflow_id)
         await self.scheduler.delete(workflow_id)
-        self.store.delete_workflow(workflow_id)
+        self.workflow_repository.delete_workflow(workflow_id)
         return workflow
 
     async def start_workflow_schedule(
@@ -159,7 +167,7 @@ class WorkflowService:
             else self.get_active_revision(workflow_id)
         )
         connection = (
-            selected_connection(self.store.read_state())
+            selected_connection(self.state_store.read_state())
             if workflow_requires_connection(revision.spec)
             else None
         )
@@ -184,5 +192,5 @@ class WorkflowService:
             "default_input": default_input,
             "values": dict(input_values or {}),
         }
-        self.store.save_workflow_run(stored_run)
+        self.workflow_repository.save_workflow_run(stored_run)
         return result

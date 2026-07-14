@@ -222,7 +222,7 @@ async def test_restart_reconciles_persisted_timers_with_the_active_revision(
         )
 
     changed = timer_workflow(interval_seconds=3600)
-    committed = first_app.state.workflow_service.store.save_workflow(
+    committed = first_app.state.workflow_repository.save_workflow(
         WorkflowDraft.model_validate(changed),
         base_revision=int(created["revision"]),
         executable=True,
@@ -307,7 +307,7 @@ async def test_next_run_failure_does_not_reuse_the_completed_workflow_run_id(
         await asyncio.wait_for(asyncio.shield(worker), timeout=2)
 
         schedule = service.scheduler.get("workflow-consistency")
-        with service.store.connect() as connection:
+        with service.workflow_repository.database.connect() as connection:
             runs = connection.execute(
                 """
                 SELECT run_id, status

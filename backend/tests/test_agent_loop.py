@@ -5,7 +5,7 @@ import pytest
 
 from flowent.agent import AgentContextUpdate, run_agent_stream
 from flowent.llm import ProviderConnection, ProviderFormat
-from flowent.tools import ToolContext, ToolResult, text_tool_result
+from flowent.tool_protocol import ToolContext, ToolResult, text_tool_result
 
 
 def provider_connection() -> ProviderConnection:

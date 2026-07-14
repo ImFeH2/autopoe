@@ -7,7 +7,7 @@ from uuid import UUID
 import pytest
 
 from flowent.main import create_app
-from flowent.tools import tool_result_model_content
+from flowent.tool_protocol import tool_result_model_content
 from flowent.workflow_tools import WorkflowAgentTools, workflow_tool_specs
 
 

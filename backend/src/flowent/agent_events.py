@@ -1,8 +1,9 @@
 from collections.abc import Mapping
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
-from flowent.tools import ToolResult
+from flowent.tool_protocol import ToolResult
 from flowent.usage import TokenUsage
 
 
@@ -39,6 +40,20 @@ def output_done_event(round_number: int) -> AgentStreamEvent:
 
 def tool_start_event(tool_item: dict[str, object]) -> AgentStreamEvent:
     return AgentStreamEvent(event="tool_start", data={"tool": tool_item})
+
+
+def new_tool_item(
+    name: str,
+    arguments: dict[str, object],
+    title: str,
+) -> dict[str, object]:
+    return {
+        "id": str(uuid4()),
+        "arguments": arguments,
+        "name": name,
+        "status": "running",
+        "title": title,
+    }
 
 
 def tool_update_event(data: dict[str, object]) -> AgentStreamEvent:

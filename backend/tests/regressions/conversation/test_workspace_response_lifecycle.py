@@ -235,6 +235,60 @@ async def test_workspace_clear_cancels_running_response_before_it_writes_again(
 
 
 @pytest.mark.anyio
+async def test_workspace_stop_persists_interrupted_response_before_stream_error(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLOWENT_DATA_DIR", str(tmp_path / "data"))
+    first_chunk_sent = asyncio.Event()
+    finish_response = asyncio.Event()
+
+    async def fake_completion(**request: object) -> object:
+        async def chunks() -> object:
+            yield {"choices": [{"delta": {"content": "Partial"}}]}
+            first_chunk_sent.set()
+            await finish_response.wait()
+            yield {"choices": [{"delta": {"content": " stale."}}]}
+
+        return chunks()
+
+    app = create_app(serve_frontend=False, chat_completion=fake_completion)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        await configure_provider(client)
+        await start_response_from_message(
+            client,
+            "Stop after partial output.",
+        )
+        await asyncio.wait_for(first_chunk_sent.wait(), timeout=2)
+        stream_task = asyncio.create_task(client.get("/api/workspace/stream"))
+        await asyncio.sleep(0)
+        stop_response = await client.post("/api/workspace/stop")
+        stream_response = await asyncio.wait_for(stream_task, timeout=2)
+        state = (await client.get("/api/state")).json()
+        finish_response.set()
+
+    events = stream_events(stream_response.text)
+    interrupted_snapshot = next(
+        event
+        for event in reversed(events)
+        if event["event"] == "snapshot"
+        and event["data"]["message"]["status"] == "interrupted"
+    )
+    assert stop_response.status_code == 200
+    assert interrupted_snapshot["data"]["message"]["content"] == "Partial"
+    assert events[-1] == {
+        "data": {"message": "Response stopped."},
+        "event": "error",
+        "id": events[-1]["id"],
+    }
+    assert state["messages"][-1]["content"] == "Partial"
+    assert state["messages"][-1]["status"] == "interrupted"
+    assert state["is_responding"] is False
+
+
+@pytest.mark.anyio
 async def test_workspace_response_stream_snapshots_tool_and_text_progress(
     tmp_path, monkeypatch
 ) -> None:

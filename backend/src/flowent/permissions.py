@@ -10,19 +10,21 @@ from flowent.approval import (
     ApprovalReviewer,
     ApprovalReviewRequest,
 )
-from flowent.patch import affected_paths
-from flowent.sandbox import SandboxError, SandboxRunner, path_is_within
-from flowent.shell import shell_invocation
-from flowent.tools import (
+from flowent.builtin_tools import (
     CommandOutputCollector,
-    ToolContext,
-    ToolResult,
-    command_tool_result,
     number_argument,
     patch_title_from_result,
     run_tool_async,
-    text_tool_result,
     tool_failure_content,
+)
+from flowent.patch import affected_paths
+from flowent.sandbox import SandboxError, SandboxRunner, path_is_within
+from flowent.shell import shell_invocation
+from flowent.tool_protocol import (
+    ToolContext,
+    ToolResult,
+    command_tool_result,
+    text_tool_result,
     tool_result_model_content,
 )
 

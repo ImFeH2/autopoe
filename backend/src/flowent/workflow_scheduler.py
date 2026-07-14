@@ -12,13 +12,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flowent.state.models import WorkflowTimerNode
 from flowent.storage import (
-    StateStore,
     StoredWorkflow,
     StoredWorkflowRevision,
     StoredWorkflowSchedule,
     StoredWorkflowScheduleTimer,
     StoredWorkflowSpec,
     WorkflowDraft,
+    WorkflowRepository,
 )
 from flowent.workflow_schedule_rules import next_cron_run_at
 
@@ -29,7 +29,7 @@ logger = logging.getLogger("flowent.workflow_scheduler")
 
 
 class WorkflowSchedulingService(Protocol):
-    store: StateStore
+    workflow_repository: WorkflowRepository
 
     def get_workflow(self, workflow_id: str) -> StoredWorkflow: ...
 
@@ -56,12 +56,12 @@ class WorkflowSchedulingService(Protocol):
 class WorkflowScheduler:
     def __init__(self, service: WorkflowSchedulingService) -> None:
         self.service = service
-        self.store = service.store
+        self.workflow_repository = service.workflow_repository
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.workflow_locks: dict[str, asyncio.Lock] = {}
 
     async def start(self) -> None:
-        for schedule in self.store.read_workflow_schedules():
+        for schedule in self.workflow_repository.read_workflow_schedules():
             if schedule.status not in {"scheduled", "running"}:
                 continue
             active_revision = self.service.get_active_revision(schedule.workflow_id)
@@ -79,7 +79,7 @@ class WorkflowScheduler:
                         else ""
                     ),
                 )
-                self.store.save_workflow_schedule(schedule)
+                self.workflow_repository.save_workflow_schedule(schedule)
             if schedule.status == "scheduled":
                 self._spawn(schedule.workflow_id, schedule.generation)
 
@@ -93,9 +93,9 @@ class WorkflowScheduler:
 
     def get(self, workflow_id: str) -> StoredWorkflowSchedule:
         self.service.get_workflow(workflow_id)
-        return self.store.read_workflow_schedule(workflow_id) or StoredWorkflowSchedule(
-            workflow_id=workflow_id
-        )
+        return self.workflow_repository.read_workflow_schedule(
+            workflow_id
+        ) or StoredWorkflowSchedule(workflow_id=workflow_id)
 
     async def start_schedule(
         self,
@@ -130,7 +130,7 @@ class WorkflowScheduler:
             raise ValueError(
                 "This workflow changed elsewhere. Open the latest version before starting it."
             )
-        existing = self.store.read_workflow_schedule(workflow_id)
+        existing = self.workflow_repository.read_workflow_schedule(workflow_id)
         has_cron = any(
             node.config.mode == "cron" for node in timer_nodes(revision.spec)
         )
@@ -177,11 +177,11 @@ class WorkflowScheduler:
         if old:
             old.cancel()
             await asyncio.gather(old, return_exceptions=True)
-            refreshed = self.store.read_workflow_schedule(workflow_id)
+            refreshed = self.workflow_repository.read_workflow_schedule(workflow_id)
             if refreshed is not None:
                 schedule.last_result = refreshed.last_result
                 schedule.last_run_at = refreshed.last_run_at
-        self.store.save_workflow_schedule(schedule)
+        self.workflow_repository.save_workflow_schedule(schedule)
         self._spawn(workflow_id, generation)
         return schedule
 
@@ -196,7 +196,7 @@ class WorkflowScheduler:
             schedule.status = "stopped"
             schedule.timers = []
             self._clear_running(schedule)
-            self.store.save_workflow_schedule(schedule)
+            self.workflow_repository.save_workflow_schedule(schedule)
             return schedule
 
     async def delete(self, workflow_id: str) -> None:
@@ -214,18 +214,22 @@ class WorkflowScheduler:
         executable: bool,
     ):
         async with self._workflow_lock(workflow.id):
-            old_revision = self.store.read_active_workflow_revision(workflow.id)
-            saved = self.store.save_workflow(
+            old_revision = self.workflow_repository.read_active_workflow_revision(
+                workflow.id
+            )
+            saved = self.workflow_repository.save_workflow(
                 workflow,
                 base_revision=base_revision,
                 executable=executable,
             )
-            new_revision = self.store.read_active_workflow_revision(workflow.id)
+            new_revision = self.workflow_repository.read_active_workflow_revision(
+                workflow.id
+            )
             if timer_signatures(old_revision) == timer_signatures(new_revision):
-                schedule = self.store.read_workflow_schedule(workflow.id)
+                schedule = self.workflow_repository.read_workflow_schedule(workflow.id)
                 if schedule is not None and new_revision is not None:
                     schedule.scheduled_revision = new_revision.revision
-                    self.store.save_workflow_schedule(schedule)
+                    self.workflow_repository.save_workflow_schedule(schedule)
                 return saved
             task = self.tasks.pop(workflow.id, None)
             if task:
@@ -249,7 +253,7 @@ class WorkflowScheduler:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            schedule = self.store.read_workflow_schedule(workflow_id)
+            schedule = self.workflow_repository.read_workflow_schedule(workflow_id)
             if schedule is not None:
                 schedule.generation += 1
                 schedule.status = "error"
@@ -257,7 +261,7 @@ class WorkflowScheduler:
                 schedule.last_result = None
                 schedule.timers = []
                 self._clear_running(schedule)
-                self.store.save_workflow_schedule(schedule)
+                self.workflow_repository.save_workflow_schedule(schedule)
 
     async def _reconcile(
         self,
@@ -265,7 +269,7 @@ class WorkflowScheduler:
         old_revision: StoredWorkflowRevision | None,
         new_revision: StoredWorkflowRevision | None,
     ) -> None:
-        schedule = self.store.read_workflow_schedule(workflow_id)
+        schedule = self.workflow_repository.read_workflow_schedule(workflow_id)
         if schedule is None or schedule.status not in {"scheduled", "running"}:
             return
         schedule.generation += 1
@@ -278,7 +282,7 @@ class WorkflowScheduler:
                 else ""
             ),
         )
-        self.store.save_workflow_schedule(schedule)
+        self.workflow_repository.save_workflow_schedule(schedule)
         if schedule.status == "scheduled":
             self._spawn(workflow_id, schedule.generation)
 
@@ -295,7 +299,7 @@ class WorkflowScheduler:
         persisted_run_id: str | None = None
         try:
             while True:
-                schedule = self.store.read_workflow_schedule(workflow_id)
+                schedule = self.workflow_repository.read_workflow_schedule(workflow_id)
                 if (
                     schedule is None
                     or schedule.generation != generation
@@ -312,7 +316,9 @@ class WorkflowScheduler:
                 next_run_at, due = min(due_timers, key=lambda item: item[0])
                 await asyncio.sleep(max(0, next_run_at - time.time()))
                 async with self._workflow_lock(workflow_id):
-                    schedule = self.store.read_workflow_schedule(workflow_id)
+                    schedule = self.workflow_repository.read_workflow_schedule(
+                        workflow_id
+                    )
                     if (
                         schedule is None
                         or schedule.generation != generation
@@ -332,7 +338,7 @@ class WorkflowScheduler:
                         else item
                         for item in schedule.timers
                     ]
-                    if not self.store.save_workflow_schedule(
+                    if not self.workflow_repository.save_workflow_schedule(
                         schedule, expected_generation=generation
                     ):
                         return
@@ -350,7 +356,9 @@ class WorkflowScheduler:
                 if current_task is not None and current_task.cancelling():
                     raise asyncio.CancelledError
                 async with self._workflow_lock(workflow_id):
-                    schedule = self.store.read_workflow_schedule(workflow_id)
+                    schedule = self.workflow_repository.read_workflow_schedule(
+                        workflow_id
+                    )
                     if (
                         schedule is None
                         or schedule.generation != generation
@@ -389,7 +397,7 @@ class WorkflowScheduler:
                         ]
                         schedule.scheduled_revision = active_revision.revision
                     self._clear_running(schedule)
-                    self.store.save_workflow_schedule(
+                    self.workflow_repository.save_workflow_schedule(
                         schedule, expected_generation=generation
                     )
                 if result.status == "failed":
@@ -399,7 +407,7 @@ class WorkflowScheduler:
         except Exception as error:
             logger.exception("Workflow schedule failed workflow_id=%s", workflow_id)
             async with self._workflow_lock(workflow_id):
-                schedule = self.store.read_workflow_schedule(workflow_id)
+                schedule = self.workflow_repository.read_workflow_schedule(workflow_id)
                 if schedule is not None and schedule.generation == generation:
                     message = str(error) or "Workflow schedule failed."
                     if schedule.running_run_id == persisted_run_id:
@@ -409,7 +417,7 @@ class WorkflowScheduler:
                     schedule.last_error = message
                     schedule.timers = []
                     self._clear_running(schedule)
-                    self.store.save_workflow_schedule(
+                    self.workflow_repository.save_workflow_schedule(
                         schedule, expected_generation=generation
                     )
 
@@ -443,7 +451,7 @@ class WorkflowScheduler:
         interrupt_message: str,
     ) -> None:
         scheduled_revision = (
-            self.store.read_workflow_revision(
+            self.workflow_repository.read_workflow_revision(
                 schedule.workflow_id, schedule.scheduled_revision
             )
             if schedule.scheduled_revision is not None
@@ -514,7 +522,7 @@ class WorkflowScheduler:
         }
         schedule.last_result = trace
         if workflow_revision is not None:
-            self.store.save_workflow_run(
+            self.workflow_repository.save_workflow_run(
                 {
                     **trace,
                     "inputs": {
@@ -552,7 +560,7 @@ class WorkflowScheduler:
         }
         schedule.last_run_at = time.time()
         schedule.last_result = trace
-        self.store.save_workflow_run(
+        self.workflow_repository.save_workflow_run(
             {
                 **trace,
                 "inputs": {

@@ -11,7 +11,7 @@ from flowent.storage import (
     StoredSettings,
     StoredState,
 )
-from flowent.tools import tool_result_model_content
+from flowent.tool_protocol import tool_result_model_content
 from flowent.usage import (
     TokenUsageInfo,
     current_model_context_window,

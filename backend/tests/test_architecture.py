@@ -37,3 +37,36 @@ def test_workspace_core_does_not_depend_on_fastapi() -> None:
         SOURCE_ROOT / "workspace" / "runtime.py",
     ):
         assert "fastapi" not in imported_modules(path), path
+
+
+def test_builtin_tool_modules_have_directed_dependencies() -> None:
+    assert not (SOURCE_ROOT / "tools.py").exists()
+
+    protocol_imports = imported_modules(SOURCE_ROOT / "tool_protocol.py")
+    assert protocol_imports.isdisjoint(
+        {
+            "flowent.builtin_tools",
+            "flowent.network",
+            "flowent.patch",
+            "flowent.sandbox",
+            "flowent.shell",
+            "flowent.system_tools",
+            "flowent.tool_catalog",
+        }
+    )
+
+    catalog_imports = imported_modules(SOURCE_ROOT / "tool_catalog.py")
+    assert catalog_imports.isdisjoint(
+        {"flowent.builtin_tools", "flowent.tool_protocol"}
+    )
+
+    executor_imports = imported_modules(SOURCE_ROOT / "builtin_tools.py")
+    assert {
+        "flowent.tool_catalog",
+        "flowent.tool_protocol",
+    }.issubset(executor_imports)
+
+
+def test_backend_does_not_import_legacy_tool_module() -> None:
+    for path in SOURCE_ROOT.rglob("*.py"):
+        assert "flowent.tools" not in imported_modules(path), path
