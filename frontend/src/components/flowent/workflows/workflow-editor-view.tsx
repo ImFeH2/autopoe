@@ -1,6 +1,7 @@
 import { AlertCircle, ArrowRight } from "lucide-react";
 import { ReactFlowProvider } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { useTranslation } from "react-i18next";
 
 import {
   fieldGroupClassName,
@@ -8,6 +9,7 @@ import {
   subtleButtonClassName,
 } from "@/components/flowent/styles";
 import { WorkflowCanvas } from "@/components/flowent/workflows/workflow-canvas";
+import { workflowRunFailureMessage } from "@/components/flowent/workflows/workflow-model";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,7 +23,6 @@ import type {
   WorkflowNode,
 } from "@/features/workflows/model/workflow-types";
 import {
-  workflowFailureMessage,
   workflowInputNodes,
   workflowTimerNodes,
 } from "@/components/flowent/workflow-run";
@@ -64,6 +65,7 @@ export function WorkflowEditorView({
   workflowSchedule: WorkflowSchedule | null;
   workflowScheduleRequestState: WorkflowScheduleRequestState;
 }) {
+  const { t } = useTranslation();
   const outputEntries = Object.entries(runResult?.outputs ?? {});
   const inputNodes = workflowInputNodes(draftWorkflow);
   const hasTimer = workflowTimerNodes(draftWorkflow).length > 0;
@@ -79,29 +81,49 @@ export function WorkflowEditorView({
   const runControl = (() => {
     if (!hasTimer) {
       return {
-        label: "Run",
+        label: t("workflows.run.control.run"),
         state: isRunning ? ("running" as const) : ("ready" as const),
       };
     }
     if (isScheduleLoading) {
-      return { label: "Loading...", state: "loading" as const };
+      return {
+        label: t("workflows.run.control.loading"),
+        state: "loading" as const,
+      };
     }
     if (workflowScheduleRequestState === "starting") {
-      return { label: "Starting...", state: "starting" as const };
+      return {
+        label: t("workflows.run.control.starting"),
+        state: "starting" as const,
+      };
     }
     if (workflowScheduleRequestState === "stopping") {
-      return { label: "Stopping...", state: "stopping" as const };
+      return {
+        label: t("workflows.run.control.stopping"),
+        state: "stopping" as const,
+      };
     }
     if (workflowScheduleRequestState === "unavailable") {
-      return { label: "Unavailable", state: "unavailable" as const };
+      return {
+        label: t("workflows.run.control.unavailable"),
+        state: "unavailable" as const,
+      };
     }
     if (canStop) {
-      return { label: "Stop", state: "stoppable" as const };
+      return {
+        label: t("workflows.run.control.stop"),
+        state: "stoppable" as const,
+      };
     }
-    return { label: "Run", state: "ready" as const };
+    return {
+      label: t("workflows.run.control.run"),
+      state: "ready" as const,
+    };
   })();
   const runFailed = runResult?.status === "failed";
-  const runError = runFailed ? workflowFailureMessage(runResult) : "";
+  const runError = runFailed
+    ? workflowRunFailureMessage(runResult, t("workflows.errors.run"))
+    : "";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
@@ -128,13 +150,13 @@ export function WorkflowEditorView({
                 aria-hidden="true"
               />
             )}
-            <span>{runFailed ? "Run failed." : "Run completed."}</span>
+            <span>
+              {runFailed
+                ? t("workflows.run.result.failed")
+                : t("workflows.run.result.completed")}
+            </span>
           </div>
-          {runFailed ? (
-            <div className="text-[#ffb3b3]">
-              {workflowFailureMessage(runResult)}
-            </div>
-          ) : null}
+          {runFailed ? <div className="text-[#ffb3b3]">{runError}</div> : null}
           {outputEntries.length > 0 ? (
             <div className="grid gap-1">
               {outputEntries.map(([key, value]) => (
@@ -165,7 +187,7 @@ export function WorkflowEditorView({
           runControlState={runControl.state}
           scheduleError={
             workflowScheduleRequestState === "unavailable"
-              ? "Could not load run status."
+              ? t("workflows.errors.displayRunStatus")
               : workflowSchedule?.status === "error" &&
                   workflowSchedule.lastError !== runError
                 ? workflowSchedule.lastError
@@ -193,10 +215,14 @@ function RunInputPanel({
   onChange: (nodeId: string, value: string) => void;
   onStart: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="grid shrink-0 gap-3 border-b border-white/10 bg-black px-3 py-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-medium text-white">Workflow Input</div>
+        <div className="text-sm font-medium text-white">
+          {t("workflows.run.input.title")}
+        </div>
         <div className="flex gap-2">
           <Button
             className={cn(subtleButtonClassName, "px-2.5")}
@@ -205,7 +231,7 @@ function RunInputPanel({
             type="button"
             variant="outline"
           >
-            Cancel
+            {t("workflows.run.input.cancel")}
           </Button>
           <Button
             className="h-8 px-2.5"
@@ -213,7 +239,7 @@ function RunInputPanel({
             size="sm"
             type="button"
           >
-            Start
+            {t("workflows.run.input.start")}
           </Button>
         </div>
       </div>
@@ -234,8 +260,10 @@ function RunInputPanel({
                 onChange={(event) => onChange(node.id, event.target.value)}
                 placeholder={
                   defaultValue
-                    ? `Default: ${defaultValue}`
-                    : "Use default value"
+                    ? t("workflows.run.input.defaultValue", {
+                        value: defaultValue,
+                      })
+                    : t("workflows.run.input.useDefaultValue")
                 }
                 value={inputValues[node.id] ?? ""}
               />

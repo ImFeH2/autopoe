@@ -21,6 +21,7 @@ import type {
   WorkflowScheduleStartRequest,
 } from "@/features/workflows/model/workflow-schedule-types";
 import type { Workflow } from "@/features/workflows/model/workflow-types";
+import i18n from "@/i18n/i18n";
 import type { RequestResult } from "@/shared/api/request-result";
 
 const errorMessageFromResponse = async (
@@ -58,9 +59,7 @@ export const saveWorkflowRequest = async (
     };
     return {
       data: null,
-      error:
-        conflict.detail ??
-        "This workflow changed elsewhere. The latest version is now open.",
+      error: conflict.detail ?? i18n.t("workflows.errors.conflict"),
       ...(conflict.workflow
         ? { latest: workflowFromApi(conflict.workflow) }
         : {}),
@@ -72,7 +71,7 @@ export const saveWorkflowRequest = async (
       data: null,
       error: await errorMessageFromResponse(
         response,
-        "Workflow could not be saved.",
+        i18n.t("workflows.errors.save"),
       ),
     };
   }
@@ -111,7 +110,7 @@ export const runWorkflowRequest = async (
       data: null,
       error: await errorMessageFromResponse(
         response,
-        "Run could not be completed.",
+        i18n.t("workflows.errors.run"),
       ),
     };
   }
@@ -134,7 +133,7 @@ export const fetchWorkflowScheduleRequest = async (
       data: null,
       error: await errorMessageFromResponse(
         response,
-        "Run status could not be loaded.",
+        i18n.t("workflows.errors.loadRunStatus"),
       ),
     };
   }
@@ -165,7 +164,7 @@ export const startWorkflowScheduleRequest = async (
       data: null,
       error: await errorMessageFromResponse(
         response,
-        "Workflow could not be started.",
+        i18n.t("workflows.errors.start"),
       ),
     };
   }
@@ -194,7 +193,7 @@ export const stopWorkflowScheduleRequest = async (
       data: null,
       error: await errorMessageFromResponse(
         response,
-        "Workflow could not be stopped.",
+        i18n.t("workflows.errors.stop"),
       ),
     };
   }

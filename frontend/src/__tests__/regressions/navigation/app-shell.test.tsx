@@ -122,7 +122,7 @@ describe("App shell navigation", () => {
     await user.hover(launchWorkflow);
     await user.click(
       within(launchWorkflowRow as HTMLElement).getByRole("button", {
-        name: "Options",
+        name: "Options for Launch Workflow",
       }),
     );
 
@@ -150,7 +150,7 @@ describe("App shell navigation", () => {
 
     await user.click(
       within(launchWorkflowRow as HTMLElement).getByRole("button", {
-        name: "Options",
+        name: "Options for Launch Workflow",
       }),
     );
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
@@ -182,13 +182,13 @@ describe("App shell navigation", () => {
     await user.hover(secondWorkflow);
     await user.click(
       within(secondWorkflowRow as HTMLElement).getByRole("button", {
-        name: "Options",
+        name: "Options for Second Workflow",
       }),
     );
     await user.click(screen.getByRole("menuitem", { name: "Pin" }));
 
     const workflowRows = screen.getAllByRole("button", {
-      name: /Workflow$/,
+      name: /^(Second|Renamed) Workflow$/,
     });
     expect(workflowRows.map((row) => row.textContent)).toEqual([
       "Second Workflow",
@@ -214,7 +214,7 @@ describe("App shell navigation", () => {
 
     await user.click(
       within(secondWorkflowRow as HTMLElement).getByRole("button", {
-        name: "Options",
+        name: "Options for Second Workflow",
       }),
     );
     expect(screen.getByRole("menuitem", { name: "Unpin" })).toBeVisible();
@@ -227,7 +227,7 @@ describe("App shell navigation", () => {
     await user.hover(renamedWorkflow);
     await user.click(
       within(renamedWorkflowRow as HTMLElement).getByRole("button", {
-        name: "Options",
+        name: "Options for Renamed Workflow",
       }),
     );
     await user.click(screen.getByRole("menuitem", { name: "Delete" }));

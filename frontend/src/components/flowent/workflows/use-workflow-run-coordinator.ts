@@ -3,10 +3,10 @@ import type { Dispatch, SetStateAction } from "react";
 import { useFlowentToast } from "@/components/flowent/toast-context";
 import {
   normalizeRunInputs,
-  workflowFailureMessage,
   workflowInputNodes,
   workflowTimerNodes,
 } from "@/components/flowent/workflow-run";
+import { workflowRunFailureMessage } from "@/components/flowent/workflows/workflow-model";
 import type {
   WorkflowRunRequest,
   WorkflowRunResult,
@@ -16,6 +16,7 @@ import type {
   WorkflowScheduleStartRequest,
 } from "@/features/workflows/model/workflow-schedule-types";
 import type { Workflow } from "@/features/workflows/model/workflow-types";
+import i18n from "@/i18n/i18n";
 
 export function useWorkflowRunCoordinator({
   clearRunError,
@@ -103,7 +104,12 @@ export function useWorkflowRunCoordinator({
         return;
       }
       if (result.data.status === "failed") {
-        reportRunError(workflowFailureMessage(result.data));
+        reportRunError(
+          workflowRunFailureMessage(
+            result.data,
+            i18n.t("workflows.errors.run"),
+          ),
+        );
       } else {
         clearRunError();
       }

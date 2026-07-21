@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 import { stableScrollbarClassName } from "@/components/flowent/styles";
 import { MessageShortcutRail } from "@/components/flowent/workspace/message-shortcut-rail";
@@ -26,6 +27,7 @@ export function WorkspaceMessageList({
   onRetryError: (request: MessageErrorRetryRequest) => void;
   onRetryMessage: (messageId: string) => void;
 }) {
+  const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const initialPositionedMessageIdRef = useRef("");
   const hasPositionedInitialHistoryRef = useRef(false);
@@ -133,7 +135,7 @@ export function WorkspaceMessageList({
   return (
     <>
       <div
-        aria-label="Conversation messages"
+        aria-label={t("workspace.conversation.messages")}
         aria-live="polite"
         className={cn(
           "absolute inset-0 flex min-h-0 flex-col overflow-auto bg-black px-6 pt-12 max-[900px]:px-4",
@@ -149,7 +151,7 @@ export function WorkspaceMessageList({
         {displayMessages.length === 0 ? (
           <div className="mx-auto grid min-h-full w-full max-w-4xl place-items-center pb-24">
             <h1 className="m-0 text-center text-[28px] font-medium leading-[1.2] text-white max-[560px]:text-2xl">
-              Where should we begin?
+              {t("workspace.conversation.empty")}
             </h1>
           </div>
         ) : null}

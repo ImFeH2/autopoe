@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { contextWindowFromLimit } from "@/app/api/mappers";
 import type { ApiMessage, ApiState } from "@/app/api/types";
@@ -38,6 +39,8 @@ import type {
   MessageActionRequest,
   MessageErrorRetryRequest,
 } from "@/features/workspace/model/message-types";
+import i18n from "@/i18n/i18n";
+import { enWorkspace } from "@/i18n/locales/en/workspace";
 import { createClientId } from "@/lib/utils";
 
 type TrackedUsageInfoUpdate =
@@ -58,6 +61,7 @@ export function useWorkspaceController({
   refreshAppState,
   showError,
 }: UseWorkspaceControllerOptions) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [usageInfo, setUsageInfo] = useState<ContextUsageInfo | null>(null);
@@ -194,7 +198,9 @@ export function useWorkspaceController({
         responseEventIndexRef.current = 0;
         setIsResponding(false);
         showWorkspaceNotification(
-          error instanceof Error ? error.message : "Message could not be sent.",
+          error instanceof Error
+            ? error.message
+            : i18n.t("workspace.errors.messageCouldNotBeSent"),
         );
       } finally {
         if (responseRunRef.current === responseRun) {
@@ -273,7 +279,7 @@ export function useWorkspaceController({
       const detail =
         error instanceof Error
           ? error.message
-          : "Context could not be compacted.";
+          : i18n.t("workspace.errors.contextCouldNotBeCompacted");
       setMessages((currentMessages) =>
         messagesIncludeErrorBlockFrom(currentMessages, compactErrorStartIndex)
           ? currentMessages
@@ -286,19 +292,19 @@ export function useWorkspaceController({
   const workspaceCommands: WorkspaceCommand[] = useMemo(
     () => [
       {
-        description: "Clear the conversation",
+        description: t("workspace.commands.clearDescription"),
         id: "clear",
         label: "/clear",
         name: "clear",
       },
       {
-        description: "Compact context",
+        description: t("workspace.commands.compactDescription"),
         id: "compact",
         label: "/compact",
         name: "compact",
       },
     ],
-    [],
+    [t],
   );
 
   const clearMessages = async () => {
@@ -322,7 +328,9 @@ export function useWorkspaceController({
     } catch {
       setMessages(previousMessages);
       setTrackedUsageInfo(previousUsageInfo);
-      showWorkspaceNotification("Conversation could not be cleared.");
+      showWorkspaceNotification(
+        i18n.t("workspace.notifications.conversationCouldNotBeCleared"),
+      );
     }
   };
 
@@ -334,7 +342,7 @@ export function useWorkspaceController({
     if (commandId === "compact") {
       if (isResponding) {
         showWorkspaceNotification(
-          "Compact is unavailable while Flowent is responding.",
+          t("workspace.notifications.compactUnavailable"),
         );
         return false;
       }
@@ -436,7 +444,11 @@ export function useWorkspaceController({
       ) {
         return;
       }
-      if (error instanceof Error && error.message === "Response in progress") {
+      if (
+        error instanceof Error &&
+        (error.message === enWorkspace.errors.responseInProgress ||
+          error.message === i18n.t("workspace.errors.responseInProgress"))
+      ) {
         setMessages(baseMessages);
         if (shouldClearDraft) {
           setDraft(userContent);
@@ -475,7 +487,7 @@ export function useWorkspaceController({
           : appendWorkspaceErrorMessage(
               nextMessages,
               error,
-              "Message could not be sent.",
+              i18n.t("workspace.errors.messageCouldNotBeSent"),
             ),
       );
       setIsResponding(false);
@@ -527,7 +539,7 @@ export function useWorkspaceController({
         messageId: userMessage.id,
       });
       if (!result.is_responding) {
-        throw new Error("Message could not be sent.");
+        throw new Error(i18n.t("workspace.errors.messageCouldNotBeSent"));
       }
       startEditedResponse(result.messages);
     } catch (error) {
@@ -535,7 +547,7 @@ export function useWorkspaceController({
         appendWorkspaceErrorMessage(
           messages.slice(0, userMessageIndex + 1),
           error,
-          "Message could not be updated.",
+          i18n.t("workspace.errors.messageCouldNotBeUpdated"),
         ),
       );
       setIsResponding(false);
@@ -575,7 +587,7 @@ export function useWorkspaceController({
     try {
       const result = await retryWorkspaceError({ errorId, messageId });
       if (!result.is_responding) {
-        throw new Error("Message could not be sent.");
+        throw new Error(i18n.t("workspace.errors.messageCouldNotBeSent"));
       }
       startEditedResponse(result.messages);
     } catch (error) {
@@ -585,7 +597,7 @@ export function useWorkspaceController({
           trimmedMessage,
           errorId,
           error,
-          "Message could not be sent.",
+          i18n.t("workspace.errors.messageCouldNotBeSent"),
         ),
       );
       setIsResponding(false);
@@ -617,7 +629,7 @@ export function useWorkspaceController({
       const result = await editWorkspaceMessage({ action, content, messageId });
       if (action === "resend") {
         if (!result.is_responding) {
-          throw new Error("Message could not be sent.");
+          throw new Error(i18n.t("workspace.errors.messageCouldNotBeSent"));
         }
         startEditedResponse(result.messages);
         return;
@@ -635,7 +647,7 @@ export function useWorkspaceController({
                 },
               ],
               error,
-              "Message could not be updated.",
+              i18n.t("workspace.errors.messageCouldNotBeUpdated"),
             )
           : previousMessages,
       );
@@ -644,7 +656,10 @@ export function useWorkspaceController({
       }
       if (action !== "resend") {
         showWorkspaceNotification(
-          workspaceErrorDetail(error, "Message could not be updated."),
+          workspaceErrorDetail(
+            error,
+            i18n.t("workspace.errors.messageCouldNotBeUpdated"),
+          ),
         );
       }
     }

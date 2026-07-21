@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type {
@@ -51,11 +52,15 @@ export function WorkspaceView({
   onStopResponse: () => void;
   skills: Skill[];
 }) {
+  const { t } = useTranslation();
   const [composerOffset, setComposerOffset] = useState(112);
   const plan = useMemo(() => latestPlanFromMessages(messages), [messages]);
 
   return (
-    <section className="h-full min-h-0 bg-black" aria-label="Workspace">
+    <section
+      className="h-full min-h-0 bg-black"
+      aria-label={t("workspace.pageLabel")}
+    >
       <TooltipProvider delayDuration={500}>
         <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
           <ChatComposer

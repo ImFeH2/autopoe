@@ -9,6 +9,7 @@ import {
   PinOff,
   Trash2,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { ViewId } from "@/app/navigation/view-types";
 import {
@@ -62,15 +63,17 @@ function WorkflowNavigationMenuItems({
   onTogglePin: (workflowId: string) => void;
   workflow: Workflow;
 }) {
+  const { t } = useTranslation();
+
   return (
     <>
       <Item onSelect={() => onOpenNewTab(workflow.id)}>
         <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
-        Open new tab
+        {t("navigation.workflowHistory.openNewTab")}
       </Item>
       <Item onSelect={() => onRenameStart(workflow.id)}>
         <Pencil className="size-4 shrink-0" aria-hidden="true" />
-        Rename
+        {t("navigation.workflowHistory.rename")}
       </Item>
       <Item onSelect={() => onTogglePin(workflow.id)}>
         {isPinned ? (
@@ -78,11 +81,13 @@ function WorkflowNavigationMenuItems({
         ) : (
           <Pin className="size-4 shrink-0" aria-hidden="true" />
         )}
-        {isPinned ? "Unpin" : "Pin"}
+        {isPinned
+          ? t("navigation.workflowHistory.unpin")
+          : t("navigation.workflowHistory.pin")}
       </Item>
       <Item onSelect={() => onDelete(workflow.id)} variant="destructive">
         <Trash2 className="size-4 shrink-0" aria-hidden="true" />
-        Delete
+        {t("navigation.workflowHistory.delete")}
       </Item>
     </>
   );
@@ -115,6 +120,7 @@ function WorkflowNavigationItem({
   onTogglePin: (workflowId: string) => void;
   workflow: Workflow;
 }) {
+  const { t } = useTranslation();
   const [draftName, setDraftName] = useState(workflow.name);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
@@ -133,7 +139,9 @@ function WorkflowNavigationItem({
     return (
       <div className="h-8 px-1 py-0.5">
         <Input
-          aria-label={`Rename ${workflow.name}`}
+          aria-label={t("navigation.workflowHistory.renameInput", {
+            name: workflow.name,
+          })}
           autoFocus
           className={cn(
             fieldInputClassName,
@@ -188,14 +196,18 @@ function WorkflowNavigationItem({
           <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button
-                aria-label="Options"
+                aria-label={t("navigation.workflowHistory.optionsFor", {
+                  name: workflow.name,
+                })}
                 className={cn(
                   "absolute top-1 right-1 hidden size-6 cursor-pointer rounded-md border border-transparent bg-transparent p-0 text-white shadow-none hover:bg-white/[0.08] focus-visible:flex data-[state=open]:flex data-[state=open]:bg-white/[0.08] group-hover/workflow-menu-item:flex group-focus-within/workflow-menu-item:flex",
                   isContextMenuOpen && "flex",
                 )}
                 onClick={(event) => event.stopPropagation()}
                 size="icon"
-                title="Options"
+                title={t("navigation.workflowHistory.optionsFor", {
+                  name: workflow.name,
+                })}
                 type="button"
                 variant="ghost"
               >
@@ -254,6 +266,7 @@ export function WorkflowsNavigationSection({
   shouldReduceMotion: boolean;
   workflows: Workflow[];
 }) {
+  const { t } = useTranslation();
   const [pinnedWorkflowIds, setPinnedWorkflowIds] = useState<string[]>(() =>
     readPinnedWorkflowIds(),
   );
@@ -321,7 +334,7 @@ export function WorkflowsNavigationSection({
     >
       <CollapsibleTrigger asChild>
         <Button
-          aria-label="Workflows"
+          aria-label={t("navigation.views.workflows")}
           className={cn(
             "flowent-workflow-history-trigger h-7 w-full cursor-pointer justify-between rounded-md border border-transparent bg-transparent px-2 py-0 text-[11px] leading-4 font-medium text-white/45 shadow-none transition-colors duration-100 hover:bg-transparent hover:text-white/70 aria-expanded:bg-transparent aria-expanded:text-white/45 dark:aria-expanded:bg-transparent dark:aria-expanded:text-white/45",
             navigationLabelClassName,
@@ -334,7 +347,7 @@ export function WorkflowsNavigationSection({
           variant="ghost"
         >
           <span className="flowent-navigation-text min-w-0 truncate">
-            Workflows
+            {t("navigation.views.workflows")}
           </span>
           <ChevronRight
             aria-hidden="true"
@@ -376,7 +389,7 @@ export function WorkflowsNavigationSection({
                     !isMobileDrawer && "max-[900px]:hidden",
                   )}
                 >
-                  <span>No workflow yet.</span>
+                  <span>{t("navigation.workflowHistory.empty")}</span>
                 </div>
               ) : (
                 sortedWorkflows.map((workflow) => (

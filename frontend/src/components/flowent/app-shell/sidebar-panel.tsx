@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { ViewId } from "@/app/navigation/view-types";
 import {
@@ -32,36 +33,15 @@ type NavigationItem = {
   label: string;
 };
 
-const workspaceNavigationItem = {
+const workspaceNavigationItemDefinition = {
   icon: MessageSquare,
   id: "workspace",
-  label: "Workspace",
-} satisfies NavigationItem;
+} satisfies Omit<NavigationItem, "label">;
 
-const workflowsNavigationItem = {
+const workflowsNavigationItemDefinition = {
   icon: PlusCircle,
   id: "workflows",
-  label: "Workflows",
-} satisfies NavigationItem;
-
-const navigationGroups = [
-  {
-    label: "Tools",
-    items: [
-      { id: "skills", label: "Skills", icon: Sparkles },
-      { id: "mcp", label: "MCP", icon: Plug },
-    ],
-  },
-  {
-    label: "Setup",
-    items: [
-      { id: "providers", label: "Providers", icon: KeyRound },
-      { id: "channels", label: "Channels", icon: Radio },
-      { id: "permissions", label: "Permissions", icon: ShieldCheck },
-      { id: "settings", label: "Settings", icon: Settings },
-    ],
-  },
-] satisfies Array<{ label: string; items: NavigationItem[] }>;
+} satisfies Omit<NavigationItem, "label">;
 
 function NavigationTrigger({
   isMobileDrawer = false,
@@ -145,7 +125,55 @@ export function SidebarPanel({
   toggleSidebar: () => void;
   workflows: Workflow[];
 }) {
+  const { t } = useTranslation();
   const isCollapsed = isMobileDrawer ? false : isSidebarCollapsed;
+  const workspaceNavigationItem = {
+    ...workspaceNavigationItemDefinition,
+    label: t("navigation.views.workspace"),
+  } satisfies NavigationItem;
+  const workflowsNavigationItem = {
+    ...workflowsNavigationItemDefinition,
+    label: t("navigation.views.workflows"),
+  } satisfies NavigationItem;
+  const navigationGroups = [
+    {
+      label: t("navigation.sections.tools"),
+      items: [
+        {
+          id: "skills",
+          label: t("navigation.views.skills"),
+          icon: Sparkles,
+        },
+        { id: "mcp", label: t("navigation.views.mcp"), icon: Plug },
+      ],
+    },
+    {
+      label: t("navigation.sections.setup"),
+      items: [
+        {
+          id: "providers",
+          label: t("navigation.views.providers"),
+          icon: KeyRound,
+        },
+        {
+          id: "channels",
+          label: t("navigation.views.channels"),
+          icon: Radio,
+        },
+        {
+          id: "permissions",
+          label: t("navigation.views.permissions"),
+          icon: ShieldCheck,
+        },
+        {
+          id: "settings",
+          label: t("navigation.views.settings"),
+          icon: Settings,
+        },
+      ],
+    },
+  ] satisfies Array<{ label: string; items: NavigationItem[] }>;
+  const providerStatus = activeProviderName ?? t("navigation.noProvider");
   const closeMobileSidebar = () => {
     if (isMobileDrawer) {
       onCloseMobileSidebar?.();
@@ -198,11 +226,11 @@ export function SidebarPanel({
         </SidebarText>
         {isMobileDrawer ? (
           <Button
-            aria-label="Close sidebar"
+            aria-label={t("navigation.closeSidebar")}
             className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
             onClick={onCloseMobileSidebar}
             size="icon"
-            title="Close sidebar"
+            title={t("navigation.closeSidebar")}
             type="button"
             variant="ghost"
           >
@@ -221,11 +249,11 @@ export function SidebarPanel({
                 }
               >
                 <Button
-                  aria-label="Collapse sidebar"
+                  aria-label={t("navigation.collapseSidebar")}
                   className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
                   onClick={toggleSidebar}
                   size="icon"
-                  title="Collapse sidebar"
+                  title={t("navigation.collapseSidebar")}
                   type="button"
                   variant="ghost"
                 >
@@ -238,7 +266,11 @@ export function SidebarPanel({
       </div>
 
       <nav
-        aria-label={isMobileDrawer ? "Mobile navigation" : "Primary navigation"}
+        aria-label={
+          isMobileDrawer
+            ? t("navigation.mobileNavigation")
+            : t("navigation.primaryNavigation")
+        }
       >
         <TabsList
           className={cn(
@@ -340,11 +372,11 @@ export function SidebarPanel({
                 }
               >
                 <Button
-                  aria-label="Expand sidebar"
+                  aria-label={t("navigation.expandSidebar")}
                   className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
                   onClick={toggleSidebar}
                   size="icon"
-                  title="Expand sidebar"
+                  title={t("navigation.expandSidebar")}
                   type="button"
                   variant="ghost"
                 >
@@ -362,7 +394,7 @@ export function SidebarPanel({
               : cn("duration-300", sidebarTransitionClassName),
             isCollapsed && "flowent-sidebar-rail-status pl-[17px] pr-0",
           )}
-          title={activeProviderName ?? "No provider"}
+          title={providerStatus}
         >
           <div
             className="size-1.5 rounded-full bg-[#7ddf89]"
@@ -372,7 +404,7 @@ export function SidebarPanel({
             isVisible={!isCollapsed}
             shouldReduceMotion={shouldReduceMotion}
           >
-            <span>{activeProviderName ?? "No provider"}</span>
+            <span>{providerStatus}</span>
           </SidebarText>
         </div>
       </div>

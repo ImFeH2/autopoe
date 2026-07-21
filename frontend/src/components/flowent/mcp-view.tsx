@@ -1,4 +1,6 @@
 import { Plug, Plus, RefreshCw, Upload, Trash2 } from "lucide-react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,8 +69,13 @@ export function McpView({
   onUpdateServer: (updates: Partial<McpServer>) => void;
   servers: McpServer[];
 }) {
+  const { t } = useTranslation();
+
   return (
-    <section className="grid h-full min-h-0 bg-black" aria-label="MCP">
+    <section
+      className="grid h-full min-h-0 bg-black"
+      aria-label={t("setup.mcp.page")}
+    >
       <div className="grid h-full min-h-0 grid-cols-[232px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
         <McpSidebar
           activeServer={activeServer}
@@ -114,13 +121,15 @@ function McpSidebar({
   onServerSelect: (server: McpServer) => void;
   servers: McpServer[];
 }) {
+  const { t } = useTranslation();
+
   return (
     <aside
       className={cn(
         "flex min-h-0 min-w-0 flex-col overflow-auto border-r border-white/10 bg-black p-3 max-[900px]:max-h-64 max-[900px]:border-r-0 max-[900px]:border-b",
         stableScrollbarClassName,
       )}
-      aria-label="MCP servers"
+      aria-label={t("setup.mcp.serversAria")}
     >
       <Button
         aria-pressed={isCreatingServer}
@@ -131,7 +140,7 @@ function McpSidebar({
         variant="outline"
       >
         <Plus aria-hidden="true" />
-        New
+        {t("setup.mcp.new")}
       </Button>
       <Button
         className="mt-2 h-8 w-full border-dashed border-white/20 bg-input/30 text-base text-white shadow-none hover:bg-input/50"
@@ -141,11 +150,11 @@ function McpSidebar({
         variant="outline"
       >
         <Upload aria-hidden="true" />
-        Import
+        {t("setup.mcp.import")}
       </Button>
       <div className="mt-4 -mx-1 grid gap-0">
         {servers.length === 0 ? (
-          <p className={emptyStateClassName}>No servers</p>
+          <p className={emptyStateClassName}>{t("setup.mcp.noServers")}</p>
         ) : null}
         {servers.map((server) => {
           const isActive = !isCreatingServer && activeServer.id === server.id;
@@ -210,6 +219,8 @@ function McpDetails({
   onUpdateServer: (updates: Partial<McpServer>) => void;
   servers: McpServer[];
 }) {
+  const { t } = useTranslation();
+
   if (isImportOpen) {
     return (
       <section
@@ -217,7 +228,7 @@ function McpDetails({
           "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
           stableScrollbarClassName,
         )}
-        aria-label="MCP import"
+        aria-label={t("setup.mcp.importAria")}
       >
         <McpImportPanel
           importPreview={importPreview}
@@ -238,14 +249,16 @@ function McpDetails({
         "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
         stableScrollbarClassName,
       )}
-      aria-label="MCP server"
+      aria-label={t("setup.mcp.serverAria")}
       onSubmit={(event) => {
         event.preventDefault();
         onSaveServer();
       }}
     >
       <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Details</h3>
+        <h3 className="text-base font-semibold text-white">
+          {t("setup.mcp.details")}
+        </h3>
         <div className={dashedPanelClassName}>
           <McpFields
             activeServer={activeServer}
@@ -255,7 +268,9 @@ function McpDetails({
       </section>
 
       <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Tools</h3>
+        <h3 className="text-base font-semibold text-white">
+          {t("setup.mcp.tools")}
+        </h3>
         <McpTools server={activeServer} />
       </section>
 
@@ -275,7 +290,7 @@ function McpDetails({
               variant="outline"
             >
               <RefreshCw aria-hidden="true" />
-              Reconnect
+              {t("setup.mcp.reconnect")}
             </Button>
             <Button
               className={subtleButtonClassName}
@@ -284,11 +299,11 @@ function McpDetails({
               variant="outline"
             >
               <Trash2 aria-hidden="true" />
-              Remove
+              {t("setup.mcp.remove")}
             </Button>
           </>
         ) : null}
-        <Button type="submit">Save</Button>
+        <Button type="submit">{t("setup.mcp.save")}</Button>
       </div>
     </form>
   );
@@ -311,6 +326,7 @@ function McpImportPanel({
   onImportServer: (serverId: string) => void;
   onImportSourceChange: (source: McpImportSource) => void;
 }) {
+  const { t } = useTranslation();
   const existingServerIds = new Set(servers.map((server) => server.id));
 
   return (
@@ -347,7 +363,9 @@ function McpImportPanel({
       </section>
 
       <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Servers</h3>
+        <h3 className="text-base font-semibold text-white">
+          {t("setup.mcp.servers")}
+        </h3>
         {importPreview.length > 0 ? (
           <div className={dashedPanelClassName}>
             {importPreview.map((server) => {
@@ -367,7 +385,7 @@ function McpImportPanel({
                       </span>
                       {existingServerIds.has(server.id) ? (
                         <span className="rounded-md border border-white/10 bg-input/30 px-2 py-0.5 text-xs text-white">
-                          Existing
+                          {t("setup.mcp.existing")}
                         </span>
                       ) : null}
                     </div>
@@ -385,7 +403,7 @@ function McpImportPanel({
                     </p>
                   </div>
                   <span className={cn("text-xs", mutedTextClassName)}>
-                    {server.type === "url" ? "URL" : "Command"}
+                    {server.type === "url" ? "URL" : t("setup.mcp.command")}
                   </span>
                   <Button
                     className={subtleButtonClassName}
@@ -395,7 +413,9 @@ function McpImportPanel({
                     type="button"
                     variant="outline"
                   >
-                    {isImportingServer ? "Importing" : "Import"}
+                    {isImportingServer
+                      ? t("setup.mcp.importing")
+                      : t("setup.mcp.import")}
                   </Button>
                 </div>
               );
@@ -403,7 +423,7 @@ function McpImportPanel({
           </div>
         ) : (
           <p className={emptyStateClassName}>
-            {isPreviewing ? "Scanning" : "No servers"}
+            {isPreviewing ? t("setup.mcp.scanning") : t("setup.mcp.noServers")}
           </p>
         )}
       </section>
@@ -418,6 +438,8 @@ function McpFields({
   activeServer: McpServer;
   onUpdateServer: (updates: Partial<McpServer>) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <>
       <div className={dataRowClassName}>
@@ -425,7 +447,7 @@ function McpFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="mcp-name"
         >
-          Name
+          {t("setup.mcp.name")}
         </Label>
         <Input
           className={fieldInputClassName}
@@ -439,7 +461,7 @@ function McpFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="mcp-type"
         >
-          Type
+          {t("setup.mcp.type")}
         </Label>
         <Select
           value={activeServer.type}
@@ -450,12 +472,12 @@ function McpFields({
           <SelectTrigger
             className={fieldTriggerClassName}
             id="mcp-type"
-            aria-label="Type"
+            aria-label={t("setup.mcp.type")}
           >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="command">Command</SelectItem>
+            <SelectItem value="command">{t("setup.mcp.command")}</SelectItem>
             <SelectItem value="url">URL</SelectItem>
           </SelectContent>
         </Select>
@@ -466,7 +488,7 @@ function McpFields({
             className={cn(fieldLabelClassName, dataRowLabelClassName)}
             htmlFor="mcp-command-line"
           >
-            Command line
+            {t("setup.mcp.commandLine")}
           </Label>
           <Input
             className={fieldInputClassName}
@@ -498,7 +520,7 @@ function McpFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="mcp-enabled"
         >
-          Enabled
+          {t("setup.mcp.enabled")}
         </Label>
         <Select
           value={activeServer.enabled ? "true" : "false"}
@@ -509,13 +531,13 @@ function McpFields({
           <SelectTrigger
             className={fieldTriggerClassName}
             id="mcp-enabled"
-            aria-label="Enabled"
+            aria-label={t("setup.mcp.enabled")}
           >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="true">On</SelectItem>
-            <SelectItem value="false">Off</SelectItem>
+            <SelectItem value="true">{t("setup.mcp.on")}</SelectItem>
+            <SelectItem value="false">{t("setup.mcp.off")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -524,7 +546,7 @@ function McpFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="mcp-status"
         >
-          Status
+          {t("setup.mcp.status")}
         </Label>
         <div
           className="flex min-w-0 flex-wrap items-center gap-2"
@@ -534,7 +556,9 @@ function McpFields({
           {activeServer.status === "ready" ? (
             <span className={cn("text-xs leading-5", mutedTextClassName)}>
               {activeServer.tools.length}{" "}
-              {activeServer.tools.length === 1 ? "tool" : "tools"}
+              {activeServer.tools.length === 1
+                ? t("setup.mcp.tool")
+                : t("setup.mcp.toolsCount")}
             </span>
           ) : null}
         </div>
@@ -544,8 +568,10 @@ function McpFields({
 }
 
 function McpTools({ server }: { server: McpServer }) {
+  const { t } = useTranslation();
+
   if (server.tools.length === 0) {
-    return <p className={emptyStateClassName}>No tools</p>;
+    return <p className={emptyStateClassName}>{t("setup.mcp.noTools")}</p>;
   }
 
   return (
@@ -578,20 +604,21 @@ function McpTools({ server }: { server: McpServer }) {
   );
 }
 
-function mcpStatusLabel(status: McpServer["status"]): string {
+function mcpStatusLabel(status: McpServer["status"], t: TFunction): string {
   if (status === "ready") {
-    return "Ready";
+    return t("setup.mcp.statuses.ready");
   }
   if (status === "starting") {
-    return "Starting";
+    return t("setup.mcp.statuses.starting");
   }
   if (status === "error") {
-    return "Error";
+    return t("setup.mcp.statuses.error");
   }
-  return "Disabled";
+  return t("setup.mcp.statuses.disabled");
 }
 
 function McpStatusBadge({ status }: { status: McpServer["status"] }) {
+  const { t } = useTranslation();
   const tone = mcpStatusTone(status);
 
   return (
@@ -610,7 +637,7 @@ function McpStatusBadge({ status }: { status: McpServer["status"] }) {
         )}
         aria-hidden="true"
       />
-      <span className="leading-none">{mcpStatusLabel(status)}</span>
+      <span className="leading-none">{mcpStatusLabel(status, t)}</span>
     </span>
   );
 }

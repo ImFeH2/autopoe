@@ -10,6 +10,7 @@ import type {
   Message,
   ToolItem,
 } from "@/features/workspace/model/message-types";
+import i18n from "@/i18n/i18n";
 
 export type WorkspaceStreamEvent =
   | {
@@ -124,7 +125,7 @@ export const parseWorkspaceStreamEvent = (
     ?.slice("data: ".length);
 
   if (!event || !data) {
-    throw new Error("Message could not be sent.");
+    throw new Error(i18n.t("workspace.errors.messageCouldNotBeSent"));
   }
 
   const eventIndex = id ? Number(id) : undefined;
@@ -140,7 +141,7 @@ export const readWorkspaceStream = async (
   handlers: WorkspaceStreamHandlers,
 ) => {
   if (!response.body) {
-    throw new Error("Message could not be sent.");
+    throw new Error(i18n.t("workspace.errors.messageCouldNotBeSent"));
   }
 
   const reader = response.body.getReader();
@@ -221,5 +222,5 @@ export const readWorkspaceStream = async (
     }
   }
 
-  throw new Error("Message could not be sent.");
+  throw new Error(i18n.t("workspace.errors.messageCouldNotBeSent"));
 };

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Menu } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -34,6 +35,7 @@ export function AppShell({
   onWorkflowSelect: (workflowId: string) => void;
   workflows: Workflow[];
 }) {
+  const { t } = useTranslation();
   const {
     handleSidebarDividerClick,
     handleSidebarDividerDoubleClick,
@@ -70,11 +72,11 @@ export function AppShell({
       <Dialog open={isMobileSidebarOpen} onOpenChange={setIsMobileSidebarOpen}>
         <div className="hidden h-14 min-h-14 items-center border-b border-white/10 bg-black px-3 max-[900px]:flex">
           <Button
-            aria-label="Menu"
+            aria-label={t("navigation.menu")}
             className="flowent-sidebar-chrome-button size-10 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 shadow-none hover:bg-white/[0.08]"
             onClick={() => setIsMobileSidebarOpen(true)}
             size="icon"
-            title="Menu"
+            title={t("navigation.menu")}
             type="button"
             variant="ghost"
           >
@@ -87,7 +89,9 @@ export function AppShell({
           overlayClassName="flowent-mobile-sidebar-overlay bg-white/10 backdrop-blur-[1px] duration-300 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
           showCloseButton={false}
         >
-          <DialogTitle className="sr-only">Navigation</DialogTitle>
+          <DialogTitle className="sr-only">
+            {t("navigation.dialogTitle")}
+          </DialogTitle>
           <SidebarPanel
             activeProviderName={activeProviderName}
             activeView={activeView}
@@ -132,7 +136,7 @@ export function AppShell({
         />
         {!isSidebarNarrowLayout ? (
           <Button
-            aria-label="Toggle sidebar from boundary"
+            aria-label={t("navigation.toggleSidebarFromBoundary")}
             className={cn(
               "absolute top-0 right-[-4px] z-10 hidden h-full w-2 rounded-none border-0 bg-transparent p-0 shadow-none transition-colors hover:bg-transparent focus-visible:bg-transparent active:bg-transparent active:not-aria-[haspopup]:translate-y-0 dark:hover:bg-transparent dark:focus-visible:bg-transparent sm:block",
               isSidebarCollapsed ? "cursor-pointer" : "cursor-ew-resize",
@@ -141,7 +145,7 @@ export function AppShell({
             onDoubleClick={handleSidebarDividerDoubleClick}
             onPointerDown={handleSidebarDividerPointerDown}
             tabIndex={-1}
-            title="Toggle sidebar"
+            title={t("navigation.toggleSidebar")}
             type="button"
             variant="ghost"
           />

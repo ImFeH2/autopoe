@@ -190,6 +190,13 @@ export const workflowToFlowEdges = (workflow: Workflow): WorkflowCanvasEdge[] =>
     targetHandle: connection.to.port,
   }));
 
+export const workflowRunFailureMessage = (
+  result: WorkflowRunResult,
+  fallback: string,
+) =>
+  result.nodeResults.find((nodeResult) => nodeResult.status === "failed")?.error
+    ?.message || fallback;
+
 export const flowEdgeToWorkflowConnection = (
   edge: WorkflowCanvasEdge,
 ): WorkflowConnection => ({

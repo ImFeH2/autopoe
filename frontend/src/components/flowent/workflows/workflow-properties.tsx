@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -29,14 +31,16 @@ export function WorkflowNodeProperties({
   onNodeChange: (updates: Partial<WorkflowNode>) => void;
   onNodeDataChange: (key: string, value: number | string) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="mt-3 grid gap-3">
       <div className="text-sm font-medium text-white">
-        {node.name} Properties
+        {t("workflows.properties.nodeTitle", { name: node.name })}
       </div>
       <div className={fieldGroupClassName}>
         <Label className={fieldLabelClassName} htmlFor={`${node.id}-name`}>
-          Name
+          {t("workflows.properties.name")}
         </Label>
         <Input
           className={fieldInputClassName}
@@ -50,7 +54,7 @@ export function WorkflowNodeProperties({
           className={fieldLabelClassName}
           htmlFor={`${node.id}-description`}
         >
-          Description
+          {t("workflows.properties.description")}
         </Label>
         <Textarea
           className="min-h-20 rounded-md border-white/10 bg-input/30 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
@@ -64,7 +68,9 @@ export function WorkflowNodeProperties({
       {node.kind === "input" ? (
         <>
           <div className={fieldGroupClassName}>
-            <Label className={fieldLabelClassName}>Type</Label>
+            <Label className={fieldLabelClassName}>
+              {t("workflows.properties.type")}
+            </Label>
             <Select
               onValueChange={(value) => onNodeDataChange("input_type", value)}
               value={String(node.config.input_type ?? "text")}
@@ -73,9 +79,15 @@ export function WorkflowNodeProperties({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="text">Text</SelectItem>
-                <SelectItem value="json">JSON</SelectItem>
-                <SelectItem value="file">File</SelectItem>
+                <SelectItem value="text">
+                  {t("workflows.properties.text")}
+                </SelectItem>
+                <SelectItem value="json">
+                  {t("workflows.properties.json")}
+                </SelectItem>
+                <SelectItem value="file">
+                  {t("workflows.properties.file")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -84,7 +96,7 @@ export function WorkflowNodeProperties({
               className={fieldLabelClassName}
               htmlFor={`${node.id}-default-value`}
             >
-              Default Value
+              {t("workflows.properties.defaultValue")}
             </Label>
             <Textarea
               className="min-h-24 rounded-md border-white/10 bg-input/30 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
@@ -100,7 +112,9 @@ export function WorkflowNodeProperties({
       {node.kind === "agent" ? (
         <>
           <div className={fieldGroupClassName}>
-            <Label className={fieldLabelClassName}>Agent</Label>
+            <Label className={fieldLabelClassName}>
+              {t("workflows.properties.agent")}
+            </Label>
             <Select
               onValueChange={(value) => onNodeDataChange("agent", value)}
               value={String(node.config.agent ?? "Default agent")}
@@ -109,7 +123,9 @@ export function WorkflowNodeProperties({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Default agent">Default agent</SelectItem>
+                <SelectItem value="Default agent">
+                  {t("workflows.properties.defaultAgent")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -118,7 +134,7 @@ export function WorkflowNodeProperties({
               className={fieldLabelClassName}
               htmlFor={`${node.id}-prompt`}
             >
-              Prompt
+              {t("workflows.properties.prompt")}
             </Label>
             <Textarea
               className="min-h-32 rounded-md border-white/10 bg-input/30 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
@@ -130,14 +146,20 @@ export function WorkflowNodeProperties({
             />
           </div>
           <div className={fieldGroupClassName}>
-            <Label className={fieldLabelClassName}>Parameters</Label>
-            <p className={emptyStateClassName}>No parameters set.</p>
+            <Label className={fieldLabelClassName}>
+              {t("workflows.properties.parameters")}
+            </Label>
+            <p className={emptyStateClassName}>
+              {t("workflows.properties.noParameters")}
+            </p>
           </div>
         </>
       ) : null}
       {node.kind === "merge" ? (
         <div className={fieldGroupClassName}>
-          <Label className={fieldLabelClassName}>Merge Strategy</Label>
+          <Label className={fieldLabelClassName}>
+            {t("workflows.properties.mergeStrategy")}
+          </Label>
           <Select
             onValueChange={(value) => onNodeDataChange("merge_strategy", value)}
             value={String(node.config.merge_strategy ?? "text")}
@@ -146,8 +168,12 @@ export function WorkflowNodeProperties({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="text">Concatenate Text</SelectItem>
-              <SelectItem value="json">JSON Merge</SelectItem>
+              <SelectItem value="text">
+                {t("workflows.properties.concatenateText")}
+              </SelectItem>
+              <SelectItem value="json">
+                {t("workflows.properties.jsonMerge")}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -155,7 +181,7 @@ export function WorkflowNodeProperties({
       {node.kind === "code" ? (
         <div className={fieldGroupClassName}>
           <Label className={fieldLabelClassName} htmlFor={`${node.id}-code`}>
-            Python Code
+            {t("workflows.properties.pythonCode")}
           </Label>
           <Textarea
             className="min-h-40 rounded-md border-white/10 bg-input/30 font-mono text-sm leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
@@ -168,7 +194,9 @@ export function WorkflowNodeProperties({
       {node.kind === "timer" ? (
         <>
           <div className={fieldGroupClassName}>
-            <Label className={fieldLabelClassName}>Mode</Label>
+            <Label className={fieldLabelClassName}>
+              {t("workflows.properties.mode")}
+            </Label>
             <Select
               onValueChange={(value) => onNodeDataChange("mode", value)}
               value={String(node.config.mode ?? "interval")}
@@ -177,8 +205,12 @@ export function WorkflowNodeProperties({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="interval">Interval</SelectItem>
-                <SelectItem value="cron">Cron</SelectItem>
+                <SelectItem value="interval">
+                  {t("workflows.properties.interval")}
+                </SelectItem>
+                <SelectItem value="cron">
+                  {t("workflows.properties.cron")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -188,7 +220,7 @@ export function WorkflowNodeProperties({
                 className={fieldLabelClassName}
                 htmlFor={`${node.id}-cron`}
               >
-                Cron
+                {t("workflows.properties.cron")}
               </Label>
               <Input
                 className={fieldInputClassName}
@@ -205,7 +237,7 @@ export function WorkflowNodeProperties({
                 className={fieldLabelClassName}
                 htmlFor={`${node.id}-interval`}
               >
-                Interval Seconds
+                {t("workflows.properties.intervalSeconds")}
               </Label>
               <Input
                 className={fieldInputClassName}
@@ -227,7 +259,7 @@ export function WorkflowNodeProperties({
               className={fieldLabelClassName}
               htmlFor={`${node.id}-payload`}
             >
-              Payload
+              {t("workflows.properties.payload")}
             </Label>
             <Textarea
               className="min-h-24 rounded-md border-white/10 bg-input/30 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
@@ -247,7 +279,7 @@ export function WorkflowNodeProperties({
               className={fieldLabelClassName}
               htmlFor={`${node.id}-output-key`}
             >
-              Output Key
+              {t("workflows.properties.outputKey")}
             </Label>
             <Input
               className={fieldInputClassName}
@@ -263,7 +295,7 @@ export function WorkflowNodeProperties({
               className={fieldLabelClassName}
               htmlFor={`${node.id}-transform`}
             >
-              Transform
+              {t("workflows.properties.transform")}
             </Label>
             <Textarea
               className="min-h-24 rounded-md border-white/10 bg-input/30 text-base text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
@@ -287,12 +319,16 @@ export function WorkflowEdgeProperties({
   edge: WorkflowEdge;
   onEdgeChange: (updates: Partial<WorkflowEdge>) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="mt-3 grid gap-3">
-      <div className="text-sm font-medium text-white">Edge Properties</div>
+      <div className="text-sm font-medium text-white">
+        {t("workflows.properties.edgeTitle")}
+      </div>
       <div className={fieldGroupClassName}>
         <Label className={fieldLabelClassName} htmlFor={`${edge.id}-label`}>
-          Label
+          {t("workflows.properties.label")}
         </Label>
         <Input
           className={fieldInputClassName}

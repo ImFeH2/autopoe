@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,7 @@ import {
 } from "@/components/flowent/styles";
 import { useFlowentToast } from "@/components/flowent/toast-context";
 import type { WritablePath } from "@/features/permissions/model/permission-types";
+import i18n from "@/i18n/i18n";
 import { cn } from "@/lib/utils";
 
 export function PermissionsView({
@@ -26,6 +28,7 @@ export function PermissionsView({
   onRemoveWritablePath: (path: string) => void;
   writablePaths: WritablePath[];
 }) {
+  const { t } = useTranslation();
   const toast = useFlowentToast();
   const [directoryPath, setDirectoryPath] = useState("");
   const [addError, setAddError] = useState("");
@@ -41,7 +44,7 @@ export function PermissionsView({
         (writablePath) => writablePath.path === trimmedDirectoryPath,
       )
     ) {
-      setAddError("Path already exists");
+      setAddError(t("setup.permissions.errors.duplicate"));
       return;
     }
 
@@ -50,22 +53,24 @@ export function PermissionsView({
       setDirectoryPath("");
       setAddError("");
     } catch {
-      toast.error("Directory could not be added.");
+      toast.error(i18n.t("setup.permissions.errors.add"));
     }
   };
 
   return (
     <section
-      aria-label="Permissions"
+      aria-label={t("setup.permissions.page")}
       className={cn(
         "grid h-full min-h-0 content-start gap-7 overflow-auto bg-black px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
         stableScrollbarClassName,
       )}
     >
       <section className="grid max-w-4xl gap-3">
-        <h3 className={sectionTitleClassName}>Writable paths</h3>
+        <h3 className={sectionTitleClassName}>
+          {t("setup.permissions.writablePaths")}
+        </h3>
         <form
-          aria-label="Add directory"
+          aria-label={t("setup.permissions.addDirectory")}
           className="grid gap-1.5"
           onSubmit={(event) => {
             event.preventDefault();
@@ -73,7 +78,7 @@ export function PermissionsView({
           }}
         >
           <label className={fieldLabelClassName} htmlFor="writable-path-input">
-            Directory path
+            {t("setup.permissions.directoryPath")}
           </label>
           <div className="flex gap-2 max-[640px]:flex-col">
             <Input
@@ -84,7 +89,7 @@ export function PermissionsView({
                 setDirectoryPath(event.target.value);
                 setAddError("");
               }}
-              placeholder="Enter a directory path"
+              placeholder={t("setup.permissions.pathPlaceholder")}
               type="text"
               value={directoryPath}
             />
@@ -96,7 +101,7 @@ export function PermissionsView({
               variant="outline"
             >
               <Plus aria-hidden="true" />
-              Add
+              {t("setup.permissions.add")}
             </Button>
           </div>
           {addError ? (
@@ -106,7 +111,9 @@ export function PermissionsView({
           ) : null}
         </form>
         {writablePaths.length === 0 ? (
-          <p className={emptyStateClassName}>No paths</p>
+          <p className={emptyStateClassName}>
+            {t("setup.permissions.noPaths")}
+          </p>
         ) : (
           <div className={dashedPanelClassName}>
             {writablePaths.map((writablePath) => (
@@ -130,6 +137,8 @@ function WritablePathRow({
   onRemoveWritablePath: (path: string) => void;
   writablePath: WritablePath;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-white/10 px-3 py-3 last:border-b-0 max-[640px]:grid-cols-1">
       <div className="flex min-w-0 items-center gap-2">
@@ -142,7 +151,7 @@ function WritablePathRow({
             {writablePath.path}
           </p>
           <p className={cn("m-0 text-xs leading-[1.4]", mutedTextClassName)}>
-            Always allowed
+            {t("setup.permissions.alwaysAllowed")}
           </p>
         </div>
       </div>
@@ -154,7 +163,7 @@ function WritablePathRow({
         variant="outline"
       >
         <Trash2 aria-hidden="true" />
-        Remove
+        {t("setup.permissions.remove")}
       </Button>
     </div>
   );

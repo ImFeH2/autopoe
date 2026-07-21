@@ -6,7 +6,15 @@ import type {
   Message,
   ToolItem,
 } from "@/features/workspace/model/message-types";
+import i18n from "@/i18n/i18n";
+import { enWorkspace } from "@/i18n/locales/en/workspace";
+import { zhCNWorkspace } from "@/i18n/locales/zh-CN/workspace";
 import { createClientId } from "@/lib/utils";
+
+const knownWorkspaceErrorCopy = new Set<string>([
+  ...Object.values(enWorkspace.errors),
+  ...Object.values(zhCNWorkspace.errors),
+]);
 
 export const assistantGroupsFromMessage = (
   message: Message,
@@ -133,25 +141,25 @@ export const streamErrorFromMessage = (
 ): Extract<AssistantOutputItem, { type: "error" }> => ({
   id: `${assistantId || "assistant"}-error-1`,
   message,
-  title: "Response interrupted",
+  title: i18n.t("workspace.errors.responseInterrupted"),
   type: "error",
 });
-
-export const requestFailedMessage =
-  "Check the model connection settings and try again.";
 
 export const createWorkspaceErrorItem = (
   detail: string,
   id: string,
-): Extract<AssistantOutputItem, { type: "error" }> => ({
-  id,
-  message: requestFailedMessage,
-  title: "Request failed",
-  type: "error",
-  ...(detail && detail !== requestFailedMessage && detail !== "Request failed"
-    ? { detail }
-    : {}),
-});
+): Extract<AssistantOutputItem, { type: "error" }> => {
+  const message = i18n.t("workspace.errors.requestFailedMessage");
+  const title = i18n.t("workspace.errors.requestFailedTitle");
+
+  return {
+    id,
+    message,
+    title,
+    type: "error",
+    ...(detail && !knownWorkspaceErrorCopy.has(detail) ? { detail } : {}),
+  };
+};
 
 export const createWorkspaceErrorMessage = (
   detail: string,

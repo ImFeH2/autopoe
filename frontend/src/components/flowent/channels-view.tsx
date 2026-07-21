@@ -1,4 +1,6 @@
 import { Check, MessageCircle } from "lucide-react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +42,7 @@ export function ChannelsView({
   onUpdateTelegramBot: (updates: Partial<TelegramBot>) => void;
   telegramBot: TelegramBot;
 }) {
+  const { t } = useTranslation();
   const pendingSessions = telegramBot.sessions.filter(
     (session) => session.status === "pending",
   );
@@ -48,27 +51,32 @@ export function ChannelsView({
   );
 
   return (
-    <section className="grid h-full min-h-0 bg-black" aria-label="Channels">
+    <section
+      className="grid h-full min-h-0 bg-black"
+      aria-label={t("setup.channels.page")}
+    >
       <form
         className={cn(
           "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
           stableScrollbarClassName,
         )}
-        aria-label="Telegram Bot"
+        aria-label={t("setup.channels.telegramBot")}
         onSubmit={(event) => {
           event.preventDefault();
           onSaveTelegramBot();
         }}
       >
         <section className="grid gap-3">
-          <h3 className="text-base font-semibold text-white">Telegram Bot</h3>
+          <h3 className="text-base font-semibold text-white">
+            {t("setup.channels.telegramBot")}
+          </h3>
           <div className={dashedPanelClassName}>
             <div className={dataRowClassName}>
               <Label
                 className={cn(fieldLabelClassName, dataRowLabelClassName)}
                 htmlFor="telegram-status"
               >
-                Status
+                {t("setup.channels.status")}
               </Label>
               <div
                 className={cn(
@@ -77,7 +85,7 @@ export function ChannelsView({
                 )}
                 id="telegram-status"
               >
-                {telegramStatusLabel(telegramBot.status)}
+                {telegramStatusLabel(telegramBot.status, t)}
               </div>
             </div>
             <div className={dataRowClassName}>
@@ -85,7 +93,7 @@ export function ChannelsView({
                 className={cn(fieldLabelClassName, dataRowLabelClassName)}
                 htmlFor="telegram-enabled"
               >
-                Enabled
+                {t("setup.channels.enabled")}
               </Label>
               <Select
                 value={telegramBot.enabled ? "true" : "false"}
@@ -96,13 +104,15 @@ export function ChannelsView({
                 <SelectTrigger
                   className={fieldTriggerClassName}
                   id="telegram-enabled"
-                  aria-label="Enabled"
+                  aria-label={t("setup.channels.enabled")}
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="false">Off</SelectItem>
-                  <SelectItem value="true">On</SelectItem>
+                  <SelectItem value="false">
+                    {t("setup.channels.off")}
+                  </SelectItem>
+                  <SelectItem value="true">{t("setup.channels.on")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -111,7 +121,7 @@ export function ChannelsView({
                 className={cn(fieldLabelClassName, dataRowLabelClassName)}
                 htmlFor="telegram-bot-secret"
               >
-                Bot secret
+                {t("setup.channels.botSecret")}
               </Label>
               <Input
                 className={fieldInputClassName}
@@ -121,7 +131,7 @@ export function ChannelsView({
                 }
                 placeholder={
                   telegramBot.hasBotSecret && !telegramBot.botSecret
-                    ? "Saved"
+                    ? t("setup.channels.saved")
                     : undefined
                 }
                 type="password"
@@ -135,20 +145,20 @@ export function ChannelsView({
             </p>
           ) : null}
           <div className={cn(formActionsClassName, "mt-0")}>
-            <Button type="submit">Save</Button>
+            <Button type="submit">{t("setup.channels.save")}</Button>
           </div>
         </section>
 
         <ConversationList
-          emptyText="No requests"
+          emptyText={t("setup.channels.noRequests")}
           onApproveSession={onApproveSession}
           sessions={pendingSessions}
-          title="Pending"
+          title={t("setup.channels.pending")}
         />
         <ConversationList
-          emptyText="No conversations"
+          emptyText={t("setup.channels.noConversations")}
           sessions={approvedSessions}
-          title="Approved"
+          title={t("setup.channels.approved")}
         />
       </form>
     </section>
@@ -193,6 +203,8 @@ function ConversationRow({
   onApproveSession?: (chatId: string) => void;
   session: TelegramSession;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-white/10 px-3 py-3 last:border-b-0 max-[640px]:grid-cols-1">
       <div className="grid min-w-0 gap-1">
@@ -201,8 +213,10 @@ function ConversationRow({
           <span className="truncate">{sessionTitle(session)}</span>
         </div>
         <p className={cn("m-0 text-xs leading-[1.4]", mutedTextClassName)}>
-          Chat {session.chatId}
-          {session.userId ? ` · User ${session.userId}` : ""}
+          {t("setup.channels.chat", { id: session.chatId })}
+          {session.userId
+            ? ` · ${t("setup.channels.user", { id: session.userId })}`
+            : ""}
           {session.username ? ` · @${session.username}` : ""}
         </p>
         {session.recentMessage ? (
@@ -220,7 +234,7 @@ function ConversationRow({
           variant="outline"
         >
           <Check aria-hidden="true" />
-          Approve
+          {t("setup.channels.approve")}
         </Button>
       ) : (
         <span
@@ -229,7 +243,7 @@ function ConversationRow({
             mutedTextClassName,
           )}
         >
-          Approved
+          {t("setup.channels.approved")}
         </span>
       )}
     </div>
@@ -246,15 +260,18 @@ function sessionTitle(session: TelegramSession): string {
   return session.chatId;
 }
 
-function telegramStatusLabel(status: TelegramBot["status"]): string {
+function telegramStatusLabel(
+  status: TelegramBot["status"],
+  t: TFunction,
+): string {
   if (status === "running") {
-    return "Running";
+    return t("setup.channels.statuses.running");
   }
   if (status === "starting") {
-    return "Starting";
+    return t("setup.channels.statuses.starting");
   }
   if (status === "error") {
-    return "Error";
+    return t("setup.channels.statuses.error");
   }
-  return "Disabled";
+  return t("setup.channels.statuses.disabled");
 }

@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,8 +53,13 @@ export function ProvidersView({
   onUpdateProvider: (updates: Partial<Provider>) => void;
   providers: Provider[];
 }) {
+  const { t } = useTranslation();
+
   return (
-    <section className="grid h-full min-h-0 bg-black" aria-label="Providers">
+    <section
+      className="grid h-full min-h-0 bg-black"
+      aria-label={t("setup.providers.page")}
+    >
       <div className="grid h-full min-h-0 grid-cols-[232px_minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
         <ProviderSidebar
           activeProvider={activeProvider}
@@ -89,13 +95,15 @@ function ProviderSidebar({
   onProviderSelect: (provider: Provider) => void;
   providers: Provider[];
 }) {
+  const { t } = useTranslation();
+
   return (
     <aside
       className={cn(
         "flex min-h-0 min-w-0 flex-col overflow-auto border-r border-white/10 bg-black p-3 max-[900px]:max-h-64 max-[900px]:border-r-0 max-[900px]:border-b",
         stableScrollbarClassName,
       )}
-      aria-label="Provider list"
+      aria-label={t("setup.providers.list")}
     >
       <Button
         aria-pressed={isCreatingProvider}
@@ -106,11 +114,13 @@ function ProviderSidebar({
         variant="outline"
       >
         <Plus aria-hidden="true" />
-        New
+        {t("setup.providers.new")}
       </Button>
       <div className="mt-4 -mx-1 grid gap-0">
         {providers.length === 0 ? (
-          <p className={emptyStateClassName}>No providers</p>
+          <p className={emptyStateClassName}>
+            {t("setup.providers.noProviders")}
+          </p>
         ) : null}
         {providers.map((provider) => {
           const isActive =
@@ -159,20 +169,24 @@ function ProviderDetails({
   onSaveProvider: () => void;
   onUpdateProvider: (updates: Partial<Provider>) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <form
       className={cn(
         "grid min-h-0 w-full content-start gap-7 overflow-auto px-12 py-8 max-[900px]:px-5 max-[900px]:py-5",
         stableScrollbarClassName,
       )}
-      aria-label="Provider details"
+      aria-label={t("setup.providers.detailsAria")}
       onSubmit={(event) => {
         event.preventDefault();
         onSaveProvider();
       }}
     >
       <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Details</h3>
+        <h3 className="text-base font-semibold text-white">
+          {t("setup.providers.details")}
+        </h3>
         <div className={dashedPanelClassName}>
           <ProviderFields
             activeProvider={activeProvider}
@@ -182,7 +196,9 @@ function ProviderDetails({
       </section>
 
       <section className="grid gap-3">
-        <h3 className="text-base font-semibold text-white">Models</h3>
+        <h3 className="text-base font-semibold text-white">
+          {t("setup.providers.models")}
+        </h3>
         <ProviderModels models={activeProvider.models} />
       </section>
 
@@ -194,7 +210,9 @@ function ProviderDetails({
           type="button"
           variant="outline"
         >
-          {isFetchingModels ? "Fetching" : "Fetch"}
+          {isFetchingModels
+            ? t("setup.providers.fetching")
+            : t("setup.providers.fetch")}
         </Button>
         {!isCreatingProvider ? (
           <Button
@@ -204,10 +222,10 @@ function ProviderDetails({
             variant="outline"
           >
             <Trash2 aria-hidden="true" />
-            Remove
+            {t("setup.providers.remove")}
           </Button>
         ) : null}
-        <Button type="submit">Save</Button>
+        <Button type="submit">{t("setup.providers.save")}</Button>
       </div>
     </form>
   );
@@ -220,6 +238,8 @@ function ProviderFields({
   activeProvider: Provider;
   onUpdateProvider: (updates: Partial<Provider>) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <>
       <div className={dataRowClassName}>
@@ -227,7 +247,7 @@ function ProviderFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="provider-name"
         >
-          Provider name
+          {t("setup.providers.name")}
         </Label>
         <Input
           className={fieldInputClassName}
@@ -241,7 +261,7 @@ function ProviderFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="provider-type"
         >
-          Provider type
+          {t("setup.providers.type")}
         </Label>
         <Select
           value={activeProvider.type}
@@ -255,7 +275,7 @@ function ProviderFields({
           <SelectTrigger
             className={fieldTriggerClassName}
             id="provider-type"
-            aria-label="Provider type"
+            aria-label={t("setup.providers.type")}
           >
             <SelectValue />
           </SelectTrigger>
@@ -273,7 +293,7 @@ function ProviderFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="provider-base-url"
         >
-          Base URL
+          {t("setup.providers.baseUrl")}
         </Label>
         <Input
           className={fieldInputClassName}
@@ -289,7 +309,7 @@ function ProviderFields({
           className={cn(fieldLabelClassName, dataRowLabelClassName)}
           htmlFor="provider-access-key"
         >
-          Access key
+          {t("setup.providers.accessKey")}
         </Label>
         <Input
           className={fieldInputClassName}
@@ -297,7 +317,7 @@ function ProviderFields({
           onChange={(event) => onUpdateProvider({ apiKey: event.target.value })}
           placeholder={
             activeProvider.hasAccessKey && !activeProvider.apiKey
-              ? "Saved"
+              ? t("setup.providers.saved")
               : undefined
           }
           type="password"
@@ -309,10 +329,12 @@ function ProviderFields({
 }
 
 function ProviderModels({ models }: { models: string[] }) {
+  const { t } = useTranslation();
+
   return (
     <div className={fieldGroupClassName}>
       {models.length === 0 ? (
-        <p className={emptyStateClassName}>No models</p>
+        <p className={emptyStateClassName}>{t("setup.providers.noModels")}</p>
       ) : (
         <div className={dashedPanelClassName}>
           {models.map((model) => (

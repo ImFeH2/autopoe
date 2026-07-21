@@ -41,6 +41,7 @@ import {
   type OnNodesChange,
 } from "@xyflow/react";
 import type { GroupImperativeHandle, Layout } from "react-resizable-panels";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -85,7 +86,6 @@ import {
   type SelectedWorkflowElement,
   type WorkflowCanvasEdge,
   type WorkflowCanvasNode,
-  type WorkflowNodeTemplate,
   workflowNodeIconByType,
   workflowNodeTemplates,
   workflowEdges,
@@ -129,7 +129,15 @@ const workflowStatusClasses = {
   }
 >;
 
+const workflowNodeStatusTranslationKey = {
+  failed: "workflows.canvas.nodeStatuses.failed",
+  pending: "workflows.canvas.nodeStatuses.pending",
+  running: "workflows.canvas.nodeStatuses.running",
+  success: "workflows.canvas.nodeStatuses.success",
+} as const;
+
 function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+  const { t } = useTranslation();
   const Icon = workflowNodeIconByType[data.workflowType];
   const result = data.result;
   const status = result?.status ?? "pending";
@@ -138,6 +146,7 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const labelMeasureRef = useRef<HTMLSpanElement>(null);
   const [nodeWidth, setNodeWidth] = useState(workflowNodeMinWidth);
   const statusClasses = workflowStatusClasses[status];
+  const statusLabel = t(workflowNodeStatusTranslationKey[status]);
 
   useLayoutEffect(() => {
     const labelWidth =
@@ -236,8 +245,8 @@ function CanvasNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
 
         <div
           className="relative flex items-center pr-0.5"
-          title={status}
-          aria-label={status}
+          title={statusLabel}
+          aria-label={statusLabel}
         >
           <span className="relative flex size-2.5">
             {isRunning ? (
@@ -284,13 +293,6 @@ type WorkflowRunControlState =
   | "stopping"
   | "unavailable";
 
-const workflowAutoSaveStatusLabel = {
-  error: "Could not save",
-  idle: "",
-  saved: "Saved",
-  saving: "Saving...",
-} satisfies Record<WorkflowAutoSaveStatus, string>;
-
 const workflowAutoSaveStatusClasses = {
   error: {
     icon: "text-[#ff8a8a]",
@@ -319,13 +321,54 @@ const workflowNodeMaxWidth = 260;
 const workflowNodeMeasuredChromeWidth = 88;
 const workflowLayoutStorageKey = "flowent:workflow-layout";
 const workflowNodeTemplateGroups: Array<{
-  label: string;
+  labelKey:
+    | "workflows.canvas.nodePicker.groups.actions"
+    | "workflows.canvas.nodePicker.groups.outputs"
+    | "workflows.canvas.nodePicker.groups.triggers";
   types: WorkflowNodeKind[];
 }> = [
-  { label: "Triggers", types: ["input", "timer"] },
-  { label: "Actions", types: ["agent", "merge", "code"] },
-  { label: "Outputs", types: ["output"] },
+  {
+    labelKey: "workflows.canvas.nodePicker.groups.triggers",
+    types: ["input", "timer"],
+  },
+  {
+    labelKey: "workflows.canvas.nodePicker.groups.actions",
+    types: ["agent", "merge", "code"],
+  },
+  {
+    labelKey: "workflows.canvas.nodePicker.groups.outputs",
+    types: ["output"],
+  },
 ];
+const workflowNodeTemplateTranslationKeys = {
+  input: {
+    description: "workflows.canvas.nodePicker.nodes.input.description",
+    label: "workflows.canvas.nodePicker.nodes.input.label",
+  },
+  agent: {
+    description: "workflows.canvas.nodePicker.nodes.agent.description",
+    label: "workflows.canvas.nodePicker.nodes.agent.label",
+  },
+  merge: {
+    description: "workflows.canvas.nodePicker.nodes.merge.description",
+    label: "workflows.canvas.nodePicker.nodes.merge.label",
+  },
+  code: {
+    description: "workflows.canvas.nodePicker.nodes.code.description",
+    label: "workflows.canvas.nodePicker.nodes.code.label",
+  },
+  timer: {
+    description: "workflows.canvas.nodePicker.nodes.timer.description",
+    label: "workflows.canvas.nodePicker.nodes.timer.label",
+  },
+  output: {
+    description: "workflows.canvas.nodePicker.nodes.output.description",
+    label: "workflows.canvas.nodePicker.nodes.output.label",
+  },
+} as const satisfies Record<
+  WorkflowNodeKind,
+  { description: string; label: string }
+>;
 const workflowLayoutPanelIds = {
   canvas: "workflow-canvas",
   properties: "workflow-properties",
@@ -372,12 +415,13 @@ function WorkflowResizeHandle({
 }
 
 function CanvasControls() {
+  const { t } = useTranslation();
   const { fitView, zoomIn, zoomOut } = useReactFlow();
 
   return (
     <div className="flex gap-1 rounded-md border border-white/10 bg-black/80 p-1">
       <Button
-        aria-label="Zoom in"
+        aria-label={t("workflows.canvas.controls.zoomIn")}
         className="size-7 p-0"
         onClick={() => {
           void zoomIn();
@@ -389,7 +433,7 @@ function CanvasControls() {
         <ZoomIn className="size-4" aria-hidden="true" />
       </Button>
       <Button
-        aria-label="Zoom out"
+        aria-label={t("workflows.canvas.controls.zoomOut")}
         className="size-7 p-0"
         onClick={() => {
           void zoomOut();
@@ -401,7 +445,7 @@ function CanvasControls() {
         <ZoomOut className="size-4" aria-hidden="true" />
       </Button>
       <Button
-        aria-label="Fit view"
+        aria-label={t("workflows.canvas.controls.fitView")}
         className="size-7 p-0"
         onClick={() => {
           void fitView({ padding: 0.18 });
@@ -457,29 +501,52 @@ function WorkflowNodePickerContent({
   Item: typeof ContextMenuItem | typeof DropdownMenuItem;
   onAddNode: (type: WorkflowNodeKind) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
-  const [previewTemplate, setPreviewTemplate] =
-    useState<WorkflowNodeTemplate | null>(workflowNodeTemplates[0] ?? null);
+  const [previewType, setPreviewType] = useState<WorkflowNodeKind | null>(
+    workflowNodeTemplates[0]?.type ?? null,
+  );
   const normalizedQuery = query.trim().toLowerCase();
-  const filteredTemplates = workflowNodeTemplates.filter((template) => {
-    if (!normalizedQuery) {
-      return true;
-    }
-    return (
-      template.label.toLowerCase().includes(normalizedQuery) ||
-      template.description.toLowerCase().includes(normalizedQuery)
-    );
-  });
-  const filteredTemplateByType = new Map(
-    filteredTemplates.map((template) => [template.type, template]),
+  const localizedTemplates = useMemo(
+    () =>
+      workflowNodeTemplates.map((template) => {
+        const keys = workflowNodeTemplateTranslationKeys[template.type];
+        return {
+          ...template,
+          displayDescription: t(keys.description),
+          displayLabel: t(keys.label),
+        };
+      }),
+    [t],
+  );
+  const filteredTemplates = useMemo(
+    () =>
+      localizedTemplates.filter((template) => {
+        if (!normalizedQuery) {
+          return true;
+        }
+        return (
+          template.displayLabel.toLowerCase().includes(normalizedQuery) ||
+          template.displayDescription.toLowerCase().includes(normalizedQuery)
+        );
+      }),
+    [localizedTemplates, normalizedQuery],
+  );
+  const filteredTemplateByType = useMemo(
+    () =>
+      new Map(filteredTemplates.map((template) => [template.type, template])),
+    [filteredTemplates],
   );
   const hasMatches = filteredTemplates.length > 0;
+  const previewTemplate = previewType
+    ? (filteredTemplateByType.get(previewType) ?? null)
+    : null;
 
   useEffect(() => {
-    if (!previewTemplate || !filteredTemplateByType.has(previewTemplate.type)) {
-      setPreviewTemplate(filteredTemplates[0] ?? null);
+    if (!previewType || !filteredTemplateByType.has(previewType)) {
+      setPreviewType(filteredTemplates[0]?.type ?? null);
     }
-  }, [filteredTemplateByType, filteredTemplates, previewTemplate]);
+  }, [filteredTemplateByType, filteredTemplates, previewType]);
 
   return (
     <div className="flex w-[390px] gap-1.5">
@@ -490,32 +557,31 @@ function WorkflowNodePickerContent({
             aria-hidden="true"
           />
           <Input
-            aria-label="Search nodes"
+            aria-label={t("workflows.canvas.nodePicker.searchLabel")}
             autoComplete="off"
             className="h-8 rounded-xl border-white/10 bg-black/35 pr-2 pl-8 text-sm text-white shadow-none placeholder:text-white/35 focus-visible:border-white/20 focus-visible:ring-0"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => event.stopPropagation()}
-            placeholder="Search nodes..."
+            placeholder={t("workflows.canvas.nodePicker.searchPlaceholder")}
             value={query}
           />
         </div>
         <div className="max-h-[330px] overflow-y-auto px-1 pb-1">
           {hasMatches ? (
             workflowNodeTemplateGroups.map((group) => {
-              const groupTemplates = group.types
-                .map((type) => filteredTemplateByType.get(type))
-                .filter((template): template is WorkflowNodeTemplate =>
-                  Boolean(template),
-                );
+              const groupTemplates = group.types.flatMap((type) => {
+                const template = filteredTemplateByType.get(type);
+                return template ? [template] : [];
+              });
 
               if (groupTemplates.length === 0) {
                 return null;
               }
 
               return (
-                <div className="pt-2 first:pt-1" key={group.label}>
+                <div className="pt-2 first:pt-1" key={group.labelKey}>
                   <div className="px-2 pb-1 text-[11px] leading-4 font-medium text-white/45">
-                    {group.label}
+                    {t(group.labelKey)}
                   </div>
                   <div className="grid gap-0.5">
                     {groupTemplates.map((template) => {
@@ -524,8 +590,8 @@ function WorkflowNodePickerContent({
                         <Item
                           className="h-9 rounded-xl px-2"
                           key={template.type}
-                          onFocus={() => setPreviewTemplate(template)}
-                          onMouseEnter={() => setPreviewTemplate(template)}
+                          onFocus={() => setPreviewType(template.type)}
+                          onMouseEnter={() => setPreviewType(template.type)}
                           onSelect={() => onAddNode(template.type)}
                         >
                           <Icon
@@ -533,7 +599,7 @@ function WorkflowNodePickerContent({
                             aria-hidden="true"
                           />
                           <span className="min-w-0 truncate">
-                            {template.label}
+                            {template.displayLabel}
                           </span>
                         </Item>
                       );
@@ -544,7 +610,7 @@ function WorkflowNodePickerContent({
             })
           ) : (
             <div className="px-2 py-6 text-center text-sm text-white/45">
-              No nodes found.
+              {t("workflows.canvas.nodePicker.noResults")}
             </div>
           )}
         </div>
@@ -563,16 +629,16 @@ function WorkflowNodePickerContent({
                 );
               })()}
               <div className="min-w-0 truncate text-sm leading-5 font-medium text-white">
-                {previewTemplate.label}
+                {previewTemplate.displayLabel}
               </div>
             </div>
             <p className="mt-2 text-xs leading-4 text-white/55">
-              {previewTemplate.description}
+              {previewTemplate.displayDescription}
             </p>
           </div>
         ) : (
           <div className="rounded-xl border border-white/10 bg-black/35 p-3 text-xs leading-4 text-white/45">
-            Hover a node to preview it.
+            {t("workflows.canvas.nodePicker.previewHint")}
           </div>
         )}
       </div>
@@ -585,6 +651,7 @@ function WorkflowCanvasContextAddMenu({
 }: {
   onAddNode: (type: WorkflowNodeKind) => void;
 }) {
+  const { t } = useTranslation();
   const [isNodePickerOpen, setIsNodePickerOpen] = useState(false);
 
   return (
@@ -597,7 +664,9 @@ function WorkflowCanvasContextAddMenu({
         }}
       >
         <Plus className="size-4 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1">Add Node</span>
+        <span className="min-w-0 flex-1">
+          {t("workflows.canvas.nodePicker.addNode")}
+        </span>
         <ChevronRight className="size-4 shrink-0 text-white/45" />
       </ContextMenuSubTrigger>
       <ContextMenuSubContent>
@@ -617,6 +686,7 @@ function WorkflowAutoSaveStatusPill({
   error: string;
   status: WorkflowAutoSaveStatus;
 }) {
+  const { t } = useTranslation();
   const [renderedStatus, setRenderedStatus] =
     useState<WorkflowAutoSaveStatus | null>(status === "idle" ? null : status);
   const [isVisible, setIsVisible] = useState(status !== "idle");
@@ -690,7 +760,13 @@ function WorkflowAutoSaveStatusPill({
   const label =
     renderedStatus === "error" && error
       ? error
-      : workflowAutoSaveStatusLabel[renderedStatus];
+      : renderedStatus === "error"
+        ? t("workflows.canvas.autoSave.error")
+        : renderedStatus === "saved"
+          ? t("workflows.canvas.autoSave.saved")
+          : renderedStatus === "saving"
+            ? t("workflows.canvas.autoSave.saving")
+            : "";
 
   return (
     <div
@@ -747,7 +823,11 @@ function snapWorkflowNodes(nodes: WorkflowCanvasNode[]) {
   }));
 }
 
-function formatScheduleTime(timestamp: number, timezone: string) {
+function formatScheduleTime(
+  timestamp: number,
+  timezone: string,
+  locale: string,
+) {
   const fallbackTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const displayTimezone = timezone || fallbackTimezone;
   const options: Intl.DateTimeFormatOptions = {
@@ -756,14 +836,14 @@ function formatScheduleTime(timestamp: number, timezone: string) {
     ...(displayTimezone ? { timeZone: displayTimezone } : {}),
   };
   try {
-    const formattedTime = new Intl.DateTimeFormat(undefined, options).format(
+    const formattedTime = new Intl.DateTimeFormat(locale, options).format(
       new Date(timestamp * 1000),
     );
     return displayTimezone
       ? `${formattedTime} (${displayTimezone})`
       : formattedTime;
   } catch {
-    const formattedTime = new Intl.DateTimeFormat(undefined, {
+    const formattedTime = new Intl.DateTimeFormat(locale, {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(timestamp * 1000));
@@ -802,6 +882,7 @@ export function WorkflowCanvas({
   scheduleStatus: WorkflowScheduleStatus | null;
   scheduleTimezone: string;
 }) {
+  const { i18n, t } = useTranslation();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const workflowLayoutGroupRef = useRef<GroupImperativeHandle | null>(null);
   const { screenToFlowPosition } = useReactFlow();
@@ -1198,7 +1279,7 @@ export function WorkflowCanvas({
     >
       {nodes.length === 0 ? (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-sm text-[#9b9b9b]">
-          Right-click the canvas or use Add to create your first node.
+          {t("workflows.canvas.empty")}
         </div>
       ) : null}
       {isRunning ||
@@ -1221,19 +1302,25 @@ export function WorkflowCanvas({
             )}
             <span>
               {isRunning
-                ? "Workflow running..."
+                ? t("workflows.canvas.schedule.workflowRunning")
                 : scheduleStatus === "running"
-                  ? "Running now"
+                  ? t("workflows.canvas.schedule.runningNow")
                   : scheduleStatus === "scheduled"
-                    ? "Running"
+                    ? t("workflows.canvas.schedule.running")
                     : scheduleStatus === "error"
-                      ? "Needs attention"
-                      : "Unavailable"}
+                      ? t("workflows.canvas.schedule.needsAttention")
+                      : t("workflows.canvas.schedule.unavailable")}
             </span>
           </div>
           {scheduleNextRunAt ? (
             <div className="text-[#9b9b9b]">
-              Next run {formatScheduleTime(scheduleNextRunAt, scheduleTimezone)}
+              {t("workflows.canvas.schedule.nextRun", {
+                time: formatScheduleTime(
+                  scheduleNextRunAt,
+                  scheduleTimezone,
+                  i18n.resolvedLanguage ?? i18n.language,
+                ),
+              })}
             </div>
           ) : null}
           {scheduleError ? (
@@ -1252,7 +1339,7 @@ export function WorkflowCanvas({
               variant="outline"
             >
               <Plus className="size-4" aria-hidden="true" />
-              Add Node
+              {t("workflows.canvas.nodePicker.addNode")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="p-1">
@@ -1329,10 +1416,12 @@ export function WorkflowCanvas({
   const renderPropertiesPanel = () => (
     <aside className="h-full min-h-0 overflow-y-auto bg-black p-3 max-[860px]:h-auto max-[860px]:border-t max-[860px]:border-white/10">
       <div className="flex items-center justify-between gap-2">
-        <h3 className={sectionTitleClassName}>Properties</h3>
+        <h3 className={sectionTitleClassName}>
+          {t("workflows.canvas.properties")}
+        </h3>
         {selectedElement ? (
           <Button
-            aria-label="Remove selection"
+            aria-label={t("workflows.canvas.removeSelection")}
             className="size-7 p-0 text-[#ff8a8a]"
             onClick={removeSelected}
             size="icon"
@@ -1346,7 +1435,7 @@ export function WorkflowCanvas({
 
       {!selectedNode && !selectedEdge ? (
         <p className={cn(emptyStateClassName, "mt-3")}>
-          Select a node or edge to view its properties.
+          {t("workflows.canvas.noSelection")}
         </p>
       ) : null}
 
@@ -1388,7 +1477,7 @@ export function WorkflowCanvas({
         {renderCanvasPanel()}
       </ResizablePanel>
       <WorkflowResizeHandle
-        ariaLabel="Resize workflow properties"
+        ariaLabel={t("workflows.canvas.resizeProperties")}
         onReset={resetWorkflowLayout}
       />
       <ResizablePanel

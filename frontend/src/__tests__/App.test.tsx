@@ -1278,7 +1278,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(
-      await screen.findByRole("button", { name: /Launch Workflow/ }),
+      await screen.findByRole("button", { name: /^Launch Workflow$/ }),
     );
 
     const propertiesHandle = await screen.findByRole("separator", {
@@ -1356,7 +1356,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(
-      await screen.findByRole("button", { name: /Launch Workflow/ }),
+      await screen.findByRole("button", { name: /^Launch Workflow$/ }),
     );
     const inputNodeLabel = screen
       .getAllByText("Input")
@@ -1499,7 +1499,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(
-      await screen.findByRole("button", { name: /Launch Workflow/ }),
+      await screen.findByRole("button", { name: /^Launch Workflow$/ }),
     );
     await user.click(screen.getByRole("button", { name: "Run" }));
 
@@ -1546,7 +1546,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(
-      await screen.findByRole("button", { name: /Launch Workflow/ }),
+      await screen.findByRole("button", { name: /^Launch Workflow$/ }),
     );
     await user.click(screen.getByRole("button", { name: "Run" }));
     expect(await screen.findByText("Workflow Input")).toBeInTheDocument();

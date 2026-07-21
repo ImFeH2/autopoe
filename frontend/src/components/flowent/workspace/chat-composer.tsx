@@ -1,5 +1,6 @@
 import { useMemo, useRef } from "react";
 import { ArrowUp, Square } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,6 +61,7 @@ export function ChatComposer({
   onStopResponse: () => void;
   skills: Skill[];
 }) {
+  const { t } = useTranslation();
   const composerRef = useComposerOffset(onOffsetChange);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const {
@@ -166,7 +168,7 @@ export function ChatComposer({
 
     if (isCommandDraft && commandName.length > 0) {
       setCommandMenuDismissed(false);
-      onCommandError("Command not found.");
+      onCommandError(t("workspace.commands.notFound"));
       return;
     }
 
@@ -207,7 +209,7 @@ export function ChatComposer({
           />
         ) : null}
         <form
-          aria-label="Workspace composer"
+          aria-label={t("workspace.composer.label")}
           className="flex flex-col-reverse overflow-clip rounded-[14px] border border-zinc-800 bg-zinc-950 shadow-[0_16px_44px_rgba(0,0,0,0.42),inset_0_0_1px_rgba(255,255,255,0.2)] transition-colors focus-within:border-zinc-700"
           onSubmit={(event) => {
             event.preventDefault();
@@ -220,7 +222,7 @@ export function ChatComposer({
           />
           <div className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 bg-[#212121] p-2.5">
             <Textarea
-              aria-label="Message Flowent"
+              aria-label={t("workspace.composer.message")}
               className="flowent-composer-textarea max-h-[216px] min-h-9 resize-none overflow-y-auto border-0 bg-transparent px-2 py-1.5 text-white shadow-none placeholder:text-[#9b9b9b] focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
               enterKeyHint="send"
               rows={1}
@@ -311,10 +313,14 @@ export function ChatComposer({
                 event.preventDefault();
                 handleSubmit();
               }}
-              placeholder="Message Flowent"
+              placeholder={t("workspace.composer.message")}
             />
             <Button
-              aria-label={showStopButton ? "Stop" : "Send message"}
+              aria-label={
+                showStopButton
+                  ? t("workspace.composer.stop")
+                  : t("workspace.composer.send")
+              }
               className={cn(
                 "size-9 rounded-full shadow-none disabled:bg-transparent disabled:text-white/35 disabled:opacity-100 [&_svg]:size-5",
                 showStopButton

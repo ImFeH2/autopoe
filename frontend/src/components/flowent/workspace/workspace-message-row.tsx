@@ -9,6 +9,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import {
   AssistantOutputTimeline,
@@ -148,6 +149,7 @@ function MessageInlineEditor({
   onSave: (content: string) => void;
   onSaveAndRetry: (content: string) => void;
 }) {
+  const { t } = useTranslation();
   const [content, setContent] = useState(initialContent);
   const isSaveUnavailable = content.length === 0;
   const isResendUnavailable = isSaveUnavailable || isResponding;
@@ -155,7 +157,7 @@ function MessageInlineEditor({
   return (
     <div className="w-full min-w-[min(420px,70vw)] max-w-[min(720px,70vw)] rounded-[22px] border border-white/10 bg-input/30 p-2.5 shadow-[inset_0_0_1px_rgba(255,255,255,0.12)]">
       <Textarea
-        aria-label="Edit message"
+        aria-label={t("workspace.messageActions.editMessage")}
         autoFocus
         className="max-h-[240px] min-h-28 resize-none border-white/10 bg-black/30 px-3 py-2 text-base leading-6 text-white shadow-none focus-visible:border-white/20 focus-visible:ring-1 focus-visible:ring-white/20 dark:bg-black/30"
         value={content}
@@ -178,19 +180,22 @@ function MessageInlineEditor({
         }}
       />
       <div className="mt-2 flex items-center justify-end gap-1">
-        <MessageIconButton label="Cancel" onClick={onCancel}>
+        <MessageIconButton
+          label={t("workspace.messageActions.cancel")}
+          onClick={onCancel}
+        >
           <X aria-hidden="true" className="size-4" />
         </MessageIconButton>
         <MessageIconButton
           disabled={isSaveUnavailable}
-          label="Save"
+          label={t("workspace.messageActions.save")}
           onClick={() => onSave(content)}
         >
           <Save aria-hidden="true" className="size-4" />
         </MessageIconButton>
         <MessageIconButton
           disabled={isResendUnavailable}
-          label="Save and retry"
+          label={t("workspace.messageActions.saveAndRetry")}
           onClick={() => onSaveAndRetry(content)}
         >
           <SendHorizontal aria-hidden="true" className="size-4" />
@@ -215,6 +220,7 @@ function MessageActionBar({
   onEdit: () => void;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   const [copyState, setCopyState] = useState<"copied" | "failed" | "idle">(
     "idle",
   );
@@ -249,10 +255,10 @@ function MessageActionBar({
 
   const copyLabel =
     copyState === "copied"
-      ? "Copied"
+      ? t("workspace.messageActions.copied")
       : copyState === "failed"
-        ? "Copy failed"
-        : "Copy";
+        ? t("workspace.messageActions.copyFailed")
+        : t("workspace.messageActions.copy");
 
   return (
     <div
@@ -271,13 +277,17 @@ function MessageActionBar({
         )}
       </MessageIconButton>
       {canEdit ? (
-        <MessageIconButton disabled={disableEdit} label="Edit" onClick={onEdit}>
+        <MessageIconButton
+          disabled={disableEdit}
+          label={t("workspace.messageActions.edit")}
+          onClick={onEdit}
+        >
           <Pencil aria-hidden="true" className="size-4" />
         </MessageIconButton>
       ) : null}
       <MessageIconButton
         disabled={disableRetry}
-        label="Retry"
+        label={t("workspace.messageActions.retry")}
         onClick={onRetry}
       >
         <RotateCcw aria-hidden="true" className="size-4" />

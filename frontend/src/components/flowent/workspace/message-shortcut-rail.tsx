@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import type { Message } from "@/features/workspace/model/message-types";
@@ -17,6 +18,7 @@ export function MessageShortcutRail({
   messageListRef: { current: HTMLDivElement | null };
   messages: Message[];
 }) {
+  const { t } = useTranslation();
   const [hoveredMessageId, setHoveredMessageId] = useState("");
   const [isRailActive, setIsRailActive] = useState(false);
   const [isRailFocused, setIsRailFocused] = useState(false);
@@ -107,7 +109,7 @@ export function MessageShortcutRail({
 
   return (
     <nav
-      aria-label="Conversation shortcuts"
+      aria-label={t("workspace.conversation.shortcuts")}
       className="group/shortcut-rail pointer-events-none fixed right-5 top-1/2 z-20 hidden -translate-y-1/2 items-center justify-end max-[1180px]:hidden min-[1181px]:flex"
       onBlurCapture={(event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -140,13 +142,22 @@ export function MessageShortcutRail({
       >
         {messages.map((message) => {
           const isHovered = hoveredMessageId === message.id;
-          const summary = messageShortcutSummary(message.content);
-          const actor = message.author === "user" ? "You" : "Flowent";
+          const summary = messageShortcutSummary(
+            message.content,
+            t("workspace.conversation.message"),
+          );
+          const actor =
+            message.author === "user"
+              ? t("workspace.conversation.you")
+              : t("workspace.conversation.flowent");
           const showSummary = isRailActive || isRailFocused || isHovered;
 
           return (
             <Button
-              aria-label={`Jump to ${actor}: ${summary}`}
+              aria-label={t("workspace.conversation.jumpTo", {
+                actor,
+                summary,
+              })}
               className="group/shortcut h-auto max-w-[260px] cursor-pointer justify-end gap-2 rounded-full border-0 bg-transparent px-0 py-0 text-right text-xs text-white shadow-none transition-all duration-200 hover:bg-transparent hover:text-white focus-visible:ring-2 focus-visible:ring-white/20"
               key={message.id}
               onClick={() => scrollToMessage(message.id)}
@@ -186,7 +197,7 @@ export function MessageShortcutRail({
   );
 }
 
-function messageShortcutSummary(content: string) {
+function messageShortcutSummary(content: string, fallback: string) {
   const summary = content
     .split("\n")
     .map((line) => line.trim())
@@ -194,7 +205,7 @@ function messageShortcutSummary(content: string) {
     ?.replace(/\s+/g, " ");
 
   if (!summary) {
-    return "Message";
+    return fallback;
   }
   if (summary.length <= 64) {
     return summary;

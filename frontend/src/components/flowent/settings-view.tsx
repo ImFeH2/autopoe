@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,15 +29,35 @@ import type {
   ReasoningEffort,
   RuntimeSettings,
 } from "@/features/settings/model/runtime-settings-types";
+import { changeAppLanguage, currentAppLanguage } from "@/i18n/i18n";
+import { isAppLanguage } from "@/i18n/languages";
 import { cn } from "@/lib/utils";
 
-const reasoningOptions: Array<{ label: string; value: ReasoningEffort }> = [
-  { label: "Default", value: "default" },
-  { label: "Low", value: "low" },
-  { label: "Medium", value: "medium" },
-  { label: "High", value: "high" },
-  { label: "XHigh", value: "xhigh" },
-];
+const reasoningOptions = [
+  {
+    labelKey: "settings.modelRouting.reasoningOptions.default",
+    value: "default",
+  },
+  {
+    labelKey: "settings.modelRouting.reasoningOptions.low",
+    value: "low",
+  },
+  {
+    labelKey: "settings.modelRouting.reasoningOptions.medium",
+    value: "medium",
+  },
+  {
+    labelKey: "settings.modelRouting.reasoningOptions.high",
+    value: "high",
+  },
+  {
+    labelKey: "settings.modelRouting.reasoningOptions.xhigh",
+    value: "xhigh",
+  },
+] as const satisfies ReadonlyArray<{
+  labelKey: string;
+  value: ReasoningEffort;
+}>;
 
 type ContextLimitMode = "auto" | "manual";
 
@@ -67,6 +88,7 @@ export function SettingsView({
   selectedModel: string;
   selectedProviderId: string;
 }) {
+  const { t } = useTranslation();
   const [agentPromptDraft, setAgentPromptDraft] = useState(agentPrompt);
   const [contextLimitMode, setContextLimitMode] = useState<ContextLimitMode>(
     contextWindowLimit === null ? "auto" : "manual",
@@ -91,6 +113,13 @@ export function SettingsView({
   const isManualContextLimitValid =
     contextLimitMode === "auto" ||
     (/^\d+$/.test(trimmedContextLimitDraft) && manualContextLimit > 0);
+  const activeLanguage = currentAppLanguage();
+
+  const selectLanguage = (language: string) => {
+    if (isAppLanguage(language)) {
+      void changeAppLanguage(language);
+    }
+  };
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -113,76 +142,117 @@ export function SettingsView({
         "flex h-full min-h-0 flex-col overflow-auto bg-black",
         stableScrollbarClassName,
       )}
-      aria-label="Settings"
+      aria-label={t("settings.pageLabel")}
     >
-      <form
-        className="m-8 grid gap-5 bg-black max-[900px]:m-5"
-        aria-label="Runtime settings"
-        onSubmit={saveSettings}
-      >
+      <div className="m-8 grid gap-5 bg-black max-[900px]:m-5">
         <section className="grid gap-3">
-          <h3 className="text-base font-semibold text-white">Model routing</h3>
+          <h3 className="text-base font-semibold text-white">
+            {t("settings.language.title")}
+          </h3>
           <div className={dashedPanelClassName}>
-            <div className="grid gap-0">
-              {providers.length === 0 ? (
-                <div className="p-3">
-                  <p className={emptyStateClassName}>No providers</p>
-                </div>
-              ) : null}
-              <RuntimeProviderSelect
-                onProviderChange={onProviderChange}
-                providers={providers}
-                selectedProviderId={selectedProviderId}
-              />
-              <RuntimeModelSelect
-                modelOptions={modelOptions}
-                onModelChange={onModelChange}
-                selectedModel={selectedModel}
-                selectedProviderId={selectedProviderId}
-              />
-              <RuntimeReasoningSelect
-                onReasoningEffortChange={onReasoningEffortChange}
-                reasoningEffort={reasoningEffort}
-              />
-              <RuntimeContextLimitField
-                contextLimitDraft={contextLimitDraft}
-                contextLimitMode={contextLimitMode}
-                isValid={isManualContextLimitValid}
-                onContextLimitDraftChange={setContextLimitDraft}
-                onContextLimitModeChange={setContextLimitMode}
-              />
+            <div className={dataRowClassName}>
+              <Label
+                className={cn(fieldLabelClassName, dataRowLabelClassName)}
+                htmlFor="app-language"
+              >
+                {t("settings.language.label")}
+              </Label>
+              <Select value={activeLanguage} onValueChange={selectLanguage}>
+                <SelectTrigger
+                  aria-label={t("settings.language.label")}
+                  className={fieldTriggerClassName}
+                  id="app-language"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">
+                    {t("settings.language.english")}
+                  </SelectItem>
+                  <SelectItem value="zh-CN">
+                    {t("settings.language.simplifiedChinese")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </section>
 
-        <section className="grid gap-3">
-          <div className="grid gap-1">
-            <h3 className="text-base font-semibold text-white">Agent prompt</h3>
-          </div>
-          <div className={cn(dashedPanelClassName, "p-3")}>
-            <Label className="sr-only" htmlFor="agent-prompt">
-              Agent prompt
-            </Label>
-            <Textarea
-              className="min-h-48 resize-y rounded-md border-white/10 bg-input/30 px-3 py-2 text-base leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
-              id="agent-prompt"
-              value={agentPromptDraft}
-              onChange={(event) => setAgentPromptDraft(event.target.value)}
-              placeholder="Add Flowent-specific instructions for the agent."
-              aria-label="Agent prompt"
-            />
-          </div>
-        </section>
+        <form
+          className="grid gap-5"
+          aria-label={t("settings.runtimeFormLabel")}
+          onSubmit={saveSettings}
+        >
+          <section className="grid gap-3">
+            <h3 className="text-base font-semibold text-white">
+              {t("settings.modelRouting.title")}
+            </h3>
+            <div className={dashedPanelClassName}>
+              <div className="grid gap-0">
+                {providers.length === 0 ? (
+                  <div className="p-3">
+                    <p className={emptyStateClassName}>
+                      {t("settings.modelRouting.noProviders")}
+                    </p>
+                  </div>
+                ) : null}
+                <RuntimeProviderSelect
+                  onProviderChange={onProviderChange}
+                  providers={providers}
+                  selectedProviderId={selectedProviderId}
+                />
+                <RuntimeModelSelect
+                  modelOptions={modelOptions}
+                  onModelChange={onModelChange}
+                  selectedModel={selectedModel}
+                  selectedProviderId={selectedProviderId}
+                />
+                <RuntimeReasoningSelect
+                  onReasoningEffortChange={onReasoningEffortChange}
+                  reasoningEffort={reasoningEffort}
+                />
+                <RuntimeContextLimitField
+                  contextLimitDraft={contextLimitDraft}
+                  contextLimitMode={contextLimitMode}
+                  isValid={isManualContextLimitValid}
+                  onContextLimitDraftChange={setContextLimitDraft}
+                  onContextLimitModeChange={setContextLimitMode}
+                />
+              </div>
+            </div>
+          </section>
 
-        <div className={cn(formActionsClassName, "mt-0")}>
-          <Button type="submit" disabled={!isManualContextLimitValid}>
-            Save
-          </Button>
-        </div>
-      </form>
+          <section className="grid gap-3">
+            <div className="grid gap-1">
+              <h3 className="text-base font-semibold text-white">
+                {t("settings.agentPrompt.title")}
+              </h3>
+            </div>
+            <div className={cn(dashedPanelClassName, "p-3")}>
+              <Label className="sr-only" htmlFor="agent-prompt">
+                {t("settings.agentPrompt.title")}
+              </Label>
+              <Textarea
+                className="min-h-48 resize-y rounded-md border-white/10 bg-input/30 px-3 py-2 text-base leading-5 text-white shadow-none placeholder:text-[#777] focus-visible:border-[#7a7a7a] focus-visible:ring-2 focus-visible:ring-ring/25"
+                id="agent-prompt"
+                value={agentPromptDraft}
+                onChange={(event) => setAgentPromptDraft(event.target.value)}
+                placeholder={t("settings.agentPrompt.placeholder")}
+                aria-label={t("settings.agentPrompt.title")}
+              />
+            </div>
+          </section>
+
+          <div className={cn(formActionsClassName, "mt-0")}>
+            <Button type="submit" disabled={!isManualContextLimitValid}>
+              {t("settings.save")}
+            </Button>
+          </div>
+        </form>
+      </div>
       {appVersion ? (
         <p className="mx-8 mt-auto pb-6 text-center text-xs leading-5 text-white/30 max-[900px]:mx-5">
-          Flowent v{appVersion}
+          {t("settings.version", { version: appVersion })}
         </p>
       ) : null}
     </section>
@@ -202,6 +272,7 @@ function RuntimeContextLimitField({
   onContextLimitDraftChange: (value: string) => void;
   onContextLimitModeChange: (value: ContextLimitMode) => void;
 }) {
+  const { t } = useTranslation();
   const errorId = "context-limit-error";
   const showError = contextLimitMode === "manual" && !isValid;
 
@@ -211,7 +282,7 @@ function RuntimeContextLimitField({
         className={cn(fieldLabelClassName, dataRowLabelClassName)}
         htmlFor="context-limit-mode"
       >
-        Context window
+        {t("settings.modelRouting.contextWindow")}
       </Label>
       <div className="grid gap-1.5">
         <div className="flex min-w-0 gap-2 max-[640px]:flex-col">
@@ -224,23 +295,27 @@ function RuntimeContextLimitField({
             <SelectTrigger
               className={cn(fieldTriggerClassName, "w-36 max-[640px]:w-full")}
               id="context-limit-mode"
-              aria-label="Context window"
+              aria-label={t("settings.modelRouting.contextWindow")}
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">Auto</SelectItem>
-              <SelectItem value="manual">Manual</SelectItem>
+              <SelectItem value="auto">
+                {t("settings.modelRouting.contextLimitModes.auto")}
+              </SelectItem>
+              <SelectItem value="manual">
+                {t("settings.modelRouting.contextLimitModes.manual")}
+              </SelectItem>
             </SelectContent>
           </Select>
           {contextLimitMode === "manual" ? (
             <Input
               aria-describedby={showError ? errorId : undefined}
               aria-invalid={showError}
-              aria-label="Context size"
+              aria-label={t("settings.modelRouting.contextSize")}
               className={fieldInputClassName}
               inputMode="numeric"
-              placeholder="e.g. 128000"
+              placeholder={t("settings.modelRouting.contextSizePlaceholder")}
               value={contextLimitDraft}
               onChange={(event) =>
                 onContextLimitDraftChange(event.target.value)
@@ -250,7 +325,7 @@ function RuntimeContextLimitField({
         </div>
         {showError ? (
           <p className="m-0 text-xs leading-4 text-red-400" id={errorId}>
-            Enter a positive integer
+            {t("settings.modelRouting.contextSizeError")}
           </p>
         ) : null}
       </div>
@@ -267,27 +342,29 @@ function RuntimeProviderSelect({
   providers: Provider[];
   selectedProviderId: string;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className={dataRowClassName}>
       <Label
         className={cn(fieldLabelClassName, dataRowLabelClassName)}
         htmlFor="active-provider"
       >
-        Provider
+        {t("settings.modelRouting.provider")}
       </Label>
       <Select value={selectedProviderId} onValueChange={onProviderChange}>
         <SelectTrigger
           className={fieldTriggerClassName}
           disabled={providers.length === 0}
           id="active-provider"
-          aria-label="Provider"
+          aria-label={t("settings.modelRouting.provider")}
         >
-          <SelectValue placeholder="No providers" />
+          <SelectValue placeholder={t("settings.modelRouting.noProviders")} />
         </SelectTrigger>
         <SelectContent>
           {providers.length === 0 ? (
             <SelectItem value="none" disabled>
-              No providers
+              {t("settings.modelRouting.noProviders")}
             </SelectItem>
           ) : null}
           {providers.map((provider) => (
@@ -308,26 +385,28 @@ function RuntimeReasoningSelect({
   onReasoningEffortChange: (value: ReasoningEffort) => void;
   reasoningEffort: ReasoningEffort;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className={dataRowClassName}>
       <Label
         className={cn(fieldLabelClassName, dataRowLabelClassName)}
         htmlFor="reasoning-effort"
       >
-        Reasoning
+        {t("settings.modelRouting.reasoning")}
       </Label>
       <Select value={reasoningEffort} onValueChange={onReasoningEffortChange}>
         <SelectTrigger
           className={fieldTriggerClassName}
           id="reasoning-effort"
-          aria-label="Reasoning"
+          aria-label={t("settings.modelRouting.reasoning")}
         >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {reasoningOptions.map((option) => (
             <SelectItem key={option.value} value={option.value}>
-              {option.label}
+              {t(option.labelKey)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -347,13 +426,15 @@ function RuntimeModelSelect({
   selectedModel: string;
   selectedProviderId: string;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className={dataRowClassName}>
       <Label
         className={cn(fieldLabelClassName, dataRowLabelClassName)}
         htmlFor="active-model"
       >
-        Model
+        {t("settings.modelRouting.model")}
       </Label>
       <Select
         key={`settings-model-${selectedProviderId}`}
@@ -364,9 +445,9 @@ function RuntimeModelSelect({
           className={fieldTriggerClassName}
           disabled={modelOptions.length === 0}
           id="active-model"
-          aria-label="Model"
+          aria-label={t("settings.modelRouting.model")}
         >
-          <SelectValue placeholder="No models" />
+          <SelectValue placeholder={t("settings.modelRouting.noModels")} />
         </SelectTrigger>
         <SelectContent>
           {modelOptions.map((model) => (

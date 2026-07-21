@@ -18,6 +18,7 @@ import type {
   WorkflowScheduleStartRequest,
 } from "@/features/workflows/model/workflow-schedule-types";
 import type { Workflow } from "@/features/workflows/model/workflow-types";
+import i18n from "@/i18n/i18n";
 import type { RequestResult } from "@/shared/api/request-result";
 
 const SCHEDULE_POLL_INTERVAL_MS = 2_000;
@@ -46,7 +47,10 @@ const loadWorkflowSchedule = async (
   try {
     return await fetchWorkflowScheduleRequest(workflowId);
   } catch {
-    return { data: null, error: "Run status could not be loaded." };
+    return {
+      data: null,
+      error: i18n.t("workflows.errors.loadRunStatus"),
+    };
   }
 };
 
@@ -129,7 +133,10 @@ export const useWorkflows = (initialWorkflowId = "") => {
       try {
         result = await saveWorkflowRequest(workflow);
       } catch {
-        return { data: null, error: "Workflow could not be saved." };
+        return {
+          data: null,
+          error: i18n.t("workflows.errors.save"),
+        };
       }
       if (!result.data) {
         if (result.latest) {
@@ -197,7 +204,7 @@ export const useWorkflows = (initialWorkflowId = "") => {
       if (!workflow) {
         return {
           data: null,
-          error: "Workflow could not be renamed.",
+          error: i18n.t("workflows.errors.rename"),
         };
       }
       return saveWorkflow({ ...workflow, name: nextName });
@@ -342,7 +349,7 @@ export const useWorkflows = (initialWorkflowId = "") => {
       } catch {
         result = {
           data: null,
-          error: "Workflow could not be started.",
+          error: i18n.t("workflows.errors.start"),
         };
       } finally {
         scheduleMutationRef.current.delete(workflowId);
@@ -383,7 +390,7 @@ export const useWorkflows = (initialWorkflowId = "") => {
       } catch {
         result = {
           data: null,
-          error: "Workflow could not be stopped.",
+          error: i18n.t("workflows.errors.stop"),
         };
       } finally {
         scheduleMutationRef.current.delete(workflowId);

@@ -16,6 +16,7 @@ import type {
   McpImportSource,
   McpServer,
 } from "@/features/mcp/model/mcp-types";
+import i18n from "@/i18n/i18n";
 
 export const useMcpServers = ({
   refreshMcpServers,
@@ -74,7 +75,7 @@ export const useMcpServers = ({
         setMcpImportPreview(servers);
       } catch {
         setMcpImportPreview([]);
-        showError("Scan could not be completed.");
+        showError(i18n.t("setup.mcp.errors.scan"));
       } finally {
         setIsPreviewingMcpImport(false);
       }
@@ -92,7 +93,7 @@ export const useMcpServers = ({
   const importMcpServer = useCallback(
     async (serverId: string) => {
       if (!mcpImportPreview.some((server) => server.id === serverId)) {
-        showError("No servers found.");
+        showError(i18n.t("setup.mcp.errors.noServers"));
         return;
       }
 
@@ -112,7 +113,7 @@ export const useMcpServers = ({
           setMcpDraft(nextServer);
         }
       } catch {
-        showError("Import could not be completed.");
+        showError(i18n.t("setup.mcp.errors.import"));
       } finally {
         setImportingMcpServerId("");
       }
@@ -142,7 +143,7 @@ export const useMcpServers = ({
         isCreatingMcpServer || mcpDraft.id === "new"
           ? mcpServerId(mcpDraft.name)
           : mcpDraft.id,
-      name: mcpDraft.name.trim() || "Server",
+      name: mcpDraft.name.trim() || i18n.t("setup.mcp.defaultName"),
       tools: isCreatingMcpServer ? [] : mcpDraft.tools,
       url: mcpDraft.type === "url" ? mcpDraft.url : "",
     };

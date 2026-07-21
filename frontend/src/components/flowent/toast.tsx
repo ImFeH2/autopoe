@@ -8,6 +8,7 @@ import {
 import { motion, useReducedMotion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import { Toast as ToastPrimitive } from "radix-ui";
+import { useTranslation } from "react-i18next";
 
 import { buttonVariants } from "@/components/ui/button-variants";
 import { mutedTextClassName } from "@/components/flowent/styles";
@@ -101,6 +102,7 @@ const flowentToastApi: FlowentToastApi = {
 };
 
 export function FlowentToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [toasts, setToasts] = useState<FlowentToast[]>(flowentToasts);
 
   useEffect(() => {
@@ -120,7 +122,7 @@ export function FlowentToastProvider({ children }: { children: ReactNode }) {
     <FlowentToastContext.Provider value={flowentToastApi}>
       <ToastPrimitive.Provider
         duration={defaultToastDuration}
-        label="Notification"
+        label={t("common.notifications.label")}
         swipeDirection="right"
       >
         {children}
@@ -137,11 +139,12 @@ function FlowentToastViewport({
   onDismiss: (id: string) => void;
   toasts: FlowentToast[];
 }) {
+  const { t } = useTranslation();
   const [isPaused, setIsPaused] = useState(false);
 
   return (
     <ToastPrimitive.Viewport
-      aria-label="Notifications"
+      aria-label={t("common.notifications.list")}
       className="fixed right-4 bottom-4 z-[80] m-0 flex w-[calc(100vw-2rem)] max-w-72 list-none flex-col items-end gap-2 p-0 outline-none max-[640px]:right-3 max-[640px]:bottom-3 max-[640px]:w-[calc(100vw-1.5rem)] max-[640px]:max-w-none"
       onBlur={(event) => {
         const nextTarget = event.relatedTarget;
@@ -178,6 +181,7 @@ function FlowentToastCard({
   onDismiss: (id: string) => void;
   toast: FlowentToast;
 }) {
+  const { t } = useTranslation();
   const shouldReduceMotion = useReducedMotion();
   const remainingDurationRef = useRef(toast.duration);
   const startedAtRef = useRef(0);
@@ -273,7 +277,7 @@ function FlowentToastCard({
           ) : null}
         </div>
         <ToastPrimitive.Close
-          aria-label="Dismiss notification"
+          aria-label={t("common.notifications.dismiss")}
           className={cn(
             buttonVariants({ size: "icon-xs", variant: "ghost" }),
             "-mt-1 -mr-1 size-6 p-0 text-white/55 hover:text-white",

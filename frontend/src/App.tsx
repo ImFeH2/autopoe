@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 
+import "@/i18n/i18n";
+
 import { fetchAppState } from "@/app/api/state-requests";
 import type { ApiState } from "@/app/api/types";
 import { useAppHydration } from "@/app/controllers/use-app-hydration";

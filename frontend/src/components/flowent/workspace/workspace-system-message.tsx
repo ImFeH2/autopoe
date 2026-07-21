@@ -1,22 +1,31 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Check, ChevronRight, Sparkles } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { MarkdownMessage } from "@/components/flowent/markdown-message";
 import { Button } from "@/components/ui/button";
 import type { Message } from "@/features/workspace/model/message-types";
+import { enWorkspace } from "@/i18n/locales/en/workspace";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceSystemMessage({ message }: { message: Message }) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const shouldReduceMotion = useReducedMotion();
   const isCompactContextMessage =
-    message.content === "Context compacted" ||
-    message.content === "Context optimized";
+    message.content === enWorkspace.systemMessages.contextCompacted ||
+    message.content === enWorkspace.systemMessages.contextOptimized;
+  const displayContent =
+    message.content === enWorkspace.systemMessages.contextOptimized
+      ? t("workspace.systemMessages.contextOptimized")
+      : message.content === enWorkspace.systemMessages.contextCompacted
+        ? t("workspace.systemMessages.contextCompacted")
+        : message.content;
   const Icon =
-    message.content === "Context optimized"
+    message.content === enWorkspace.systemMessages.contextOptimized
       ? Sparkles
-      : message.content === "Context compacted"
+      : message.content === enWorkspace.systemMessages.contextCompacted
         ? Check
         : null;
 
@@ -41,7 +50,7 @@ export function WorkspaceSystemMessage({ message }: { message: Message }) {
                   className="size-4 shrink-0 text-white/55"
                 />
               ) : null}
-              <span className="truncate font-medium">{message.content}</span>
+              <span className="truncate font-medium">{displayContent}</span>
             </span>
             <ChevronRight
               aria-hidden="true"
@@ -69,7 +78,9 @@ export function WorkspaceSystemMessage({ message }: { message: Message }) {
                 transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
               >
                 <div
-                  aria-label={`${message.content} summary`}
+                  aria-label={t("workspace.systemMessages.summary", {
+                    label: displayContent,
+                  })}
                   className="border-t border-white/10 px-4 py-3 text-sm leading-6 text-white/80"
                   id={summaryId}
                   role="region"
@@ -90,7 +101,7 @@ export function WorkspaceSystemMessage({ message }: { message: Message }) {
         {Icon ? (
           <Icon aria-hidden="true" className="size-3.5 text-white/50" />
         ) : null}
-        {message.content}
+        {displayContent}
       </div>
     </div>
   );

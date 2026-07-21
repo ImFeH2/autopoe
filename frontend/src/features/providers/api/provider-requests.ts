@@ -4,35 +4,46 @@ import {
   providerToApi,
 } from "@/features/providers/api/provider-mappers";
 import type { Provider } from "@/features/providers/model/provider-types";
+import i18n from "@/i18n/i18n";
 
-const providerModelFetchFailureMessages = {
+const providerModelFetchFailureKeys = {
   access_denied: {
-    description: "Check the key and account access.",
-    message: "Access denied.",
+    description: "setup.providers.errors.accessDenied.description",
+    message: "setup.providers.errors.accessDenied.message",
   },
   connection_failed: {
-    description: "Check the address and try again.",
-    message: "Connection failed.",
+    description: "setup.providers.errors.connectionFailed.description",
+    message: "setup.providers.errors.connectionFailed.message",
   },
   provider_unavailable: {
-    description: "The service is currently unreachable.",
-    message: "Provider unavailable.",
+    description: "setup.providers.errors.unavailable.description",
+    message: "setup.providers.errors.unavailable.message",
   },
   rate_limited: {
-    description: "Please wait a moment and try again.",
-    message: "Too many requests.",
+    description: "setup.providers.errors.rateLimited.description",
+    message: "setup.providers.errors.rateLimited.message",
   },
   request_failed: {
-    description: "Check the connection settings and try again.",
-    message: "Request failed.",
+    description: "setup.providers.errors.requestFailed.description",
+    message: "setup.providers.errors.requestFailed.message",
   },
 } as const;
 
-type ProviderModelFetchFailure = keyof typeof providerModelFetchFailureMessages;
+type ProviderModelFetchFailure = keyof typeof providerModelFetchFailureKeys;
 
 export type ProviderNotification = {
   description?: string;
   message: string;
+};
+
+const providerModelFetchFailureNotification = (
+  failure: ProviderModelFetchFailure,
+): ProviderNotification => {
+  const keys = providerModelFetchFailureKeys[failure];
+  return {
+    description: i18n.t(keys.description),
+    message: i18n.t(keys.message),
+  };
 };
 
 export class ProviderModelFetchError extends Error {
@@ -48,7 +59,7 @@ export class ProviderModelFetchError extends Error {
 const isProviderModelFetchFailure = (
   value: unknown,
 ): value is ProviderModelFetchFailure =>
-  typeof value === "string" && value in providerModelFetchFailureMessages;
+  typeof value === "string" && value in providerModelFetchFailureKeys;
 
 const providerModelFetchFailureFromResponse = async (
   response: Response,
@@ -84,7 +95,7 @@ export const fetchProviderModelsRequest = async (
     if (!response.ok) {
       const failure = await providerModelFetchFailureFromResponse(response);
       throw new ProviderModelFetchError(
-        providerModelFetchFailureMessages[failure],
+        providerModelFetchFailureNotification(failure),
       );
     }
 
@@ -95,7 +106,7 @@ export const fetchProviderModelsRequest = async (
       throw error;
     }
     throw new ProviderModelFetchError(
-      providerModelFetchFailureMessages.connection_failed,
+      providerModelFetchFailureNotification("connection_failed"),
     );
   }
 };

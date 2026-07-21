@@ -12,6 +12,7 @@ import {
   providerOptions,
 } from "@/features/providers/model/provider-options";
 import type { Provider } from "@/features/providers/model/provider-types";
+import i18n from "@/i18n/i18n";
 import { createClientId } from "@/lib/utils";
 
 export type RemovedProviderResult = {
@@ -60,8 +61,8 @@ export const useProviders = ({
 
       if (models.length === 0) {
         showError({
-          description: "No models available for this provider.",
-          message: "No models found.",
+          description: i18n.t("setup.providers.errors.noModels.description"),
+          message: i18n.t("setup.providers.errors.noModels.message"),
         });
       }
     } catch (error) {

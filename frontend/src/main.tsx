@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@/styles/index.css";
+import "@/i18n/i18n";
 import App from "@/App.tsx";
 import { AgentationRoot } from "@/components/flowent/agentation-root";
 import { ErudaRoot } from "@/components/flowent/eruda-root";

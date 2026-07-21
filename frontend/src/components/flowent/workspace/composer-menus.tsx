@@ -1,4 +1,5 @@
 import { Sparkles, Terminal } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import type { Skill } from "@/features/skills/model/skill-types";
@@ -16,9 +17,11 @@ export function CommandMenu({
   onCommand: (command: WorkspaceCommand) => void;
   onSelectIndex: (index: number) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div
-      aria-label="Commands"
+      aria-label={t("workspace.menus.commands")}
       className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] p-1 shadow-[0_16px_44px_rgba(0,0,0,0.42)]"
       role="listbox"
     >
@@ -61,9 +64,11 @@ export function SkillMenu({
   onSelectIndex: (index: number) => void;
   onSkill: (skill: Skill) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div
-      aria-label="Skills"
+      aria-label={t("workspace.menus.skills")}
       className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-[#171717] p-1 shadow-[0_16px_44px_rgba(0,0,0,0.42)]"
       role="listbox"
     >

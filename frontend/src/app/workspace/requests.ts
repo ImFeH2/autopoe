@@ -8,6 +8,7 @@ import type {
   MessageActionRequest,
   MessageErrorRetryRequest,
 } from "@/features/workspace/model/message-types";
+import i18n from "@/i18n/i18n";
 
 export const responseErrorFromApi = async (response: Response) => {
   try {
@@ -16,11 +17,11 @@ export const responseErrorFromApi = async (response: Response) => {
       return result.detail;
     }
   } catch {
-    return "Message could not be sent.";
+    return i18n.t("workspace.errors.messageCouldNotBeSent");
   }
   return response.status === 409
-    ? "Response in progress"
-    : "Message could not be sent.";
+    ? i18n.t("workspace.errors.responseInProgress")
+    : i18n.t("workspace.errors.messageCouldNotBeSent");
 };
 
 export const clearWorkspace = async () => {
@@ -30,7 +31,9 @@ export const clearWorkspace = async () => {
   });
 
   if (!response.ok) {
-    throw new Error("Conversation could not be cleared.");
+    throw new Error(
+      i18n.t("workspace.notifications.conversationCouldNotBeCleared"),
+    );
   }
 
   return (await response.json()) as Partial<ApiState>;
@@ -65,14 +68,14 @@ export const editWorkspaceMessage = async ({
     }
     throw new Error(
       response.status === 409
-        ? "Response in progress"
-        : "Message could not be updated.",
+        ? i18n.t("workspace.errors.responseInProgress")
+        : i18n.t("workspace.errors.messageCouldNotBeUpdated"),
     );
   }
 
   const result = (await response.json()) as WorkspaceMessageEditResponse;
   if (!Array.isArray(result.messages)) {
-    throw new Error("Message could not be updated.");
+    throw new Error(i18n.t("workspace.errors.messageCouldNotBeUpdated"));
   }
   return result;
 };
@@ -95,7 +98,7 @@ export const retryWorkspaceError = async ({
 
   const result = (await response.json()) as WorkspaceMessageEditResponse;
   if (!Array.isArray(result.messages)) {
-    throw new Error("Message could not be updated.");
+    throw new Error(i18n.t("workspace.errors.messageCouldNotBeUpdated"));
   }
   return result;
 };

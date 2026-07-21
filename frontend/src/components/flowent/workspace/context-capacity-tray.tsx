@@ -1,4 +1,5 @@
 import { Activity } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { ContextCapacity } from "@/components/flowent/workspace/context-capacity";
 import { formatContextUnits } from "@/components/flowent/workspace/context-capacity";
@@ -11,6 +12,7 @@ export function ContextCapacityTray({
   capacity: ContextCapacity;
   isRefining: boolean;
 }) {
+  const { t } = useTranslation();
   const toneClassName =
     capacity.tone === "critical"
       ? "bg-red-500"
@@ -36,7 +38,7 @@ export function ContextCapacityTray({
           aria-hidden="true"
           className={cn("size-3 shrink-0", isRefining && "animate-pulse")}
         />
-        <span className="hidden sm:inline">Context</span>
+        <span className="hidden sm:inline">{t("workspace.context.label")}</span>
       </div>
       <div className="flex min-w-0 items-center gap-2">
         <span
@@ -47,10 +49,10 @@ export function ContextCapacityTray({
               : "text-zinc-500 uppercase",
           )}
         >
-          {isRefining ? "Refining..." : capacityAmount}
+          {isRefining ? t("workspace.context.refining") : capacityAmount}
         </span>
         <div
-          aria-label="Context capacity status"
+          aria-label={t("workspace.context.capacityStatus")}
           aria-valuemax={100}
           aria-valuemin={0}
           aria-valuenow={capacity.percent}

@@ -8,6 +8,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { AnimatedExpandableContent } from "@/components/flowent/workspace/animated-expandable-content";
@@ -15,15 +16,16 @@ import type { ToolItem } from "@/features/workspace/model/message-types";
 import { cn } from "@/lib/utils";
 
 export function ToolProcessItem({ tool }: { tool: ToolItem }) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const statusLabel =
     tool.status === "waiting"
-      ? "Waiting"
+      ? t("workspace.tools.statuses.waiting")
       : tool.status === "running"
-        ? "Running"
+        ? t("workspace.tools.statuses.running")
         : tool.status === "success"
-          ? "Done"
-          : "Failed";
+          ? t("workspace.tools.statuses.done")
+          : t("workspace.tools.statuses.failed");
 
   return (
     <div className="max-w-full text-base leading-5 text-white">
@@ -107,7 +109,11 @@ type ToolApprovalData = {
 };
 
 function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
-  const decision = approval.decision === "denied" ? "Denied" : "Approved";
+  const { t } = useTranslation();
+  const decision =
+    approval.decision === "denied"
+      ? t("workspace.tools.denied")
+      : t("workspace.tools.approved");
   const firstFailureOutput = approval.toolResult?.trim()
     ? approval.toolResult
     : null;
@@ -115,7 +121,7 @@ function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
   return (
     <div className="min-w-0">
       <div className="mb-1 text-[11px] font-medium leading-4 text-white/45">
-        REVIEW
+        {t("workspace.tools.review")}
       </div>
       <div className="grid gap-1 rounded-md border border-white/10 bg-black px-2.5 py-2 text-xs leading-5 text-white/70">
         <div className="font-medium text-white">{decision}</div>
@@ -125,7 +131,7 @@ function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
         {approval.reviewerOutput?.trim() ? (
           <div className="mt-1.5 border-t border-white/5 pt-1.5">
             <div className="mb-0.5 text-[10px] font-medium leading-4 text-white/40">
-              Reviewer output
+              {t("workspace.tools.reviewerOutput")}
             </div>
             <div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-white/50">
               {approval.reviewerOutput}
@@ -135,7 +141,7 @@ function ToolProcessApproval({ approval }: { approval: ToolApprovalData }) {
         {firstFailureOutput ? (
           <div className="mt-1.5 border-t border-white/5 pt-1.5">
             <div className="mb-0.5 text-[10px] font-medium leading-4 text-white/40">
-              FAILURE
+              {t("workspace.tools.failure")}
             </div>
             <div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-white/50">
               {firstFailureOutput}
@@ -176,6 +182,7 @@ function ToolProcessPayload({
 }
 
 function ToolProcessExitStatus({ exitCode }: { exitCode: string }) {
+  const { t } = useTranslation();
   const isSuccess = exitCode === "0";
   return (
     <div className="flex items-center gap-1.5 text-[11px] font-medium leading-4 text-white/45">
@@ -186,7 +193,7 @@ function ToolProcessExitStatus({ exitCode }: { exitCode: string }) {
           isSuccess ? "bg-[#7ddf89]" : "bg-[#ff7474]",
         )}
       />
-      <span>Exit {exitCode}</span>
+      <span>{t("workspace.tools.exit", { code: exitCode })}</span>
     </div>
   );
 }

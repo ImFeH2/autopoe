@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Activity, Check, ChevronRight, Circle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,7 @@ export function PlanTray({
   isHidden: boolean;
   plan: WorkspacePlan | null;
 }) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const trayRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
@@ -72,7 +74,15 @@ export function PlanTray({
   const completedCount = plan.items.filter(
     (item) => item.status === "completed",
   ).length;
-  const summary = `Plan · ${completedCount}/${plan.items.length} done`;
+  const summary = t("workspace.plan.summary", {
+    completed: completedCount,
+    total: plan.items.length,
+  });
+  const statusLabels: Record<PlanItemStatus, string> = {
+    completed: t("workspace.plan.statuses.completed"),
+    in_progress: t("workspace.plan.statuses.inProgress"),
+    pending: t("workspace.plan.statuses.pending"),
+  };
 
   return (
     <div
@@ -122,7 +132,7 @@ export function PlanTray({
             }
           >
             <ol
-              aria-label="Plan tasks"
+              aria-label={t("workspace.plan.tasks")}
               className="grid max-h-[150px] gap-1 overflow-auto p-1.5 sm:max-h-[25vh]"
             >
               {plan.items.map((item, index) => (
@@ -143,7 +153,7 @@ export function PlanTray({
                   <PlanStatusIcon status={item.status} />
                   <span className="min-w-0 break-words">{item.step}</span>
                   <span className="shrink-0 text-xs leading-5 text-white/45">
-                    {planStatusLabel(item.status)}
+                    {statusLabels[item.status]}
                   </span>
                 </li>
               ))}
@@ -175,14 +185,4 @@ function PlanStatusIcon({ status }: { status: PlanItemStatus }) {
   return (
     <Circle aria-hidden="true" className={cn(className, "text-white/40")} />
   );
-}
-
-function planStatusLabel(status: PlanItemStatus) {
-  if (status === "completed") {
-    return "Done";
-  }
-  if (status === "in_progress") {
-    return "Doing";
-  }
-  return "Pending";
 }
