@@ -1,6 +1,6 @@
 [project]
 name = "flowent"
-version = "0.3.9"
+version = "0.3.10"
 description = "Just say what you need. Flowent gets it done."
 readme = "README.md"
 authors = [
