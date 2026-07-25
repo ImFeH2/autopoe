@@ -4,7 +4,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 const projectRoot = join(import.meta.dirname, "..", "..", "..");
-const version = "0.3.10";
 
 async function read(relativePath) {
   return readFile(join(projectRoot, relativePath), "utf8");
@@ -30,10 +29,18 @@ test("release manifests use one version and a reproducible native dependency", a
     read("native/flowent-sandbox-windows/Cargo.toml"),
     read("native/flowent-sandbox-windows/Cargo.lock"),
   ]);
+  const version = packageJson.version;
+  assert.equal(typeof version, "string");
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  assert.equal(packageJson.version, version);
-  assert.match(backendProject, /^version = "0\.3\.10"$/m);
-  assert.match(backendProject, /^ {4}"flowent-native==0\.3\.10",$/m);
+  assert.match(
+    backendProject,
+    new RegExp(`^version = "${escapedVersion}"$`, "m"),
+  );
+  assert.match(
+    backendProject,
+    new RegExp(`^ {4}"flowent-native==${escapedVersion}",$`, "m"),
+  );
   assert.match(
     backendProject,
     /^flowent-native = \{ path = "\.\.\/native\/flowent-native" \}$/m,
@@ -41,12 +48,20 @@ test("release manifests use one version and a reproducible native dependency", a
   assert.match(backendProject, /^ {4}"pyinstaller>=6\.14\.1,<7\.0\.0",$/m);
   assert.match(backendLock, /name = "flowent-native"/);
   assert.match(nativeProject, /^module-name = "flowent_native"$/m);
-  assert.match(nativeCargo, /^version = "0\.3\.10"$/m);
-  assert.match(nativeLock, /name = "flowent-native"\nversion = "0\.3\.10"/);
-  assert.match(windowsCargo, /^version = "0\.3\.10"$/m);
+  assert.match(nativeCargo, new RegExp(`^version = "${escapedVersion}"$`, "m"));
+  assert.match(
+    nativeLock,
+    new RegExp(`name = "flowent-native"\\nversion = "${escapedVersion}"`),
+  );
+  assert.match(
+    windowsCargo,
+    new RegExp(`^version = "${escapedVersion}"$`, "m"),
+  );
   assert.match(
     windowsLock,
-    /name = "flowent-sandbox-windows"\nversion = "0\.3\.10"/,
+    new RegExp(
+      `name = "flowent-sandbox-windows"\\nversion = "${escapedVersion}"`,
+    ),
   );
 });
 

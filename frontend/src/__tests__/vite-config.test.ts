@@ -50,7 +50,7 @@ describe("vite config", () => {
 });
 
 describe("vitest config", () => {
-  it("caps parallel test workers for stable application loading", async () => {
+  it("runs application-heavy test files sequentially", async () => {
     const loadedConfig = await loadConfigFromFile(
       { command: "serve", mode: "test" },
       "vitest.config.ts",
@@ -61,9 +61,7 @@ describe("vitest config", () => {
       }
     ).test;
 
-    expect(testConfig).toMatchObject({
-      fileParallelism: true,
-      maxWorkers: 4,
-    });
+    expect(testConfig?.fileParallelism).toBe(false);
+    expect(testConfig?.maxWorkers).toBeUndefined();
   });
 });
