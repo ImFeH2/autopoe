@@ -48,3 +48,22 @@ describe("vite config", () => {
     ]);
   });
 });
+
+describe("vitest config", () => {
+  it("caps parallel test workers for stable application loading", async () => {
+    const loadedConfig = await loadConfigFromFile(
+      { command: "serve", mode: "test" },
+      "vitest.config.ts",
+    );
+    const testConfig = (
+      loadedConfig?.config as {
+        test?: { fileParallelism?: boolean; maxWorkers?: number | string };
+      }
+    ).test;
+
+    expect(testConfig).toMatchObject({
+      fileParallelism: true,
+      maxWorkers: 4,
+    });
+  });
+});
