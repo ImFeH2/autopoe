@@ -244,7 +244,7 @@ test("npm staging emits a platform package without conflating alias and package 
   );
 });
 
-test("PyInstaller staging describes reusable onedir binary and data inputs", async () => {
+test("PyInstaller staging separates exact executables from data inputs", async () => {
   const root = await mkdtemp(join(tmpdir(), "flowent-runtime-pyinstaller-"));
   const plan = await loadResourcePlan(planPath);
 
@@ -257,15 +257,20 @@ test("PyInstaller staging describes reusable onedir binary and data inputs", asy
   });
 
   const input = JSON.parse(await readFile(result.inputPath, "utf8"));
-  assert.deepEqual(input.binaries, []);
+  assert.equal(input.schemaVersion, 2);
+  assert.deepEqual(
+    input.executableFiles.map((entry) => entry.source).sort(),
+    [
+      "flowent-runtime/bin/bwrap",
+      "flowent-runtime/bin/flowent-native",
+      "flowent-runtime/bin/rg",
+    ].sort(),
+  );
   assert.deepEqual(
     input.data.map((entry) => entry.source).sort(),
     [
       "flowent-runtime/LICENSE",
       "flowent-runtime/THIRD_PARTY_NOTICES",
-      "flowent-runtime/bin/bwrap",
-      "flowent-runtime/bin/flowent-native",
-      "flowent-runtime/bin/rg",
       "flowent-runtime/licenses/bubblewrap-COPYING",
       "flowent-runtime/licenses/flowent-native-Apache-2.0.txt",
       "flowent-runtime/licenses/ripgrep-MIT.txt",

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import socket
 import subprocess
-import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from flowent.runtime_commands import python_runner_command
 from flowent.sandboxing.core import (
     PreparedProcess,
     ProcessLaunchOptions,
@@ -203,7 +204,7 @@ class SeatbeltCapabilityProbe:
                 "import os\n"
                 "import platform\n"
                 "import socket\n"
-                "import sys\n"
+                "allowed_path, escaped_path, raw_port, expected_network = inputs\n"
                 "assert platform.machine()\n"
                 "assert os.cpu_count()\n"
                 "with open(os.devnull, 'w') as stream:\n"
@@ -211,10 +212,10 @@ class SeatbeltCapabilityProbe:
                 "master, slave = os.openpty()\n"
                 "os.close(master)\n"
                 "os.close(slave)\n"
-                "with open(sys.argv[1], 'w', encoding='utf-8') as stream:\n"
+                "with open(allowed_path, 'w', encoding='utf-8') as stream:\n"
                 "    stream.write('allowed')\n"
                 "try:\n"
-                "    with open(sys.argv[2], 'w', encoding='utf-8') as stream:\n"
+                "    with open(escaped_path, 'w', encoding='utf-8') as stream:\n"
                 "        stream.write('escaped')\n"
                 "except PermissionError:\n"
                 "    pass\n"
@@ -222,13 +223,13 @@ class SeatbeltCapabilityProbe:
                 "    raise SystemExit(1)\n"
                 "connected = False\n"
                 "try:\n"
-                "    connection = socket.create_connection(('127.0.0.1', int(sys.argv[3])), timeout=1)\n"
+                "    connection = socket.create_connection(('127.0.0.1', int(raw_port)), timeout=1)\n"
                 "except OSError:\n"
                 "    pass\n"
                 "else:\n"
                 "    connection.close()\n"
                 "    connected = True\n"
-                "if connected != (sys.argv[4] == 'allow'):\n"
+                "if connected != (expected_network == 'allow'):\n"
                 "    raise SystemExit(1)\n"
             )
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -285,20 +286,26 @@ class SeatbeltCapabilityProbe:
             build_seatbelt_profile(selected_policy, writable_roots),
             *build_seatbelt_definition_args(selected_policy, writable_roots),
             "--",
-            sys.executable,
-            "-c",
-            script,
-            str(allowed_file),
-            str(escaped_file),
-            str(port),
-            "allow" if allow_network else "deny",
+            *python_runner_command(),
         ]
+        payload = json.dumps(
+            {
+                "code": script,
+                "inputs": [
+                    str(allowed_file),
+                    str(escaped_file),
+                    str(port),
+                    "allow" if allow_network else "deny",
+                ],
+            }
+        )
         return self.runner(
             args,
             check=False,
             capture_output=True,
             cwd=policy.cwd,
             env=build_shell_environment(),
+            input=payload,
             text=True,
             timeout=5,
         )

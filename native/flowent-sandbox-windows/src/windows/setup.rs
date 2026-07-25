@@ -31,7 +31,10 @@ use super::util::{OwnedHandle, copy_sid, sid_from_string, sid_to_string, wide};
 
 pub const SANDBOX_GROUP: &str = "FlowentSandboxUsers";
 pub const ONLINE_USER: &str = "FlowentSandboxOnline";
-pub const OFFLINE_USER: &str = "FlowentSandboxOffline";
+pub const OFFLINE_USER: &str = "FlowentSandboxNoNet";
+
+const _: () = assert!(ONLINE_USER.len() <= 20);
+const _: () = assert!(OFFLINE_USER.len() <= 20);
 
 const MARKER_FILE: &str = "setup.json";
 const SECRETS_FILE: &str = "credentials.json";

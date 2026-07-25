@@ -506,14 +506,21 @@ export async function stagePyinstallerOnedir({
     projectLicense,
     targetManifestPath,
   });
-  const binaries = [];
+  const executableFiles = [];
   const data = [];
   for (const resource of Object.values(staged.manifest.resources)) {
-    const entry = {
-      source: posix.join("flowent-runtime", resource.path),
-      destination: posix.join("flowent-runtime", posix.dirname(resource.path)),
-    };
-    data.push(entry);
+    const source = posix.join("flowent-runtime", resource.path);
+    if (resource.executable) {
+      executableFiles.push({ source, destination: source });
+    } else {
+      data.push({
+        source,
+        destination: posix.join(
+          "flowent-runtime",
+          posix.dirname(resource.path),
+        ),
+      });
+    }
     if (resource.buildProvenance) {
       data.push({
         source: posix.join("flowent-runtime", resource.buildProvenance.path),
@@ -543,13 +550,15 @@ export async function stagePyinstallerOnedir({
     source: "flowent-runtime/resources.json",
     destination: "flowent-runtime",
   });
-  binaries.sort((left, right) => left.source.localeCompare(right.source));
+  executableFiles.sort((left, right) =>
+    left.source.localeCompare(right.source),
+  );
   data.sort((left, right) => left.source.localeCompare(right.source));
   const input = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     target: targetId,
     bundleDirectory: "flowent-runtime",
-    binaries,
+    executableFiles,
     data,
   };
   const inputPath = join(stagingRoot, "pyinstaller-input.json");

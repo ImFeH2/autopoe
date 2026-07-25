@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -209,10 +210,11 @@ def test_seatbelt_capability_probe_checks_allowed_and_symlink_escape_writes(
         calls += 1
         profiles.append(args[2])
         command = probe_command(args)
-        assert command[0] == sys.executable
-        assert "platform.machine()" in command[2]
-        assert "os.openpty()" in command[2]
-        Path(command[3]).write_text("allowed")
+        assert command[:3] == [sys.executable, "-I", "-c"]
+        payload = json.loads(str(kwargs["input"]))
+        assert "platform.machine()" in payload["code"]
+        assert "os.openpty()" in payload["code"]
+        Path(payload["inputs"][0]).write_text("allowed")
         return subprocess.CompletedProcess(args, 0, "", "")
 
     probe = SeatbeltCapabilityProbe(cache={}, runner=runner)
@@ -231,9 +233,9 @@ def test_seatbelt_capability_probe_rejects_escaped_write(
     executable.touch()
 
     def runner(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        command = probe_command(args)
-        Path(command[3]).write_text("allowed")
-        Path(command[4]).write_text("escaped")
+        payload = json.loads(str(kwargs["input"]))
+        Path(payload["inputs"][0]).write_text("allowed")
+        Path(payload["inputs"][1]).write_text("escaped")
         return subprocess.CompletedProcess(args, 0, "", "")
 
     probe = SeatbeltCapabilityProbe(cache={}, runner=runner)
@@ -251,13 +253,34 @@ def test_seatbelt_capability_probe_rejects_unusable_network_policy(
     def runner(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal calls
         calls += 1
-        command = probe_command(args)
-        Path(command[3]).write_text("allowed")
+        payload = json.loads(str(kwargs["input"]))
+        Path(payload["inputs"][0]).write_text("allowed")
         return subprocess.CompletedProcess(args, 0 if calls == 1 else 1, "", "")
 
     probe = SeatbeltCapabilityProbe(cache={}, runner=runner)
 
     assert not probe.supports(executable)
+
+
+def test_seatbelt_capability_probe_uses_frozen_runtime_entrypoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "sandbox-exec"
+    executable.touch()
+    commands: list[list[str]] = []
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    def runner(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(probe_command(args))
+        payload = json.loads(str(kwargs["input"]))
+        Path(payload["inputs"][0]).write_text("allowed")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    probe = SeatbeltCapabilityProbe(cache={}, runner=runner)
+
+    assert probe.supports(executable)
+    assert commands == [[sys.executable, "_run-python"]] * 2
 
 
 def test_macos_backend_rejects_empty_command(tmp_path: Path) -> None:
