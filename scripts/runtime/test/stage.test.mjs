@@ -257,25 +257,15 @@ test("PyInstaller staging describes reusable onedir binary and data inputs", asy
   });
 
   const input = JSON.parse(await readFile(result.inputPath, "utf8"));
-  assert.deepEqual(input.binaries, [
-    {
-      source: "flowent-runtime/bin/bwrap",
-      destination: "flowent-runtime/bin",
-    },
-    {
-      source: "flowent-runtime/bin/flowent-native",
-      destination: "flowent-runtime/bin",
-    },
-    {
-      source: "flowent-runtime/bin/rg",
-      destination: "flowent-runtime/bin",
-    },
-  ]);
+  assert.deepEqual(input.binaries, []);
   assert.deepEqual(
     input.data.map((entry) => entry.source).sort(),
     [
       "flowent-runtime/LICENSE",
       "flowent-runtime/THIRD_PARTY_NOTICES",
+      "flowent-runtime/bin/bwrap",
+      "flowent-runtime/bin/flowent-native",
+      "flowent-runtime/bin/rg",
       "flowent-runtime/licenses/bubblewrap-COPYING",
       "flowent-runtime/licenses/flowent-native-Apache-2.0.txt",
       "flowent-runtime/licenses/ripgrep-MIT.txt",

@@ -226,6 +226,14 @@ test("Linux applications freeze in the matching manylinux 2_17 container", async
   assert.doesNotMatch(workflow, /rustup (?:toolchain install|default) stable/);
   assert.match(
     workflow,
+    /name: Install Windows ARM64 build tools[\s\S]*if: matrix\.target == 'win32-arm64'[\s\S]*0878b5224d4a4968940ee296a2e7fae2d3b62983[\s\S]*openssl:arm64-windows-static[\s\S]*OPENSSL_DIR/,
+  );
+  assert.match(
+    workflow,
+    /name: Install Python build dependencies[\s\S]*run: uv pip install --system --require-hashes[^\n]+\n\n {6}- name: Install Flowent package[\s\S]*run: uv pip install --system --no-deps \.\/backend/,
+  );
+  assert.match(
+    workflow,
     /docker-options: -e SOURCE_DATE_EPOCH -e PYTHONHASHSEED/,
   );
   assert.match(workflow, /rust-toolchain: "1\.93\.1"/);

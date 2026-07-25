@@ -302,7 +302,46 @@ def test_windows_setup_uses_trusted_powershell_and_encoded_command(
     assert "Start-Process" in decoded
     assert "-Verb RunAs" in decoded
     assert "Flowent''s helper.exe" in decoded
-    assert kwargs["check"] is True
+    assert kwargs["check"] is False
+
+
+def test_windows_setup_reports_helper_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "flowent.sandboxing.windows.windows_system_shell_paths",
+        lambda: (
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "C:\\Windows\\System32\\cmd.exe",
+        ),
+    )
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        status_path.write_text(
+            json.dumps(
+                {
+                    **status_record(
+                        "failed",
+                        "account_setup_failed",
+                        "Protected account setup failed.",
+                    ),
+                    "operation": "setup",
+                }
+            )
+        )
+        return subprocess.CompletedProcess(args, 70, "", "")
+
+    monkeypatch.setattr("flowent.sandboxing.windows.subprocess.run", run)
+    status_path = tmp_path / "setup.json"
+
+    with pytest.raises(OSError, match="Protected account setup failed"):
+        launch_elevated_setup(
+            tmp_path / "flowent-native.exe",
+            tmp_path / "state",
+            status_path,
+            "S-1-5-21-1000",
+        )
 
 
 def test_windows_owner_sid_uses_system_whoami(

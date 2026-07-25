@@ -197,6 +197,22 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
 
+      - name: Install Windows ARM64 build tools
+        if: matrix.target == 'win32-arm64'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          git -C $vcpkgRoot fetch --depth 1 origin 0878b5224d4a4968940ee296a2e7fae2d3b62983
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $vcpkgRoot checkout --detach 0878b5224d4a4968940ee296a2e7fae2d3b62983
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$vcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$vcpkgRoot\vcpkg.exe" install openssl:arm64-windows-static --clean-after-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "OPENSSL_DIR=$vcpkgRoot\installed\arm64-windows-static" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "OPENSSL_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Download frontend files
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -213,9 +229,10 @@ jobs:
           uv export --project backend --frozen --only-group native-build --no-emit-project --no-emit-package flowent-native --output-file .artifacts/native-build-requirements.txt
 
       - name: Install Python build dependencies
-        run: |
-          uv pip install --system --require-hashes -r .artifacts/runtime-requirements.txt -r .artifacts/native-build-requirements.txt
-          uv pip install --system --no-deps ./backend
+        run: uv pip install --system --require-hashes -r .artifacts/runtime-requirements.txt -r .artifacts/native-build-requirements.txt
+
+      - name: Install Flowent package
+        run: uv pip install --system --no-deps ./backend
 
       - name: Test native implementation
         env:

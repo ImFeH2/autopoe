@@ -513,11 +513,7 @@ export async function stagePyinstallerOnedir({
       source: posix.join("flowent-runtime", resource.path),
       destination: posix.join("flowent-runtime", posix.dirname(resource.path)),
     };
-    if (resource.executable) {
-      binaries.push(entry);
-    } else {
-      data.push(entry);
-    }
+    data.push(entry);
     if (resource.buildProvenance) {
       data.push({
         source: posix.join("flowent-runtime", resource.buildProvenance.path),

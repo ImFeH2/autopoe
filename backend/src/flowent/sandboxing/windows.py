@@ -100,7 +100,7 @@ def launch_elevated_setup(
         f"-ArgumentList {_powershell_quote(arguments)} -Verb RunAs -Wait -PassThru; "
         "exit $process.ExitCode"
     )
-    subprocess.run(
+    completed = subprocess.run(
         [
             powershell,
             "-NoLogo",
@@ -109,11 +109,22 @@ def launch_elevated_setup(
             "-EncodedCommand",
             _encoded_powershell(command),
         ],
-        check=True,
+        check=False,
         env=build_shell_environment(),
         capture_output=True,
         text=True,
     )
+    if completed.returncode != 0:
+        try:
+            record = _read_status(status_path, "setup")
+            message = str(record["message"])
+        except ValueError:
+            message = (
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or "Command protection setup failed."
+            )
+        raise OSError(message)
 
 
 def current_owner_sid() -> str:
