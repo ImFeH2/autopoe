@@ -72,9 +72,14 @@ pub fn spawn(
     capability_sid: &str,
     mut progress: impl FnMut(&'static str) -> AppResult<()>,
 ) -> AppResult<ProtectedProcess> {
-    let token = create_restricted(capability_sid)?;
+    let identity = create_restricted(capability_sid)?;
     progress("restricted_token_ready")?;
-    let mut desktop = PrivateDesktop::create(&random_hex(16)?, base_sid, capability_sid)?;
+    let mut desktop = PrivateDesktop::create(
+        &random_hex(16)?,
+        base_sid,
+        capability_sid,
+        &identity.logon_sid,
+    )?;
     progress("private_desktop_ready")?;
     let (stdin_read, stdin_write) = inheritable_pipe()?;
     let (stdout_read, stdout_write) = inheritable_pipe()?;
@@ -96,7 +101,7 @@ pub fn spawn(
     let creation_flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
     if unsafe {
         CreateProcessAsUserW(
-            token.get(),
+            identity.token.get(),
             std::ptr::null(),
             command_line.as_mut_ptr(),
             std::ptr::null(),

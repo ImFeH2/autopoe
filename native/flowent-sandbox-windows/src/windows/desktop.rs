@@ -37,7 +37,12 @@ pub struct PrivateDesktop {
 }
 
 impl PrivateDesktop {
-    pub fn create(name_suffix: &str, base_sid: &str, capability_sid: &str) -> AppResult<Self> {
+    pub fn create(
+        name_suffix: &str,
+        base_sid: &str,
+        capability_sid: &str,
+        logon_sid: &[u8],
+    ) -> AppResult<Self> {
         let name = format!("FlowentProtected-{name_suffix}");
         let name_wide = wide(&name);
         let handle = unsafe {
@@ -58,7 +63,7 @@ impl PrivateDesktop {
         }
         let base = sid_from_string(base_sid)?;
         let capability = sid_from_string(capability_sid)?;
-        if let Err(error) = apply_acl(handle, &[&base, &capability]) {
+        if let Err(error) = apply_acl(handle, &[&base, &capability, logon_sid]) {
             unsafe {
                 CloseDesktop(handle);
             }
@@ -85,7 +90,7 @@ impl Drop for PrivateDesktop {
     }
 }
 
-fn apply_acl(handle: HDESK, sids: &[&Vec<u8>]) -> AppResult<()> {
+fn apply_acl(handle: HDESK, sids: &[&[u8]]) -> AppResult<()> {
     let entries = sids
         .iter()
         .map(|sid| EXPLICIT_ACCESS_W {
