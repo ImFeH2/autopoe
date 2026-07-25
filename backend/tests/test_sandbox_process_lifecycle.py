@@ -77,6 +77,20 @@ def test_sync_timeout_kills_process_tree_and_closes_resources(
     assert tracker.close_count == 1
 
 
+def test_sync_timeout_preserves_stderr(tmp_path: Path) -> None:
+    runner = SandboxRunner(cwd=tmp_path, backend=PassthroughBackend())
+    command = [
+        sys.executable,
+        "-c",
+        "import sys,time;sys.stderr.write('startup-stage');sys.stderr.flush();time.sleep(10)",
+    ]
+
+    result = runner.run(command, timeout_seconds=0.05)
+
+    assert result.exit_code == 124
+    assert result.stderr == "startup-stage"
+
+
 @pytest.mark.anyio
 async def test_async_timeout_kills_process_tree_and_closes_resources(
     tmp_path: Path,
@@ -93,6 +107,21 @@ async def test_async_timeout_kills_process_tree_and_closes_resources(
     assert result.failure.kind is SandboxFailureKind.TIMEOUT
     assert not marker.exists()
     assert tracker.close_count == 1
+
+
+@pytest.mark.anyio
+async def test_async_timeout_preserves_stderr(tmp_path: Path) -> None:
+    runner = SandboxRunner(cwd=tmp_path, backend=PassthroughBackend())
+    command = [
+        sys.executable,
+        "-c",
+        "import sys,time;sys.stderr.write('startup-stage');sys.stderr.flush();time.sleep(10)",
+    ]
+
+    result = await runner.run_async(command, timeout_seconds=0.05)
+
+    assert result.exit_code == 124
+    assert result.stderr == "startup-stage"
 
 
 @pytest.mark.anyio

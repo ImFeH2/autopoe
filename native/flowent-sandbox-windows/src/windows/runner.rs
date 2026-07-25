@@ -42,7 +42,9 @@ fn run_parent_inner(
     policy: &SandboxPolicy,
     command: Vec<String>,
 ) -> AppResult<i32> {
+    trace("runtime_validation_started");
     validate_runtime_paths(policy)?;
+    trace("runtime_validation_ready");
     let credentials = match policy.network {
         NetworkMode::Enabled => &installed.online,
         NetworkMode::Disabled => &installed.offline,
@@ -54,11 +56,17 @@ fn run_parent_inner(
     let capability_sid = create_capability_sid()?;
     let capability = sid_from_string(&capability_sid)?;
     let base = sid_from_string(&installed.marker.group_sid)?;
+    trace("workspace_access_started");
     let mut lease = AclLease::acquire(policy.effective_writable_roots(), &base, &capability)?;
+    trace("workspace_access_ready");
     protect_runtime_directory(&policy.runtime_dir, &installed.marker.owner_sid, &base)?;
+    trace("runtime_access_ready");
     let (mut pipe, pipe_name) = Pipe::create_server(&installed.marker.owner_sid, account_sid)?;
+    trace("worker_launch_started");
     let worker = launch_worker(credentials, &pipe_name, &policy.runtime_dir)?;
+    trace("worker_launched");
     pipe.connect_server(worker.process.get())?;
+    trace("worker_connected");
     let request = WorkerRequest {
         version: PROTOCOL_VERSION,
         policy: policy.clone(),
@@ -69,9 +77,12 @@ fn run_parent_inner(
     };
     request.validate()?;
     pipe.send(&request)?;
+    trace("request_sent");
     let terminal = loop {
         match pipe.receive::<WorkerFrame>()? {
+            WorkerFrame::Progress { stage } => trace(&format!("worker_{stage}")),
             WorkerFrame::Started { process_id } => {
+                trace("command_started");
                 write_status(&policy.status_file, &StatusRecord::running(process_id))?;
             }
             WorkerFrame::Stdout { data } => {
@@ -96,8 +107,11 @@ fn run_parent_inner(
             }
         }
     };
+    trace("terminal_frame_received");
     let worker_result = worker.wait();
+    trace("worker_stopped");
     let cleanup_result = lease.release();
+    trace("workspace_access_released");
     let exit_code = terminal?;
     worker_result?;
     cleanup_result?;
@@ -119,13 +133,17 @@ pub fn run_worker(pipe_name: &str) -> i32 {
 fn run_worker_connected(mut pipe: Pipe) -> i32 {
     let prepared = (|| -> AppResult<(WorkerRequest, process::ProtectedProcess)> {
         let request = pipe.receive::<WorkerRequest>()?;
+        send_progress(&mut pipe, "request_received")?;
         request.validate()?;
+        send_progress(&mut pipe, "request_validated")?;
         verify_current_account(&request.account_sid, &request.base_sid)?;
+        send_progress(&mut pipe, "identity_verified")?;
         let child = process::spawn(
             &request.command,
             &request.policy.cwd,
             &request.base_sid,
             &request.capability_sid,
+            |stage| send_progress(&mut pipe, stage),
         )?;
         Ok((request, child))
     })();
@@ -197,6 +215,25 @@ fn run_worker_connected(mut pipe: Pipe) -> i32 {
             error.exit_code
         }
     }
+}
+
+fn trace_enabled() -> bool {
+    std::env::var_os("FLOWENT_NATIVE_TRACE").is_some_and(|value| value == "1")
+}
+
+fn trace(stage: &str) {
+    if trace_enabled() {
+        eprintln!("Flowent native trace: {stage}");
+    }
+}
+
+fn send_progress(pipe: &mut Pipe, stage: &'static str) -> AppResult<()> {
+    if trace_enabled() {
+        pipe.send(&WorkerFrame::Progress {
+            stage: stage.to_string(),
+        })?;
+    }
+    Ok(())
 }
 
 fn send_connected_failure(pipe: &mut Pipe, error: AppError) -> i32 {

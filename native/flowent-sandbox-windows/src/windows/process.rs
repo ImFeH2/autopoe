@@ -70,15 +70,19 @@ pub fn spawn(
     cwd: &Path,
     base_sid: &str,
     capability_sid: &str,
+    mut progress: impl FnMut(&'static str) -> AppResult<()>,
 ) -> AppResult<ProtectedProcess> {
     let token = create_restricted(capability_sid)?;
+    progress("restricted_token_ready")?;
     let mut desktop = PrivateDesktop::create(&random_hex(16)?, base_sid, capability_sid)?;
+    progress("private_desktop_ready")?;
     let (stdin_read, stdin_write) = inheritable_pipe()?;
     let (stdout_read, stdout_write) = inheritable_pipe()?;
     let (stderr_read, stderr_write) = inheritable_pipe()?;
     clear_inheritance(stdin_write.get())?;
     clear_inheritance(stdout_read.get())?;
     clear_inheritance(stderr_read.get())?;
+    progress("stdio_ready")?;
     let mut startup = STARTUPINFOW::default();
     startup.cb = size_of::<STARTUPINFOW>() as u32;
     startup.dwFlags = STARTF_USESTDHANDLES;
@@ -121,6 +125,10 @@ pub fn spawn(
         "process_create_failed",
         "Could not open protected command thread.",
     )?;
+    if let Err(error) = progress("command_created") {
+        terminate_suspended(process.get());
+        return Err(error);
+    }
     drop(stdin_read);
     drop(stdin_write);
     drop(stdout_write);
@@ -136,12 +144,23 @@ pub fn spawn(
         terminate_suspended(process.get());
         return Err(error);
     }
+    if let Err(error) = progress("command_job_assigned") {
+        terminate_suspended(process.get());
+        return Err(error);
+    }
     if unsafe { ResumeThread(thread.get()) } == u32::MAX {
         terminate_suspended(process.get());
         return Err(last_error(
             "process_resume_failed",
             "Could not resume protected command after job assignment.",
         ));
+    }
+    if let Err(error) = progress("command_resumed") {
+        unsafe {
+            TerminateProcess(process.get(), 125);
+            WaitForSingleObject(process.get(), INFINITE);
+        }
+        return Err(error);
     }
     drop(thread);
     Ok(ProtectedProcess {

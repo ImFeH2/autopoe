@@ -284,10 +284,13 @@ class SandboxRunner:
                     message="Command timed out.",
                     backend=self.backend.name,
                 )
+                stderr = self._text_output(error.stderr)
                 return CommandResult(
                     command=" ".join(command),
                     exit_code=124,
-                    stderr=str(error) or failure.message,
+                    stderr=(stderr or str(error) or failure.message)[
+                        : self.output_limit
+                    ],
                     stdout=self._text_output(error.stdout)[: self.output_limit],
                     failure=failure,
                 )
@@ -392,7 +395,7 @@ class SandboxRunner:
             return CommandResult(
                 command=" ".join(command),
                 exit_code=124,
-                stderr=failure.message,
+                stderr=stderr or failure.message,
                 stdout=stdout,
                 failure=failure,
             )

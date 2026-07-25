@@ -61,7 +61,8 @@ def probe_command_protection(root: Path) -> None:
                 PROBE_SOURCE,
                 str(allowed_file),
                 str(blocked_file),
-            ]
+            ],
+            env={"FLOWENT_NATIVE_TRACE": "1"} if sys.platform == "win32" else None,
         )
         if result.exit_code != 0 or result.failure is not None:
             message = result.stderr

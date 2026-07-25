@@ -99,6 +99,7 @@ impl WorkerRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorkerFrame {
+    Progress { stage: String },
     Started { process_id: u32 },
     Stdout { data: String },
     Stderr { data: String },
@@ -132,7 +133,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{NetworkMode, PROTOCOL_VERSION, SandboxPolicy};
+    use super::{NetworkMode, PROTOCOL_VERSION, SandboxPolicy, WorkerFrame};
     use std::path::PathBuf;
 
     #[test]
@@ -181,5 +182,17 @@ mod tests {
             status_file: PathBuf::from("/status.json"),
         };
         assert_eq!(policy.validate().unwrap_err().code, "invalid_request");
+    }
+
+    #[test]
+    fn worker_progress_frame_preserves_stage() {
+        let frame = WorkerFrame::Progress {
+            stage: "restricted_token_ready".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_string(&frame).unwrap(),
+            r#"{"type":"progress","stage":"restricted_token_ready"}"#
+        );
     }
 }
