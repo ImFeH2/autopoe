@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "projectLicense": {
+    "source": "LICENSE",
+    "spdx": "Apache-2.0"
+  },
+  "resources": [
+    {
+      "name": "flowent-native",
+      "source": "bin/flowent-native{exe}",
+      "destination": "bin/flowent-native{exe}",
+      "executable": true,
+      "version": "0.3.10",
+      "sourceUrl": "https://github.com/ImFeH2/flowent/releases/tag/v0.3.10",
+      "sourceCodeUrl": "https://github.com/ImFeH2/flowent/tree/v0.3.10",
+      "licenses": [
+        {
+          "spdx": "Apache-2.0",
+          "source": "LICENSE",
+          "destination": "licenses/flowent-native-Apache-2.0.txt"
+        }
+      ]
+    },
+    {
+      "name": "ripgrep",
+      "source": "bin/rg{exe}",
+      "destination": "bin/rg{exe}",
+      "executable": true,
+      "version": "15.1.0",
+      "sourceUrl": "https://github.com/BurntSushi/ripgrep/releases/tag/15.1.0",
+      "sourceCodeUrl": "https://github.com/BurntSushi/ripgrep/tree/15.1.0",
+      "licenses": [
+        {
+          "spdx": "MIT",
+          "source": "licenses/ripgrep-MIT.txt",
+          "destination": "licenses/ripgrep-MIT.txt"
+        },
+        {
+          "spdx": "Unlicense",
+          "source": "licenses/ripgrep-UNLICENSE.txt",
+          "destination": "licenses/ripgrep-UNLICENSE.txt"
+        }
+      ]
+    },
+    {
+      "name": "bubblewrap",
+      "targets": ["linux-x64", "linux-arm64"],
+      "source": "bin/bwrap",
+      "destination": "bin/bwrap",
+      "executable": true,
+      "version": "0.11.0",
+      "sourceUrl": "https://github.com/containers/bubblewrap/releases/tag/v0.11.0",
+      "sourceCodeUrl": "https://github.com/containers/bubblewrap/tree/v0.11.0",
+      "buildProvenance": "provenance/bubblewrap.json",
+      "licenses": [
+        {
+          "spdx": "LGPL-2.0-or-later",
+          "source": "licenses/bubblewrap-COPYING",
+          "destination": "licenses/bubblewrap-COPYING"
+        }
+      ]
+    }
+  ]
+}

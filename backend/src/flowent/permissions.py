@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +17,7 @@ from flowent.builtin_tools import (
     tool_failure_content,
 )
 from flowent.patch import affected_paths
+from flowent.runtime_commands import flowent_command
 from flowent.sandbox import SandboxError, SandboxRunner, path_is_within
 from flowent.shell import shell_invocation
 from flowent.tool_protocol import (
@@ -25,7 +25,6 @@ from flowent.tool_protocol import (
     ToolResult,
     command_tool_result,
     text_tool_result,
-    tool_result_model_content,
 )
 
 SANDBOX_WITH_ADDITIONAL_PERMISSIONS = "with_additional_permissions"
@@ -225,29 +224,7 @@ async def run_shell_command_with_permissions(
     )
     if approval_data is not None:
         result = tool_result_with_fields(result, approval_data)
-    if result.ok or not is_likely_sandbox_denied_result(result):
-        return result
-    review_request = ApprovalReviewRequest(
-        action="sandbox_failure",
-        arguments=arguments,
-        cwd=context.cwd,
-        tool_name="shell_command",
-        tool_result=tool_failure_text(result),
-    )
-    decision = await review_approval(review_request)
-    review_data = approval_result_data(review_request, decision)
-    if decision.decision == "denied":
-        return ToolResult(
-            result=text_tool_result(
-                approval_denial_content(decision, review_request),
-                previous_result=result.result,
-                **review_data,
-            ),
-            ok=False,
-            title="Denied by reviewer",
-        )
-    retry_result = await shell_command_without_sandbox(arguments, context)
-    return tool_result_with_fields(retry_result, review_data)
+    return result
 
 
 async def run_apply_patch_with_permissions(
@@ -288,19 +265,15 @@ async def apply_patch_with_writable_paths(
     runner = SandboxRunner(cwd=context.cwd, writable_roots=writable_paths)
     try:
         result = await runner.run_async(
-            [
-                sys.executable,
-                "-m",
-                "flowent.cli",
-                "apply-patch",
-                "--cwd",
-                str(context.cwd),
-            ],
+            flowent_command("apply-patch", "--cwd", str(context.cwd)),
             input_text=patch,
         )
     except SandboxError as error:
         return ToolResult(
-            result=text_tool_result(str(error)), ok=False, title="Edit failed"
+            result=text_tool_result(str(error)),
+            ok=False,
+            title="Edit failed",
+            sandbox_failure_kind=error.failure.kind,
         )
 
     if result.exit_code != 0:
@@ -308,6 +281,9 @@ async def apply_patch_with_writable_paths(
             result=text_tool_result(tool_failure_content(result)),
             ok=False,
             title="Edit failed",
+            sandbox_failure_kind=(
+                result.failure.kind if result.failure is not None else None
+            ),
         )
     data = json.loads(result.stdout or "{}")
     return ToolResult(
@@ -329,16 +305,24 @@ async def shell_command_with_writable_paths(
     timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
     invocation = shell_invocation(command)
     collector = CommandOutputCollector(command, context.emit_event)
-    result = await SandboxRunner(
-        cwd=context.cwd,
-        writable_roots=writable_paths,
-    ).run_async(
-        invocation.args,
-        env=invocation.env,
-        on_stderr=collector.append_stderr,
-        on_stdout=collector.append_stdout,
-        timeout_seconds=timeout_seconds,
-    )
+    try:
+        result = await SandboxRunner(
+            cwd=context.cwd,
+            writable_roots=writable_paths,
+        ).run_async(
+            invocation.args,
+            env=invocation.env,
+            on_stderr=collector.append_stderr,
+            on_stdout=collector.append_stdout,
+            timeout_seconds=timeout_seconds,
+        )
+    except SandboxError as error:
+        return ToolResult(
+            result=text_tool_result(str(error)),
+            ok=False,
+            title="Command stopped",
+            sandbox_failure_kind=error.failure.kind,
+        )
     ok = result.exit_code == 0
     return ToolResult(
         result=command_tool_result(
@@ -350,77 +334,9 @@ async def shell_command_with_writable_paths(
         ),
         ok=ok,
         title=f"Ran {command}",
-    )
-
-
-def is_likely_sandbox_denied_result(result: ToolResult) -> bool:
-    payload = result.result
-    exit_code = int_result_field(payload.get("exit_code"))
-    if exit_code == 0:
-        return False
-    output = "\n".join(
-        str(payload.get(name, "") or "") for name in ["stderr", "stdout", "output"]
-    ).lower()
-    return any(
-        keyword in output
-        for keyword in [
-            "operation not permitted",
-            "permission denied",
-            "read-only file system",
-            "seccomp",
-            "sandbox",
-            "landlock",
-            "failed to write file",
-        ]
-    )
-
-
-def int_result_field(value: object) -> int:
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
-
-
-def tool_failure_text(result: ToolResult) -> str:
-    payload = result.result
-    stderr = str(payload.get("stderr", "") or "").strip()
-    stdout = str(payload.get("stdout", "") or "").strip()
-    parts: list[str] = []
-    for part in [stderr, stdout]:
-        if part and part not in parts:
-            parts.append(part)
-    if not parts:
-        content = tool_result_model_content(result).strip()
-        if content:
-            parts.append(content)
-    return "\n".join(parts)
-
-
-async def shell_command_without_sandbox(
-    arguments: dict[str, object],
-    context: ToolContext,
-) -> ToolResult:
-    command = str(arguments["command"])
-    timeout_seconds = number_argument(arguments, "timeout_seconds", 30)
-    invocation = shell_invocation(command)
-    result = await SandboxRunner(cwd=context.cwd).run_unsandboxed_async(
-        invocation.args, env=invocation.env, timeout_seconds=timeout_seconds
-    )
-    ok = result.exit_code == 0
-    return ToolResult(
-        result=command_tool_result(
-            command=command,
-            exit_code=result.exit_code,
-            stderr=result.stderr,
-            stdout=result.stdout,
+        sandbox_failure_kind=(
+            result.failure.kind if result.failure is not None else None
         ),
-        ok=ok,
-        title=f"Ran {command}",
     )
 
 

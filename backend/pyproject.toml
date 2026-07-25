@@ -37,6 +37,7 @@ classifiers = [
 ]
 dependencies = [
     "fastapi[standard]>=0.136.1",
+    "flowent-native==0.3.10",
     "litellm>=1.84.0",
     "mcp>=1.24.0",
     "uvicorn>=0.46.0",
@@ -46,9 +47,15 @@ dependencies = [
 dev = [
     "httpx>=0.28.1",
     "mypy>=1.19.1",
+    "pyinstaller>=6.14.1,<7.0.0",
     "pre-commit>=4.5.1",
     "pytest>=9.0.3",
     "ruff>=0.15.12",
+]
+native-build = [
+    "maturin==1.13.3",
+    "pyinstaller>=6.14.1,<7.0.0",
+    "pytest>=9.0.3,<10.0",
 ]
 
 [project.scripts]
@@ -62,6 +69,9 @@ Issues = "https://github.com/ImFeH2/flowent/issues"
 [build-system]
 requires = ["uv_build>=0.8.14,<0.9.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+flowent-native = { path = "../native/flowent-native" }
 
 [tool.ruff]
 target-version = "py311"

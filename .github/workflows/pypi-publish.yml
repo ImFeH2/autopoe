@@ -1,4 +1,5 @@
 name: Publish Python package
+run-name: Publish Python package ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 on:
   push:
@@ -19,60 +20,59 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  native:
+    name: Build native Python wheels
+    uses: ./.github/workflows/native-build.yml
+    with:
+      ref: refs/tags/${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      release_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
   build:
     name: Build Python package
+    needs: native
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       HUSKY: 0
+      SOURCE_DATE_EPOCH: 0
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6.0.8
-        with:
-          version: 10.33.2
-          run_install: false
+          ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          node-version: 24.15.0
+          package-manager-cache: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.13.13"
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v8.1.0
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
           enable-cache: true
+          version: "0.8.14"
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Prepare Python README
-        run: node scripts/prepare-python-readme.mjs
-
-      - name: Install Python dependencies
-        run: uv sync --project backend --frozen
-
-      - name: Install test tools
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap ripgrep
-
-      - name: Enable user namespaces
-        run: |
-          echo "kernel.apparmor_restrict_unprivileged_userns = 0" | sudo tee /etc/sysctl.d/99-userns.conf
-          sudo sysctl --system
+      - name: Download frontend files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: flowent-static
+          path: backend/src/flowent/static
 
       - name: Check package version
+        env:
+          EXPECTED_VERSION: ${{ needs.native.outputs.version }}
         run: |
           package_version="$(node -p "require('./package.json').version")"
-          python_version="$(uv run --project backend python -c "import tomllib; print(tomllib.load(open('backend/pyproject.toml','rb'))['project']['version'])")"
-          if [ "$package_version" != "$python_version" ]; then
-            echo "package.json version $package_version does not match backend version $python_version."
+          python_version="$(python -c "import tomllib; print(tomllib.load(open('backend/pyproject.toml','rb'))['project']['version'])")"
+          if [ "$package_version" != "$python_version" ] || [ "$python_version" != "$EXPECTED_VERSION" ]; then
+            echo "Package versions do not match native version $EXPECTED_VERSION."
             exit 1
           fi
           if [ "$RELEASE_TAG" != "v$python_version" ]; then
@@ -80,17 +80,11 @@ jobs:
             exit 1
           fi
 
-      - name: Check code quality
-        run: pnpm check
+      - name: Prepare Python package
+        run: node scripts/prepare-python-readme.mjs
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
+      - name: Build Python package
+        run: uv build --project backend --no-sources
 
       - name: Verify Python artifacts
         run: |
@@ -102,9 +96,9 @@ jobs:
           python -c "import sys, zipfile; names = set(zipfile.ZipFile(sys.argv[1]).namelist()); assert 'flowent/static/index.html' in names; assert 'flowent/static/flowent.png' in names" "$wheel"
 
       - name: Upload Python artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: python-dist
+          name: python-main
           path: |
             backend/dist/flowent-*.whl
             backend/dist/flowent-*.tar.gz
@@ -112,19 +106,57 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs:
+      - native
+      - build
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: pypi
     permissions:
       contents: read
       id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
-      - name: Download Python artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          name: python-dist
-          path: dist
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Download main Python artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: python-main
+          path: .release/publish
+
+      - name: Download native Python artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: native-*
+          path: .release/native
+          merge-multiple: true
+
+      - name: Collect and verify Python artifacts
+        run: |
+          find .release/native/python -maxdepth 1 -type f -name '*.whl' -exec cp '{}' .release/publish/ ';'
+          native_count="$(find .release/publish -maxdepth 1 -type f -name 'flowent_native-*.whl' | wc -l)"
+          main_wheel_count="$(find .release/publish -maxdepth 1 -type f -name 'flowent-*.whl' | wc -l)"
+          source_count="$(find .release/publish -maxdepth 1 -type f -name 'flowent-*.tar.gz' | wc -l)"
+          test "$native_count" -eq 6
+          test "$main_wheel_count" -eq 1
+          test "$source_count" -eq 1
+
+      - name: Check existing PyPI artifacts
+        id: preflight
+        env:
+          VERSION: ${{ needs.native.outputs.version }}
+        run: |
+          python scripts/release/prepare_pypi_publish.py --directory .release/publish --version "$VERSION"
+          remaining="$(find .release/publish -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l)"
+          echo "remaining=$remaining" >> "$GITHUB_OUTPUT"
 
       - name: Publish
-        uses: pypa/gh-action-pypi-publish@release/v1
+        if: steps.preflight.outputs.remaining != '0'
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247
+        with:
+          packages-dir: .release/publish

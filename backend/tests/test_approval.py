@@ -7,6 +7,7 @@ import pytest
 from flowent.approval import (
     ApprovalReviewRequest,
     ApprovalTranscriptEntry,
+    parse_review_decision,
     review_approval_request,
 )
 from flowent.llm import ProviderConnection, ProviderFormat
@@ -32,6 +33,22 @@ async def reviewer_stream(content: str) -> AsyncIterator[dict[str, object]]:
     midpoint = len(content) // 2
     yield reviewer_chunk(content[:midpoint])
     yield reviewer_chunk(content[midpoint:])
+
+
+def test_high_risk_assessment_is_denied_even_below_score_threshold() -> None:
+    decision = parse_review_decision(
+        json.dumps(
+            {
+                "risk_level": "high",
+                "risk_score": 79,
+                "rationale": "The action can expose credentials.",
+                "evidence": [],
+            }
+        )
+    )
+
+    assert decision.decision == "denied"
+    assert decision.reviewer_output
 
 
 @pytest.mark.anyio

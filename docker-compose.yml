@@ -4,6 +4,9 @@ services:
   flowent:
     image: ghcr.io/imfeh2/flowent:${FLOWENT_VERSION:-latest}
     restart: unless-stopped
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     environment:
       FLOWENT_HOST: 0.0.0.0
     ports:

@@ -1,0 +1,9 @@
+/target
+/python/flowent_native/runtime/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.so
+.venv/
+dist/
+*.egg-info/

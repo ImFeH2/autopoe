@@ -82,8 +82,12 @@ Flowent 在使用本地文件和命令时，会同时守住清晰的安全边界
 - 文件工具在工作空间和已经允许的路径中操作。
 - 额外访问权限会先经过审查。
 - 风险审查可以在执行前拦截范围过大、具有破坏性或涉及敏感内容的操作。
-- 命令在 Bubblewrap 沙箱中运行，文件系统访问范围清楚可控。
-- 沙箱执行出现问题后，会再次审查后续处理方式。
+- 命令在 Linux 上使用 Bubblewrap、在 macOS 上使用 Seatbelt、在 Windows 上使用
+  原生命令保护，并把写入范围限制在已经允许的位置。
+- 如果命令保护无法启动，本次操作会停止，不会在无保护状态下继续执行。
+- Windows 第一次执行受保护命令，或之后需要刷新保护设置时，会请求系统授权，用于
+  创建或修复专用本地组、受限本地账户和网络规则；设置完成后，Flowent 会自动继续
+  执行这条命令。
 
 Flowent 可以获得真正有用的工具，同时让工具能够触及的范围保持清楚、可控。
 
@@ -115,21 +119,22 @@ Flowent 在不同 Channel 中保持一致的身份和任务执行能力。除了
 
 ## 快速开始
 
-Flowent 使用 Bubblewrap 隔离工具执行，并使用 ripgrep 搜索文件。
+下一次 npm 和 PyPI 发布会包含 Flowent、Web 界面、文件搜索和命令保护所需文件，
+支持 glibc 2.17 或更高版本的 GNU/Linux、macOS 11 或更高版本，以及 Windows，
+每个平台都提供 x64 和 arm64 版本。Linux 包会包含 Bubblewrap，macOS 使用系统提供
+的 Seatbelt，Windows 包会包含原生命令保护程序。npm 和 pip 会自动选择对应版本，
+不需要另外安装 uv、Bubblewrap 或 ripgrep。
 
-安装系统依赖：
+目前公开的 0.3.10 版本早于这套内置运行文件。下一次发布完成前，请使用 Docker
+Compose 或源码开发方式运行。
 
-```bash
-sudo apt-get install bubblewrap ripgrep
-```
-
-通过 npm 安装：
+下一次发布完成后，可以通过 npm 安装（需要 Node.js 20.9 或更高版本）：
 
 ```bash
 npm install -g flowent
 ```
 
-或者通过 pip 安装：
+也可以通过 pip 安装（需要 Python 3.11 或更高版本，同样需要等待下一次发布）：
 
 ```bash
 pip install flowent
@@ -149,19 +154,29 @@ flowent
 flowent doctor
 ```
 
+检查结果会分别显示命令保护、文件搜索和内置运行文件是否可用。在 Windows 上，
+如果保护设置尚未完成或需要更新，这里会显示需要设置；下一次执行受保护命令时会请求
+系统授权。
+
 ### Docker Compose
 
 也可以通过 Docker Compose 运行：
 
 ```bash
+git clone https://github.com/ImFeH2/flowent.git
+cd flowent
 docker compose up
 ```
+
+镜像已经包含 Flowent、文件搜索和命令保护所需文件，宿主机不需要另外安装 uv、
+Bubblewrap 或 ripgrep。
 
 ## 开发
 
 Flowent 仍在积极开发中。
 
-安装仓库依赖并启动开发服务：
+源码开发使用 pnpm、uv、Rust 工具链和系统提供的 ripgrep，Linux 还需要 Bubblewrap。
+在 Debian 或 Ubuntu 上，可以通过下面的命令安装系统工具并启动开发服务：
 
 ```bash
 sudo apt-get install bubblewrap ripgrep

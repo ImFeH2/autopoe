@@ -16,7 +16,13 @@ from flowent.builtin_tools import default_web_search, run_tool
 from flowent.llm import ProviderConnection, ProviderFormat
 from flowent.main import create_app
 from flowent.network import flowent_user_agent
-from flowent.sandbox import CommandResult, SandboxCommand, SandboxRunner
+from flowent.sandbox import (
+    CommandResult,
+    SandboxCommand,
+    SandboxError,
+    SandboxFailureKind,
+    SandboxRunner,
+)
 from flowent.tool_protocol import (
     ToolContext,
     ToolResult,
@@ -866,23 +872,21 @@ def test_sandbox_command_binds_existing_writable_file(tmp_path, monkeypatch) -> 
     assert (str(writable_file), str(writable_file)) in sandbox_bind_pairs(command.args)
 
 
-def test_sandbox_proc_preflight_does_not_hide_non_proc_errors(
-    tmp_path, monkeypatch
-) -> None:
+def test_sandbox_proc_preflight_stops_on_non_proc_errors(tmp_path, monkeypatch) -> None:
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("#!/bin/sh\necho 'bwrap: unrelated startup failure' >&2\nexit 1\n")
     bwrap.chmod(0o700)
     monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: str(bwrap))
 
-    assert SandboxRunner(cwd=tmp_path).build_command(["/bin/true"]).args[0:7] == [
-        str(bwrap),
-        "--ro-bind",
-        "/",
-        "/",
-        "--dev",
-        "/dev",
-        "--proc",
-    ]
+    def failed_probe() -> bool:
+        raise OSError("Bubblewrap could not start command protection.")
+
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", failed_probe)
+
+    with pytest.raises(SandboxError) as error:
+        SandboxRunner(cwd=tmp_path).build_command(["/bin/true"])
+
+    assert error.value.failure.kind is SandboxFailureKind.BACKEND_UNAVAILABLE
 
 
 def test_shell_command_runs_without_proc_mount_after_preflight_fallback(
@@ -1306,6 +1310,31 @@ def test_apply_patch_uses_internal_subcommand(tmp_path, monkeypatch) -> None:
     assert result.title == "Edited files"
     assert calls
     assert calls[0][1:4] == ["-m", "flowent.cli", "apply-patch"]
+
+
+def test_frozen_apply_patch_uses_flowent_subcommand(tmp_path, monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(self, command, **kwargs):
+        calls.append(command)
+        from flowent.sandbox import CommandResult
+
+        return CommandResult(
+            command=" ".join(command), exit_code=0, stderr="", stdout="{}"
+        )
+
+    monkeypatch.setattr(SandboxRunner, "run", fake_run)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    patch = """*** Begin Patch
+*** Add File: created.txt
++hello
+*** End Patch
+"""
+
+    result = run_tool("apply_patch", {"patch": patch}, ToolContext(cwd=tmp_path))
+
+    assert result.ok
+    assert calls[0][:2] == [sys.executable, "apply-patch"]
 
 
 def test_apply_patch_reports_patch_error_when_stderr_has_warning(

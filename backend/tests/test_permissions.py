@@ -8,13 +8,17 @@ from flowent.approval import ApprovalReviewDecision, ApprovalReviewRequest
 from flowent.main import create_app
 from flowent.permissions import run_tool_with_path_permissions
 from flowent.sandbox import CommandResult, SandboxRunner
+from flowent.sandboxing import SandboxFailure, SandboxFailureKind
 from flowent.storage import StateStore
 from flowent.tool_protocol import ToolContext, tool_result_model_content
 
 
-class UserRecord:
-    def __init__(self, pw_shell: str) -> None:
-        self.pw_shell = pw_shell
+def policy_denied_failure() -> SandboxFailure:
+    return SandboxFailure(
+        kind=SandboxFailureKind.POLICY_DENIED,
+        message="Command protection denied this operation.",
+        backend="test",
+    )
 
 
 def test_app_state_persists_writable_paths_across_app_instances(
@@ -357,19 +361,12 @@ async def test_declared_missing_write_path_is_not_precreated_by_sandbox(
     assert not result.ok
     assert not missing_path.exists()
     assert not missing_path.parent.exists()
-    assert [request.action for request in reviews] == [
-        "additional_permissions",
-        "sandbox_failure",
-    ]
-    assert result.result["approval"]["decision"] == "denied"
-    assert (
-        result.result["approval"]["tool_result"]
-        == "cannot create requested path: Read-only file system"
-    )
+    assert [request.action for request in reviews] == ["additional_permissions"]
+    assert result.result["approval"]["decision"] == "approved"
 
 
 @pytest.mark.anyio
-async def test_sandbox_denied_shell_command_is_reviewed_and_retried_without_sandbox(
+async def test_policy_denied_shell_command_stays_protected(
     tmp_path, monkeypatch
 ) -> None:
     calls: list[str] = []
@@ -382,30 +379,14 @@ async def test_sandbox_denied_shell_command_is_reviewed_and_retried_without_sand
             exit_code=1,
             stderr="failed to write file: Read-only file system\n",
             stdout="",
-        )
-
-    async def fake_run_unsandboxed_async(self, command, **kwargs):
-        calls.append("unsandboxed")
-        return CommandResult(
-            command=" ".join(command),
-            exit_code=0,
-            stderr="",
-            stdout="created",
+            failure=policy_denied_failure(),
         )
 
     async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
         reviews.append(request)
-        return ApprovalReviewDecision(
-            decision="approved", reason="Retry is consistent with the task."
-        )
+        return ApprovalReviewDecision(decision="approved", reason="Allowed.")
 
     monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
-    monkeypatch.setattr(
-        SandboxRunner,
-        "run_unsandboxed_async",
-        fake_run_unsandboxed_async,
-        raising=False,
-    )
 
     result = await run_tool_with_path_permissions(
         "shell_command",
@@ -415,172 +396,11 @@ async def test_sandbox_denied_shell_command_is_reviewed_and_retried_without_sand
         writable_paths=[],
     )
 
-    assert result.ok
-    assert result.result["output"] == "created"
-    assert calls == ["sandbox", "unsandboxed"]
-    assert reviews[0].action == "sandbox_failure"
-    assert "Read-only file system" in reviews[0].tool_result
-    assert result.result["approval"]["action"] == "sandbox_failure"
-    assert result.result["approval"]["decision"] == "approved"
-    assert (
-        result.result["approval"]["tool_result"]
-        == "failed to write file: Read-only file system"
-    )
-
-
-@pytest.mark.anyio
-async def test_sandbox_retry_uses_default_shell(
-    tmp_path, monkeypatch, make_executable_file
-) -> None:
-    shell = make_executable_file(tmp_path / "user-shell")
-    calls: list[tuple[str, list[str], dict[str, str] | None]] = []
-
-    async def fake_run_async(self, command, **kwargs):
-        calls.append(("sandbox", command, kwargs.get("env")))
-        return CommandResult(
-            command=" ".join(command),
-            exit_code=1,
-            stderr="failed to write file: Read-only file system\n",
-            stdout="",
-        )
-
-    async def fake_run_unsandboxed_async(self, command, **kwargs):
-        calls.append(("unsandboxed", command, kwargs.get("env")))
-        return CommandResult(
-            command=" ".join(command),
-            exit_code=0,
-            stderr="",
-            stdout="created",
-        )
-
-    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
-        return ApprovalReviewDecision(
-            decision="approved", reason="Retry is consistent with the task."
-        )
-
-    monkeypatch.setenv("SHELL", str(shell))
-    monkeypatch.setattr("pwd.getpwuid", lambda _uid: UserRecord(str(shell)))
-    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
-    monkeypatch.setattr(
-        SandboxRunner,
-        "run_unsandboxed_async",
-        fake_run_unsandboxed_async,
-        raising=False,
-    )
-
-    result = await run_tool_with_path_permissions(
-        "shell_command",
-        {"command": "touch output.txt"},
-        ToolContext(cwd=tmp_path / "work"),
-        review_approval=approve,
-        writable_paths=[],
-    )
-
-    assert result.ok
-    assert calls == [
-        ("sandbox", [str(shell), "-c", "touch output.txt"], {"SHELL": str(shell)}),
-        (
-            "unsandboxed",
-            [str(shell), "-c", "touch output.txt"],
-            {"SHELL": str(shell)},
-        ),
-    ]
-
-
-@pytest.mark.anyio
-async def test_sandbox_denied_shell_command_is_not_retried_when_reviewer_denies(
-    tmp_path, monkeypatch
-) -> None:
-    calls: list[str] = []
-
-    async def fake_run_async(self, command, **kwargs):
-        calls.append("sandbox")
-        return CommandResult(
-            command=" ".join(command),
-            exit_code=1,
-            stderr="failed to write file: Read-only file system\n",
-            stdout="",
-        )
-
-    async def fake_run_unsandboxed_async(self, command, **kwargs):
-        calls.append("unsandboxed")
-        return CommandResult(
-            command=" ".join(command),
-            exit_code=0,
-            stderr="",
-            stdout="created",
-        )
-
-    async def deny(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
-        return ApprovalReviewDecision(decision="denied", reason="Too broad.")
-
-    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
-    monkeypatch.setattr(
-        SandboxRunner,
-        "run_unsandboxed_async",
-        fake_run_unsandboxed_async,
-        raising=False,
-    )
-
-    result = await run_tool_with_path_permissions(
-        "shell_command",
-        {"command": "touch output.txt"},
-        ToolContext(cwd=tmp_path / "work"),
-        review_approval=deny,
-        writable_paths=[],
-    )
-
     assert not result.ok
     assert calls == ["sandbox"]
-    assert "Too broad." in tool_result_model_content(result)
-    assert result.result["approval"]["decision"] == "denied"
-    assert (
-        result.result["approval"]["tool_result"]
-        == "failed to write file: Read-only file system"
-    )
-
-
-@pytest.mark.anyio
-async def test_sandbox_denied_shell_command_preserves_failure_output_when_review_fails(
-    tmp_path, monkeypatch
-) -> None:
-    calls: list[str] = []
-
-    async def fake_run_async(self, command, **kwargs):
-        calls.append("sandbox")
-        return CommandResult(
-            command=" ".join(command),
-            exit_code=1,
-            stderr="mkdir: cannot create directory '/root/.local/state': Permission denied\n",
-            stdout="",
-        )
-
-    async def deny_after_review_failure(
-        request: ApprovalReviewRequest,
-    ) -> ApprovalReviewDecision:
-        return ApprovalReviewDecision(
-            decision="denied",
-            reason="Approval reviewer failed: network unavailable",
-        )
-
-    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
-
-    result = await run_tool_with_path_permissions(
-        "shell_command",
-        {"command": "pnpm test"},
-        ToolContext(cwd=tmp_path / "work"),
-        review_approval=deny_after_review_failure,
-        writable_paths=[],
-    )
-
-    assert not result.ok
-    assert calls == ["sandbox"]
-    assert result.result["approval"]["decision"] == "denied"
-    assert "network unavailable" in result.result["approval"]["reason"]
-    assert (
-        result.result["approval"]["tool_result"]
-        == "mkdir: cannot create directory '/root/.local/state': Permission denied"
-    )
+    assert reviews == []
+    assert result.sandbox_failure_kind == SandboxFailureKind.POLICY_DENIED
+    assert "Read-only file system" in tool_result_model_content(result)
 
 
 @pytest.mark.anyio
@@ -597,6 +417,7 @@ async def test_command_text_is_not_used_to_guess_write_paths(
             exit_code=1,
             stderr=f"rm: cannot remove '{outside / 'file.txt'}': Read-only file system\n",
             stdout="",
+            failure=policy_denied_failure(),
         )
 
     async def deny(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
@@ -616,8 +437,82 @@ async def test_command_text_is_not_used_to_guess_write_paths(
     )
 
     assert not result.ok
-    assert reviews[0].action == "sandbox_failure"
-    assert reviews[0].write_paths == []
+    assert reviews == []
+
+
+@pytest.mark.anyio
+async def test_backend_failure_is_not_reviewed_or_retried(
+    tmp_path, monkeypatch
+) -> None:
+    calls: list[str] = []
+    reviews: list[ApprovalReviewRequest] = []
+
+    async def fake_run_async(self, command, **kwargs):
+        calls.append("protected")
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=1,
+            stderr="helper: Permission denied\n",
+            stdout="",
+            failure=SandboxFailure(
+                kind=SandboxFailureKind.BACKEND_LAUNCH_FAILED,
+                message="Command protection could not start the command.",
+                backend="test",
+            ),
+        )
+
+    async def approve(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        reviews.append(request)
+        return ApprovalReviewDecision(decision="approved", reason="Allowed.")
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+
+    result = await run_tool_with_path_permissions(
+        "shell_command",
+        {"command": "touch output.txt"},
+        ToolContext(cwd=tmp_path / "work"),
+        review_approval=approve,
+        writable_paths=[],
+    )
+
+    assert not result.ok
+    assert calls == ["protected"]
+    assert reviews == []
+    assert result.sandbox_failure_kind == SandboxFailureKind.BACKEND_LAUNCH_FAILED
+    assert "Permission denied" in tool_result_model_content(result)
+
+
+@pytest.mark.anyio
+async def test_unclassified_error_text_is_not_treated_as_policy_denial(
+    tmp_path, monkeypatch
+) -> None:
+    reviews: list[ApprovalReviewRequest] = []
+
+    async def fake_run_async(self, command, **kwargs):
+        return CommandResult(
+            command=" ".join(command),
+            exit_code=1,
+            stderr="Permission denied\n",
+            stdout="",
+        )
+
+    async def review(request: ApprovalReviewRequest) -> ApprovalReviewDecision:
+        reviews.append(request)
+        return ApprovalReviewDecision(decision="approved", reason="Allowed.")
+
+    monkeypatch.setattr(SandboxRunner, "run_async", fake_run_async)
+
+    result = await run_tool_with_path_permissions(
+        "shell_command",
+        {"command": "false"},
+        ToolContext(cwd=tmp_path / "work"),
+        review_approval=review,
+        writable_paths=[],
+    )
+
+    assert not result.ok
+    assert reviews == []
+    assert result.sandbox_failure_kind is None
 
 
 @pytest.mark.anyio

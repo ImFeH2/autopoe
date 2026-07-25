@@ -81,6 +81,7 @@ os.environ["PATH"] = f"{_test_bin}{os.pathsep}{os.environ.get('PATH', '')}"
 @pytest.fixture(autouse=True)
 def sandbox_available(monkeypatch):
     monkeypatch.setattr("flowent.sandbox.sandbox_binary", lambda: "/usr/bin/bwrap")
+    monkeypatch.setattr("flowent.sandbox.sandbox_supports_proc_mount", lambda: False)
     monkeypatch.setattr("flowent.system_tools.ripgrep_binary", lambda: str(_test_rg))
 
 

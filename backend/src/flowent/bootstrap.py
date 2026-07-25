@@ -16,7 +16,13 @@ from flowent.llm import CompletionCallable
 from flowent.logging import ensure_logging_configured
 from flowent.mcp import McpManager, McpTransport
 from flowent.paths import resolve_workdir
-from flowent.sandbox import ensure_sandbox_available
+from flowent.sandbox import (
+    SandboxError,
+    SandboxFailure,
+    SandboxFailureKind,
+    SandboxRunner,
+    SandboxState,
+)
 from flowent.storage import StateStore, WorkflowRepository
 from flowent.system_tools import ensure_ripgrep_available
 from flowent.workflow_service import WorkflowService
@@ -56,7 +62,17 @@ def frontend_static_directory() -> Path:
 
 def ensure_application_requirements() -> None:
     ensure_logging_configured()
-    ensure_sandbox_available()
+    protection_status = SandboxRunner().status
+    if (
+        not protection_status.available
+        and protection_status.state is not SandboxState.SETUP_REQUIRED
+    ):
+        failure = protection_status.failure or SandboxFailure(
+            kind=SandboxFailureKind.BACKEND_UNAVAILABLE,
+            message="Command protection is not ready.",
+            backend=protection_status.backend,
+        )
+        raise SandboxError(failure=failure)
     ensure_ripgrep_available()
 
 

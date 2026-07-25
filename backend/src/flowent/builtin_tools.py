@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
-import sys
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
@@ -11,6 +10,7 @@ from pathlib import Path
 
 from flowent.network import flowent_user_agent
 from flowent.patch import affected_paths
+from flowent.runtime_commands import flowent_command
 from flowent.sandbox import SandboxError, SandboxRunner
 from flowent.shell import shell_invocation
 from flowent.system_tools import ensure_ripgrep_available
@@ -182,7 +182,7 @@ def apply_patch_tool(arguments: ToolArguments, context: ToolContext) -> ToolResu
     for path in paths:
         runner.ensure_writable_path(path)
     result = runner.run(
-        [sys.executable, "-m", "flowent.cli", "apply-patch", "--cwd", str(context.cwd)],
+        flowent_command("apply-patch", "--cwd", str(context.cwd)),
         input_text=patch,
     )
     if result.exit_code != 0:
@@ -207,7 +207,7 @@ async def apply_patch_tool_async(
     for path in paths:
         runner.ensure_writable_path(path)
     result = await runner.run_async(
-        [sys.executable, "-m", "flowent.cli", "apply-patch", "--cwd", str(context.cwd)],
+        flowent_command("apply-patch", "--cwd", str(context.cwd)),
         input_text=patch,
     )
     if result.exit_code != 0:
@@ -275,6 +275,9 @@ def shell_command(arguments: ToolArguments, context: ToolContext) -> ToolResult:
         ),
         ok=ok,
         title=f"Ran {command}",
+        sandbox_failure_kind=(
+            result.failure.kind if result.failure is not None else None
+        ),
     )
 
 
@@ -303,6 +306,9 @@ async def shell_command_async(
         ),
         ok=ok,
         title=f"Ran {command}",
+        sandbox_failure_kind=(
+            result.failure.kind if result.failure is not None else None
+        ),
     )
 
 

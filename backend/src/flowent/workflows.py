@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import math
 import re
-import sys
 import tempfile
 from collections import defaultdict, deque
 from collections.abc import Mapping, Sequence
@@ -16,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from flowent.context import runtime_context_messages
 from flowent.llm import ChatMessage, ProviderConnection
+from flowent.runtime_commands import python_runner_command
 from flowent.sandbox import SandboxRunner
 from flowent.storage import (
     StateStore,
@@ -90,31 +90,6 @@ class WorkflowRunRequestValues(BaseModel):
 
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z0-9_.-]+)\.output\s*\}\}")
-PYTHON_CODE_RUNNER = r"""
-import contextlib
-import io
-import json
-import sys
-
-payload = json.loads(sys.stdin.read() or "{}")
-namespace = {
-    "input": payload.get("input", ""),
-    "inputs": payload.get("inputs", []),
-    "output": "",
-}
-stdout = io.StringIO()
-with contextlib.redirect_stdout(stdout):
-    exec(str(payload.get("code", "")), namespace)
-captured = stdout.getvalue()
-result = namespace.get("output")
-if result is None:
-    result = ""
-if result == "" and captured:
-    result = captured.rstrip("\n")
-if not isinstance(result, str):
-    result = json.dumps(result, ensure_ascii=False)
-print(result, end="")
-"""
 
 
 def validate_workflow_draft(workflow: WorkflowDraft) -> WorkflowDraft:
@@ -533,7 +508,7 @@ async def run_code_node(node: StoredWorkflowNode, upstream: list[str]) -> str:
         return joined_text(upstream)
     with tempfile.TemporaryDirectory(prefix="flowent-workflow-code-") as code_dir:
         result = await SandboxRunner(timeout_seconds=10, cwd=Path(code_dir)).run_async(
-            [sys.executable, "-I", "-c", PYTHON_CODE_RUNNER],
+            python_runner_command(),
             input_text=json.dumps(
                 {"code": code, "input": joined_text(upstream), "inputs": upstream},
                 ensure_ascii=False,

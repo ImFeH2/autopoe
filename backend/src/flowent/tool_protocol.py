@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from flowent.sandboxing import SandboxFailureKind
+
 ToolArguments = dict[str, object]
 ToolEventData = dict[str, object]
 ToolPayload = dict[str, object]
@@ -19,6 +21,9 @@ class ToolResult(BaseModel):
     result: ToolPayload = Field(default_factory=dict)
     ok: bool = True
     title: str
+    sandbox_failure_kind: SandboxFailureKind | None = Field(
+        default=None, exclude=True, repr=False
+    )
 
 
 ToolEventEmitter = Callable[[ToolEventData], Awaitable[None]]

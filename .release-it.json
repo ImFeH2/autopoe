@@ -24,12 +24,31 @@
       "out": [
         {
           "file": "backend/pyproject.toml",
-          "path": "project.version"
+          "type": "text/plain"
+        },
+        {
+          "file": "native/flowent-native/Cargo.toml",
+          "path": "package.version"
+        },
+        {
+          "file": "native/flowent-sandbox-windows/Cargo.toml",
+          "path": "package.version"
+        },
+        {
+          "file": "native/flowent-native/Cargo.lock",
+          "type": "text/plain"
+        },
+        {
+          "file": "native/flowent-sandbox-windows/Cargo.lock",
+          "type": "text/plain"
         }
       ]
     }
   },
   "hooks": {
-    "after:bump": "uv lock --project backend"
+    "after:bump": [
+      "uv lock --project backend",
+      "python scripts/release/check_versions.py"
+    ]
   }
 }

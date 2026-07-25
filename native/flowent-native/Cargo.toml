@@ -1,0 +1,9 @@
+[package]
+name = "flowent-native"
+version = "0.3.10"
+edition = "2024"
+description = "Platform runtime resources for Flowent"
+license = "Apache-2.0"
+repository = "https://github.com/ImFeH2/flowent"
+
+[dependencies]

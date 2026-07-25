@@ -1,5 +1,6 @@
 import pytest
 
+from flowent.sandboxing import SandboxFailureKind
 from flowent.tool_catalog import tool_call_title, tool_specs
 from flowent.tool_protocol import ToolResult
 
@@ -166,10 +167,14 @@ def test_builtin_tool_titles_match_agent_contract(
 
 
 def test_tool_result_serialization_matches_agent_event_contract() -> None:
-    result = ToolResult(title="Read notes.txt")
+    result = ToolResult(
+        title="Read notes.txt",
+        sandbox_failure_kind=SandboxFailureKind.BACKEND_UNAVAILABLE,
+    )
 
     assert result.model_dump() == {
         "result": {},
         "ok": True,
         "title": "Read notes.txt",
     }
+    assert result.sandbox_failure_kind == SandboxFailureKind.BACKEND_UNAVAILABLE

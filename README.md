@@ -88,8 +88,14 @@ Flowent combines capable local tools with clear security boundaries.
 - File tools work within the workspace and explicitly allowed paths.
 - Additional access goes through permission review.
 - Risk review can stop broad, destructive, or sensitive actions before execution.
-- Commands run inside a Bubblewrap sandbox with controlled filesystem access.
-- Sandbox failures return to review before any broader retry is considered.
+- Commands use Bubblewrap on Linux, Seatbelt on macOS, and native Windows
+  protection, with write access limited to approved locations.
+- If command protection cannot start, the operation stops instead of running
+  without protection.
+- On Windows, the first protected command, or a later protection setup refresh,
+  asks for system approval to create or repair a dedicated local group,
+  restricted local accounts, and a network rule. Flowent resumes the command
+  after setup completes.
 
 You can give Flowent useful tools while keeping their reach visible and
 controlled.
@@ -124,21 +130,24 @@ architecture is ready for more integrations alongside Web and Telegram.
 
 ## Quick start
 
-Flowent requires Bubblewrap for tool isolation and ripgrep for file search.
+The next npm and PyPI release will include the Flowent runtime, web app, file
+search, and the files needed for command protection. Packages cover GNU/Linux
+with glibc 2.17 or newer, macOS 11 or newer, and Windows on x64 and arm64. Linux
+packages include Bubblewrap, macOS uses the Seatbelt service provided by the
+operating system, and Windows packages include the native protection helper.
+npm and pip select the matching package, so uv, Bubblewrap, and ripgrep do not
+need to be installed separately.
 
-Install the system requirements:
+The currently published 0.3.10 packages predate this bundled runtime. Use
+Docker Compose or source development until the next release is available.
 
-```bash
-sudo apt-get install bubblewrap ripgrep
-```
-
-Install Flowent with npm:
+After the next release, install Flowent with npm (Node.js 20.9 or later):
 
 ```bash
 npm install -g flowent
 ```
 
-Or install it with pip:
+Or, after the next release, install it with pip (Python 3.11 or later):
 
 ```bash
 pip install flowent
@@ -158,19 +167,30 @@ To check whether your system is ready:
 flowent doctor
 ```
 
+The check reports command protection, file search, and built-in runtime files.
+On Windows, it reports when setup is required; the approval prompt appears when
+Flowent runs the next protected command.
+
 ### Docker Compose
 
 You can also run Flowent with Docker Compose:
 
 ```bash
+git clone https://github.com/ImFeH2/flowent.git
+cd flowent
 docker compose up
 ```
+
+The image includes its runtime, file search, and command protection requirements.
+You don't need to install uv, Bubblewrap, or ripgrep on the host.
 
 ## Development
 
 Flowent is under active development.
 
-Install the repository dependencies and start the development server:
+Source development uses pnpm, uv, the Rust toolchain, and system ripgrep. Linux
+also needs Bubblewrap. On Debian or Ubuntu, install the system tools and start
+the development server with:
 
 ```bash
 sudo apt-get install bubblewrap ripgrep

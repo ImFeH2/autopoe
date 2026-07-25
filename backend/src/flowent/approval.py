@@ -149,15 +149,15 @@ def parse_review_decision(content: str) -> ApprovalReviewDecision:
     if not isinstance(parsed, Mapping):
         raise ValueError("Approval reviewer did not return a JSON object.")
     assessment = ApprovalRiskAssessment.model_validate(parsed)
+    denied = (
+        assessment.risk_level == "high"
+        or assessment.risk_score >= APPROVAL_RISK_THRESHOLD
+    )
     return ApprovalReviewDecision(
-        decision=(
-            "denied" if assessment.risk_score >= APPROVAL_RISK_THRESHOLD else "approved"
-        ),
+        decision="denied" if denied else "approved",
         evidence=assessment.evidence,
         reason=assessment.rationale,
-        reviewer_output=content
-        if assessment.risk_score >= APPROVAL_RISK_THRESHOLD
-        else "",
+        reviewer_output=content if denied else "",
         risk_level=assessment.risk_level,
         risk_score=assessment.risk_score,
     )
