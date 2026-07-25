@@ -72,6 +72,8 @@ pub struct WorkerRequest {
     pub account_sid: String,
     pub base_sid: String,
     pub capability_sid: String,
+    #[serde(default)]
+    pub trace: bool,
 }
 
 impl WorkerRequest {
@@ -133,7 +135,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{NetworkMode, PROTOCOL_VERSION, SandboxPolicy, WorkerFrame};
+    use super::{NetworkMode, PROTOCOL_VERSION, SandboxPolicy, WorkerFrame, WorkerRequest};
     use std::path::PathBuf;
 
     #[test]
@@ -194,5 +196,15 @@ mod tests {
             serde_json::to_string(&frame).unwrap(),
             r#"{"type":"progress","stage":"restricted_token_ready"}"#
         );
+    }
+
+    #[test]
+    fn worker_request_trace_defaults_to_disabled() {
+        let request: WorkerRequest = serde_json::from_str(
+            r#"{"version":1,"policy":{"cwd":"/workspace","runtime_dir":"/runtime","status_file":"/status.json"},"command":["command"],"account_sid":"account","base_sid":"base","capability_sid":"capability"}"#,
+        )
+        .unwrap();
+
+        assert!(!request.trace);
     }
 }

@@ -5,14 +5,17 @@ import sys
 import tempfile
 from pathlib import Path
 
-from flowent.sandbox import SandboxRunner
+from flowent.sandbox import CommandResult, SandboxRunner
 from flowent.sandboxing.linux import LinuxSandboxBackend
 from flowent.sandboxing.resources import ExecutableResolver, native_resource_path
+from flowent.shell import windows_system_shell_paths
 
 PROBE_SOURCE = """
+import faulthandler
 import sys
 from pathlib import Path
 
+faulthandler.dump_traceback_later(10)
 allowed = Path(sys.argv[1])
 blocked = Path(sys.argv[2])
 allowed.write_text("ready", encoding="utf8")
@@ -22,13 +25,15 @@ except OSError:
     pass
 else:
     raise SystemExit(20)
+faulthandler.cancel_dump_traceback_later()
 print("ready", end="")
 """
 
 
 def _runner(cwd: Path) -> SandboxRunner:
     if not sys.platform.startswith("linux"):
-        return SandboxRunner(cwd=cwd, timeout_seconds=60)
+        timeout = 20 if sys.platform == "win32" else 60
+        return SandboxRunner(cwd=cwd, timeout_seconds=timeout)
     resolver = ExecutableResolver(
         system_names=(),
         bundled_provider=lambda: native_resource_path("bubblewrap"),
@@ -38,6 +43,21 @@ def _runner(cwd: Path) -> SandboxRunner:
         timeout_seconds=60,
         backend=LinuxSandboxBackend(resolver=resolver),
     )
+
+
+def _environment() -> dict[str, str] | None:
+    if sys.platform == "win32":
+        return {"FLOWENT_NATIVE_TRACE": "1"}
+    return None
+
+
+def _require_success(result: CommandResult, label: str) -> None:
+    if result.exit_code == 0 and result.failure is None:
+        return
+    message = result.stderr
+    if not message and result.failure is not None:
+        message = result.failure.message
+    raise RuntimeError(f"{label}: {message or 'Protected command failed.'}")
 
 
 def probe_command_protection(root: Path) -> None:
@@ -53,6 +73,14 @@ def probe_command_protection(root: Path) -> None:
         allowed_file = workspace / "allowed.txt"
         blocked_file = boundary / "blocked.txt"
         runner = _runner(workspace)
+        if sys.platform == "win32":
+            _, cmd = windows_system_shell_paths()
+            launch_result = runner.run(
+                [cmd, "/d", "/c", "exit", "0"],
+                env=_environment(),
+            )
+            _require_success(launch_result, "Windows protected process launch failed")
+            print("Windows protected process launch passed.")
         result = runner.run(
             [
                 sys.executable,
@@ -62,13 +90,9 @@ def probe_command_protection(root: Path) -> None:
                 str(allowed_file),
                 str(blocked_file),
             ],
-            env={"FLOWENT_NATIVE_TRACE": "1"} if sys.platform == "win32" else None,
+            env=_environment(),
         )
-        if result.exit_code != 0 or result.failure is not None:
-            message = result.stderr
-            if not message and result.failure is not None:
-                message = result.failure.message
-            raise RuntimeError(message or "Protected command failed.")
+        _require_success(result, "Command protection boundary failed")
         if result.stdout != "ready":
             raise RuntimeError("Protected command returned unexpected output.")
         if allowed_file.read_text(encoding="utf8") != "ready":

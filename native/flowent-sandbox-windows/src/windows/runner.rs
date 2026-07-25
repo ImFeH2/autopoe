@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode;
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, GetExitCodeProcess,
-    LOGON_WITH_PROFILE, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess,
-    WaitForSingleObject,
+    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW,
+    GetExitCodeProcess, LOGON_WITH_PROFILE, PROCESS_INFORMATION, ResumeThread, STARTUPINFOW,
+    TerminateProcess, WaitForSingleObject,
 };
 
 use crate::error::{AppError, AppResult};
@@ -22,7 +23,11 @@ use super::setup::{AccountCredentials, InstalledSetup};
 use super::token::verify_current_account;
 use super::util::{OwnedHandle, quote_command, random_hex, sid_from_string, wide, wide_path};
 
+const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+
 pub fn run_parent(installed: &InstalledSetup, policy: SandboxPolicy, command: Vec<String>) -> i32 {
+    suppress_system_dialogs();
     let status_path = policy.status_file.clone();
     match run_parent_inner(installed, &policy, command) {
         Ok(exit_code) => exit_code,
@@ -74,6 +79,7 @@ fn run_parent_inner(
         account_sid: account_sid.clone(),
         base_sid: installed.marker.group_sid.clone(),
         capability_sid,
+        trace: trace_enabled(),
     };
     request.validate()?;
     pipe.send(&request)?;
@@ -101,7 +107,10 @@ fn run_parent_inner(
                         AppError::io("Could not forward command error output", error)
                     })?;
             }
-            WorkerFrame::Exited { exit_code } => break Ok(exit_code),
+            WorkerFrame::Exited { exit_code } => {
+                trace(&format!("command_exited_{exit_code}"));
+                break Ok(exit_code);
+            }
             WorkerFrame::Failed { code, message } => {
                 break Err(AppError::windows(code, message));
             }
@@ -120,6 +129,7 @@ fn run_parent_inner(
 }
 
 pub fn run_worker(pipe_name: &str) -> i32 {
+    suppress_system_dialogs();
     let pipe = match Pipe::connect_client(pipe_name) {
         Ok(pipe) => pipe,
         Err(error) => {
@@ -133,17 +143,18 @@ pub fn run_worker(pipe_name: &str) -> i32 {
 fn run_worker_connected(mut pipe: Pipe) -> i32 {
     let prepared = (|| -> AppResult<(WorkerRequest, process::ProtectedProcess)> {
         let request = pipe.receive::<WorkerRequest>()?;
-        send_progress(&mut pipe, "request_received")?;
+        let trace = request.trace;
+        send_progress(&mut pipe, trace, "request_received")?;
         request.validate()?;
-        send_progress(&mut pipe, "request_validated")?;
+        send_progress(&mut pipe, trace, "request_validated")?;
         verify_current_account(&request.account_sid, &request.base_sid)?;
-        send_progress(&mut pipe, "identity_verified")?;
+        send_progress(&mut pipe, trace, "identity_verified")?;
         let child = process::spawn(
             &request.command,
             &request.policy.cwd,
             &request.base_sid,
             &request.capability_sid,
-            |stage| send_progress(&mut pipe, stage),
+            |stage| send_progress(&mut pipe, trace, stage),
         )?;
         Ok((request, child))
     })();
@@ -227,13 +238,19 @@ fn trace(stage: &str) {
     }
 }
 
-fn send_progress(pipe: &mut Pipe, stage: &'static str) -> AppResult<()> {
-    if trace_enabled() {
+fn send_progress(pipe: &mut Pipe, enabled: bool, stage: &'static str) -> AppResult<()> {
+    if enabled {
         pipe.send(&WorkerFrame::Progress {
             stage: stage.to_string(),
         })?;
     }
     Ok(())
+}
+
+fn suppress_system_dialogs() {
+    unsafe {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    }
 }
 
 fn send_connected_failure(pipe: &mut Pipe, error: AppError) -> i32 {
@@ -320,7 +337,7 @@ fn launch_worker(
             LOGON_WITH_PROFILE,
             executable_wide.as_ptr(),
             command_line.as_mut_ptr(),
-            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
             std::ptr::null(),
             current_directory.as_ptr(),
             &startup,
