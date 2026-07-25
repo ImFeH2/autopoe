@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -179,4 +181,73 @@ test("staged platform npm package includes the frozen application and notices", 
     "package.json",
     "vendor",
   ]);
+});
+
+test("packed POSIX platform npm package materializes frozen application links", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "flowent-platform-link-"));
+  const applicationDir = join(root, "application", "flowent");
+  const outputDir = join(root, "package");
+  const binaryPath = join(applicationDir, "flowent");
+  await mkdir(dirname(binaryPath), { recursive: true });
+  await writeFile(binaryPath, "frozen application fixture");
+  await chmod(binaryPath, 0o755);
+  await writeFile(join(applicationDir, "python-library.zip"), "fixture");
+  await symlink(
+    "python-library.zip",
+    join(applicationDir, "python-library-link.zip"),
+  );
+
+  await stagePlatformPackage({
+    targetId: "linux-x64",
+    sourceDir: runtimeSource,
+    planPath: runtimePlan,
+    applicationDir,
+    outputDir,
+    baseVersion: "0.3.10",
+  });
+
+  const copiedLink = await lstat(
+    join(
+      outputDir,
+      "vendor",
+      "x86_64-unknown-linux-gnu",
+      "flowent",
+      "python-library-link.zip",
+    ),
+  );
+  assert.equal(copiedLink.isFile(), true);
+  assert.equal(copiedLink.isSymbolicLink(), false);
+
+  const unpackRoot = join(root, "unpacked");
+  await mkdir(unpackRoot);
+  const packed = JSON.parse(
+    (
+      await execFileAsync("npm", ["pack", "--json"], {
+        cwd: outputDir,
+        env: { ...process.env, npm_config_cache: join(root, "npm-cache") },
+      })
+    ).stdout,
+  )[0];
+  await execFileAsync("tar", [
+    "-xzf",
+    join(outputDir, packed.filename),
+    "-C",
+    unpackRoot,
+  ]);
+  assert.equal(
+    await readFile(
+      join(
+        unpackRoot,
+        "package",
+        "vendor",
+        "x86_64-unknown-linux-gnu",
+        "flowent",
+        "python-library-link.zip",
+      ),
+      "utf8",
+    ),
+    "fixture",
+  );
 });

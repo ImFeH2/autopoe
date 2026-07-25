@@ -48,6 +48,10 @@ test("release manifests use one version and a reproducible native dependency", a
   assert.match(backendProject, /^ {4}"pyinstaller>=6\.14\.1,<7\.0\.0",$/m);
   assert.match(backendLock, /name = "flowent-native"/);
   assert.match(nativeProject, /^module-name = "flowent_native"$/m);
+  assert.match(
+    nativeProject,
+    /^include = \[{ path = "python\/flowent_native\/runtime\/\*\*\/\*", format = "wheel" }]$/m,
+  );
   assert.match(nativeCargo, new RegExp(`^version = "${escapedVersion}"$`, "m"));
   assert.match(
     nativeLock,

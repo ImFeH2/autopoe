@@ -223,11 +223,14 @@ def test_shell_environment_keeps_windows_runtime_variables(
     monkeypatch.setenv("FLOWENT_SECRET", "hidden")
 
     environment = build_shell_environment()
+    normalized_environment = {
+        name.upper(): value for name, value in environment.items()
+    }
 
-    assert environment["SystemRoot"] == "C:\\Windows"
-    assert environment["ComSpec"] == "C:\\Windows\\System32\\cmd.exe"
-    assert environment["PATHEXT"] == ".COM;.EXE;.BAT;.CMD"
-    assert "FLOWENT_SECRET" not in environment
+    assert normalized_environment["SYSTEMROOT"] == "C:\\Windows"
+    assert normalized_environment["COMSPEC"] == "C:\\Windows\\System32\\cmd.exe"
+    assert normalized_environment["PATHEXT"] == ".COM;.EXE;.BAT;.CMD"
+    assert "FLOWENT_SECRET" not in normalized_environment
 
 
 @pytest.mark.parametrize(

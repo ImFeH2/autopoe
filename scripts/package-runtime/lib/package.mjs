@@ -103,7 +103,10 @@ export async function stagePlatformPackage({
     baseVersion,
   });
   const destination = join(staged.bundleRoot, "flowent");
-  await cp(applicationDir, destination, { recursive: true });
+  await cp(applicationDir, destination, {
+    recursive: true,
+    dereference: true,
+  });
   if (!targetId.startsWith("win32-")) {
     await chmod(join(destination, "flowent"), 0o755);
   }

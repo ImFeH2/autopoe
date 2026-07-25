@@ -29,6 +29,7 @@ tests = [
 [tool.maturin]
 bindings = "bin"
 exclude = ["python/**/__pycache__/**", "python/**/*.py[cod]"]
+include = [{ path = "python/flowent_native/runtime/**/*", format = "wheel" }]
 module-name = "flowent_native"
 python-source = "python"
 python-packages = ["flowent_native"]

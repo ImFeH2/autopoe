@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.release.verify_native_artifacts import (
+    ArtifactVerificationError,
     verify_application,
     verify_npm_package,
     verify_python_wheel,
@@ -45,6 +46,21 @@ def add_tar_file(
 
 
 class VerifyNativeArtifactsTest(unittest.TestCase):
+    def test_application_failure_includes_process_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            application = Path(directory) / "flowent"
+            application.write_text(
+                "#!/bin/sh\nprintf 'missing runtime' >&2\nexit 7\n",
+                encoding="utf8",
+            )
+            application.chmod(0o755)
+
+            with self.assertRaisesRegex(
+                ArtifactVerificationError,
+                "--version failed with exit code 7: missing runtime",
+            ):
+                verify_application(application, "0.3.10")
+
     def test_application_npm_package_and_wheel_are_verified(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

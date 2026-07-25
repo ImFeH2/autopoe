@@ -16,6 +16,28 @@ class ArtifactVerificationError(RuntimeError):
     pass
 
 
+def _run_application(
+    executable: str,
+    arguments: list[str],
+    **options: Any,
+) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        [executable, *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        **options,
+    )
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip() or "no output"
+        raise ArtifactVerificationError(
+            f"Frozen application command {arguments[0]} failed with exit code "
+            f"{result.returncode}: {output}"
+        )
+    return result
+
+
 def _target(root: Path, target_id: str) -> dict[str, Any]:
     manifest = json.loads(
         (root / "scripts" / "runtime" / "targets.json").read_text(encoding="utf8")
@@ -30,22 +52,15 @@ def _target(root: Path, target_id: str) -> dict[str, Any]:
 
 def verify_application(application: Path, version: str) -> None:
     executable = str(application.resolve())
-    result = subprocess.run(
-        [executable, "--version"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    result = _run_application(executable, ["--version"])
     if result.stdout.strip() != f"flowent {version}":
         raise ArtifactVerificationError(
             f"Frozen application reported an unexpected version: {result.stdout.strip()}"
         )
     code_marker = "FLOWENT_NATIVE_CODE_READY"
-    code_result = subprocess.run(
-        [executable, "_run-python"],
-        check=True,
-        capture_output=True,
+    code_result = _run_application(
+        executable,
+        ["_run-python"],
         input=json.dumps(
             {
                 "code": "output = input.upper()",
@@ -53,8 +68,6 @@ def verify_application(application: Path, version: str) -> None:
                 "inputs": [],
             }
         ),
-        text=True,
-        timeout=30,
     )
     if code_result.stdout != code_marker:
         raise ArtifactVerificationError(
@@ -62,18 +75,15 @@ def verify_application(application: Path, version: str) -> None:
         )
     with tempfile.TemporaryDirectory(prefix="flowent-artifact-patch-") as directory:
         patch_root = Path(directory)
-        patch_result = subprocess.run(
-            [executable, "apply-patch", "--cwd", str(patch_root)],
-            check=True,
-            capture_output=True,
+        patch_result = _run_application(
+            executable,
+            ["apply-patch", "--cwd", str(patch_root)],
             input=(
                 "*** Begin Patch\n"
                 "*** Add File: result.txt\n"
                 "+frozen patch ready\n"
                 "*** End Patch\n"
             ),
-            text=True,
-            timeout=30,
         )
         patched_file = patch_root / "result.txt"
         if (
