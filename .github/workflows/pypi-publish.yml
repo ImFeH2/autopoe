@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 10
     env:
       HUSKY: 0
-      SOURCE_DATE_EPOCH: 0
+      SOURCE_DATE_EPOCH: 315532800
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - name: Checkout

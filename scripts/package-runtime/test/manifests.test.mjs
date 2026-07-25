@@ -119,7 +119,7 @@ test("release workflows publish from exact tags and gate the GitHub release", as
   assert.match(pypiWorkflow, /steps\.preflight\.outputs\.remaining/);
   assert.match(pypiWorkflow, /node-version: 24\.15\.0/);
   assert.match(pypiWorkflow, /python-version: "3\.13\.13"/);
-  assert.match(pypiWorkflow, /^ {6}SOURCE_DATE_EPOCH: 0$/m);
+  assert.match(pypiWorkflow, /^ {6}SOURCE_DATE_EPOCH: 315532800$/m);
   assert.match(pypiWorkflow, /^ {10}version: "0\.8\.14"$/m);
   assert.match(npmWorkflow, /node scripts\/release\/publish-npm-package\.mjs/);
   assert.match(npmWorkflow, /node-version: 24\.15\.0/);
@@ -215,7 +215,7 @@ test("Linux applications freeze in the matching manylinux 2_17 container", async
   assert.match(workflow, /uv venv --python 3\.13\.13/);
   assert.match(workflow, /node-version: 24\.15\.0/);
   assert.match(workflow, /python-version: "3\.13\.13"/);
-  assert.match(workflow, /^ {6}SOURCE_DATE_EPOCH: 0$/m);
+  assert.match(workflow, /^ {6}SOURCE_DATE_EPOCH: 315532800$/m);
   assert.match(workflow, /^ {10}version: "0\.8\.14"$/m);
   assert.match(workflow, /rustup toolchain install 1\.93\.1/);
   assert.match(workflow, /rustup default 1\.93\.1/);
@@ -225,6 +225,10 @@ test("Linux applications freeze in the matching manylinux 2_17 container", async
     /docker-options: -e SOURCE_DATE_EPOCH -e PYTHONHASHSEED/,
   );
   assert.match(workflow, /rust-toolchain: "1\.93\.1"/);
+  assert.match(
+    workflow,
+    /name: Download frontend files[\s\S]*name: Prepare Python package[\s\S]*node scripts\/prepare-python-readme\.mjs[\s\S]*name: Install Python build dependencies/,
+  );
   assert.match(
     workflow,
     /name: Stage frozen application inputs[\s\S]*if: matrix\.platform == 'linux'[\s\S]*stage-pyinstaller-input\.mjs/,

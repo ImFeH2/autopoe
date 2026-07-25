@@ -82,7 +82,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
-      SOURCE_DATE_EPOCH: 0
+      SOURCE_DATE_EPOCH: 315532800
       PYTHONHASHSEED: 0
     strategy:
       fail-fast: false
@@ -203,6 +203,9 @@ jobs:
           name: flowent-static
           path: backend/src/flowent/static
 
+      - name: Prepare Python package
+        run: node scripts/prepare-python-readme.mjs
+
       - name: Export locked Python build dependencies
         run: |
           python -c "from pathlib import Path; Path('.artifacts').mkdir(exist_ok=True)"
@@ -239,7 +242,7 @@ jobs:
           docker run --rm \
             --env PYTHONHASHSEED=0 \
             --env PYTHONDONTWRITEBYTECODE=1 \
-            --env SOURCE_DATE_EPOCH=0 \
+            --env SOURCE_DATE_EPOCH=315532800 \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
             --workdir "$GITHUB_WORKSPACE" \
             --entrypoint /bin/bash \
