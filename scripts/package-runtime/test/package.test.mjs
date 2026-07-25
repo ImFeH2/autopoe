@@ -39,16 +39,20 @@ test("staged main npm package injects all platform aliases", async () => {
   const root = await mkdtemp(join(tmpdir(), "flowent-main-package-"));
   await stageMainPackage({ projectRoot, outputDir: root });
 
+  const sourcePackage = JSON.parse(
+    await readFile(join(projectRoot, "package.json"), "utf8"),
+  );
   const packageJson = JSON.parse(
     await readFile(join(root, "package.json"), "utf8"),
   );
+  assert.equal(packageJson.version, sourcePackage.version);
   assert.deepEqual(packageJson.optionalDependencies, {
-    "flowent-darwin-arm64": "npm:flowent@0.3.10-darwin-arm64",
-    "flowent-darwin-x64": "npm:flowent@0.3.10-darwin-x64",
-    "flowent-linux-arm64": "npm:flowent@0.3.10-linux-arm64",
-    "flowent-linux-x64": "npm:flowent@0.3.10-linux-x64",
-    "flowent-win32-arm64": "npm:flowent@0.3.10-win32-arm64",
-    "flowent-win32-x64": "npm:flowent@0.3.10-win32-x64",
+    "flowent-darwin-arm64": `npm:flowent@${sourcePackage.version}-darwin-arm64`,
+    "flowent-darwin-x64": `npm:flowent@${sourcePackage.version}-darwin-x64`,
+    "flowent-linux-arm64": `npm:flowent@${sourcePackage.version}-linux-arm64`,
+    "flowent-linux-x64": `npm:flowent@${sourcePackage.version}-linux-x64`,
+    "flowent-win32-arm64": `npm:flowent@${sourcePackage.version}-win32-arm64`,
+    "flowent-win32-x64": `npm:flowent@${sourcePackage.version}-win32-x64`,
   });
   assert.equal(packageJson.scripts, undefined);
   assert.equal(packageJson.devDependencies, undefined);
