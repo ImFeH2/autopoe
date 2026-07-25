@@ -7,7 +7,9 @@ use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, Conver
 use windows_sys::Win32::Security::Cryptography::{
     BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
 };
-use windows_sys::Win32::Security::{CopySid, GetLengthSid, PSID};
+use windows_sys::Win32::Security::{
+    CheckTokenMembership, CopySid, DuplicateToken, GetLengthSid, PSID, SecurityImpersonation,
+};
 
 use crate::error::{AppError, AppResult};
 
@@ -43,6 +45,26 @@ impl Drop for OwnedHandle {
             }
         }
     }
+}
+
+pub fn token_has_enabled_sid(
+    token: &OwnedHandle,
+    sid: &[u8],
+    code: &str,
+    context: &str,
+) -> AppResult<bool> {
+    let mut impersonation = std::ptr::null_mut();
+    if unsafe { DuplicateToken(token.get(), SecurityImpersonation, &mut impersonation) } == 0 {
+        return Err(last_error(code, context));
+    }
+    let impersonation = OwnedHandle::new(impersonation, code, context)?;
+    let mut is_member = 0;
+    if unsafe { CheckTokenMembership(impersonation.get(), sid.as_ptr() as PSID, &mut is_member) }
+        == 0
+    {
+        return Err(last_error(code, context));
+    }
+    Ok(is_member != 0)
 }
 
 pub fn last_error(code: &str, context: &str) -> AppError {
@@ -190,7 +212,10 @@ pub fn random_hex(byte_count: usize) -> AppResult<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::quote_argument;
+    use windows_sys::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    use super::{OwnedHandle, quote_argument, sid_from_string, token_has_enabled_sid};
 
     #[test]
     fn quotes_windows_arguments_without_losing_backslashes() {
@@ -201,5 +226,24 @@ mod tests {
             quote_argument("C:\\path with space\\"),
             "\"C:\\path with space\\\\\""
         );
+    }
+
+    #[test]
+    fn checks_membership_for_primary_process_token() {
+        let mut token = std::ptr::null_mut();
+        assert_ne!(
+            unsafe {
+                OpenProcessToken(
+                    GetCurrentProcess(),
+                    TOKEN_QUERY | TOKEN_DUPLICATE,
+                    &mut token,
+                )
+            },
+            0
+        );
+        let token = OwnedHandle::new(token, "test_failed", "test failed").unwrap();
+        let everyone = sid_from_string("S-1-1-0").unwrap();
+
+        assert!(token_has_enabled_sid(&token, &everyone, "test_failed", "test failed").unwrap());
     }
 }

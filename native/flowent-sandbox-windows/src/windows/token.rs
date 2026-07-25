@@ -10,7 +10,9 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 
 use crate::error::{AppError, AppResult};
 
-use super::util::{OwnedHandle, copy_sid, last_error, sid_from_string, sid_to_string};
+use super::util::{
+    OwnedHandle, copy_sid, last_error, sid_from_string, sid_to_string, token_has_enabled_sid,
+};
 
 pub fn create_restricted(capability_sid: &str) -> AppResult<OwnedHandle> {
     let capability = sid_from_string(capability_sid)?;
@@ -72,7 +74,14 @@ pub fn create_restricted(capability_sid: &str) -> AppResult<OwnedHandle> {
 
 pub fn verify_current_account(expected_sid: &str, expected_group_sid: &str) -> AppResult<()> {
     let mut current = std::ptr::null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut current) } == 0 {
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_QUERY | TOKEN_DUPLICATE,
+            &mut current,
+        )
+    } == 0
+    {
         return Err(last_error(
             "worker_identity_failed",
             "Could not inspect protected command worker identity.",
@@ -124,16 +133,12 @@ pub fn verify_current_account(expected_sid: &str, expected_group_sid: &str) -> A
         ));
     }
     let group = sid_from_string(expected_group_sid)?;
-    let mut member = 0;
-    if unsafe {
-        windows_sys::Win32::Security::CheckTokenMembership(
-            current.get(),
-            group.as_ptr() as *mut c_void,
-            &mut member,
-        )
-    } == 0
-        || member == 0
-    {
+    if !token_has_enabled_sid(
+        &current,
+        &group,
+        "worker_identity_failed",
+        "Could not verify protected command worker membership.",
+    )? {
         return Err(AppError::windows(
             "worker_identity_failed",
             "Protected command worker is not in its required account group.",

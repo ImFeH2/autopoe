@@ -16,8 +16,8 @@ use windows_sys::Win32::Security::Cryptography::{
     CRYPTPROTECT_LOCAL_MACHINE, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
 };
 use windows_sys::Win32::Security::{
-    CheckTokenMembership, GetTokenInformation, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
-    LogonUserW, LookupAccountSidW, PSID, SID_NAME_USE, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
+    GetTokenInformation, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, LogonUserW,
+    LookupAccountSidW, PSID, SID_NAME_USE, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
     TokenElevation, TokenUser,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -27,7 +27,9 @@ use crate::protocol::SETUP_VERSION;
 
 use super::acl::{lookup_sid, protect_state_directory};
 use super::firewall;
-use super::util::{OwnedHandle, copy_sid, sid_from_string, sid_to_string, wide};
+use super::util::{
+    OwnedHandle, copy_sid, sid_from_string, sid_to_string, token_has_enabled_sid, wide,
+};
 
 pub const SANDBOX_GROUP: &str = "FlowentSandboxUsers";
 pub const ONLINE_USER: &str = "FlowentSandboxOnline";
@@ -386,35 +388,19 @@ fn verify_low_privilege_account(username: &str, password: &str, group_sid: &[u8]
         "Could not open account token.",
     )?;
     let administrators = sid_from_string("S-1-5-32-544")?;
-    let mut is_administrator = 0;
-    if unsafe {
-        CheckTokenMembership(
-            token.get(),
-            administrators.as_ptr() as PSID,
-            &mut is_administrator,
-        )
-    } == 0
-    {
-        return Err(super::util::last_error(
-            "account_verification_failed",
-            "Could not verify protected account privileges.",
-        ));
-    }
-    let mut is_group_member = 0;
-    if unsafe {
-        CheckTokenMembership(
-            token.get(),
-            group_sid.as_ptr() as PSID,
-            &mut is_group_member,
-        )
-    } == 0
-    {
-        return Err(super::util::last_error(
-            "account_verification_failed",
-            "Could not verify protected account membership.",
-        ));
-    }
-    if is_administrator != 0 || is_group_member == 0 {
+    let is_administrator = token_has_enabled_sid(
+        &token,
+        &administrators,
+        "account_verification_failed",
+        "Could not verify protected account privileges.",
+    )?;
+    let is_group_member = token_has_enabled_sid(
+        &token,
+        group_sid,
+        "account_verification_failed",
+        "Could not verify protected account membership.",
+    )?;
+    if is_administrator || !is_group_member {
         return Err(AppError::windows(
             "account_verification_failed",
             "Protected command account has unsafe group membership.",
