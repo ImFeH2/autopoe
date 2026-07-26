@@ -176,6 +176,32 @@ def _read_status(path: Path, expected_operation: str) -> dict[str, Any]:
     return value
 
 
+def _is_windows_platform_path(path: Path) -> bool:
+    try:
+        _, system_cmd = windows_system_shell_paths()
+        windows_root = PureWindowsPath(system_cmd).parent.parent
+        PureWindowsPath(path).relative_to(windows_root)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _command_runtime_roots(executable: str) -> tuple[Path, ...]:
+    path = Path(executable)
+    if not path.is_absolute():
+        located = shutil.which(executable, path=build_shell_environment().get("PATH"))
+        if located is None:
+            return ()
+        path = Path(located)
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError:
+        return ()
+    if not resolved.is_file() or _is_windows_platform_path(resolved):
+        return ()
+    return (resolved.parent,)
+
+
 def _unavailable_status(
     message: str,
     *,
@@ -354,6 +380,9 @@ class WindowsSandboxBackend(SandboxBackend):
                 "version": 1,
                 "cwd": str(policy.cwd),
                 "writable_roots": [str(path) for path in policy.writable_roots],
+                "readable_roots": [
+                    str(path) for path in _command_runtime_roots(command[0])
+                ],
                 "runtime_dir": str(runtime_dir),
                 "network": "enabled" if policy.allow_network else "disabled",
                 "status_file": str(status_path),

@@ -23,6 +23,8 @@ pub struct SandboxPolicy {
     pub cwd: PathBuf,
     #[serde(default)]
     pub writable_roots: Vec<PathBuf>,
+    #[serde(default)]
+    pub readable_roots: Vec<PathBuf>,
     pub runtime_dir: PathBuf,
     #[serde(default)]
     pub network: NetworkMode,
@@ -49,12 +51,25 @@ impl SandboxPolicy {
         for root in &self.writable_roots {
             require_absolute("writable_roots", root)?;
         }
+        for root in &self.readable_roots {
+            require_absolute("readable_roots", root)?;
+        }
         Ok(())
     }
 
     pub fn effective_writable_roots(&self) -> Vec<PathBuf> {
         let mut roots = vec![self.cwd.clone()];
         for root in &self.writable_roots {
+            if !roots.iter().any(|existing| same_path(existing, root)) {
+                roots.push(root.clone());
+            }
+        }
+        roots
+    }
+
+    pub fn effective_readable_roots(&self) -> Vec<PathBuf> {
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for root in &self.readable_roots {
             if !roots.iter().any(|existing| same_path(existing, root)) {
                 roots.push(root.clone());
             }
@@ -146,6 +161,7 @@ mod tests {
         .unwrap();
         assert_eq!(policy.network, NetworkMode::Enabled);
         assert_eq!(policy.version, PROTOCOL_VERSION);
+        assert!(policy.readable_roots.is_empty());
     }
 
     #[test]
@@ -163,6 +179,11 @@ mod tests {
             version: PROTOCOL_VERSION,
             cwd: PathBuf::from("/workspace"),
             writable_roots: vec![PathBuf::from("/workspace"), PathBuf::from("/approved")],
+            readable_roots: vec![
+                PathBuf::from("/runtime"),
+                PathBuf::from("/runtime"),
+                PathBuf::from("/tools"),
+            ],
             runtime_dir: PathBuf::from("/runtime"),
             network: NetworkMode::Disabled,
             status_file: PathBuf::from("/status.json"),
@@ -170,6 +191,10 @@ mod tests {
         assert_eq!(
             policy.effective_writable_roots(),
             vec![PathBuf::from("/workspace"), PathBuf::from("/approved"),]
+        );
+        assert_eq!(
+            policy.effective_readable_roots(),
+            vec![PathBuf::from("/runtime"), PathBuf::from("/tools")]
         );
     }
 
@@ -179,6 +204,21 @@ mod tests {
             version: PROTOCOL_VERSION,
             cwd: PathBuf::from("workspace"),
             writable_roots: Vec::new(),
+            readable_roots: Vec::new(),
+            runtime_dir: PathBuf::from("/runtime"),
+            network: NetworkMode::Enabled,
+            status_file: PathBuf::from("/status.json"),
+        };
+        assert_eq!(policy.validate().unwrap_err().code, "invalid_request");
+    }
+
+    #[test]
+    fn relative_readable_roots_are_rejected() {
+        let policy = SandboxPolicy {
+            version: PROTOCOL_VERSION,
+            cwd: PathBuf::from("/workspace"),
+            writable_roots: Vec::new(),
+            readable_roots: vec![PathBuf::from("runtime")],
             runtime_dir: PathBuf::from("/runtime"),
             network: NetworkMode::Enabled,
             status_file: PathBuf::from("/status.json"),

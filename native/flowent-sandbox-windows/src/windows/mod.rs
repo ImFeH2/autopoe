@@ -1,4 +1,5 @@
 mod acl;
+mod acl_lock;
 mod desktop;
 mod firewall;
 mod ipc;

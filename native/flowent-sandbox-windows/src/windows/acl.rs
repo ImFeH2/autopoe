@@ -22,6 +22,7 @@ use super::util::{copy_sid, sid_from_string, wide, wide_path};
 
 const MODIFY_ACCESS: u32 =
     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | 0x00010000;
+const READ_EXECUTE_ACCESS: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
 
 pub fn lookup_sid(name: &str) -> AppResult<Vec<u8>> {
     let name_wide = wide(name);
@@ -70,6 +71,10 @@ pub fn lookup_sid(name: &str) -> AppResult<Vec<u8>> {
 
 pub fn grant_modify(path: &Path, sid: &[u8]) -> AppResult<()> {
     update_path(path, sid, MODIFY_ACCESS, GRANT_ACCESS)
+}
+
+pub fn grant_read_execute(path: &Path, sid: &[u8]) -> AppResult<()> {
+    update_path(path, sid, READ_EXECUTE_ACCESS, GRANT_ACCESS)
 }
 
 pub fn protect_runtime_directory(

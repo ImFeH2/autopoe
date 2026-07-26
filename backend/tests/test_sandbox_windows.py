@@ -16,6 +16,7 @@ from flowent.sandboxing import (
 from flowent.sandboxing.resources import ResolvedExecutable, ResourceSource
 from flowent.sandboxing.windows import (
     WindowsSandboxBackend,
+    _is_windows_platform_path,
     current_owner_sid,
     launch_elevated_setup,
 )
@@ -37,6 +38,13 @@ def status_record(
 
 def resolved_helper(path: Path):
     return lambda: ResolvedExecutable(path=path, source=ResourceSource.BUNDLED)
+
+
+def test_windows_platform_paths_do_not_require_runtime_acl_changes() -> None:
+    assert _is_windows_platform_path(Path("C:/Windows/System32/cmd.exe"))
+    assert not _is_windows_platform_path(
+        Path("C:/hostedtoolcache/windows/Python/3.13.13/x64/python.exe")
+    )
 
 
 def test_windows_backend_reports_ready_from_helper_probe(tmp_path: Path) -> None:
@@ -137,8 +145,11 @@ def test_windows_prepare_runs_setup_once_and_builds_strict_policy(
     workspace = tmp_path / "workspace"
     temporary = tmp_path / "temporary"
     approved = tmp_path / "approved"
-    for path in (workspace, temporary, approved):
+    command_runtime = tmp_path / "runtime"
+    for path in (workspace, temporary, approved, command_runtime):
         path.mkdir()
+    executable = command_runtime / "python.exe"
+    executable.write_bytes(b"python")
     backend = WindowsSandboxBackend(
         resolver=resolved_helper(helper),
         state_dir=state_dir,
@@ -148,7 +159,7 @@ def test_windows_prepare_runs_setup_once_and_builds_strict_policy(
     )
 
     prepared = backend.prepare(
-        ["cmd.exe", "/d", "/c", "echo hello"],
+        [str(executable), "-c", "print('hello')"],
         SandboxPolicy(
             cwd=workspace,
             writable_roots=(approved,),
@@ -160,7 +171,7 @@ def test_windows_prepare_runs_setup_once_and_builds_strict_policy(
     assert setups == 1
     assert probes == 2
     assert prepared.args[:2] == [str(prepared.args[0]), "run"]
-    assert prepared.args[-5:] == ["--", "cmd.exe", "/d", "/c", "echo hello"]
+    assert prepared.args[-4:] == ["--", str(executable), "-c", "print('hello')"]
     policy_path = Path(prepared.args[prepared.args.index("--policy") + 1])
     policy = json.loads(policy_path.read_text())
     assert policy == {
@@ -171,6 +182,7 @@ def test_windows_prepare_runs_setup_once_and_builds_strict_policy(
             str(temporary.resolve()),
             str(approved.resolve()),
         ],
+        "readable_roots": [str(command_runtime.resolve())],
         "runtime_dir": str(policy_path.parent),
         "network": "disabled",
         "status_file": str(policy_path.parent / "status.json"),

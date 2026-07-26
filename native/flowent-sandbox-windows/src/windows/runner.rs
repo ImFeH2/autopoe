@@ -15,7 +15,8 @@ use crate::error::{AppError, AppResult};
 use crate::protocol::{NetworkMode, PROTOCOL_VERSION, SandboxPolicy, WorkerFrame, WorkerRequest};
 use crate::status::{Operation, StatusRecord, write_status};
 
-use super::acl::{grant_modify, protect_runtime_directory, revoke};
+use super::acl::{grant_modify, grant_read_execute, protect_runtime_directory, revoke};
+use super::acl_lock::AclLock;
 use super::ipc::Pipe;
 use super::job::KillJob;
 use super::process;
@@ -62,7 +63,12 @@ fn run_parent_inner(
     let capability = sid_from_string(&capability_sid)?;
     let base = sid_from_string(&installed.marker.group_sid)?;
     trace("workspace_access_started");
-    let mut lease = AclLease::acquire(policy.effective_writable_roots(), &base, &capability)?;
+    let mut lease = AclLease::acquire(
+        policy.effective_writable_roots(),
+        policy.effective_readable_roots(),
+        &base,
+        &capability,
+    )?;
     trace("workspace_access_ready");
     protect_runtime_directory(&policy.runtime_dir, &installed.marker.owner_sid, &base)?;
     trace("runtime_access_ready");
@@ -389,13 +395,28 @@ struct AclLease {
 }
 
 impl AclLease {
-    fn acquire(roots: Vec<PathBuf>, base: &[u8], capability: &[u8]) -> AppResult<Self> {
+    fn acquire(
+        writable_roots: Vec<PathBuf>,
+        readable_roots: Vec<PathBuf>,
+        base: &[u8],
+        capability: &[u8],
+    ) -> AppResult<Self> {
+        let _lock = AclLock::acquire()?;
         let mut lease = Self {
             roots: Vec::new(),
             capability: capability.to_vec(),
             released: false,
         };
-        for root in roots {
+        for root in readable_roots {
+            let canonical = std::fs::canonicalize(&root).map_err(|error| {
+                AppError::io(
+                    &format!("Could not resolve readable location {}", root.display()),
+                    error,
+                )
+            })?;
+            grant_read_execute(&canonical, base)?;
+        }
+        for root in writable_roots {
             let canonical = std::fs::canonicalize(&root).map_err(|error| {
                 AppError::io(
                     &format!("Could not resolve writable location {}", root.display()),
@@ -416,6 +437,7 @@ impl AclLease {
         if self.released {
             return Ok(());
         }
+        let _lock = AclLock::acquire()?;
         let mut failure = None;
         for root in &self.roots {
             if let Err(error) = revoke(root, &self.capability) {
@@ -465,6 +487,14 @@ fn validate_runtime_paths(policy: &SandboxPolicy) -> AppResult<()> {
         if !root.exists() {
             return Err(AppError::invalid(format!(
                 "Writable location does not exist: {}.",
+                root.display()
+            )));
+        }
+    }
+    for root in &policy.readable_roots {
+        if !root.exists() {
+            return Err(AppError::invalid(format!(
+                "Readable location does not exist: {}.",
                 root.display()
             )));
         }
