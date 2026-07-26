@@ -30,6 +30,7 @@ pub struct RestrictedIdentity {
 
 pub fn create_restricted(capability_sid: &str) -> AppResult<RestrictedIdentity> {
     let capability = sid_from_string(capability_sid)?;
+    let everyone = sid_from_string("S-1-1-0")?;
     let mut current = std::ptr::null_mut();
     let access = TOKEN_ASSIGN_PRIMARY
         | TOKEN_DUPLICATE
@@ -55,6 +56,10 @@ pub fn create_restricted(capability_sid: &str) -> AppResult<RestrictedIdentity> 
         },
         SID_AND_ATTRIBUTES {
             Sid: logon_sid.as_ptr() as *mut c_void,
+            Attributes: 0,
+        },
+        SID_AND_ATTRIBUTES {
+            Sid: everyone.as_ptr() as *mut c_void,
             Attributes: 0,
         },
     ];
@@ -90,7 +95,7 @@ pub fn create_restricted(capability_sid: &str) -> AppResult<RestrictedIdentity> 
             "Windows did not mark the command identity as restricted.",
         ));
     }
-    grant_default_object_access(&restricted, &[&capability, &logon_sid])?;
+    grant_default_object_access(&restricted, &[&capability, &logon_sid, &everyone])?;
     Ok(RestrictedIdentity {
         token: restricted,
         logon_sid,
@@ -351,7 +356,11 @@ mod tests {
         let capability = "S-1-5-21-1-2-3-4";
         let identity = create_restricted(capability).unwrap();
         let logon_sid = sid_to_string(&identity.logon_sid).unwrap();
-        let mut expected = vec![capability.to_string(), logon_sid.clone()];
+        let mut expected = vec![
+            "S-1-1-0".to_string(),
+            capability.to_string(),
+            logon_sid.clone(),
+        ];
         expected.sort();
 
         assert_ne!(unsafe { IsTokenRestricted(identity.token.get()) }, 0);
