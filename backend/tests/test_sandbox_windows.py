@@ -31,7 +31,7 @@ def status_record(
         "state": state,
         "code": code,
         "message": message,
-        "setup_version": 1,
+        "setup_version": 2,
         **extra,
     }
 

@@ -38,6 +38,7 @@ HelperResolver: TypeAlias = Callable[[], ResolvedExecutable | None]
 SetupLauncher: TypeAlias = Callable[[Path, Path, Path, str], None]
 OwnerSidProvider: TypeAlias = Callable[[], str]
 _SETUP_LOCK = threading.Lock()
+_SETUP_VERSION = 2
 _STATUS_FIELDS = {
     "version",
     "operation",
@@ -165,7 +166,7 @@ def _read_status(path: Path, expected_operation: str) -> dict[str, Any]:
         item = value.get(name)
         if isinstance(item, bool) or not isinstance(item, expected_type):
             raise ValueError("Command protection status has an invalid structure.")
-    if value["version"] != 1 or value["setup_version"] != 1:
+    if value["version"] != 1 or value["setup_version"] != _SETUP_VERSION:
         raise ValueError("Command protection status uses an unsupported version.")
     if value["operation"] != expected_operation or value["state"] not in _STATUS_STATES:
         raise ValueError("Command protection status has an invalid operation or state.")

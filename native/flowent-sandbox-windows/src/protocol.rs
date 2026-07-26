@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{AppError, AppResult};
 
 pub const PROTOCOL_VERSION: u32 = 1;
-pub const SETUP_VERSION: u32 = 1;
+pub const SETUP_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

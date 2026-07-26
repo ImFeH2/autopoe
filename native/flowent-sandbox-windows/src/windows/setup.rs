@@ -5,7 +5,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, GetLastError, LocalFree};
+use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, GetLastError, LocalFree, S_OK};
 use windows_sys::Win32::NetworkManagement::NetManagement::{
     LOCALGROUP_INFO_1, LOCALGROUP_MEMBERS_INFO_3, NERR_GroupExists, NERR_Success, NERR_UserExists,
     NetLocalGroupAdd, NetLocalGroupAddMembers, NetUserAdd, NetUserSetInfo, UF_DONT_EXPIRE_PASSWD,
@@ -21,6 +21,7 @@ use windows_sys::Win32::Security::{
     TokenElevation, TokenUser,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::UI::Shell::CreateProfile;
 
 use crate::error::{AppError, AppResult};
 use crate::protocol::SETUP_VERSION;
@@ -40,6 +41,8 @@ const _: () = assert!(OFFLINE_USER.len() <= 20);
 
 const MARKER_FILE: &str = "setup.json";
 const SECRETS_FILE: &str = "credentials.json";
+const PROFILE_ALREADY_EXISTS: i32 = 0x800700B7_u32 as i32;
+const PROFILE_PATH_CAPACITY: usize = 32768;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -111,11 +114,13 @@ pub fn install(state_dir: &Path, owner_sid: Option<&str>) -> AppResult<Installed
     ensure_membership(SANDBOX_GROUP, OFFLINE_USER)?;
     ensure_builtin_users_membership(ONLINE_USER)?;
     ensure_builtin_users_membership(OFFLINE_USER)?;
+    let online_sid = sid_to_string(&lookup_sid(ONLINE_USER)?)?;
+    let offline_sid = sid_to_string(&lookup_sid(OFFLINE_USER)?)?;
+    ensure_profile(ONLINE_USER, &online_sid)?;
+    ensure_profile(OFFLINE_USER, &offline_sid)?;
     verify_low_privilege_account(ONLINE_USER, &online_password, &group_sid)?;
     verify_low_privilege_account(OFFLINE_USER, &offline_password, &group_sid)?;
 
-    let online_sid = sid_to_string(&lookup_sid(ONLINE_USER)?)?;
-    let offline_sid = sid_to_string(&lookup_sid(OFFLINE_USER)?)?;
     firewall::ensure_offline_rule(&offline_sid)?;
 
     let marker = SetupMarker {
@@ -283,6 +288,31 @@ fn ensure_user(username: &str, password: &str) -> AppResult<()> {
         ));
     }
     Ok(())
+}
+
+fn ensure_profile(username: &str, sid: &str) -> AppResult<()> {
+    let username = wide(username);
+    let sid = wide(sid);
+    let mut profile_path = vec![0u16; PROFILE_PATH_CAPACITY];
+    let result = unsafe {
+        CreateProfile(
+            sid.as_ptr(),
+            username.as_ptr(),
+            profile_path.as_mut_ptr(),
+            profile_path.len() as u32,
+        )
+    };
+    if profile_result_is_ready(result) {
+        return Ok(());
+    }
+    Err(AppError::windows(
+        "profile_setup_failed",
+        "Windows could not finish command protection setup.",
+    ))
+}
+
+fn profile_result_is_ready(result: i32) -> bool {
+    result == S_OK || result == PROFILE_ALREADY_EXISTS
 }
 
 fn ensure_membership(group: &str, username: &str) -> AppResult<()> {
@@ -621,4 +651,18 @@ fn require_absolute_directory_path(path: &Path) -> AppResult<()> {
 
 pub fn marker_path(state_dir: &Path) -> PathBuf {
     state_dir.join(MARKER_FILE)
+}
+
+#[cfg(test)]
+mod tests {
+    use windows_sys::Win32::Foundation::S_OK;
+
+    use super::{PROFILE_ALREADY_EXISTS, profile_result_is_ready};
+
+    #[test]
+    fn profile_creation_accepts_new_and_existing_profiles() {
+        assert!(profile_result_is_ready(S_OK));
+        assert!(profile_result_is_ready(PROFILE_ALREADY_EXISTS));
+        assert!(!profile_result_is_ready(0x80070005_u32 as i32));
+    }
 }
