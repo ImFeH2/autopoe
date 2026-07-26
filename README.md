@@ -130,24 +130,21 @@ architecture is ready for more integrations alongside Web and Telegram.
 
 ## Quick start
 
-The next npm and PyPI release will include the Flowent runtime, web app, file
-search, and the files needed for command protection. Packages cover GNU/Linux
-with glibc 2.17 or newer, macOS 11 or newer, and Windows on x64 and arm64. Linux
-packages include Bubblewrap, macOS uses the Seatbelt service provided by the
-operating system, and Windows packages include the native protection helper.
-npm and pip select the matching package, so uv, Bubblewrap, and ripgrep do not
-need to be installed separately.
+The npm and PyPI packages include the Flowent runtime, web app, file search, and
+the files needed for command protection. Packages cover GNU/Linux with glibc
+2.17 or newer, macOS 11 or newer, and Windows on x64 and arm64. Linux packages
+include Bubblewrap, macOS uses the Seatbelt service provided by the operating
+system, and Windows packages include the native protection helper. npm and pip
+select the matching package, so uv, Bubblewrap, and ripgrep do not need to be
+installed separately.
 
-The currently published 0.3.10 packages predate this bundled runtime. Use
-Docker Compose or source development until the next release is available.
-
-After the next release, install Flowent with npm (Node.js 20.9 or later):
+Install Flowent with npm (Node.js 20.9 or later):
 
 ```bash
 npm install -g flowent
 ```
 
-Or, after the next release, install it with pip (Python 3.11 or later):
+Or install it with pip (Python 3.11 or later):
 
 ```bash
 pip install flowent

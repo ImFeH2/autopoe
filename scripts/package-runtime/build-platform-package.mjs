@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
@@ -20,6 +20,9 @@ await runCli(async () => {
     "version",
   ]);
   const projectRoot = process.cwd();
+  const packageJson = JSON.parse(
+    await readFile(join(projectRoot, "package.json"), "utf8"),
+  );
   const workRoot = resolve(options.work);
   await mkdir(workRoot, { recursive: true });
   let applicationDir = options.application;
@@ -49,6 +52,7 @@ await runCli(async () => {
     applicationDir,
     outputDir: options.output,
     baseVersion: options.version,
+    repository: packageJson.repository,
   });
   console.log(
     JSON.stringify({ alias: staged.alias, packageRoot: staged.packageRoot }),

@@ -151,13 +151,20 @@ test("staged platform npm package includes the frozen application and notices", 
     applicationDir,
     outputDir,
     baseVersion: "0.3.10",
+    repository: JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ).repository,
   });
 
   assert.equal(result.alias, "flowent-linux-x64");
-  assert.equal(
-    JSON.parse(await readFile(join(outputDir, "package.json"), "utf8")).libc,
-    "glibc",
+  const packageJson = JSON.parse(
+    await readFile(join(outputDir, "package.json"), "utf8"),
   );
+  const sourcePackage = JSON.parse(
+    await readFile(join(projectRoot, "package.json"), "utf8"),
+  );
+  assert.equal(packageJson.libc, "glibc");
+  assert.deepEqual(packageJson.repository, sourcePackage.repository);
   assert.equal(
     await readFile(
       join(
@@ -206,6 +213,9 @@ test("packed POSIX platform npm package materializes frozen application links", 
     applicationDir,
     outputDir,
     baseVersion: "0.3.10",
+    repository: JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ).repository,
   });
 
   const copiedLink = await lstat(

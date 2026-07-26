@@ -119,22 +119,19 @@ Flowent 在不同 Channel 中保持一致的身份和任务执行能力。除了
 
 ## 快速开始
 
-下一次 npm 和 PyPI 发布会包含 Flowent、Web 界面、文件搜索和命令保护所需文件，
-支持 glibc 2.17 或更高版本的 GNU/Linux、macOS 11 或更高版本，以及 Windows，
-每个平台都提供 x64 和 arm64 版本。Linux 包会包含 Bubblewrap，macOS 使用系统提供
-的 Seatbelt，Windows 包会包含原生命令保护程序。npm 和 pip 会自动选择对应版本，
-不需要另外安装 uv、Bubblewrap 或 ripgrep。
+npm 和 PyPI 包已经包含 Flowent、Web 界面、文件搜索和命令保护所需文件，支持
+glibc 2.17 或更高版本的 GNU/Linux、macOS 11 或更高版本，以及 Windows，每个平台
+都提供 x64 和 arm64 版本。Linux 包包含 Bubblewrap，macOS 使用系统提供的 Seatbelt，
+Windows 包包含原生命令保护程序。npm 和 pip 会自动选择对应版本，不需要另外安装
+uv、Bubblewrap 或 ripgrep。
 
-目前公开的 0.3.10 版本早于这套内置运行文件。下一次发布完成前，请使用 Docker
-Compose 或源码开发方式运行。
-
-下一次发布完成后，可以通过 npm 安装（需要 Node.js 20.9 或更高版本）：
+通过 npm 安装（需要 Node.js 20.9 或更高版本）：
 
 ```bash
 npm install -g flowent
 ```
 
-也可以通过 pip 安装（需要 Python 3.11 或更高版本，同样需要等待下一次发布）：
+也可以通过 pip 安装（需要 Python 3.11 或更高版本）：
 
 ```bash
 pip install flowent

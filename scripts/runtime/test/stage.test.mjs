@@ -25,6 +25,10 @@ import {
 const sourceDir = new URL("./fixtures/runtime-source/", import.meta.url);
 const planPath = new URL("./fixtures/runtime-plan.json", import.meta.url);
 const execFileAsync = promisify(execFile);
+const repository = {
+  type: "git",
+  url: "git+https://github.com/ImFeH2/flowent.git",
+};
 
 test("runtime staging assembles binaries, licenses, and a verified resource manifest", async () => {
   const root = await mkdtemp(join(tmpdir(), "flowent-runtime-stage-"));
@@ -205,6 +209,7 @@ test("npm staging emits a platform package without conflating alias and package 
     resources: plan.resources,
     projectLicense: plan.projectLicense,
     baseVersion: "0.3.10",
+    repository,
   });
 
   const packageJson = JSON.parse(
@@ -216,6 +221,7 @@ test("npm staging emits a platform package without conflating alias and package 
   assert.equal(packageJson.version, "0.3.10-win32-arm64");
   assert.deepEqual(packageJson.os, ["win32"]);
   assert.deepEqual(packageJson.cpu, ["arm64"]);
+  assert.deepEqual(packageJson.repository, repository);
   assert.equal(
     JSON.parse(
       await readFile(
@@ -320,6 +326,7 @@ test("packed npm platform artifact retains all project and component notices", a
     resources: plan.resources,
     projectLicense: plan.projectLicense,
     baseVersion: "0.3.10",
+    repository,
   });
   await mkdir(unpackRoot);
   let packed;

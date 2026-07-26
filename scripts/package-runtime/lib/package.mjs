@@ -92,6 +92,7 @@ export async function stagePlatformPackage({
   applicationDir,
   outputDir,
   baseVersion,
+  repository,
 }) {
   const plan = await loadResourcePlan(planPath);
   const staged = await stageNpmPlatformPackage({
@@ -101,6 +102,7 @@ export async function stagePlatformPackage({
     resources: plan.resources,
     projectLicense: plan.projectLicense,
     baseVersion,
+    repository,
   });
   const destination = join(staged.bundleRoot, "flowent");
   await cp(applicationDir, destination, {

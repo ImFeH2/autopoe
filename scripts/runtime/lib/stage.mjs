@@ -442,6 +442,7 @@ export async function stageNpmPlatformPackage({
   resources,
   projectLicense,
   baseVersion,
+  repository,
   targetManifestPath,
 }) {
   const packageRoot = toPath(outputDir);
@@ -465,6 +466,7 @@ export async function stageNpmPlatformPackage({
     os: metadata.os,
     cpu: metadata.cpu,
     ...(metadata.libc ? { libc: metadata.libc } : {}),
+    repository,
     files: ["vendor/", "LICENSE", "THIRD_PARTY_NOTICES"],
     publishConfig: { access: "public" },
   };
