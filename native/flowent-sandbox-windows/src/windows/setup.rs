@@ -5,7 +5,9 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, GetLastError, LocalFree, S_OK};
+use windows_sys::Win32::Foundation::{
+    ERROR_INSUFFICIENT_BUFFER, GetLastError, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::NetworkManagement::NetManagement::{
     LOCALGROUP_INFO_1, LOCALGROUP_MEMBERS_INFO_3, NERR_GroupExists, NERR_Success, NERR_UserExists,
     NetLocalGroupAdd, NetLocalGroupAddMembers, NetUserAdd, NetUserSetInfo, UF_DONT_EXPIRE_PASSWD,
@@ -20,8 +22,12 @@ use windows_sys::Win32::Security::{
     LookupAccountSidW, PSID, SID_NAME_USE, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
     TokenElevation, TokenUser,
 };
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows_sys::Win32::UI::Shell::CreateProfile;
+use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+use windows_sys::Win32::System::Threading::{
+    CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, GetCurrentProcess,
+    GetExitCodeProcess, LOGON_WITH_PROFILE, OpenProcessToken, PROCESS_INFORMATION, STARTUPINFOW,
+    TerminateProcess, WaitForSingleObject,
+};
 
 use crate::error::{AppError, AppResult};
 use crate::protocol::SETUP_VERSION;
@@ -29,7 +35,8 @@ use crate::protocol::SETUP_VERSION;
 use super::acl::{lookup_sid, protect_state_directory};
 use super::firewall;
 use super::util::{
-    OwnedHandle, copy_sid, sid_from_string, sid_to_string, token_has_enabled_sid, wide,
+    OwnedHandle, copy_sid, quote_command, sid_from_string, sid_to_string, token_has_enabled_sid,
+    wide, wide_path,
 };
 
 pub const SANDBOX_GROUP: &str = "FlowentSandboxUsers";
@@ -41,8 +48,8 @@ const _: () = assert!(OFFLINE_USER.len() <= 20);
 
 const MARKER_FILE: &str = "setup.json";
 const SECRETS_FILE: &str = "credentials.json";
-const PROFILE_ALREADY_EXISTS: i32 = 0x800700B7_u32 as i32;
-const PROFILE_PATH_CAPACITY: usize = 32768;
+const SYSTEM_DIRECTORY_CAPACITY: usize = 260;
+const PROFILE_INITIALIZATION_TIMEOUT_MS: u32 = 120000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -114,12 +121,12 @@ pub fn install(state_dir: &Path, owner_sid: Option<&str>) -> AppResult<Installed
     ensure_membership(SANDBOX_GROUP, OFFLINE_USER)?;
     ensure_builtin_users_membership(ONLINE_USER)?;
     ensure_builtin_users_membership(OFFLINE_USER)?;
-    let online_sid = sid_to_string(&lookup_sid(ONLINE_USER)?)?;
-    let offline_sid = sid_to_string(&lookup_sid(OFFLINE_USER)?)?;
-    ensure_profile(ONLINE_USER, &online_sid)?;
-    ensure_profile(OFFLINE_USER, &offline_sid)?;
     verify_low_privilege_account(ONLINE_USER, &online_password, &group_sid)?;
     verify_low_privilege_account(OFFLINE_USER, &offline_password, &group_sid)?;
+    initialize_profile(ONLINE_USER, &online_password)?;
+    initialize_profile(OFFLINE_USER, &offline_password)?;
+    let online_sid = sid_to_string(&lookup_sid(ONLINE_USER)?)?;
+    let offline_sid = sid_to_string(&lookup_sid(OFFLINE_USER)?)?;
 
     firewall::ensure_offline_rule(&offline_sid)?;
 
@@ -290,29 +297,126 @@ fn ensure_user(username: &str, password: &str) -> AppResult<()> {
     Ok(())
 }
 
-fn ensure_profile(username: &str, sid: &str) -> AppResult<()> {
-    let username = wide(username);
-    let sid = wide(sid);
-    let mut profile_path = vec![0u16; PROFILE_PATH_CAPACITY];
-    let result = unsafe {
-        CreateProfile(
-            sid.as_ptr(),
-            username.as_ptr(),
-            profile_path.as_mut_ptr(),
-            profile_path.len() as u32,
-        )
-    };
-    if profile_result_is_ready(result) {
-        return Ok(());
+fn system_command() -> AppResult<PathBuf> {
+    let mut capacity = SYSTEM_DIRECTORY_CAPACITY;
+    loop {
+        let mut buffer = vec![0u16; capacity];
+        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
+        if length == 0 {
+            return Err(super::util::last_error(
+                "system_command_unavailable",
+                "Windows system command is unavailable.",
+            ));
+        }
+        let length = length as usize;
+        if length < buffer.len() {
+            buffer.truncate(length);
+            let mut command = PathBuf::from(String::from_utf16_lossy(&buffer));
+            command.push("cmd.exe");
+            if command.is_file() {
+                return Ok(command);
+            }
+            return Err(AppError::windows(
+                "system_command_unavailable",
+                "Windows system command is unavailable.",
+            ));
+        }
+        capacity = length.checked_add(1).ok_or_else(|| {
+            AppError::windows(
+                "system_command_unavailable",
+                "Windows system command is unavailable.",
+            )
+        })?;
     }
-    Err(AppError::windows(
-        "profile_setup_failed",
-        "Windows could not finish command protection setup.",
-    ))
 }
 
-fn profile_result_is_ready(result: i32) -> bool {
-    result == S_OK || result == PROFILE_ALREADY_EXISTS
+fn initialize_profile(username: &str, password: &str) -> AppResult<()> {
+    let executable = system_command()?;
+    let command = vec![
+        executable.to_string_lossy().into_owned(),
+        "/d".to_string(),
+        "/c".to_string(),
+        "exit".to_string(),
+        "0".to_string(),
+    ];
+    let executable_wide = wide_path(&executable);
+    let mut command_line = quote_command(&command)?;
+    let username = wide(username);
+    let domain = wide(".");
+    let password = wide(password);
+    let current_directory = executable.parent().ok_or_else(|| {
+        AppError::windows(
+            "profile_initialization_failed",
+            "Windows could not finish command protection setup.",
+        )
+    })?;
+    let current_directory = wide_path(current_directory);
+    let mut startup = STARTUPINFOW::default();
+    startup.cb = size_of::<STARTUPINFOW>() as u32;
+    let mut information = PROCESS_INFORMATION::default();
+    if unsafe {
+        CreateProcessWithLogonW(
+            username.as_ptr(),
+            domain.as_ptr(),
+            password.as_ptr(),
+            LOGON_WITH_PROFILE,
+            executable_wide.as_ptr(),
+            command_line.as_mut_ptr(),
+            CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            std::ptr::null(),
+            current_directory.as_ptr(),
+            &startup,
+            &mut information,
+        )
+    } == 0
+    {
+        return Err(super::util::last_error(
+            "profile_initialization_failed",
+            "Windows could not finish command protection setup.",
+        ));
+    }
+    let process = OwnedHandle::new(
+        information.hProcess,
+        "profile_initialization_failed",
+        "Windows could not finish command protection setup.",
+    )?;
+    let thread = OwnedHandle::new(
+        information.hThread,
+        "profile_initialization_failed",
+        "Windows could not finish command protection setup.",
+    )?;
+    drop(thread);
+    let wait = unsafe { WaitForSingleObject(process.get(), PROFILE_INITIALIZATION_TIMEOUT_MS) };
+    if wait == WAIT_TIMEOUT {
+        unsafe {
+            TerminateProcess(process.get(), 125);
+            WaitForSingleObject(process.get(), 30000);
+        }
+        return Err(AppError::windows(
+            "profile_initialization_failed",
+            "Windows could not finish command protection setup.",
+        ));
+    }
+    if wait != WAIT_OBJECT_0 {
+        return Err(super::util::last_error(
+            "profile_initialization_failed",
+            "Windows could not finish command protection setup.",
+        ));
+    }
+    let mut exit_code = 0u32;
+    if unsafe { GetExitCodeProcess(process.get(), &mut exit_code) } == 0 {
+        return Err(super::util::last_error(
+            "profile_initialization_failed",
+            "Windows could not finish command protection setup.",
+        ));
+    }
+    if exit_code != 0 {
+        return Err(AppError::windows(
+            "profile_initialization_failed",
+            "Windows could not finish command protection setup.",
+        ));
+    }
+    Ok(())
 }
 
 fn ensure_membership(group: &str, username: &str) -> AppResult<()> {
@@ -655,14 +759,13 @@ pub fn marker_path(state_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use windows_sys::Win32::Foundation::S_OK;
-
-    use super::{PROFILE_ALREADY_EXISTS, profile_result_is_ready};
+    use super::system_command;
 
     #[test]
-    fn profile_creation_accepts_new_and_existing_profiles() {
-        assert!(profile_result_is_ready(S_OK));
-        assert!(profile_result_is_ready(PROFILE_ALREADY_EXISTS));
-        assert!(!profile_result_is_ready(0x80070005_u32 as i32));
+    fn profile_initialization_uses_the_system_command() {
+        let command = system_command().unwrap();
+        assert!(command.is_absolute());
+        assert_eq!(command.file_name().unwrap(), "cmd.exe");
+        assert!(command.is_file());
     }
 }
