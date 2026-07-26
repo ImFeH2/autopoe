@@ -1,6 +1,6 @@
 [package]
 name = "flowent-native"
-version = "0.3.11"
+version = "0.3.12"
 edition = "2024"
 description = "Platform runtime resources for Flowent"
 license = "Apache-2.0"

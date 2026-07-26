@@ -1,6 +1,6 @@
 [package]
 name = "flowent-sandbox-windows"
-version = "0.3.11"
+version = "0.3.12"
 edition = "2024"
 autobins = false
 

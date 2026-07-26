@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "flowent-sandbox-windows"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "serde",
  "serde_json",
