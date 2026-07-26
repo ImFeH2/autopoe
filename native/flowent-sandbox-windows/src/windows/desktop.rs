@@ -11,15 +11,13 @@ use windows_sys::Win32::Security::{
     SetSecurityDescriptorDacl,
 };
 use windows_sys::Win32::System::StationsAndDesktops::{
-    CloseDesktop, CloseWindowStation, CreateDesktopW, CreateWindowStationW, DESKTOP_CREATEMENU,
-    DESKTOP_CREATEWINDOW, DESKTOP_DELETE, DESKTOP_ENUMERATE, DESKTOP_HOOKCONTROL,
-    DESKTOP_JOURNALPLAYBACK, DESKTOP_JOURNALRECORD, DESKTOP_READ_CONTROL, DESKTOP_READOBJECTS,
-    DESKTOP_SWITCHDESKTOP, DESKTOP_WRITE_DAC, DESKTOP_WRITE_OWNER, DESKTOP_WRITEOBJECTS,
-    GetProcessWindowStation, GetUserObjectInformationW, HDESK, HWINSTA, SetProcessWindowStation,
-    UOI_NAME,
+    CloseDesktop, CreateDesktopW, DESKTOP_CREATEMENU, DESKTOP_CREATEWINDOW, DESKTOP_DELETE,
+    DESKTOP_ENUMERATE, DESKTOP_HOOKCONTROL, DESKTOP_JOURNALPLAYBACK, DESKTOP_JOURNALRECORD,
+    DESKTOP_READ_CONTROL, DESKTOP_READOBJECTS, DESKTOP_SWITCHDESKTOP, DESKTOP_WRITE_DAC,
+    DESKTOP_WRITE_OWNER, DESKTOP_WRITEOBJECTS, GetProcessWindowStation, GetUserObjectInformationW,
+    HDESK, HWINSTA, UOI_NAME,
 };
 use windows_sys::Win32::System::SystemServices::SECURITY_DESCRIPTOR_REVISION;
-use windows_sys::Win32::UI::WindowsAndMessaging::{CWF_CREATE_ONLY, WINSTA_ALL_ACCESS};
 
 use crate::error::{AppError, AppResult};
 
@@ -41,7 +39,6 @@ const DESKTOP_ACCESS: u32 = DESKTOP_READOBJECTS
 
 pub struct PrivateDesktop {
     handle: HDESK,
-    _station: PrivateWindowStation,
     startup_name: Vec<u16>,
 }
 
@@ -55,7 +52,14 @@ impl PrivateDesktop {
         let base = sid_from_string(base_sid)?;
         let capability = sid_from_string(capability_sid)?;
         let sids = [&base[..], &capability[..], logon_sid];
-        let station = PrivateWindowStation::create(&sids)?;
+        let station = unsafe { GetProcessWindowStation() };
+        if station.is_null() {
+            return Err(super::util::last_error(
+                "window_station_name_failed",
+                "Could not access the current command window station.",
+            ));
+        }
+        let station_name = user_object_name(station)?;
         let desktop_name = format!("FlowentProtectedDesktop-{name_suffix}");
         let name_wide = wide(&desktop_name);
         let acl = create_acl(&sids, DESKTOP_ACCESS)?;
@@ -83,8 +87,7 @@ impl PrivateDesktop {
         }
         Ok(Self {
             handle,
-            startup_name: wide(format!("{}\\{desktop_name}", station.name)),
-            _station: station,
+            startup_name: wide(format!("{station_name}\\{desktop_name}")),
         })
     }
 
@@ -99,78 +102,6 @@ impl Drop for PrivateDesktop {
             unsafe {
                 CloseDesktop(self.handle);
             }
-        }
-    }
-}
-
-struct PrivateWindowStation {
-    handle: HWINSTA,
-    previous: HWINSTA,
-    name: String,
-}
-
-impl PrivateWindowStation {
-    fn create(sids: &[&[u8]]) -> AppResult<Self> {
-        let previous = unsafe { GetProcessWindowStation() };
-        if previous.is_null() {
-            return Err(super::util::last_error(
-                "window_station_create_failed",
-                "Could not access the current command window station.",
-            ));
-        }
-        let acl = create_acl(sids, WINSTA_ALL_ACCESS as u32)?;
-        let mut descriptor = create_descriptor(&acl)?;
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: &mut descriptor as *mut _ as *mut c_void,
-            bInheritHandle: 0,
-        };
-        let handle = unsafe {
-            CreateWindowStationW(
-                std::ptr::null(),
-                CWF_CREATE_ONLY,
-                WINSTA_ALL_ACCESS as u32,
-                &attributes,
-            )
-        };
-        if handle.is_null() {
-            return Err(super::util::last_error(
-                "window_station_create_failed",
-                "Could not create a private command window station.",
-            ));
-        }
-        let name = match user_object_name(handle) {
-            Ok(name) => name,
-            Err(error) => {
-                unsafe {
-                    CloseWindowStation(handle);
-                }
-                return Err(error);
-            }
-        };
-        if unsafe { SetProcessWindowStation(handle) } == 0 {
-            let error = super::util::last_error(
-                "window_station_switch_failed",
-                "Could not activate the private command window station.",
-            );
-            unsafe {
-                CloseWindowStation(handle);
-            }
-            return Err(error);
-        }
-        Ok(Self {
-            handle,
-            previous,
-            name,
-        })
-    }
-}
-
-impl Drop for PrivateWindowStation {
-    fn drop(&mut self) {
-        unsafe {
-            SetProcessWindowStation(self.previous);
-            CloseWindowStation(self.handle);
         }
     }
 }
@@ -259,7 +190,7 @@ fn user_object_name(handle: HWINSTA) -> AppResult<String> {
     if needed < size_of::<u16>() as u32 {
         return Err(super::util::last_error(
             "window_station_name_failed",
-            "Could not read the private command window station name.",
+            "Could not read the current command window station name.",
         ));
     }
     let mut buffer = vec![0u16; (needed as usize).div_ceil(size_of::<u16>())];
@@ -275,7 +206,7 @@ fn user_object_name(handle: HWINSTA) -> AppResult<String> {
     {
         return Err(super::util::last_error(
             "window_station_name_failed",
-            "Could not read the private command window station name.",
+            "Could not read the current command window station name.",
         ));
     }
     let length = buffer
@@ -287,7 +218,7 @@ fn user_object_name(handle: HWINSTA) -> AppResult<String> {
     if name.is_empty() || name.contains('\\') {
         return Err(AppError::windows(
             "window_station_name_failed",
-            "Private command window station name is invalid.",
+            "Current command window station name is invalid.",
         ));
     }
     Ok(name)
@@ -295,13 +226,16 @@ fn user_object_name(handle: HWINSTA) -> AppResult<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::PrivateDesktop;
+    use windows_sys::Win32::System::StationsAndDesktops::GetProcessWindowStation;
+
+    use super::{PrivateDesktop, user_object_name};
     use crate::windows::token::create_restricted;
 
     #[test]
-    fn creates_isolated_window_station_and_desktop() {
+    fn creates_private_desktop_on_current_window_station() {
         let capability = "S-1-5-21-1-2-3-4";
         let identity = create_restricted(capability).unwrap();
+        let station = user_object_name(unsafe { GetProcessWindowStation() }).unwrap();
         let desktop =
             PrivateDesktop::create("test", "S-1-1-0", capability, &identity.logon_sid).unwrap();
         let length = desktop
@@ -311,7 +245,7 @@ mod tests {
             .unwrap();
         let name = String::from_utf16(&desktop.startup_name[..length]).unwrap();
 
-        assert!(name.contains('\\'));
-        assert!(!name.starts_with("Winsta0\\"));
+        assert!(name.starts_with(&format!("{station}\\FlowentProtectedDesktop-")));
+        assert!(!name.ends_with("\\Default"));
     }
 }

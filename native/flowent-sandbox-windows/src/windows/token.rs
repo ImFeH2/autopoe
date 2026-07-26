@@ -1,17 +1,20 @@
 use std::ffi::c_void;
 use std::mem::{align_of, size_of};
 
-use windows_sys::Win32::Foundation::{ERROR_SUCCESS, GENERIC_ALL, HANDLE, LocalFree};
+use windows_sys::Win32::Foundation::{
+    ERROR_NOT_ALL_ASSIGNED, ERROR_SUCCESS, GENERIC_ALL, GetLastError, HANDLE, LUID, LocalFree,
+};
 use windows_sys::Win32::Security::Authorization::{
     EXPLICIT_ACCESS_W, GRANT_ACCESS, SetEntriesInAclW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN,
     TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, GetTokenInformation, IsTokenRestricted,
-    LUA_TOKEN, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ADJUST_DEFAULT,
+    AdjustTokenPrivileges, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, GetTokenInformation,
+    IsTokenRestricted, LUA_TOKEN, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+    SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES,
     TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE,
-    TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenDefaultDacl, TokenGroups, TokenUser,
-    WRITE_RESTRICTED,
+    TOKEN_INFORMATION_CLASS, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER, TokenDefaultDacl,
+    TokenGroups, TokenUser, WRITE_RESTRICTED,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -36,6 +39,7 @@ pub fn create_restricted(capability_sid: &str) -> AppResult<RestrictedIdentity> 
         | TOKEN_DUPLICATE
         | TOKEN_QUERY
         | TOKEN_ADJUST_DEFAULT
+        | TOKEN_ADJUST_PRIVILEGES
         | TOKEN_ADJUST_SESSIONID;
     if unsafe { OpenProcessToken(GetCurrentProcess(), access, &mut current) } == 0 {
         return Err(last_error(
@@ -95,11 +99,61 @@ pub fn create_restricted(capability_sid: &str) -> AppResult<RestrictedIdentity> 
             "Windows did not mark the command identity as restricted.",
         ));
     }
+    enable_privilege(&restricted, "SeChangeNotifyPrivilege")?;
     grant_default_object_access(&restricted, &[&capability, &logon_sid, &everyone])?;
     Ok(RestrictedIdentity {
         token: restricted,
         logon_sid,
     })
+}
+
+fn enable_privilege(token: &OwnedHandle, name: &str) -> AppResult<()> {
+    let luid = privilege_luid(name)?;
+    let privileges = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
+    };
+    if unsafe {
+        AdjustTokenPrivileges(
+            token.get(),
+            0,
+            &privileges,
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    } == 0
+    {
+        return Err(last_error(
+            "token_privilege_failed",
+            "Could not apply protected command privileges.",
+        ));
+    }
+    if unsafe { GetLastError() } == ERROR_NOT_ALL_ASSIGNED {
+        return Err(AppError::windows(
+            "token_privilege_failed",
+            "Required protected command privileges are unavailable.",
+        ));
+    }
+    Ok(())
+}
+
+fn privilege_luid(name: &str) -> AppResult<LUID> {
+    let name = super::util::wide(name);
+    let mut luid = LUID {
+        LowPart: 0,
+        HighPart: 0,
+    };
+    if unsafe { LookupPrivilegeValueW(std::ptr::null(), name.as_ptr(), &mut luid) } == 0 {
+        return Err(last_error(
+            "token_privilege_failed",
+            "Could not resolve protected command privileges.",
+        ));
+    }
+    Ok(luid)
 }
 
 fn token_logon_sid(token: &OwnedHandle) -> AppResult<Vec<u8>> {
@@ -322,10 +376,11 @@ mod tests {
     use std::mem::{align_of, size_of};
 
     use windows_sys::Win32::Security::{
-        IsTokenRestricted, SID_AND_ATTRIBUTES, TokenRestrictedSids,
+        IsTokenRestricted, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED, SID_AND_ATTRIBUTES,
+        TokenPrivileges, TokenRestrictedSids,
     };
 
-    use super::{create_restricted, read_token_information};
+    use super::{create_restricted, privilege_luid, read_token_information};
     use crate::windows::util::{copy_sid, sid_to_string};
 
     fn restricted_sids(identity: &super::RestrictedIdentity) -> Vec<String> {
@@ -351,6 +406,28 @@ mod tests {
         sids
     }
 
+    fn privilege_enabled(identity: &super::RestrictedIdentity, name: &str) -> bool {
+        let expected = privilege_luid(name).unwrap();
+        let (buffer, length) = read_token_information(
+            &identity.token,
+            TokenPrivileges,
+            "test_failed",
+            "token privileges",
+        )
+        .unwrap();
+        let bytes = buffer.as_ptr() as *const u8;
+        let count = unsafe { std::ptr::read_unaligned(bytes as *const u32) } as usize;
+        let offset = size_of::<u32>().next_multiple_of(align_of::<LUID_AND_ATTRIBUTES>());
+        assert!(offset + count * size_of::<LUID_AND_ATTRIBUTES>() <= length);
+        let entries = unsafe { bytes.add(offset) as *const LUID_AND_ATTRIBUTES };
+        (0..count).any(|index| {
+            let entry = unsafe { std::ptr::read_unaligned(entries.add(index)) };
+            entry.Luid.LowPart == expected.LowPart
+                && entry.Luid.HighPart == expected.HighPart
+                && entry.Attributes & SE_PRIVILEGE_ENABLED != 0
+        })
+    }
+
     #[test]
     fn restricted_identity_keeps_logon_access() {
         let capability = "S-1-5-21-1-2-3-4";
@@ -366,5 +443,6 @@ mod tests {
         assert_ne!(unsafe { IsTokenRestricted(identity.token.get()) }, 0);
         assert!(logon_sid.starts_with("S-1-5-5-"));
         assert_eq!(restricted_sids(&identity), expected);
+        assert!(privilege_enabled(&identity, "SeChangeNotifyPrivilege"));
     }
 }
