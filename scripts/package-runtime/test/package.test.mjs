@@ -134,6 +134,24 @@ test("packed main npm artifact contains aliases, launcher, license, and notices"
   );
 });
 
+test("staged npm launcher starts through an npm command link", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "flowent-command-link-"));
+  const packageRoot = join(root, "node_modules", "flowent");
+  const commandRoot = join(root, "node_modules", ".bin");
+  const commandPath = join(commandRoot, "flowent");
+  await stageMainPackage({ projectRoot, outputDir: packageRoot });
+  await mkdir(commandRoot, { recursive: true });
+  await symlink("../flowent/bin/flowent.mjs", commandPath);
+
+  await assert.rejects(execFileAsync(commandPath, ["doctor"]), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /files for this computer are missing/i);
+    return true;
+  });
+});
+
 test("staged platform npm package includes the frozen application and notices", async () => {
   const root = await mkdtemp(join(tmpdir(), "flowent-platform-package-"));
   const applicationDir = join(root, "application", "flowent");

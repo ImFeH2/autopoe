@@ -6,7 +6,7 @@ import { access, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const runtimeTargets = {
   "darwin-arm64": {
@@ -193,9 +193,21 @@ async function main() {
   }
 }
 
-const invokedPath = process.argv[1]
-  ? pathToFileURL(resolve(process.argv[1])).href
-  : "";
-if (import.meta.url === invokedPath) {
+async function isInvoked() {
+  if (!process.argv[1]) {
+    return false;
+  }
+  try {
+    const [modulePath, invokedPath] = await Promise.all([
+      realpath(fileURLToPath(import.meta.url)),
+      realpath(resolve(process.argv[1])),
+    ]);
+    return modulePath === invokedPath;
+  } catch {
+    return false;
+  }
+}
+
+if (await isInvoked()) {
   await main();
 }
