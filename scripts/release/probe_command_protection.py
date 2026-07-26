@@ -81,6 +81,19 @@ def probe_command_protection(root: Path) -> None:
             )
             _require_success(launch_result, "Windows protected process launch failed")
             print("Windows protected process launch passed.")
+            helper = runner.status.executable
+            if helper is None:
+                raise RuntimeError("Windows command protection file is unavailable.")
+            native_result = runner.run(
+                [str(helper), "help"],
+                env=_environment(),
+            )
+            _require_success(native_result, "Windows protected runtime launch failed")
+            if not native_result.stdout.startswith("Usage:"):
+                raise RuntimeError(
+                    "Windows protected runtime returned unexpected output."
+                )
+            print("Windows protected runtime launch passed.")
         result = runner.run(
             [
                 sys.executable,
