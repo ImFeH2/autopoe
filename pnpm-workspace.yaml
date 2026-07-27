@@ -1,7 +1,0 @@
-packages:
-  - frontend
-
-ignoredBuiltDependencies:
-  - msw
-  - sharp
-  - unrs-resolver
