@@ -1,9 +1,9 @@
 [package]
 name = "flowent"
 version = "0.0.1"
-description = "Flowent desktop application"
-authors = ["ImFeH2"]
-edition = "2021"
+description = "Just say what you need. Flowent gets it done."
+authors = ["ImFeH2 <i@feh2.im>"]
+edition = "2024"
 
 [lib]
 name = "flowent_lib"

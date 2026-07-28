@@ -2,6 +2,7 @@
   "name": "flowent",
   "private": true,
   "version": "0.0.1",
+  "description": "Just say what you need. Flowent gets it done.",
   "type": "module",
   "scripts": {
     "dev": "vite",
