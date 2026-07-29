@@ -14,4 +14,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 agent = { path = "../agent" }
+futures-util = "0.3"
 tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["time"] }
