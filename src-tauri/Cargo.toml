@@ -13,4 +13,5 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+agent = { path = "../agent" }
 tauri = { version = "2", features = [] }
