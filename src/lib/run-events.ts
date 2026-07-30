@@ -18,6 +18,12 @@ function eventDetail(event: RuntimeEvent) {
   if (event.name === "agent.tool_completed") {
     return JSON.stringify(event.payload.result ?? {}, null, 2);
   }
+  if (
+    event.name === "workflow.completed" ||
+    event.name === "workflow.workspace_ready"
+  ) {
+    return JSON.stringify(event.payload.output ?? event.payload, null, 2);
+  }
   return text(event.payload.message);
 }
 
@@ -91,6 +97,7 @@ export function applyRuntimeEvent(
   const resumed =
     event.name === "approval.resolved" ||
     event.name === "workflow.approval_resolved";
+  const started = event.name === "workflow.started";
   const approvalId = text(event.payload.approval_id);
   const events =
     resumed && approvalId
@@ -100,7 +107,9 @@ export function applyRuntimeEvent(
       : run.events;
   return {
     ...run,
-    status: status ?? (waiting ? "waiting" : resumed ? "running" : run.status),
+    status:
+      status ??
+      (waiting ? "waiting" : resumed || started ? "running" : run.status),
     events: [...events, toRunEvent(event)],
   };
 }

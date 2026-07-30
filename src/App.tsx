@@ -9,7 +9,10 @@ import {
 import { Theme } from "@radix-ui/themes";
 import { AppHeader } from "@/components/app/AppHeader";
 import { AppSidebar } from "@/components/app/AppSidebar";
-import { cloneDefaultWorkflow } from "@/data/defaultWorkflow";
+import {
+  cloneDefaultWorkflow,
+  createBlankWorkflow,
+} from "@/data/defaultWorkflow";
 import { RunWorkflowDialog } from "@/features/runs/RunWorkflowDialog";
 import type { RunWorkflowInput } from "@/features/runs/RunWorkflowDialog";
 import { applyRuntimeEvent, markApprovalResolved } from "@/lib/run-events";
@@ -21,6 +24,8 @@ import type {
   RunListResponse,
   RuntimeEvent,
   StoredWorkflowRun,
+  WorkflowListResponse,
+  WorkflowSummary,
   WorkflowVersionResponse,
 } from "@/types/runtime";
 import type { WorkflowDefinition } from "@/types/workflow";
@@ -109,6 +114,7 @@ function fromStoredRun(run: StoredWorkflowRun): WorkflowRun {
 function App() {
   const [activeView, setActiveView] = useState<AppView>("workflows");
   const [workflow, setWorkflow] = useState(cloneDefaultWorkflow);
+  const [workflowOptions, setWorkflowOptions] = useState<WorkflowSummary[]>([]);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [startingRun, setStartingRun] = useState(false);
@@ -134,6 +140,10 @@ function App() {
       })
       .catch(() => undefined);
   }, [workflow.id]);
+
+  useEffect(() => {
+    void refreshWorkflows();
+  }, []);
 
   useEffect(() => {
     if (historyLoadedRef.current) {
@@ -224,7 +234,51 @@ function App() {
 
   async function saveWorkflow() {
     await runtimeRequest("workflow.save", { workflow });
+    await refreshWorkflows();
     setNotice(null);
+  }
+
+  async function refreshWorkflows() {
+    try {
+      const response = await runtimeRequest<WorkflowListResponse>(
+        "workflow.list",
+      );
+      if (response?.workflows) {
+        setWorkflowOptions(response.workflows);
+      }
+    } catch {
+      return;
+    }
+  }
+
+  async function selectWorkflow(workflowId: string) {
+    if (workflowId === workflow.id) {
+      return;
+    }
+    try {
+      await saveWorkflow();
+      const response = await runtimeRequest<{ workflow: WorkflowDefinition }>(
+        "workflow.get",
+        { workflow_id: workflowId },
+      );
+      setWorkflow(response.workflow);
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function newWorkflow() {
+    try {
+      await saveWorkflow();
+      const next = createBlankWorkflow();
+      await runtimeRequest("workflow.save", { workflow: next });
+      setWorkflow(next);
+      await refreshWorkflows();
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function startRun(input: RunWorkflowInput) {
@@ -303,6 +357,21 @@ function App() {
     }
   }
 
+  async function cancelRun(runId: string) {
+    try {
+      const response = await runtimeRequest<{ cancelled: boolean }>(
+        "workflow.cancel",
+        { run_id: runId },
+      );
+      if (!response.cancelled) {
+        throw new Error("Run is no longer active");
+      }
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   return (
     <Theme
       accentColor="gray"
@@ -325,9 +394,12 @@ function App() {
               {activeView === "workflows" ? (
                 <WorkflowEditor
                   onChange={setWorkflow}
+                  onNewWorkflow={newWorkflow}
                   onRun={() => setRunDialogOpen(true)}
                   onSave={saveWorkflow}
+                  onSelectWorkflow={selectWorkflow}
                   workflow={workflow}
+                  workflowOptions={workflowOptions}
                 />
               ) : null}
               {activeView === "agents" ? (
@@ -335,6 +407,7 @@ function App() {
               ) : null}
               {activeView === "runs" ? (
                 <RunsView
+                  onCancelRun={cancelRun}
                   onResolveApproval={resolveApproval}
                   onSelectRun={loadRunEvents}
                   runs={runs}

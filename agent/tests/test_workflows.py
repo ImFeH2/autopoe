@@ -404,3 +404,60 @@ async def test_workflow_approval_can_be_resolved(tmp_path: Path) -> None:
     assert result.status == "completed"
     assert result.output["gate"]["approved"] is True
     await services.close()
+
+
+async def test_workflow_waiting_for_approval_can_be_cancelled(
+    tmp_path: Path,
+) -> None:
+    services = await RuntimeServices.create(tmp_path)
+    approvals = ApprovalCoordinator(services.approvals)
+    engine = WorkflowEngine(
+        services.workflows,
+        FakeAgentRunner(),
+        approvals,
+        WorkspaceManager(tmp_path),
+        services.artifacts,
+    )
+    definition = WorkflowDefinition.model_validate(
+        {
+            "id": "cancel",
+            "name": "Cancel",
+            "nodes": [
+                {
+                    "id": "gate",
+                    "name": "Gate",
+                    "type": "approval",
+                    "prompt": "Continue?",
+                }
+            ],
+        }
+    )
+    await services.workflows.save_draft(definition)
+    await services.workflows.publish(definition.id)
+    approval_ready = asyncio.Event()
+
+    async def emit(
+        name: str,
+        payload: dict[str, Any],
+        agent_run_id: str | None,
+    ) -> None:
+        if name == "workflow.approval_required":
+            approval_ready.set()
+
+    run_task = asyncio.create_task(
+        engine.run(
+            WorkflowRunRequest(
+                run_id="workflow-run-cancel",
+                workflow_id=definition.id,
+            ),
+            emit,
+        )
+    )
+    await asyncio.wait_for(approval_ready.wait(), 1)
+    run_task.cancel()
+    result = await run_task
+    runs = await services.workflows.list_runs()
+
+    assert result.status == "cancelled"
+    assert runs[0].status == "cancelled"
+    await services.close()

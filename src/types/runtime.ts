@@ -27,6 +27,18 @@ export interface WorkflowVersionResponse {
   };
 }
 
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  description: string;
+  latest_version?: number | null;
+  updated_at: string;
+}
+
+export interface WorkflowListResponse {
+  workflows: WorkflowSummary[];
+}
+
 export interface RuntimePreferences {
   default_workspace_mode: "direct" | "worktree";
 }
@@ -40,7 +52,7 @@ export interface SettingsResponse {
 
 export interface StoredWorkflowRun {
   id: string;
-  workflow_id?: string;
+  workflow_id?: string | null;
   workflow_name: string;
   version?: number;
   status: string;

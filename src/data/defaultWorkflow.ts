@@ -211,3 +211,32 @@ export const defaultWorkflow: WorkflowDefinition = {
 export function cloneDefaultWorkflow() {
   return structuredClone(defaultWorkflow);
 }
+
+export function createBlankWorkflow(): WorkflowDefinition {
+  const suffix =
+    globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36);
+  const nodeId = "agent";
+  return {
+    id: `workflow-${suffix}`,
+    name: "Untitled workflow",
+    description: "",
+    max_parallelism: 3,
+    nodes: [
+      {
+        id: nodeId,
+        type: "agent",
+        name: "Agent",
+        depends_on: [],
+        position: { x: 160, y: 180 },
+        agent: createAgent(
+          nodeId,
+          "Agent",
+          "Complete the assigned step precisely.",
+        ),
+        prompt: "Complete {{ input.request }}.",
+        output_mode: "text",
+        max_attempts: 2,
+      },
+    ],
+  };
+}

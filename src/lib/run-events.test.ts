@@ -13,6 +13,20 @@ function createRun(): WorkflowRun {
 }
 
 describe("run events", () => {
+  it("marks a queued workflow as running", () => {
+    const started = applyRuntimeEvent(
+      { ...createRun(), status: "queued" },
+      {
+        name: "workflow.started",
+        sequence: 0,
+        scope: { run_id: "run-1" },
+        payload: {},
+      },
+    );
+
+    expect(started.status).toBe("running");
+  });
+
   it("coalesces streaming text by agent run", () => {
     const first = applyRuntimeEvent(createRun(), {
       name: "agent.text_delta",

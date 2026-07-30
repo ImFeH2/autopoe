@@ -55,6 +55,21 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
   });
 
+  it("creates another editable workflow", async () => {
+    render(<App />);
+
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "Select workflow" }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New" }));
+
+    expect(
+      await screen.findByRole("textbox", { name: "Workflow name" }),
+    ).toHaveValue("Untitled workflow");
+    expect(screen.getAllByText("Agent").length).toBeGreaterThan(0);
+  });
+
   it("queues a workflow run and opens its console", async () => {
     invokeMock.mockImplementation(async (command: string, args: any) => {
       if (command === "runtime_request" && args.name === "workflow.publish") {
@@ -62,6 +77,9 @@ describe("App", () => {
       }
       if (command === "runtime_request" && args.name === "workflow.get") {
         throw new Error("Not saved");
+      }
+      if (command === "runtime_request" && args.name === "workflow.cancel") {
+        return { cancelled: true };
       }
       if (command === "run_workflow") {
         args.events.onmessage?.({
@@ -93,6 +111,13 @@ describe("App", () => {
       (await screen.findAllByText("Software delivery")).length,
     ).toBeGreaterThan(0);
     expect(await screen.findByText("workflow started")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("runtime_request", {
+        name: "workflow.cancel",
+        payload: { run_id: expect.any(String) },
+      });
+    });
   });
 
   it("loads and replays persisted workflow runs", async () => {

@@ -322,10 +322,16 @@
   border-bottom: 1px solid var(--f-border-subtle);
 }
 
-.console-head > div {
+.console-title {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.console-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--f-space-2);
 }
 
 .console-head strong {

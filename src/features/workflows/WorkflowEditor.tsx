@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, DropdownMenu, TextField, Tooltip } from "@radix-ui/themes";
 import {
   Bot,
@@ -21,12 +21,16 @@ import type {
   WorkflowNode,
   WorkflowNodeKind,
 } from "@/types/workflow";
+import type { WorkflowSummary } from "@/types/runtime";
 
 interface WorkflowEditorProps {
   workflow: WorkflowDefinition;
+  workflowOptions: WorkflowSummary[];
   onChange: (workflow: WorkflowDefinition) => void;
+  onNewWorkflow: () => Promise<void>;
   onRun: () => void;
   onSave: () => Promise<void>;
+  onSelectWorkflow: (workflowId: string) => Promise<void>;
 }
 
 function createNode(kind: WorkflowNodeKind, index: number): WorkflowNode {
@@ -127,9 +131,12 @@ function loopPathLabels(nodes: WorkflowNode[], path: string[]) {
 
 export function WorkflowEditor({
   workflow,
+  workflowOptions,
   onChange,
+  onNewWorkflow,
   onRun,
   onSave,
+  onSelectWorkflow,
 }: WorkflowEditorProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
     workflow.nodes[0]?.id ?? null,
@@ -149,6 +156,12 @@ export function WorkflowEditor({
       visibleNodes.find((node) => node.id === selectedNodeId) ?? null,
     [selectedNodeId, visibleNodes],
   );
+
+  useEffect(() => {
+    setActiveLoopPath([]);
+    setSelectedNodeId(workflow.nodes[0]?.id ?? null);
+    setSaved(true);
+  }, [workflow.id]);
 
   function updateWorkflow(next: WorkflowDefinition) {
     setSaved(false);
@@ -228,7 +241,39 @@ export function WorkflowEditor({
               <CornerUpLeft size={14} strokeWidth={1.8} />
             </Button>
           ) : (
-          <GitBranch size={15} strokeWidth={1.7} />
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                <Button
+                  aria-label="Select workflow"
+                  className="workflow-selector-button"
+                  color="gray"
+                  variant="ghost"
+                >
+                  <GitBranch size={15} strokeWidth={1.7} />
+                  <ChevronDown size={12} strokeWidth={1.8} />
+                </Button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="start">
+                {workflowOptions.map((option) => (
+                  <DropdownMenu.Item
+                    key={option.id}
+                    onSelect={() => void onSelectWorkflow(option.id)}
+                  >
+                    {option.id === workflow.id ? (
+                      <Check size={13} strokeWidth={1.8} />
+                    ) : (
+                      <GitBranch size={13} strokeWidth={1.7} />
+                    )}
+                    {option.name}
+                  </DropdownMenu.Item>
+                ))}
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item onSelect={() => void onNewWorkflow()}>
+                  <Plus size={13} strokeWidth={1.8} />
+                  New
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
           )}
           {activeLoopPath.length === 0 ? (
             <TextField.Root

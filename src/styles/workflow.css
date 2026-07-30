@@ -39,6 +39,13 @@
   color: var(--f-text-tertiary);
 }
 
+.workflow-selector-button.rt-Button {
+  height: 28px;
+  gap: 2px;
+  padding: 0 5px;
+  color: var(--f-text-tertiary);
+}
+
 .workflow-breadcrumbs,
 .workflow-breadcrumbs > span {
   display: flex;

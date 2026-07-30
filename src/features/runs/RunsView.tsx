@@ -4,6 +4,7 @@ import {
   Bot,
   Check,
   Circle,
+  CircleStop,
   Clock3,
   PlayCircle,
   ShieldCheck,
@@ -14,6 +15,7 @@ import type { WorkflowRun, WorkflowRunStatus } from "@/types/run";
 
 interface RunsViewProps {
   runs: WorkflowRun[];
+  onCancelRun: (runId: string) => Promise<void>;
   onResolveApproval: (approvalId: string, approved: boolean) => Promise<void>;
   onSelectRun: (runId: string) => Promise<void>;
 }
@@ -48,6 +50,7 @@ function EventIcon({ name }: { name: string }) {
 
 export function RunsView({
   runs,
+  onCancelRun,
   onResolveApproval,
   onSelectRun,
 }: RunsViewProps) {
@@ -105,13 +108,29 @@ export function RunsView({
       {selected ? (
         <div className="run-console">
           <div className="console-head">
-            <div>
+            <div className="console-title">
               <span className="eyebrow">Run</span>
               <strong>{selected.workflowName}</strong>
             </div>
-            <span className="status-label" data-status={selected.status}>
-              {statusLabels[selected.status]}
-            </span>
+            <div className="console-actions">
+              <span className="status-label" data-status={selected.status}>
+                {statusLabels[selected.status]}
+              </span>
+              {selected.status === "queued" ||
+              selected.status === "running" ||
+              selected.status === "waiting" ? (
+                <Button
+                  className="secondary-button"
+                  color="gray"
+                  onClick={() => void onCancelRun(selected.id)}
+                  size="1"
+                  variant="soft"
+                >
+                  <CircleStop size={13} strokeWidth={1.7} />
+                  Cancel
+                </Button>
+              ) : null}
+            </div>
           </div>
           <ScrollArea className="event-scroll" scrollbars="vertical">
             <div className="event-timeline" role="log" aria-live="polite">
