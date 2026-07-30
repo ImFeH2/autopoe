@@ -96,6 +96,28 @@ def test_template_renderer_resolves_nested_values() -> None:
     assert rendered == "Build search after spec"
 
 
+def test_workflow_preserves_canvas_positions() -> None:
+    definition = WorkflowDefinition.model_validate(
+        {
+            "id": "layout",
+            "name": "Layout",
+            "nodes": [
+                {
+                    "id": "node",
+                    "name": "Node",
+                    "type": "agent",
+                    "position": {"x": 120, "y": 240},
+                    "agent": agent_config("Agent"),
+                    "prompt": "Run",
+                }
+            ],
+        }
+    )
+
+    assert definition.nodes[0].position is not None
+    assert definition.nodes[0].position.x == 120
+
+
 async def test_workflow_store_versions_drafts(tmp_path: Path) -> None:
     services = await RuntimeServices.create(tmp_path)
     definition = WorkflowDefinition.model_validate(

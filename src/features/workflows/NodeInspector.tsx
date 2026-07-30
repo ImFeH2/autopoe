@@ -8,9 +8,9 @@ import {
   TextField,
 } from "@radix-ui/themes";
 import { Trash2 } from "lucide-react";
+import { ModelConfigurationFields } from "@/components/ModelConfigurationFields";
 import type {
   AgentWorkflowNode,
-  ProviderKind,
   WorkflowNode,
 } from "@/types/workflow";
 import { availableTools } from "@/types/workflow";
@@ -20,13 +20,6 @@ interface NodeInspectorProps {
   onChange: (node: WorkflowNode) => void;
   onDelete: (nodeId: string) => void;
 }
-
-const providerLabels: Record<ProviderKind, string> = {
-  demo: "Local demo",
-  openai: "OpenAI",
-  openai_compatible: "OpenAI compatible",
-  anthropic: "Anthropic",
-};
 
 const underscorePattern = /_/g;
 
@@ -104,48 +97,12 @@ export function NodeInspector({
                     />
                   </label>
 
-                  <label className="field-label">
-                    <span>Provider</span>
-                    <Select.Root
-                      onValueChange={(provider: ProviderKind) =>
-                        onChange(
-                          updateAgent(node, {
-                            model: { ...node.agent.model, provider },
-                          }),
-                        )
-                      }
-                      value={node.agent.model.provider}
-                    >
-                      <Select.Trigger className="field-select" />
-                      <Select.Content>
-                        {Object.entries(providerLabels).map(
-                          ([provider, label]) => (
-                            <Select.Item key={provider} value={provider}>
-                              {label}
-                            </Select.Item>
-                          ),
-                        )}
-                      </Select.Content>
-                    </Select.Root>
-                  </label>
-
-                  <label className="field-label">
-                    <span>Model</span>
-                    <TextField.Root
-                      onChange={(event) =>
-                        onChange(
-                          updateAgent(node, {
-                            model: {
-                              ...node.agent.model,
-                              model: event.target.value,
-                            },
-                          }),
-                        )
-                      }
-                      value={node.agent.model.model}
-                      variant="surface"
-                    />
-                  </label>
+                  <ModelConfigurationFields
+                    model={node.agent.model}
+                    onChange={(model) =>
+                      onChange(updateAgent(node, { model }))
+                    }
+                  />
 
                   <label className="field-label">
                     <span>Instructions</span>

@@ -1,7 +1,7 @@
 mod commands;
 mod runtime;
 
-use commands::{run_agent, runtime_status};
+use commands::{run_agent, run_workflow, runtime_request, runtime_status};
 use runtime::RuntimeManager;
 use tauri::Manager;
 
@@ -17,7 +17,12 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![run_agent, runtime_status])
+        .invoke_handler(tauri::generate_handler![
+            run_agent,
+            run_workflow,
+            runtime_request,
+            runtime_status
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

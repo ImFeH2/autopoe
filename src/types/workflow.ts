@@ -15,6 +15,7 @@ export interface ModelConfiguration {
   provider: ProviderKind;
   model: string;
   api_mode: "responses" | "chat";
+  credential_id?: string;
   base_url?: string;
 }
 

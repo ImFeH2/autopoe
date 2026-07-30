@@ -28,12 +28,20 @@ class Condition(BaseModel):
     value: Any = None
 
 
+class CanvasPosition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: float
+    y: float
+
+
 class BaseNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: NodeId
     name: str = Field(min_length=1, max_length=120)
     depends_on: list[NodeId] = Field(default_factory=list)
+    position: CanvasPosition | None = None
 
 
 class AgentNode(BaseNode):

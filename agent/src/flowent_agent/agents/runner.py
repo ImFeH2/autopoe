@@ -4,6 +4,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from pydantic import SecretStr
 from pydantic_ai import (
     Agent,
     AgentRunResultEvent,
@@ -28,6 +29,7 @@ from flowent_agent.agents.models import (
 )
 from flowent_agent.approval import ApprovalCoordinator, ApprovalScope
 from flowent_agent.persistence.runs import AgentRunStore
+from flowent_agent.persistence.settings import CredentialStore
 from flowent_agent.tools.registry import AgentDependencies, ToolRegistry
 from flowent_agent.tools.workspace import Workspace, WorkspaceManager
 
@@ -40,11 +42,13 @@ class AgentRunner:
         runs: AgentRunStore,
         approvals: ApprovalCoordinator | None = None,
         workspace_manager: WorkspaceManager | None = None,
+        credentials: CredentialStore | None = None,
         model_factory: Callable[..., Any] = create_model,
     ) -> None:
         self.runs = runs
         self.approvals = approvals
         self.workspace_manager = workspace_manager
+        self.credentials = credentials
         self.model_factory = model_factory
         self.tools = ToolRegistry()
 
@@ -125,7 +129,21 @@ class AgentRunner:
         workspace: Workspace | None,
     ) -> dict[str, Any]:
         configuration = request.agent
-        model = self.model_factory(configuration.model)
+        model_configuration = configuration.model
+        if (
+            model_configuration.api_key is None
+            and model_configuration.credential_id is not None
+            and self.credentials is not None
+        ):
+            secret = await self.credentials.get(
+                model_configuration.provider,
+                model_configuration.credential_id,
+            )
+            if secret is not None:
+                model_configuration = model_configuration.model_copy(
+                    update={"api_key": SecretStr(secret)}
+                )
+        model = self.model_factory(model_configuration)
         toolset = self.tools.build(configuration.tools)
         if toolset is not None and workspace is None:
             raise ValueError("Workspace tools require an active workspace")

@@ -4,6 +4,7 @@ from flowent_agent.persistence.database import Database, RecoveryResult
 from flowent_agent.persistence.events import EventRecord, EventStore
 from flowent_agent.persistence.runs import AgentRunRecord, AgentRunStore
 from flowent_agent.persistence.services import RuntimeServices
+from flowent_agent.persistence.settings import CredentialStore, SettingsStore
 from flowent_agent.persistence.workflows import WorkflowStore
 
 __all__ = [
@@ -12,10 +13,12 @@ __all__ = [
     "ApprovalStore",
     "ArtifactRecord",
     "ArtifactStore",
+    "CredentialStore",
     "Database",
     "EventRecord",
     "EventStore",
     "RecoveryResult",
     "RuntimeServices",
+    "SettingsStore",
     "WorkflowStore",
 ]

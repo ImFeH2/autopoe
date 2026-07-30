@@ -3,12 +3,12 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
-from flowent_agent.agents import AgentRunner, AgentRunRequest
+from flowent_agent.agents import AgentRunner, AgentRunRequest, ModelConfiguration
 from flowent_agent.approval import ApprovalCoordinator
 from flowent_agent.persistence import RuntimeServices
 from flowent_agent.protocol import Envelope, JsonlTransport, Scope
@@ -25,6 +25,21 @@ class InitializeRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     data_dir: str = Field(min_length=1)
+
+
+class RuntimePreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_workspace_mode: Literal["direct", "worktree"] = "worktree"
+
+
+class SaveModelSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: ModelConfiguration
+    runtime: RuntimePreferences = Field(default_factory=RuntimePreferences)
+    api_key: SecretStr | None = None
+    clear_api_key: bool = False
 
 
 class Runtime:
@@ -80,6 +95,8 @@ class Runtime:
             "workflow.cancel": self.cancel_workflow,
             "workflow.approve": self.approve_workflow,
             "approval.resolve": self.approve_workflow,
+            "settings.get": self.get_settings,
+            "settings.save": self.save_settings,
         }
         handler = handlers.get(request.name)
         if handler is None:
@@ -117,6 +134,7 @@ class Runtime:
             self.services.runs,
             self.approvals,
             self.workspace_manager,
+            self.services.credentials,
         )
         self.workflow_engine = WorkflowEngine(
             self.services.workflows,
@@ -141,6 +159,8 @@ class Runtime:
                     "workflow.cancel",
                     "workflow.approve",
                     "approval.resolve",
+                    "settings.get",
+                    "settings.save",
                 ],
                 "protocol_version": 1,
                 "recovered": {
@@ -161,7 +181,12 @@ class Runtime:
     async def start_agent(self, request: Envelope) -> None:
         if not self.initialized:
             raise RuntimeError("Runtime is not initialized")
-        payload = AgentRunRequest.model_validate(request.payload)
+        request_payload = dict(request.payload)
+        if "agent" not in request_payload:
+            stored_model = await self.require_services().settings.get("model.default")
+            if stored_model is not None:
+                request_payload["agent"] = {"model": stored_model}
+        payload = AgentRunRequest.model_validate(request_payload)
         if payload.run_id in self.tasks:
             raise RuntimeError(f"Run already exists: {payload.run_id}")
         task = asyncio.create_task(self.run_agent(payload))
@@ -238,6 +263,98 @@ class Runtime:
         await self.respond(
             request,
             {"resolved": resolved, "approval_id": decision.approval_id},
+        )
+
+    async def get_settings(self, request: Envelope) -> None:
+        services = self.require_services()
+        stored = await services.settings.get("model.default")
+        stored_runtime = await services.settings.get("runtime.preferences")
+        configuration = ModelConfiguration.model_validate(
+            stored
+            or {
+                "provider": "demo",
+                "model": "flowent-demo",
+                "api_mode": "responses",
+                "credential_id": "default",
+            }
+        )
+        has_api_key = False
+        credential_store_available = True
+        if configuration.credential_id is not None:
+            try:
+                has_api_key = (
+                    await services.credentials.get(
+                        configuration.provider,
+                        configuration.credential_id,
+                    )
+                    is not None
+                )
+            except RuntimeError:
+                credential_store_available = False
+        await self.respond(
+            request,
+            {
+                "model": configuration.model_dump(mode="json"),
+                "runtime": RuntimePreferences.model_validate(
+                    stored_runtime or {}
+                ).model_dump(mode="json"),
+                "has_api_key": has_api_key,
+                "credential_store_available": credential_store_available,
+            },
+        )
+
+    async def save_settings(self, request: Envelope) -> None:
+        services = self.require_services()
+        payload = SaveModelSettingsRequest.model_validate(request.payload)
+        configuration = payload.model
+        credential_id = configuration.credential_id or "default"
+        configuration = configuration.model_copy(
+            update={"credential_id": credential_id}
+        )
+        credential_store_available = True
+        if payload.clear_api_key:
+            await services.credentials.delete(
+                configuration.provider,
+                credential_id,
+            )
+            has_api_key = False
+        elif payload.api_key is not None:
+            await services.credentials.set(
+                configuration.provider,
+                credential_id,
+                payload.api_key.get_secret_value(),
+            )
+            has_api_key = True
+        elif configuration.provider == "demo":
+            has_api_key = False
+        else:
+            try:
+                has_api_key = (
+                    await services.credentials.get(
+                        configuration.provider,
+                        credential_id,
+                    )
+                    is not None
+                )
+            except RuntimeError:
+                has_api_key = False
+                credential_store_available = False
+        await services.settings.set(
+            "model.default",
+            configuration.model_dump(mode="json"),
+        )
+        await services.settings.set(
+            "runtime.preferences",
+            payload.runtime.model_dump(mode="json"),
+        )
+        await self.respond(
+            request,
+            {
+                "model": configuration.model_dump(mode="json"),
+                "runtime": payload.runtime.model_dump(mode="json"),
+                "has_api_key": has_api_key,
+                "credential_store_available": credential_store_available,
+            },
         )
 
     async def run_agent(self, request: AgentRunRequest) -> None:

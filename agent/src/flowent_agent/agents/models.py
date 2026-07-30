@@ -19,7 +19,8 @@ class ModelConfiguration(BaseModel):
     model: str = Field(default="flowent-demo", min_length=1)
     api_mode: Literal["responses", "chat"] = "responses"
     api_key: SecretStr | None = Field(default=None, exclude=True)
-    base_url: str | None = None
+    credential_id: str | None = Field(default="default", min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def validate_provider(self) -> "ModelConfiguration":

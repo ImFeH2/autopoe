@@ -209,6 +209,23 @@
   text-transform: uppercase;
 }
 
+.app-notice {
+  position: fixed;
+  z-index: 20;
+  right: var(--f-space-5);
+  bottom: var(--f-space-5);
+  max-width: 420px;
+  padding: 10px var(--f-space-3);
+  border: 1px solid var(--f-danger-border);
+  border-radius: var(--f-radius-md);
+  background: rgba(30, 16, 16, 0.94);
+  box-shadow: var(--f-shadow-float);
+  color: var(--f-danger-text);
+  font-size: var(--f-text-xs);
+  line-height: 1.45;
+  backdrop-filter: var(--f-blur);
+}
+
 @media (max-width: 980px) {
   :root {
     --f-sidebar-width: 66px;

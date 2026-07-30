@@ -24,7 +24,7 @@ interface WorkflowEditorProps {
   workflow: WorkflowDefinition;
   onChange: (workflow: WorkflowDefinition) => void;
   onRun: () => void;
-  onSave: () => void;
+  onSave: () => Promise<void>;
 }
 
 function createNode(kind: WorkflowNodeKind, index: number): WorkflowNode {
@@ -127,9 +127,13 @@ export function WorkflowEditor({
     setSelectedNodeId(null);
   }
 
-  function saveWorkflow() {
-    setSaved(true);
-    onSave();
+  async function saveWorkflow() {
+    try {
+      await onSave();
+      setSaved(true);
+    } catch {
+      setSaved(false);
+    }
   }
 
   return (
@@ -175,7 +179,7 @@ export function WorkflowEditor({
             <Button
               className="secondary-button"
               color="gray"
-              onClick={saveWorkflow}
+              onClick={() => void saveWorkflow()}
               variant="soft"
             >
               {saved ? (

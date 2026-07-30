@@ -11,6 +11,9 @@ export interface WorkflowRunEvent {
   name: string;
   node?: string;
   detail?: string;
+  approvalId?: string;
+  prompt?: string;
+  resolved?: boolean;
   timestamp: string;
 }
 

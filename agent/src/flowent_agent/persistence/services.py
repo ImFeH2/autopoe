@@ -6,6 +6,7 @@ from flowent_agent.persistence.artifacts import ArtifactStore
 from flowent_agent.persistence.database import Database, RecoveryResult
 from flowent_agent.persistence.events import EventStore
 from flowent_agent.persistence.runs import AgentRunStore
+from flowent_agent.persistence.settings import CredentialStore, SettingsStore
 from flowent_agent.persistence.workflows import WorkflowStore
 
 
@@ -17,6 +18,8 @@ class RuntimeServices:
     artifacts: ArtifactStore
     approvals: ApprovalStore
     runs: AgentRunStore
+    settings: SettingsStore
+    credentials: CredentialStore
     workflows: WorkflowStore
     recovery: RecoveryResult
 
@@ -31,6 +34,8 @@ class RuntimeServices:
             artifacts=ArtifactStore(data_dir, database),
             approvals=ApprovalStore(database),
             runs=AgentRunStore(database),
+            settings=SettingsStore(database),
+            credentials=CredentialStore(),
             workflows=WorkflowStore(database),
             recovery=recovery,
         )

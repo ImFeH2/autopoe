@@ -42,9 +42,35 @@ describe("App", () => {
   });
 
   it("queues a workflow run and opens its console", async () => {
+    invokeMock.mockImplementation(async (command: string, args: any) => {
+      if (command === "runtime_request" && args.name === "workflow.publish") {
+        return { version: { version: 1 } };
+      }
+      if (command === "runtime_request" && args.name === "workflow.get") {
+        throw new Error("Not saved");
+      }
+      if (command === "run_workflow") {
+        args.events.onmessage?.({
+          name: "workflow.started",
+          sequence: 0,
+          scope: { run_id: args.runId },
+          payload: {},
+        });
+        return {};
+      }
+      return {};
+    });
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Run" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Request"), {
+      target: { value: "Add search" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Repository"), {
+      target: { value: "/project/flowent" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run" }));
 
     expect(
       await screen.findByRole("button", { name: "Runs" }),
@@ -52,7 +78,7 @@ describe("App", () => {
     expect(
       (await screen.findAllByText("Software delivery")).length,
     ).toBeGreaterThan(0);
-    expect(await screen.findByText("workflow queued")).toBeInTheDocument();
+    expect(await screen.findByText("workflow started")).toBeInTheDocument();
   });
 
   it("streams an agent response in chat", async () => {
@@ -88,30 +114,29 @@ describe("App", () => {
   });
 
   it("excludes failed assistant output from later chat history", async () => {
-    invokeMock
-      .mockImplementationOnce(
-        async (
-          _command: string,
-          args: { events: { onmessage?: (event: RunEvent) => void } },
-        ) => {
-          args.events.onmessage?.({ type: "started" });
+    let attempts = 0;
+    invokeMock.mockImplementation(
+      async (
+        command: string,
+        args: { events?: { onmessage?: (event: RunEvent) => void } },
+      ) => {
+        if (command !== "run_agent" || !args.events) {
+          return {};
+        }
+        attempts += 1;
+        args.events.onmessage?.({ type: "started" });
+        if (attempts === 1) {
           args.events.onmessage?.({
             type: "failed",
             message: "Provider unavailable",
           });
           throw new Error("Provider unavailable");
-        },
-      )
-      .mockImplementationOnce(
-        async (
-          _command: string,
-          args: { events: { onmessage?: (event: RunEvent) => void } },
-        ) => {
-          args.events.onmessage?.({ type: "started" });
-          args.events.onmessage?.({ type: "text_delta", delta: "Recovered" });
-          args.events.onmessage?.({ type: "completed" });
-        },
-      );
+        }
+        args.events.onmessage?.({ type: "text_delta", delta: "Recovered" });
+        args.events.onmessage?.({ type: "completed" });
+        return {};
+      },
+    );
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Chat" }));

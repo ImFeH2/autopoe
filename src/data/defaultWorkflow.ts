@@ -3,6 +3,7 @@ import type {
   WorkflowDefinition,
   WorkflowNode,
 } from "@/types/workflow";
+import { defaultModelConfiguration } from "@/lib/models";
 
 export function createAgent(
   id: string,
@@ -14,11 +15,7 @@ export function createAgent(
     id,
     name,
     instructions,
-    model: {
-      provider: "demo",
-      model: "flowent-demo",
-      api_mode: "responses",
-    },
+    model: { ...defaultModelConfiguration },
     limits: {
       request_limit: 24,
       tool_calls_limit: 48,

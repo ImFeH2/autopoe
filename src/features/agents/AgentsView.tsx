@@ -2,16 +2,15 @@ import { useMemo, useState } from "react";
 import {
   Button,
   ScrollArea,
-  Select,
   TextArea,
   TextField,
 } from "@radix-ui/themes";
 import { Bot, Plus, Search, Wrench } from "lucide-react";
+import { ModelConfigurationFields } from "@/components/ModelConfigurationFields";
 import { createAgent } from "@/data/defaultWorkflow";
 import type {
   AgentConfiguration,
   AgentWorkflowNode,
-  ProviderKind,
   WorkflowDefinition,
   WorkflowNode,
 } from "@/types/workflow";
@@ -181,45 +180,11 @@ export function AgentsView({ workflow, onChange }: AgentsViewProps) {
                   variant="surface"
                 />
               </label>
-              <label className="field-label">
-                <span>Provider</span>
-                <Select.Root
-                  onValueChange={(value) =>
-                    updateAgent({
-                      model: {
-                        ...selected.node.agent.model,
-                        provider: value as ProviderKind,
-                      },
-                    })
-                  }
-                  value={selected.node.agent.model.provider}
-                >
-                  <Select.Trigger className="field-select" />
-                  <Select.Content>
-                    <Select.Item value="demo">Local demo</Select.Item>
-                    <Select.Item value="openai">OpenAI</Select.Item>
-                    <Select.Item value="openai_compatible">
-                      OpenAI compatible
-                    </Select.Item>
-                    <Select.Item value="anthropic">Anthropic</Select.Item>
-                  </Select.Content>
-                </Select.Root>
-              </label>
-              <label className="field-label detail-form-wide">
-                <span>Model</span>
-                <TextField.Root
-                  onChange={(event) =>
-                    updateAgent({
-                      model: {
-                        ...selected.node.agent.model,
-                        model: event.target.value,
-                      },
-                    })
-                  }
-                  value={selected.node.agent.model.model}
-                  variant="surface"
-                />
-              </label>
+              <ModelConfigurationFields
+                className="detail-form-wide"
+                model={selected.node.agent.model}
+                onChange={(model) => updateAgent({ model })}
+              />
               <label className="field-label detail-form-wide">
                 <span>Instructions</span>
                 <TextArea

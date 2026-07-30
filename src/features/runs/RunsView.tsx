@@ -14,6 +14,7 @@ import type { WorkflowRun, WorkflowRunStatus } from "@/types/run";
 
 interface RunsViewProps {
   runs: WorkflowRun[];
+  onResolveApproval: (approvalId: string, approved: boolean) => Promise<void>;
 }
 
 const dotPattern = /\./g;
@@ -43,7 +44,7 @@ function EventIcon({ name }: { name: string }) {
   return <Circle size={10} strokeWidth={1.8} />;
 }
 
-export function RunsView({ runs }: RunsViewProps) {
+export function RunsView({ runs, onResolveApproval }: RunsViewProps) {
   const [selectedId, setSelectedId] = useState(runs[0]?.id ?? "");
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0];
 
@@ -116,6 +117,31 @@ export function RunsView({ runs }: RunsViewProps) {
                     ) : null}
                     {event.detail ? (
                       <pre className="timeline-detail">{event.detail}</pre>
+                    ) : null}
+                    {event.prompt ? (
+                      <span className="approval-prompt">{event.prompt}</span>
+                    ) : null}
+                    {event.approvalId && !event.resolved ? (
+                      <div className="approval-actions">
+                        <Button
+                          className="secondary-button"
+                          color="gray"
+                          onClick={() =>
+                            void onResolveApproval(event.approvalId!, false)
+                          }
+                          variant="soft"
+                        >
+                          Reject
+                        </Button>
+                        <Button
+                          className="primary-button"
+                          onClick={() =>
+                            void onResolveApproval(event.approvalId!, true)
+                          }
+                        >
+                          Approve
+                        </Button>
+                      </div>
                     ) : null}
                   </div>
                   <time>{event.timestamp}</time>
