@@ -8,22 +8,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from flowent_agent.agents import AgentRunner, AgentRunRequest
 from flowent_agent.persistence import RuntimeServices
 from flowent_agent.protocol import Envelope, JsonlTransport, Scope
-
-
-class AgentMessage(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    role: str
-    content: str
-
-
-class AgentRunRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: str = Field(min_length=1)
-    messages: list[AgentMessage]
 
 
 class InitializeRequest(BaseModel):
@@ -39,6 +26,7 @@ class Runtime:
         self.initialized = False
         self.stopping = False
         self.services: RuntimeServices | None = None
+        self.agent_runner: AgentRunner | None = None
 
     @classmethod
     def run(cls) -> None:
@@ -104,6 +92,7 @@ class Runtime:
     async def initialize(self, request: Envelope) -> None:
         payload = InitializeRequest.model_validate(request.payload)
         self.services = await RuntimeServices.create(Path(payload.data_dir))
+        self.agent_runner = AgentRunner(self.services.runs)
         self.initialized = True
         await self.respond(request, {"initialized": True})
         await self.emit(
@@ -132,7 +121,7 @@ class Runtime:
         payload = AgentRunRequest.model_validate(request.payload)
         if payload.run_id in self.tasks:
             raise RuntimeError(f"Run already exists: {payload.run_id}")
-        task = asyncio.create_task(self.run_demo_agent(payload))
+        task = asyncio.create_task(self.run_agent(payload))
         self.tasks[payload.run_id] = task
         task.add_done_callback(lambda _: self.tasks.pop(payload.run_id, None))
         await self.respond(request, {"accepted": True, "run_id": payload.run_id})
@@ -144,44 +133,17 @@ class Runtime:
             task.cancel()
         await self.respond(request, {"cancelled": task is not None, "run_id": run_id})
 
-    async def run_demo_agent(self, request: AgentRunRequest) -> None:
+    async def run_agent(self, request: AgentRunRequest) -> None:
         async def send(name: str, payload: dict[str, Any] | None = None) -> None:
             await self.emit(
                 name,
                 payload or {},
-                scope=Scope(run_id=request.run_id),
+                scope=Scope(run_id=request.run_id, agent_run_id=request.run_id),
             )
 
-        await send("agent.started")
-        try:
-            user_messages = [
-                message.content
-                for message in request.messages
-                if message.role == "user"
-            ]
-            latest = user_messages[-1] if user_messages else ""
-            preview = latest[:96]
-            suffix = "…" if len(latest) > 96 else ""
-            if len(user_messages) > 1:
-                response = (
-                    f"I received “{preview}{suffix}” as turn {len(user_messages)}. "
-                    "The conversation reached the Python runtime, and each response chunk is "
-                    "streaming through JSONL and Tauri Channel."
-                )
-            else:
-                response = (
-                    f"I received “{preview}{suffix}”. This is Flowent’s Python sidecar runtime, "
-                    "streaming over stdio JSONL without a local server."
-                )
-            for chunk in self.chunk_text(response):
-                await asyncio.sleep(0.024)
-                await send("agent.text_delta", {"delta": chunk})
-            await send("agent.completed")
-        except asyncio.CancelledError:
-            await send("agent.cancelled")
-            raise
-        except Exception as error:
-            await send("agent.failed", {"message": str(error)})
+        if self.agent_runner is None:
+            raise RuntimeError("Agent runner is not initialized")
+        await self.agent_runner.run(request, send)
 
     async def respond(
         self,
@@ -237,11 +199,3 @@ class Runtime:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-
-    @staticmethod
-    def chunk_text(value: str) -> list[str]:
-        chunks = value.split(" ")
-        return [
-            chunk if index == len(chunks) - 1 else f"{chunk} "
-            for index, chunk in enumerate(chunks)
-        ]

@@ -141,4 +141,14 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        2,
+        """
+        ALTER TABLE agent_runs ADD COLUMN conversation_id TEXT;
+        ALTER TABLE agent_runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'unknown';
+        ALTER TABLE agent_runs ADD COLUMN model TEXT NOT NULL DEFAULT 'unknown';
+
+        CREATE INDEX agent_runs_conversation ON agent_runs(conversation_id, created_at);
+        """,
+    ),
 )

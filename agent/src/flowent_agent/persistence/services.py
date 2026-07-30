@@ -4,6 +4,7 @@ from pathlib import Path
 from flowent_agent.persistence.artifacts import ArtifactStore
 from flowent_agent.persistence.database import Database, RecoveryResult
 from flowent_agent.persistence.events import EventStore
+from flowent_agent.persistence.runs import AgentRunStore
 
 
 @dataclass
@@ -12,6 +13,7 @@ class RuntimeServices:
     database: Database
     events: EventStore
     artifacts: ArtifactStore
+    runs: AgentRunStore
     recovery: RecoveryResult
 
     @classmethod
@@ -23,6 +25,7 @@ class RuntimeServices:
             database=database,
             events=EventStore(database),
             artifacts=ArtifactStore(data_dir, database),
+            runs=AgentRunStore(database),
             recovery=recovery,
         )
 
