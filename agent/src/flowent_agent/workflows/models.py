@@ -127,6 +127,23 @@ class WorkflowRunResult(BaseModel):
     error: str | None = None
 
 
+class WorkflowRunRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    workflow_id: str | None = None
+    workflow_name: str
+    version: int | None = None
+    status: str
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] | None = None
+    error: str | None = None
+    workspace: dict[str, Any] | None = None
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
 def validate_graph(nodes: list[WorkflowNode], owner: str) -> None:
     node_ids = [node.id for node in nodes]
     if len(node_ids) != len(set(node_ids)):

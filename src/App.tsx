@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Theme } from "@radix-ui/themes";
 import { AppHeader } from "@/components/app/AppHeader";
 import { AppSidebar } from "@/components/app/AppSidebar";
@@ -8,8 +15,14 @@ import type { RunWorkflowInput } from "@/features/runs/RunWorkflowDialog";
 import { applyRuntimeEvent, markApprovalResolved } from "@/lib/run-events";
 import { runWorkflow, runtimeRequest } from "@/lib/runtime";
 import type { AppView } from "@/types/navigation";
-import type { WorkflowRun } from "@/types/run";
-import type { RuntimeEvent, WorkflowVersionResponse } from "@/types/runtime";
+import type { WorkflowRun, WorkflowRunStatus } from "@/types/run";
+import type {
+  RunEventsResponse,
+  RunListResponse,
+  RuntimeEvent,
+  StoredWorkflowRun,
+  WorkflowVersionResponse,
+} from "@/types/runtime";
 import type { WorkflowDefinition } from "@/types/workflow";
 
 const viewTitles: Record<AppView, string> = {
@@ -57,6 +70,42 @@ function createRunId() {
   return globalThis.crypto?.randomUUID?.() ?? `run-${Date.now().toString(36)}`;
 }
 
+function runStatus(status: string): WorkflowRunStatus {
+  switch (status) {
+    case "queued":
+    case "running":
+    case "waiting":
+    case "completed":
+    case "failed":
+    case "cancelled":
+    case "interrupted":
+      return status;
+    default:
+      return "failed";
+  }
+}
+
+function runTime(value: string | undefined) {
+  if (!value) {
+    return "Unknown";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function fromStoredRun(run: StoredWorkflowRun): WorkflowRun {
+  return {
+    id: run.id,
+    workflowName: run.workflow_name,
+    status: runStatus(run.status),
+    startedAt: runTime(run.started_at ?? run.created_at),
+    events: [],
+    eventsLoaded: false,
+  };
+}
+
 function App() {
   const [activeView, setActiveView] = useState<AppView>("workflows");
   const [workflow, setWorkflow] = useState(cloneDefaultWorkflow);
@@ -65,6 +114,8 @@ function App() {
   const [startingRun, setStartingRun] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const loadedRef = useRef(false);
+  const historyLoadedRef = useRef(false);
+  const loadingRunIdsRef = useRef(new Set<string>());
   const queuedEventsRef = useRef(new Map<string, RuntimeEvent[]>());
   const frameRef = useRef<number | null>(null);
 
@@ -83,6 +134,29 @@ function App() {
       })
       .catch(() => undefined);
   }, [workflow.id]);
+
+  useEffect(() => {
+    if (historyLoadedRef.current) {
+      return;
+    }
+    historyLoadedRef.current = true;
+    void runtimeRequest<RunListResponse>("run.list", { limit: 50 })
+      .then((response) => {
+        if (!response?.runs) {
+          return;
+        }
+        setRuns((current) => {
+          const activeIds = new Set(current.map((run) => run.id));
+          return [
+            ...current,
+            ...response.runs
+              .filter((run) => !activeIds.has(run.id))
+              .map(fromStoredRun),
+          ];
+        });
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(
     () => () => {
@@ -117,6 +191,37 @@ function App() {
     }
   }
 
+  const loadRunEvents = useCallback(async (runId: string) => {
+    if (loadingRunIdsRef.current.has(runId)) {
+      return;
+    }
+    loadingRunIdsRef.current.add(runId);
+    try {
+      const response = await runtimeRequest<RunEventsResponse>("run.events", {
+        run_id: runId,
+      });
+      setRuns((current) =>
+        current.map((run) => {
+          if (run.id !== runId) {
+            return run;
+          }
+          const replayed = (response?.events ?? []).reduce(applyRuntimeEvent, {
+            ...run,
+            events: [],
+            eventsLoaded: true,
+          });
+          return run.status === "interrupted"
+            ? { ...replayed, status: "interrupted" }
+            : replayed;
+        }),
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      loadingRunIdsRef.current.delete(runId);
+    }
+  }, []);
+
   async function saveWorkflow() {
     await runtimeRequest("workflow.save", { workflow });
     setNotice(null);
@@ -145,6 +250,7 @@ function App() {
               timestamp: currentTime(),
             },
           ],
+          eventsLoaded: true,
         },
         ...current,
       ]);
@@ -176,14 +282,25 @@ function App() {
   }
 
   async function resolveApproval(approvalId: string, approved: boolean) {
-    await runtimeRequest("approval.resolve", {
-      approval_id: approvalId,
-      approved,
-      data: {},
-    });
-    setRuns((current) => [
-      ...current.map((run) => markApprovalResolved(run, approvalId)),
-    ]);
+    try {
+      const response = await runtimeRequest<{ resolved: boolean }>(
+        "approval.resolve",
+        {
+          approval_id: approvalId,
+          approved,
+          data: {},
+        },
+      );
+      if (!response.resolved) {
+        throw new Error("Approval is no longer pending");
+      }
+      setRuns((current) =>
+        current.map((run) => markApprovalResolved(run, approvalId)),
+      );
+      setNotice(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return (
@@ -217,7 +334,11 @@ function App() {
                 <AgentsView onChange={setWorkflow} workflow={workflow} />
               ) : null}
               {activeView === "runs" ? (
-                <RunsView onResolveApproval={resolveApproval} runs={runs} />
+                <RunsView
+                  onResolveApproval={resolveApproval}
+                  onSelectRun={loadRunEvents}
+                  runs={runs}
+                />
               ) : null}
               {activeView === "chat" ? <ChatView /> : null}
               {activeView === "settings" ? <SettingsView /> : null}

@@ -26,6 +26,14 @@ function eventId(event: RuntimeEvent) {
   return `${event.scope?.run_id ?? "run"}-${sequence}-${event.name}`;
 }
 
+function eventTime(event: RuntimeEvent) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(event.created_at ? new Date(event.created_at) : new Date());
+}
+
 function toRunEvent(event: RuntimeEvent): WorkflowRunEvent {
   const approvalId = text(event.payload.approval_id);
   return {
@@ -35,11 +43,7 @@ function toRunEvent(event: RuntimeEvent): WorkflowRunEvent {
     detail: eventDetail(event),
     approvalId,
     prompt: text(event.payload.prompt),
-    timestamp: new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date()),
+    timestamp: eventTime(event),
   };
 }
 
@@ -87,10 +91,17 @@ export function applyRuntimeEvent(
   const resumed =
     event.name === "approval.resolved" ||
     event.name === "workflow.approval_resolved";
+  const approvalId = text(event.payload.approval_id);
+  const events =
+    resumed && approvalId
+      ? run.events.map((item) =>
+          item.approvalId === approvalId ? { ...item, resolved: true } : item,
+        )
+      : run.events;
   return {
     ...run,
     status: status ?? (waiting ? "waiting" : resumed ? "running" : run.status),
-    events: [...run.events, toRunEvent(event)],
+    events: [...events, toRunEvent(event)],
   };
 }
 

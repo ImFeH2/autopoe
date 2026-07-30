@@ -50,4 +50,24 @@ describe("run events", () => {
     expect(resolved.events[0].resolved).toBe(true);
     expect(completed.status).toBe("completed");
   });
+
+  it("replays stored timestamps and resolves prior approvals", () => {
+    const waiting = applyRuntimeEvent(createRun(), {
+      name: "workflow.approval_required",
+      sequence: 3,
+      scope: { run_id: "run-1" },
+      payload: { approval_id: "approval-1", prompt: "Ship" },
+      created_at: "2026-07-30T10:15:30+00:00",
+    });
+    const resolved = applyRuntimeEvent(waiting, {
+      name: "workflow.approval_resolved",
+      sequence: 4,
+      scope: { run_id: "run-1" },
+      payload: { approval_id: "approval-1", approved: true },
+      created_at: "2026-07-30T10:16:00+00:00",
+    });
+
+    expect(resolved.events[0].resolved).toBe(true);
+    expect(resolved.events[0].timestamp).not.toBe("");
+  });
 });

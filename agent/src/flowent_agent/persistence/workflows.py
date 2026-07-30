@@ -5,6 +5,7 @@ from uuid import uuid4
 from flowent_agent.persistence.database import Database, utc_now
 from flowent_agent.workflows.models import (
     WorkflowDefinition,
+    WorkflowRunRecord,
     WorkflowSummary,
     WorkflowVersion,
 )
@@ -180,6 +181,57 @@ class WorkflowStore:
                 (status, output_json, error, timestamp, timestamp, run_id),
             )
             await self.database.connection.commit()
+
+    async def list_runs(
+        self,
+        limit: int = 50,
+        workflow_id: str | None = None,
+    ) -> list[WorkflowRunRecord]:
+        parameters: list[Any] = []
+        condition = ""
+        if workflow_id is not None:
+            condition = "WHERE v.workflow_id = ?"
+            parameters.append(workflow_id)
+        parameters.append(limit)
+        cursor = await self.database.connection.execute(
+            "SELECT r.id, v.workflow_id, v.definition_json, v.version, "
+            "r.status, r.input_json, r.output_json, r.error, r.workspace_json, "
+            "r.created_at, r.started_at, r.completed_at "
+            "FROM workflow_runs r "
+            "LEFT JOIN workflow_versions v ON v.id = r.workflow_version_id "
+            f"{condition} ORDER BY r.created_at DESC LIMIT ?",
+            parameters,
+        )
+        rows = await cursor.fetchall()
+        return [
+            WorkflowRunRecord(
+                id=row["id"],
+                workflow_id=row["workflow_id"],
+                workflow_name=(
+                    json.loads(row["definition_json"])["name"]
+                    if row["definition_json"] is not None
+                    else "Unknown workflow"
+                ),
+                version=row["version"],
+                status=row["status"],
+                input=json.loads(row["input_json"]),
+                output=(
+                    json.loads(row["output_json"])
+                    if row["output_json"] is not None
+                    else None
+                ),
+                error=row["error"],
+                workspace=(
+                    json.loads(row["workspace_json"])
+                    if row["workspace_json"] is not None
+                    else None
+                ),
+                created_at=row["created_at"],
+                started_at=row["started_at"],
+                completed_at=row["completed_at"],
+            )
+            for row in rows
+        ]
 
     async def start_work_item(
         self,

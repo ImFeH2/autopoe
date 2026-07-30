@@ -152,7 +152,8 @@ input {
   color: var(--f-text-primary);
 }
 
-.status-label[data-status="failed"] {
+.status-label[data-status="failed"],
+.status-label[data-status="interrupted"] {
   border-color: var(--f-danger-border);
   color: var(--f-danger-text);
 }

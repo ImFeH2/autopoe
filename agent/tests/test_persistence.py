@@ -25,6 +25,7 @@ async def test_event_store_assigns_stable_sequences(tmp_path: Path) -> None:
     assert first.sequence == 0
     assert second.sequence == 1
     assert await services.events.list_stream("run:one") == [first, second]
+    assert await services.events.list_run("one") == [first, second]
     await services.close()
 
     reopened = await RuntimeServices.create(tmp_path)

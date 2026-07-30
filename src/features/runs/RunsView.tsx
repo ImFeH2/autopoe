@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, ScrollArea } from "@radix-ui/themes";
 import {
   Bot,
@@ -15,6 +15,7 @@ import type { WorkflowRun, WorkflowRunStatus } from "@/types/run";
 interface RunsViewProps {
   runs: WorkflowRun[];
   onResolveApproval: (approvalId: string, approved: boolean) => Promise<void>;
+  onSelectRun: (runId: string) => Promise<void>;
 }
 
 const dotPattern = /\./g;
@@ -26,6 +27,7 @@ const statusLabels: Record<WorkflowRunStatus, string> = {
   completed: "Completed",
   failed: "Failed",
   cancelled: "Cancelled",
+  interrupted: "Interrupted",
 };
 
 function EventIcon({ name }: { name: string }) {
@@ -44,9 +46,19 @@ function EventIcon({ name }: { name: string }) {
   return <Circle size={10} strokeWidth={1.8} />;
 }
 
-export function RunsView({ runs, onResolveApproval }: RunsViewProps) {
+export function RunsView({
+  runs,
+  onResolveApproval,
+  onSelectRun,
+}: RunsViewProps) {
   const [selectedId, setSelectedId] = useState(runs[0]?.id ?? "");
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0];
+
+  useEffect(() => {
+    if (selected && !selected.eventsLoaded) {
+      void onSelectRun(selected.id);
+    }
+  }, [onSelectRun, selected]);
 
   if (runs.length === 0) {
     return (
@@ -103,6 +115,9 @@ export function RunsView({ runs, onResolveApproval }: RunsViewProps) {
           </div>
           <ScrollArea className="event-scroll" scrollbars="vertical">
             <div className="event-timeline" role="log" aria-live="polite">
+              {!selected.eventsLoaded ? (
+                <div className="run-event-loading">Loading</div>
+              ) : null}
               {selected.events.map((event) => (
                 <article className="timeline-event" key={event.id}>
                   <span className="timeline-icon">

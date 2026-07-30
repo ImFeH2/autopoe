@@ -122,6 +122,8 @@ fn is_allowed_request(name: &str) -> bool {
             | "workflow.publish"
             | "workflow.cancel"
             | "approval.resolve"
+            | "run.list"
+            | "run.events"
             | "settings.get"
             | "settings.save"
     )
@@ -135,6 +137,7 @@ mod tests {
     fn runtime_request_has_a_strict_allowlist() {
         assert!(is_allowed_request("workflow.list"));
         assert!(is_allowed_request("approval.resolve"));
+        assert!(is_allowed_request("run.events"));
         assert!(!is_allowed_request("runtime.shutdown"));
         assert!(!is_allowed_request("agent.run"));
     }

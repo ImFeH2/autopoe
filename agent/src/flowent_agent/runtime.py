@@ -42,6 +42,20 @@ class SaveModelSettingsRequest(BaseModel):
     clear_api_key: bool = False
 
 
+class ListRunsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class ListRunEventsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(min_length=1)
+    after: int = Field(default=-1, ge=-1)
+
+
 class Runtime:
     def __init__(self) -> None:
         self.transport = JsonlTransport()
@@ -95,6 +109,8 @@ class Runtime:
             "workflow.cancel": self.cancel_workflow,
             "workflow.approve": self.approve_workflow,
             "approval.resolve": self.approve_workflow,
+            "run.list": self.list_runs,
+            "run.events": self.list_run_events,
             "settings.get": self.get_settings,
             "settings.save": self.save_settings,
         }
@@ -159,6 +175,8 @@ class Runtime:
                     "workflow.cancel",
                     "workflow.approve",
                     "approval.resolve",
+                    "run.list",
+                    "run.events",
                     "settings.get",
                     "settings.save",
                 ],
@@ -264,6 +282,42 @@ class Runtime:
             request,
             {"resolved": resolved, "approval_id": decision.approval_id},
         )
+
+    async def list_runs(self, request: Envelope) -> None:
+        services = self.require_services()
+        payload = ListRunsRequest.model_validate(request.payload)
+        runs = await services.workflows.list_runs(
+            payload.limit,
+            payload.workflow_id,
+        )
+        await self.respond(
+            request,
+            {"runs": [run.model_dump(mode="json") for run in runs]},
+        )
+
+    async def list_run_events(self, request: Envelope) -> None:
+        services = self.require_services()
+        payload = ListRunEventsRequest.model_validate(request.payload)
+        records = await services.events.list_run(payload.run_id, payload.after)
+        events = [
+            {
+                "name": record.name,
+                "sequence": record.sequence,
+                "scope": {
+                    key: value
+                    for key, value in {
+                        "run_id": record.run_id,
+                        "workflow_run_id": record.workflow_run_id,
+                        "agent_run_id": record.agent_run_id,
+                    }.items()
+                    if value is not None
+                },
+                "payload": record.payload,
+                "created_at": record.created_at,
+            }
+            for record in records
+        ]
+        await self.respond(request, {"events": events})
 
     async def get_settings(self, request: Envelope) -> None:
         services = self.require_services()

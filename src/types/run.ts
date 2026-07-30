@@ -4,7 +4,8 @@ export type WorkflowRunStatus =
   | "waiting"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "interrupted";
 
 export interface WorkflowRunEvent {
   id: string;
@@ -23,4 +24,5 @@ export interface WorkflowRun {
   status: WorkflowRunStatus;
   startedAt: string;
   events: WorkflowRunEvent[];
+  eventsLoaded?: boolean;
 }

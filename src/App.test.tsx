@@ -81,6 +81,61 @@ describe("App", () => {
     expect(await screen.findByText("workflow started")).toBeInTheDocument();
   });
 
+  it("loads and replays persisted workflow runs", async () => {
+    invokeMock.mockImplementation(async (command: string, args: any) => {
+      if (command !== "runtime_request") {
+        return {};
+      }
+      if (args.name === "workflow.get") {
+        throw new Error("Not saved");
+      }
+      if (args.name === "run.list") {
+        return {
+          runs: [
+            {
+              id: "stored-run",
+              workflow_name: "Stored delivery",
+              status: "completed",
+              input: {},
+              created_at: "2026-07-30T10:00:00+00:00",
+            },
+          ],
+        };
+      }
+      if (args.name === "run.events") {
+        return {
+          events: [
+            {
+              name: "agent.text_delta",
+              sequence: 1,
+              scope: {
+                run_id: "stored-run",
+                workflow_run_id: "stored-run",
+                agent_run_id: "agent-1",
+              },
+              payload: { node_id: "requirements", delta: "Stored output" },
+              created_at: "2026-07-30T10:01:00+00:00",
+            },
+            {
+              name: "workflow.completed",
+              sequence: 2,
+              scope: { run_id: "stored-run" },
+              payload: {},
+              created_at: "2026-07-30T10:02:00+00:00",
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Runs" }));
+
+    expect(await screen.findByText("Stored output")).toBeInTheDocument();
+    expect(screen.getAllByText("Stored delivery").length).toBeGreaterThan(0);
+  });
+
   it("streams an agent response in chat", async () => {
     invokeMock.mockImplementation(
       async (

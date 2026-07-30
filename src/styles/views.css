@@ -339,6 +339,13 @@
   padding: var(--f-space-8) var(--f-space-6) 80px;
 }
 
+.run-event-loading {
+  padding: var(--f-space-8) 0;
+  color: var(--f-text-tertiary);
+  font-family: var(--f-font-mono);
+  font-size: var(--f-text-2xs);
+}
+
 .timeline-event {
   position: relative;
   display: grid;

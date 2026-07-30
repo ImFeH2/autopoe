@@ -9,6 +9,7 @@ export interface RuntimeEvent {
   sequence?: number;
   scope?: RuntimeScope;
   payload: Record<string, unknown>;
+  created_at?: string;
 }
 
 export interface WorkspaceConfiguration {
@@ -35,5 +36,28 @@ export interface SettingsResponse {
   runtime: RuntimePreferences;
   has_api_key: boolean;
   credential_store_available: boolean;
+}
+
+export interface StoredWorkflowRun {
+  id: string;
+  workflow_id?: string;
+  workflow_name: string;
+  version?: number;
+  status: string;
+  input: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  error?: string;
+  workspace?: Record<string, unknown>;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface RunListResponse {
+  runs: StoredWorkflowRun[];
+}
+
+export interface RunEventsResponse {
+  events: RuntimeEvent[];
 }
 import type { ModelConfiguration } from "@/types/workflow";

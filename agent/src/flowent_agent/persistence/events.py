@@ -87,17 +87,28 @@ class EventStore:
             (stream_id, after),
         )
         rows = await cursor.fetchall()
-        return [
-            EventRecord(
-                event_id=row["event_id"],
-                stream_id=row["stream_id"],
-                sequence=row["sequence"],
-                name=row["name"],
-                payload=json.loads(row["payload_json"]),
-                workflow_run_id=row["workflow_run_id"],
-                agent_run_id=row["agent_run_id"],
-                run_id=row["run_id"],
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+        return [self.from_row(row) for row in rows]
+
+    async def list_run(self, run_id: str, after: int = -1) -> list[EventRecord]:
+        cursor = await self.database.connection.execute(
+            "SELECT event_id, stream_id, sequence, name, payload_json, workflow_run_id, agent_run_id, run_id, created_at "
+            "FROM events WHERE (workflow_run_id = ? OR (workflow_run_id IS NULL AND run_id = ?)) "
+            "AND sequence > ? ORDER BY sequence",
+            (run_id, run_id, after),
+        )
+        rows = await cursor.fetchall()
+        return [self.from_row(row) for row in rows]
+
+    @staticmethod
+    def from_row(row: Any) -> EventRecord:
+        return EventRecord(
+            event_id=row["event_id"],
+            stream_id=row["stream_id"],
+            sequence=row["sequence"],
+            name=row["name"],
+            payload=json.loads(row["payload_json"]),
+            workflow_run_id=row["workflow_run_id"],
+            agent_run_id=row["agent_run_id"],
+            run_id=row["run_id"],
+            created_at=row["created_at"],
+        )

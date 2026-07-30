@@ -140,14 +140,28 @@ async def test_workflow_store_versions_drafts(tmp_path: Path) -> None:
     changed = definition.model_copy(update={"name": "Delivery v2"})
     await services.workflows.save_draft(changed)
     second = await services.workflows.publish(definition.id)
+    await services.workflows.start_run(
+        "history-run",
+        second.id,
+        {"request": "Build history"},
+    )
+    await services.workflows.finish_run(
+        "history-run",
+        "completed",
+        {"result": "done"},
+    )
 
     persisted_first = await services.workflows.get_version(definition.id, 1)
     summaries = await services.workflows.list_definitions()
+    runs = await services.workflows.list_runs()
     assert first.version == 1
     assert second.version == 2
     assert persisted_first is not None
     assert persisted_first.definition.name == "Delivery"
     assert summaries[0].latest_version == 2
+    assert runs[0].workflow_name == "Delivery v2"
+    assert runs[0].input == {"request": "Build history"}
+    assert runs[0].output == {"result": "done"}
     await services.close()
 
 
