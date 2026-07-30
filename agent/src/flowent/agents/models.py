@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-from flowent_agent.tools.workspace import WorkspaceConfiguration
+from flowent.tools.workspace import WorkspaceConfiguration
 
 
 class AgentMessage(BaseModel):

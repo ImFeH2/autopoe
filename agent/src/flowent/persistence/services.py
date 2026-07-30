@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from flowent_agent.persistence.approvals import ApprovalStore
-from flowent_agent.persistence.artifacts import ArtifactStore
-from flowent_agent.persistence.database import Database, RecoveryResult
-from flowent_agent.persistence.events import EventStore
-from flowent_agent.persistence.runs import AgentRunStore
-from flowent_agent.persistence.settings import CredentialStore, SettingsStore
-from flowent_agent.persistence.workflows import WorkflowStore
+from flowent.persistence.approvals import ApprovalStore
+from flowent.persistence.artifacts import ArtifactStore
+from flowent.persistence.database import Database, RecoveryResult
+from flowent.persistence.events import EventStore
+from flowent.persistence.runs import AgentRunStore
+from flowent.persistence.settings import CredentialStore, SettingsStore
+from flowent.persistence.workflows import WorkflowStore
 
 
 @dataclass

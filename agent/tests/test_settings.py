@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from flowent_agent.persistence import RuntimeServices
-from flowent_agent.protocol import Envelope
-from flowent_agent.runtime import Runtime
+from flowent.persistence import RuntimeServices
+from flowent.protocol import Envelope
+from flowent.runtime import Runtime
 
 
 async def test_runtime_stores_credentials_outside_sqlite(
@@ -21,11 +21,11 @@ async def test_runtime_stores_credentials_outside_sqlite(
         credentials[(service, username)] = secret
 
     monkeypatch.setattr(
-        "flowent_agent.persistence.settings.keyring.get_password",
+        "flowent.persistence.settings.keyring.get_password",
         get_password,
     )
     monkeypatch.setattr(
-        "flowent_agent.persistence.settings.keyring.set_password",
+        "flowent.persistence.settings.keyring.set_password",
         set_password,
     )
     services = await RuntimeServices.create(tmp_path)
@@ -86,11 +86,11 @@ async def test_credential_can_be_removed(
         credentials.pop((service, username))
 
     monkeypatch.setattr(
-        "flowent_agent.persistence.settings.keyring.get_password",
+        "flowent.persistence.settings.keyring.get_password",
         get_password,
     )
     monkeypatch.setattr(
-        "flowent_agent.persistence.settings.keyring.delete_password",
+        "flowent.persistence.settings.keyring.delete_password",
         delete_password,
     )
     services = await RuntimeServices.create(tmp_path)

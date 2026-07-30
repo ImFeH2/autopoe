@@ -2,13 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from flowent_agent.agents import (
+from flowent.agents import (
     AgentRunner,
     AgentRunRequest,
     ModelConfiguration,
 )
-from flowent_agent.agents.model_factory import chunk_text, create_model
-from flowent_agent.persistence import RuntimeServices
+from flowent.agents.model_factory import chunk_text, create_model
+from flowent.persistence import RuntimeServices
 
 
 def test_chunk_text_preserves_content() -> None:

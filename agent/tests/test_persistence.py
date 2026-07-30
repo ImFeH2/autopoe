@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from flowent_agent.persistence import Database, RuntimeServices
-from flowent_agent.persistence.database import utc_now
+from flowent.persistence import Database, RuntimeServices
+from flowent.persistence.database import utc_now
 
 
 async def test_event_store_assigns_stable_sequences(tmp_path: Path) -> None:

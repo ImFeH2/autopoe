@@ -10,7 +10,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from flowent_agent.agents.models import ModelConfiguration
+from flowent.agents.models import ModelConfiguration
 
 
 def create_model(configuration: ModelConfiguration) -> Model:

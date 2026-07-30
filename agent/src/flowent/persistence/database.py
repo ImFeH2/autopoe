@@ -5,7 +5,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from flowent_agent.persistence.schema import MIGRATIONS
+from flowent.persistence.schema import MIGRATIONS
 
 
 def utc_now() -> str:

@@ -9,7 +9,7 @@ binaries = []
 hiddenimports = collect_submodules("keyring.backends")
 
 analysis = Analysis(
-    ["src/flowent_agent/__main__.py"],
+    ["src/flowent/__main__.py"],
     pathex=[],
     binaries=binaries,
     datas=datas,

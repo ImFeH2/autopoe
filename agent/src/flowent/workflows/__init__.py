@@ -1,9 +1,9 @@
-from flowent_agent.approval import ApprovalDecision
-from flowent_agent.workflows.builtins import (
+from flowent.approval import ApprovalDecision
+from flowent.workflows.builtins import (
     seed_builtin_workflows,
     software_delivery_workflow,
 )
-from flowent_agent.workflows.models import (
+from flowent.workflows.models import (
     AgentNode,
     ApprovalNode,
     CanvasPosition,

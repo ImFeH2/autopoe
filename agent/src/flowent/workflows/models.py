@@ -4,8 +4,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from flowent_agent.agents import AgentConfiguration
-from flowent_agent.tools.workspace import WorkspaceConfiguration
+from flowent.agents import AgentConfiguration
+from flowent.tools.workspace import WorkspaceConfiguration
 
 NodeId = Annotated[
     str,

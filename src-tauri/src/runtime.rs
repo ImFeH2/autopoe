@@ -475,7 +475,7 @@ fn runtime_command(app: &AppHandle) -> Result<Command, String> {
         .arg("run")
         .arg("--project")
         .arg(agent_dir)
-        .arg("flowent-agent"))
+        .arg("flowent"))
 }
 
 #[cfg(not(debug_assertions))]

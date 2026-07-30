@@ -15,18 +15,18 @@ from pydantic import (
     field_validator,
 )
 
-from flowent_agent.agents import AgentRunner, AgentRunRequest, ModelConfiguration
-from flowent_agent.approval import ApprovalCoordinator
-from flowent_agent.persistence import RuntimeServices
-from flowent_agent.protocol import Envelope, JsonlTransport, Scope
-from flowent_agent.tools.workspace import WorkspaceManager
-from flowent_agent.workflows import (
+from flowent.agents import AgentRunner, AgentRunRequest, ModelConfiguration
+from flowent.approval import ApprovalCoordinator
+from flowent.persistence import RuntimeServices
+from flowent.protocol import Envelope, JsonlTransport, Scope
+from flowent.tools.workspace import WorkspaceManager
+from flowent.workflows import (
     ApprovalDecision,
     WorkflowDefinition,
     WorkflowRunRequest,
     seed_builtin_workflows,
 )
-from flowent_agent.workflows.engine import WorkflowEngine
+from flowent.workflows.engine import WorkflowEngine
 
 
 class InitializeRequest(BaseModel):

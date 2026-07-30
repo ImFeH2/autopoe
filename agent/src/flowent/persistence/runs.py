@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
-from flowent_agent.persistence.database import Database, utc_now
+from flowent.persistence.database import Database, utc_now
 
 
 class AgentRunRecord(BaseModel):

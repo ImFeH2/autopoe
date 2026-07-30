@@ -21,18 +21,18 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
-from flowent_agent.agents.model_factory import create_model
-from flowent_agent.agents.models import (
+from flowent.agents.model_factory import create_model
+from flowent.agents.models import (
     AgentExecutionResult,
     AgentMessage,
     AgentRunRequest,
     ModelConfiguration,
 )
-from flowent_agent.approval import ApprovalCoordinator, ApprovalScope
-from flowent_agent.persistence.runs import AgentRunStore
-from flowent_agent.persistence.settings import CredentialStore, SettingsStore
-from flowent_agent.tools.registry import AgentDependencies, ToolRegistry
-from flowent_agent.tools.workspace import Workspace, WorkspaceManager
+from flowent.approval import ApprovalCoordinator, ApprovalScope
+from flowent.persistence.runs import AgentRunStore
+from flowent.persistence.settings import CredentialStore, SettingsStore
+from flowent.tools.registry import AgentDependencies, ToolRegistry
+from flowent.tools.workspace import Workspace, WorkspaceManager
 
 EmitEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 

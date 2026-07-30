@@ -9,8 +9,8 @@ from uuid import uuid4
 
 from pydantic_ai import FunctionToolset, RunContext
 
-from flowent_agent.approval import ApprovalCoordinator, ApprovalScope
-from flowent_agent.tools.workspace import Workspace, sanitized_environment
+from flowent.approval import ApprovalCoordinator, ApprovalScope
+from flowent.tools.workspace import Workspace, sanitized_environment
 
 MAX_FILE_BYTES = 512 * 1024
 MAX_TOOL_OUTPUT = 64 * 1024

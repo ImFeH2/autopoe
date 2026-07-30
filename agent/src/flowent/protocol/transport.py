@@ -1,7 +1,7 @@
 import asyncio
 import sys
 
-from flowent_agent.protocol.models import Envelope
+from flowent.protocol.models import Envelope
 
 
 class JsonlTransport:

@@ -1,9 +1,9 @@
 from typing import TYPE_CHECKING, Any
 
-from flowent_agent.workflows.models import WorkflowDefinition
+from flowent.workflows.models import WorkflowDefinition
 
 if TYPE_CHECKING:
-    from flowent_agent.persistence.workflows import WorkflowStore
+    from flowent.persistence.workflows import WorkflowStore
 
 
 def agent(

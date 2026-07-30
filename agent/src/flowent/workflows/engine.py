@@ -4,17 +4,17 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 from uuid import uuid4
 
-from flowent_agent.agents import AgentExecutionResult, AgentMessage
-from flowent_agent.agents.models import AgentRunRequest
-from flowent_agent.approval import (
+from flowent.agents import AgentExecutionResult, AgentMessage
+from flowent.agents.models import AgentRunRequest
+from flowent.approval import (
     ApprovalCoordinator,
     ApprovalDecision,
     ApprovalScope,
 )
-from flowent_agent.persistence.artifacts import ArtifactStore
-from flowent_agent.persistence.workflows import WorkflowStore
-from flowent_agent.tools.workspace import Workspace, WorkspaceManager
-from flowent_agent.workflows.models import (
+from flowent.persistence.artifacts import ArtifactStore
+from flowent.persistence.workflows import WorkflowStore
+from flowent.tools.workspace import Workspace, WorkspaceManager
+from flowent.workflows.models import (
     AgentNode,
     ApprovalNode,
     LoopNode,
@@ -22,7 +22,7 @@ from flowent_agent.workflows.models import (
     WorkflowRunRequest,
     WorkflowRunResult,
 )
-from flowent_agent.workflows.template import TemplateRenderer, evaluate_condition
+from flowent.workflows.template import TemplateRenderer, evaluate_condition
 
 EmitWorkflowEvent = Callable[
     [str, dict[str, Any], str | None],

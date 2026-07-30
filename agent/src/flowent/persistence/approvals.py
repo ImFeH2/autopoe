@@ -2,7 +2,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from flowent_agent.persistence.database import Database, utc_now
+from flowent.persistence.database import Database, utc_now
 
 
 class ApprovalStore:

@@ -5,19 +5,19 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from flowent_agent.agents import AgentExecutionResult, AgentRunner
-from flowent_agent.approval import ApprovalCoordinator
-from flowent_agent.persistence import RuntimeServices
-from flowent_agent.tools.workspace import WorkspaceManager
-from flowent_agent.workflows import (
+from flowent.agents import AgentExecutionResult, AgentRunner
+from flowent.approval import ApprovalCoordinator
+from flowent.persistence import RuntimeServices
+from flowent.tools.workspace import WorkspaceManager
+from flowent.workflows import (
     ApprovalDecision,
     WorkflowDefinition,
     WorkflowRunRequest,
     seed_builtin_workflows,
     software_delivery_workflow,
 )
-from flowent_agent.workflows.engine import WorkflowEngine
-from flowent_agent.workflows.template import TemplateRenderer
+from flowent.workflows.engine import WorkflowEngine
+from flowent.workflows.template import TemplateRenderer
 
 
 class FakeAgentRunner:

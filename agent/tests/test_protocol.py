@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from flowent_agent.protocol import Envelope
+from flowent.protocol import Envelope
 
 
 def test_envelope_round_trip() -> None:

@@ -1,4 +1,4 @@
-from flowent_agent.agents.models import (
+from flowent.agents.models import (
     AgentConfiguration,
     AgentExecutionResult,
     AgentLimits,
@@ -6,7 +6,7 @@ from flowent_agent.agents.models import (
     AgentRunRequest,
     ModelConfiguration,
 )
-from flowent_agent.agents.runner import AgentRunner
+from flowent.agents.runner import AgentRunner
 
 __all__ = [
     "AgentConfiguration",

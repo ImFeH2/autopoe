@@ -237,7 +237,7 @@ wheels = [
 ]
 
 [[package]]
-name = "flowent-agent"
+name = "flowent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -10,15 +10,15 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.usage import RunUsage
 
-from flowent_agent.agents import AgentRunner, AgentRunRequest
-from flowent_agent.approval import (
+from flowent.agents import AgentRunner, AgentRunRequest
+from flowent.approval import (
     ApprovalCoordinator,
     ApprovalDecision,
     ApprovalScope,
 )
-from flowent_agent.persistence import RuntimeServices
-from flowent_agent.tools.registry import AgentDependencies, CommandPolicy, ToolRegistry
-from flowent_agent.tools.workspace import (
+from flowent.persistence import RuntimeServices
+from flowent.tools.registry import AgentDependencies, CommandPolicy, ToolRegistry
+from flowent.tools.workspace import (
     WorkspaceConfiguration,
     WorkspaceManager,
     sanitized_environment,

@@ -5,7 +5,7 @@ from typing import Any
 
 import keyring
 
-from flowent_agent.persistence.database import Database, utc_now
+from flowent.persistence.database import Database, utc_now
 
 CREDENTIAL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 
