@@ -13,6 +13,14 @@ dist-ssr
 /target
 *.local
 
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+/agent/build/
+/agent/dist/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

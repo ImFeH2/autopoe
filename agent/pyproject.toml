@@ -1,0 +1,28 @@
+[project]
+name = "flowent-agent"
+version = "0.1.0"
+description = "Local multi-agent runtime for Flowent"
+authors = [
+    { name = "ImFeH2", email = "i@feh2.im" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.13.4",
+]
+
+[project.scripts]
+flowent-agent = "flowent_agent:main"
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.0",
+]
+
+[tool.ruff.lint]
+ignore = ["BLE001"]

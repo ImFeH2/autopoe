@@ -1,3 +1,0 @@
-[workspace]
-members = ["agent", "src-tauri"]
-resolver = "3"

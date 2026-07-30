@@ -1,12 +1,23 @@
 mod commands;
-mod demo_provider;
+mod runtime;
 
-use commands::run_agent;
+use commands::{run_agent, runtime_status};
+use runtime::RuntimeManager;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![run_agent])
+        .plugin(tauri_plugin_shell::init())
+        .manage(RuntimeManager::default())
+        .setup(|app| {
+            let runtime = app.state::<RuntimeManager>();
+            if let Err(error) = runtime.start(app.handle().clone()) {
+                runtime.fail(error);
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![run_agent, runtime_status])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
