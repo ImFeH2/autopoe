@@ -16,12 +16,13 @@ import {
   WorkflowNodeCard,
   type WorkflowFlowNode,
 } from "@/features/workflows/WorkflowNodeCard";
-import type { WorkflowDefinition, WorkflowNode } from "@/types/workflow";
+import type { WorkflowNode } from "@/types/workflow";
 
 interface WorkflowCanvasProps {
-  workflow: WorkflowDefinition;
+  definitions: WorkflowNode[];
   selectedNodeId: string | null;
-  onChange: (workflow: WorkflowDefinition) => void;
+  onChange: (nodes: WorkflowNode[]) => void;
+  onOpenLoop: (nodeId: string) => void;
   onSelectNode: (nodeId: string | null) => void;
 }
 
@@ -56,51 +57,51 @@ function toEdges(nodes: WorkflowNode[]): Edge[] {
 }
 
 export function WorkflowCanvas({
-  workflow,
+  definitions,
   selectedNodeId,
   onChange,
+  onOpenLoop,
   onSelectNode,
 }: WorkflowCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowFlowNode>(
-    workflow.nodes.map(toFlowNode),
+    definitions.map(toFlowNode),
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
-    toEdges(workflow.nodes),
+    toEdges(definitions),
   );
 
   useEffect(() => {
     setNodes((current) => {
       const currentById = new Map(current.map((node) => [node.id, node]));
-      return workflow.nodes.map((definition) => ({
+      return definitions.map((definition) => ({
         ...currentById.get(definition.id),
         ...toFlowNode(definition),
         selected: definition.id === selectedNodeId,
       }));
     });
-  }, [selectedNodeId, setNodes, workflow.nodes]);
+  }, [definitions, selectedNodeId, setNodes]);
 
   useEffect(() => {
     setEdges((current) => {
       const currentById = new Map(current.map((edge) => [edge.id, edge]));
-      return toEdges(workflow.nodes).map((edge) => ({
+      return toEdges(definitions).map((edge) => ({
         ...currentById.get(edge.id),
         ...edge,
       }));
     });
-  }, [setEdges, workflow.nodes]);
+  }, [definitions, setEdges]);
 
   const handleNodeDragStop = useCallback(
     (_: unknown, draggedNode: Node) => {
-      onChange({
-        ...workflow,
-        nodes: workflow.nodes.map((node) =>
+      onChange(
+        definitions.map((node) =>
           node.id === draggedNode.id
             ? { ...node, position: draggedNode.position }
             : node,
         ),
-      });
+      );
     },
-    [onChange, workflow],
+    [definitions, onChange],
   );
 
   const handleEdgesChange = useCallback(
@@ -114,17 +115,16 @@ export function WorkflowCanvas({
       if (removedIds.size === 0) {
         return;
       }
-      onChange({
-        ...workflow,
-        nodes: workflow.nodes.map((node) => ({
+      onChange(
+        definitions.map((node) => ({
           ...node,
           depends_on: node.depends_on.filter(
             (dependency) => !removedIds.has(`${dependency}:${node.id}`),
           ),
         })),
-      });
+      );
     },
-    [onChange, onEdgesChange, workflow],
+    [definitions, onChange, onEdgesChange],
   );
 
   const handleConnect = useCallback(
@@ -139,9 +139,8 @@ export function WorkflowCanvas({
       setEdges((current) =>
         addEdge({ ...connection, type: "smoothstep" }, current),
       );
-      onChange({
-        ...workflow,
-        nodes: workflow.nodes.map((node) => ({
+      onChange(
+        definitions.map((node) => ({
           ...node,
           depends_on:
             node.id === connection.target &&
@@ -149,26 +148,25 @@ export function WorkflowCanvas({
               ? [...node.depends_on, connection.source]
               : node.depends_on,
         })),
-      });
+      );
     },
-    [onChange, setEdges, workflow],
+    [definitions, onChange, setEdges],
   );
 
   const handleNodesDelete = useCallback(
     (deletedNodes: Node[]) => {
       const deletedIds = new Set(deletedNodes.map((node) => node.id));
-      onChange({
-        ...workflow,
-        nodes: workflow.nodes
+      onChange(
+        definitions
           .filter((node) => !deletedIds.has(node.id))
           .map((node) => ({
             ...node,
             depends_on: node.depends_on.filter((id) => !deletedIds.has(id)),
           })),
-      });
+      );
       onSelectNode(null);
     },
-    [onChange, onSelectNode, workflow],
+    [definitions, onChange, onSelectNode],
   );
 
   return (
@@ -187,6 +185,7 @@ export function WorkflowCanvas({
         onEdgesChange={handleEdgesChange}
         onNodeDragStop={handleNodeDragStop}
         onNodeClick={(_, node) => onSelectNode(node.id)}
+        onNodeDoubleClick={(_, node) => onOpenLoop(node.id)}
         onNodesChange={onNodesChange}
         onNodesDelete={handleNodesDelete}
         onPaneClick={() => onSelectNode(null)}

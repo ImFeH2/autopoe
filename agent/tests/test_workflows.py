@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from flowent_agent.agents import AgentExecutionResult
+from flowent_agent.agents import AgentExecutionResult, AgentRunner
 from flowent_agent.approval import ApprovalCoordinator
 from flowent_agent.persistence import RuntimeServices
 from flowent_agent.tools.workspace import WorkspaceManager
@@ -13,6 +13,8 @@ from flowent_agent.workflows import (
     ApprovalDecision,
     WorkflowDefinition,
     WorkflowRunRequest,
+    seed_builtin_workflows,
+    software_delivery_workflow,
 )
 from flowent_agent.workflows.engine import WorkflowEngine
 from flowent_agent.workflows.template import TemplateRenderer
@@ -162,6 +164,85 @@ async def test_workflow_store_versions_drafts(tmp_path: Path) -> None:
     assert runs[0].workflow_name == "Delivery v2"
     assert runs[0].input == {"request": "Build history"}
     assert runs[0].output == {"result": "done"}
+    await services.close()
+
+
+async def test_builtin_workflow_is_seeded_without_overwriting_edits(
+    tmp_path: Path,
+) -> None:
+    services = await RuntimeServices.create(tmp_path)
+    await seed_builtin_workflows(services.workflows)
+    seeded = await services.workflows.get_draft("software-delivery")
+    assert seeded is not None
+    edited = seeded.model_copy(update={"name": "My delivery"})
+    await services.workflows.save_draft(edited)
+
+    await seed_builtin_workflows(services.workflows)
+
+    retained = await services.workflows.get_draft("software-delivery")
+    assert retained is not None
+    assert retained.name == "My delivery"
+    await services.close()
+
+
+async def test_builtin_delivery_workflow_runs_end_to_end(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    services = await RuntimeServices.create(tmp_path / "data")
+    approvals = ApprovalCoordinator(services.approvals)
+    workspaces = WorkspaceManager(services.data_dir)
+    runner = AgentRunner(
+        services.runs,
+        approvals,
+        workspaces,
+        services.credentials,
+        services.settings,
+    )
+    engine = WorkflowEngine(
+        services.workflows,
+        runner,
+        approvals,
+        workspaces,
+        services.artifacts,
+    )
+    definition = software_delivery_workflow()
+    await services.workflows.save_draft(definition)
+    await services.workflows.publish(definition.id)
+    events: list[str] = []
+
+    async def emit(
+        name: str,
+        payload: dict[str, Any],
+        agent_run_id: str | None,
+    ) -> None:
+        events.append(name)
+        if name == "workflow.approval_required":
+            await approvals.resolve(
+                ApprovalDecision(
+                    approval_id=str(payload["approval_id"]),
+                    approved=True,
+                )
+            )
+
+    result = await engine.run(
+        WorkflowRunRequest(
+            run_id="builtin-run",
+            workflow_id=definition.id,
+            input={"request": "Exercise the delivery loop"},
+            workspace={
+                "path": str(repository),
+                "mode": "direct",
+                "base_ref": "HEAD",
+            },
+        ),
+        emit,
+    )
+
+    assert result.status == "completed"
+    assert result.output["quality"]["count"] == 1
+    assert "agent.text_delta" in events
+    assert "workflow.approval_required" in events
+    assert events[-1] == "workflow.completed"
     await services.close()
 
 

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
@@ -13,6 +14,8 @@ from flowent_agent.agents.models import ModelConfiguration
 
 
 def create_model(configuration: ModelConfiguration) -> Model:
+    if configuration.provider == "default":
+        raise ValueError("Default model configuration must be resolved before use")
     if configuration.provider == "demo":
         return FunctionModel(
             stream_function=stream_demo_response,
@@ -46,6 +49,19 @@ async def stream_demo_response(
 ) -> AsyncIterator[str]:
     prompts = extract_user_prompts(messages)
     latest = prompts[-1] if prompts else ""
+    if "respond with json" in latest.lower():
+        response = json.dumps(
+            {
+                "approved": True,
+                "findings": [],
+                "summary": "Demo verification passed",
+            },
+            separators=(",", ":"),
+        )
+        for chunk in chunk_text(response):
+            await asyncio.sleep(0.012)
+            yield chunk
+        return
     preview = latest[:96]
     suffix = "…" if len(latest) > 96 else ""
     if len(prompts) > 1:

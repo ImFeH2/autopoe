@@ -4,6 +4,8 @@ import {
   Bot,
   Check,
   ChevronDown,
+  ChevronRight,
+  CornerUpLeft,
   GitBranch,
   Play,
   Plus,
@@ -78,6 +80,51 @@ function createNode(kind: WorkflowNodeKind, index: number): WorkflowNode {
   };
 }
 
+function nodesAtPath(nodes: WorkflowNode[], path: string[]): WorkflowNode[] {
+  let current = nodes;
+  for (const nodeId of path) {
+    const node = current.find((candidate) => candidate.id === nodeId);
+    if (!node || node.type !== "loop") {
+      return [];
+    }
+    current = node.nodes;
+  }
+  return current;
+}
+
+function replaceNodesAtPath(
+  nodes: WorkflowNode[],
+  path: string[],
+  replacement: WorkflowNode[],
+): WorkflowNode[] {
+  const [nodeId, ...rest] = path;
+  if (!nodeId) {
+    return replacement;
+  }
+  return nodes.map((node) =>
+    node.id === nodeId && node.type === "loop"
+      ? {
+          ...node,
+          nodes: replaceNodesAtPath(node.nodes, rest, replacement),
+        }
+      : node,
+  );
+}
+
+function loopPathLabels(nodes: WorkflowNode[], path: string[]) {
+  const labels: Array<{ id: string; name: string }> = [];
+  let current = nodes;
+  for (const nodeId of path) {
+    const node = current.find((candidate) => candidate.id === nodeId);
+    if (!node || node.type !== "loop") {
+      break;
+    }
+    labels.push({ id: node.id, name: node.name });
+    current = node.nodes;
+  }
+  return labels;
+}
+
 export function WorkflowEditor({
   workflow,
   onChange,
@@ -87,11 +134,20 @@ export function WorkflowEditor({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
     workflow.nodes[0]?.id ?? null,
   );
+  const [activeLoopPath, setActiveLoopPath] = useState<string[]>([]);
   const [saved, setSaved] = useState(true);
+  const visibleNodes = useMemo(
+    () => nodesAtPath(workflow.nodes, activeLoopPath),
+    [activeLoopPath, workflow.nodes],
+  );
+  const pathLabels = useMemo(
+    () => loopPathLabels(workflow.nodes, activeLoopPath),
+    [activeLoopPath, workflow.nodes],
+  );
   const selectedNode = useMemo(
     () =>
-      workflow.nodes.find((node) => node.id === selectedNodeId) ?? null,
-    [selectedNodeId, workflow.nodes],
+      visibleNodes.find((node) => node.id === selectedNodeId) ?? null,
+    [selectedNodeId, visibleNodes],
   );
 
   function updateWorkflow(next: WorkflowDefinition) {
@@ -100,31 +156,52 @@ export function WorkflowEditor({
   }
 
   function updateNode(nextNode: WorkflowNode) {
-    updateWorkflow({
-      ...workflow,
-      nodes: workflow.nodes.map((node) =>
+    updateVisibleNodes(
+      visibleNodes.map((node) =>
         node.id === nextNode.id ? nextNode : node,
       ),
+    );
+  }
+
+  function updateVisibleNodes(nodes: WorkflowNode[]) {
+    updateWorkflow({
+      ...workflow,
+      nodes: replaceNodesAtPath(workflow.nodes, activeLoopPath, nodes),
     });
   }
 
   function addNode(kind: WorkflowNodeKind) {
-    const node = createNode(kind, workflow.nodes.length);
-    updateWorkflow({ ...workflow, nodes: [...workflow.nodes, node] });
+    const node = createNode(kind, visibleNodes.length);
+    updateVisibleNodes([...visibleNodes, node]);
     setSelectedNodeId(node.id);
   }
 
   function deleteNode(nodeId: string) {
-    updateWorkflow({
-      ...workflow,
-      nodes: workflow.nodes
+    updateVisibleNodes(
+      visibleNodes
         .filter((node) => node.id !== nodeId)
         .map((node) => ({
           ...node,
           depends_on: node.depends_on.filter((id) => id !== nodeId),
         })),
-    });
+    );
     setSelectedNodeId(null);
+  }
+
+  function openLoop(nodeId: string) {
+    const node = visibleNodes.find((candidate) => candidate.id === nodeId);
+    if (!node || node.type !== "loop") {
+      return;
+    }
+    setActiveLoopPath((current) => [...current, node.id]);
+    setSelectedNodeId(node.nodes[0]?.id ?? null);
+  }
+
+  function navigateTo(depth: number) {
+    const path = activeLoopPath.slice(0, depth);
+    const nodes = nodesAtPath(workflow.nodes, path);
+    setActiveLoopPath(path);
+    setSelectedNodeId(nodes[0]?.id ?? null);
   }
 
   async function saveWorkflow() {
@@ -140,17 +217,53 @@ export function WorkflowEditor({
     <section className="workflow-editor">
       <div className="workflow-toolbar">
         <div className="workflow-identity">
+          {activeLoopPath.length > 0 ? (
+            <Button
+              aria-label="Back"
+              className="workflow-back-button"
+              color="gray"
+              onClick={() => navigateTo(activeLoopPath.length - 1)}
+              variant="ghost"
+            >
+              <CornerUpLeft size={14} strokeWidth={1.8} />
+            </Button>
+          ) : (
           <GitBranch size={15} strokeWidth={1.7} />
-          <TextField.Root
-            aria-label="Workflow name"
-            className="workflow-name-field"
-            onChange={(event) =>
-              updateWorkflow({ ...workflow, name: event.target.value })
-            }
-            value={workflow.name}
-            variant="soft"
-          />
-          <span className="node-count">{workflow.nodes.length} nodes</span>
+          )}
+          {activeLoopPath.length === 0 ? (
+            <TextField.Root
+              aria-label="Workflow name"
+              className="workflow-name-field"
+              onChange={(event) =>
+                updateWorkflow({ ...workflow, name: event.target.value })
+              }
+              value={workflow.name}
+              variant="soft"
+            />
+          ) : (
+            <div className="workflow-breadcrumbs">
+              <Button
+                color="gray"
+                onClick={() => navigateTo(0)}
+                variant="ghost"
+              >
+                {workflow.name}
+              </Button>
+              {pathLabels.map((item, index) => (
+                <span key={item.id}>
+                  <ChevronRight size={12} strokeWidth={1.7} />
+                  <Button
+                    color="gray"
+                    onClick={() => navigateTo(index + 1)}
+                    variant="ghost"
+                  >
+                    {item.name}
+                  </Button>
+                </span>
+              ))}
+            </div>
+          )}
+          <span className="node-count">{visibleNodes.length} nodes</span>
         </div>
 
         <div className="toolbar-actions">
@@ -200,15 +313,18 @@ export function WorkflowEditor({
 
       <div className="workflow-workbench">
         <WorkflowCanvas
-          onChange={updateWorkflow}
+          definitions={visibleNodes}
+          key={activeLoopPath.join("/") || "root"}
+          onChange={updateVisibleNodes}
+          onOpenLoop={openLoop}
           onSelectNode={setSelectedNodeId}
           selectedNodeId={selectedNodeId}
-          workflow={workflow}
         />
         <NodeInspector
           node={selectedNode}
           onChange={updateNode}
           onDelete={deleteNode}
+          onOpenLoop={openLoop}
         />
       </div>
     </section>

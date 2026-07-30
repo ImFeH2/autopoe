@@ -32,6 +32,39 @@
   color: var(--f-text-tertiary);
 }
 
+.workflow-back-button.rt-Button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--f-text-tertiary);
+}
+
+.workflow-breadcrumbs,
+.workflow-breadcrumbs > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.workflow-breadcrumbs {
+  overflow: hidden;
+}
+
+.workflow-breadcrumbs > span {
+  color: var(--f-text-disabled);
+}
+
+.workflow-breadcrumbs .rt-Button {
+  max-width: 160px;
+  height: 28px;
+  padding: 0 var(--f-space-2);
+  overflow: hidden;
+  color: var(--f-text-secondary);
+  font-size: var(--f-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workflow-name-field.rt-TextFieldRoot {
   width: min(260px, 28vw);
   border: 0;
@@ -256,6 +289,39 @@
   color: var(--f-text-secondary);
   font-size: var(--f-text-sm);
   font-weight: 560;
+}
+
+.loop-open-row,
+.loop-open-row > span {
+  display: flex;
+  align-items: center;
+}
+
+.loop-open-row {
+  justify-content: space-between;
+  gap: var(--f-space-3);
+  padding: var(--f-space-3);
+  border: 1px solid var(--f-border-subtle);
+  border-radius: var(--f-radius-md);
+  background: var(--f-surface-1);
+}
+
+.loop-open-row > span {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.loop-open-row strong {
+  color: var(--f-text-secondary);
+  font-size: var(--f-text-xs);
+  font-weight: 580;
+}
+
+.loop-open-row small {
+  color: var(--f-text-disabled);
+  font-family: var(--f-font-mono);
+  font-size: 9px;
 }
 
 .inspector-head {

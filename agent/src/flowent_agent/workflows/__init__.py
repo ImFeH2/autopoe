@@ -1,4 +1,8 @@
 from flowent_agent.approval import ApprovalDecision
+from flowent_agent.workflows.builtins import (
+    seed_builtin_workflows,
+    software_delivery_workflow,
+)
 from flowent_agent.workflows.models import (
     AgentNode,
     ApprovalNode,
@@ -26,4 +30,6 @@ __all__ = [
     "WorkflowRunResult",
     "WorkflowSummary",
     "WorkflowVersion",
+    "seed_builtin_workflows",
+    "software_delivery_workflow",
 ]

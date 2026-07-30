@@ -1,4 +1,5 @@
 export type ProviderKind =
+  | "default"
   | "demo"
   | "openai"
   | "openai_compatible"

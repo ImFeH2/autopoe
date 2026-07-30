@@ -3,7 +3,7 @@ import type {
   WorkflowDefinition,
   WorkflowNode,
 } from "@/types/workflow";
-import { defaultModelConfiguration } from "@/lib/models";
+import { inheritedModelConfiguration } from "@/lib/models";
 
 export function createAgent(
   id: string,
@@ -15,7 +15,7 @@ export function createAgent(
     id,
     name,
     instructions,
-    model: { ...defaultModelConfiguration },
+    model: { ...inheritedModelConfiguration },
     limits: {
       request_limit: 24,
       tool_calls_limit: 48,
@@ -32,30 +32,80 @@ const qualityNodes: WorkflowNode[] = [
     type: "agent",
     name: "Code review",
     depends_on: [],
-    position: { x: 0, y: 0 },
+    position: { x: 40, y: 100 },
     agent: createAgent(
       "reviewer",
       "Reviewer",
-      "Review the implementation for correctness, security, and maintainability. Return JSON with an approved boolean and findings.",
+      "Review correctness, security, and maintainability. Return only the requested JSON.",
       ["read_file", "list_files", "search_text", "git_diff"],
     ),
-    prompt: "Review iteration {{ iteration }} in {{ workspace.path }}.",
+    prompt:
+      "Review iteration {{ iteration }} in {{ workspace.path }}. Respond with JSON containing approved, findings, and summary.",
     output_mode: "json",
     max_attempts: 2,
   },
   {
     id: "test",
     type: "agent",
-    name: "Verification",
-    depends_on: ["review"],
-    position: { x: 280, y: 0 },
+    name: "Tests",
+    depends_on: [],
+    position: { x: 40, y: 340 },
     agent: createAgent(
       "tester",
       "Tester",
-      "Run focused verification and report failures precisely.",
+      "Run focused verification and return only the requested JSON.",
       ["read_file", "search_text", "run_command", "git_status"],
     ),
-    prompt: "Verify the implementation after review: {{ outputs.review }}",
+    prompt:
+      "Test iteration {{ iteration }} in {{ workspace.path }}. Respond with JSON containing approved, findings, and summary.",
+    output_mode: "json",
+    max_attempts: 2,
+  },
+  {
+    id: "repair",
+    type: "agent",
+    name: "Repair",
+    depends_on: ["review", "test"],
+    position: { x: 330, y: 220 },
+    agent: createAgent(
+      "repairer",
+      "Repairer",
+      "Resolve review and test findings with minimal, verified changes.",
+      [
+        "read_file",
+        "list_files",
+        "search_text",
+        "write_file",
+        "replace_text",
+        "run_command",
+        "git_diff",
+      ],
+    ),
+    prompt:
+      "Resolve these findings: review={{ outputs.review }}, tests={{ outputs.test }}.",
+    output_mode: "text",
+    max_attempts: 2,
+  },
+  {
+    id: "verify",
+    type: "agent",
+    name: "Verification",
+    depends_on: ["repair"],
+    position: { x: 620, y: 220 },
+    agent: createAgent(
+      "verifier",
+      "Verifier",
+      "Verify the repaired workspace independently. Return only the requested JSON.",
+      [
+        "read_file",
+        "search_text",
+        "run_command",
+        "git_status",
+        "git_diff",
+      ],
+    ),
+    prompt:
+      "Verify iteration {{ iteration }} after {{ outputs.repair }}. Respond with JSON containing approved, findings, and summary.",
     output_mode: "json",
     max_attempts: 2,
   },
@@ -139,7 +189,7 @@ export const defaultWorkflow: WorkflowDefinition = {
       position: { x: 558, y: 220 },
       nodes: qualityNodes,
       until: {
-        path: "outputs.test.approved",
+        path: "outputs.verify.approved",
         operator: "equals",
         value: true,
       },

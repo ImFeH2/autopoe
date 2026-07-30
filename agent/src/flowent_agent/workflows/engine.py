@@ -144,7 +144,10 @@ class WorkflowEngine:
         except asyncio.CancelledError:
             await self.workflows.finish_run(request.run_id, "cancelled")
             await emit("workflow.cancelled", {}, None)
-            raise
+            return WorkflowRunResult(
+                run_id=request.run_id,
+                status="cancelled",
+            )
         except Exception as error:
             message = str(error) or type(error).__name__
             payload: dict[str, Any] = {"message": message}

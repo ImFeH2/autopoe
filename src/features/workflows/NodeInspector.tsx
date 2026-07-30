@@ -7,7 +7,7 @@ import {
   TextArea,
   TextField,
 } from "@radix-ui/themes";
-import { Trash2 } from "lucide-react";
+import { ArrowRight, Trash2 } from "lucide-react";
 import { ModelConfigurationFields } from "@/components/ModelConfigurationFields";
 import type {
   AgentWorkflowNode,
@@ -19,6 +19,7 @@ interface NodeInspectorProps {
   node: WorkflowNode | null;
   onChange: (node: WorkflowNode) => void;
   onDelete: (nodeId: string) => void;
+  onOpenLoop: (nodeId: string) => void;
 }
 
 const underscorePattern = /_/g;
@@ -34,6 +35,7 @@ export function NodeInspector({
   node,
   onChange,
   onDelete,
+  onOpenLoop,
 }: NodeInspectorProps) {
   if (!node) {
     return (
@@ -167,6 +169,22 @@ export function NodeInspector({
 
               {node.type === "loop" ? (
                 <>
+                  <div className="loop-open-row">
+                    <span>
+                      <strong>Steps</strong>
+                      <small>{node.nodes.length}</small>
+                    </span>
+                    <Button
+                      className="secondary-button"
+                      color="gray"
+                      onClick={() => onOpenLoop(node.id)}
+                      size="1"
+                      variant="soft"
+                    >
+                      Open
+                      <ArrowRight size={13} strokeWidth={1.8} />
+                    </Button>
+                  </div>
                   <label className="field-label">
                     <span>Iterations</span>
                     <TextField.Root

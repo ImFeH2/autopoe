@@ -6,12 +6,14 @@ import type {
 } from "@/types/workflow";
 
 interface ModelConfigurationFieldsProps {
+  allowDefault?: boolean;
   className?: string;
   model: ModelConfiguration;
   onChange: (model: ModelConfiguration) => void;
 }
 
 const providerLabels: Record<ProviderKind, string> = {
+  default: "Default",
   demo: "Local demo",
   openai: "OpenAI",
   openai_compatible: "OpenAI compatible",
@@ -19,10 +21,14 @@ const providerLabels: Record<ProviderKind, string> = {
 };
 
 export function ModelConfigurationFields({
+  allowDefault = true,
   className,
   model,
   onChange,
 }: ModelConfigurationFieldsProps) {
+  const providers = Object.entries(providerLabels).filter(
+    ([provider]) => allowDefault || provider !== "default",
+  );
   return (
     <div className={["model-configuration-fields", className]
       .filter(Boolean)
@@ -38,7 +44,7 @@ export function ModelConfigurationFields({
         >
           <Select.Trigger className="field-select" />
           <Select.Content>
-            {Object.entries(providerLabels).map(([provider, label]) => (
+            {providers.map(([provider, label]) => (
               <Select.Item key={provider} value={provider}>
                 {label}
               </Select.Item>
@@ -47,16 +53,18 @@ export function ModelConfigurationFields({
         </Select.Root>
       </label>
 
-      <label className="field-label">
-        <span>Model</span>
-        <TextField.Root
-          onChange={(event) =>
-            onChange({ ...model, model: event.target.value })
-          }
-          value={model.model}
-          variant="surface"
-        />
-      </label>
+      {model.provider !== "default" ? (
+        <label className="field-label">
+          <span>Model</span>
+          <TextField.Root
+            onChange={(event) =>
+              onChange({ ...model, model: event.target.value })
+            }
+            value={model.model}
+            variant="surface"
+          />
+        </label>
+      ) : null}
 
       {model.provider === "openai" ? (
         <label className="field-label">

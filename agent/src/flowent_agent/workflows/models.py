@@ -122,7 +122,7 @@ class WorkflowRunResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str
-    status: Literal["completed", "failed"]
+    status: Literal["completed", "failed", "cancelled"]
     output: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
 

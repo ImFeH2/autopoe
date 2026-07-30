@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
 
 from flowent_agent.agents import AgentRunner, AgentRunRequest, ModelConfiguration
 from flowent_agent.approval import ApprovalCoordinator
@@ -17,6 +24,7 @@ from flowent_agent.workflows import (
     ApprovalDecision,
     WorkflowDefinition,
     WorkflowRunRequest,
+    seed_builtin_workflows,
 )
 from flowent_agent.workflows.engine import WorkflowEngine
 
@@ -40,6 +48,16 @@ class SaveModelSettingsRequest(BaseModel):
     runtime: RuntimePreferences = Field(default_factory=RuntimePreferences)
     api_key: SecretStr | None = None
     clear_api_key: bool = False
+
+    @field_validator("model")
+    @classmethod
+    def require_concrete_model(
+        cls,
+        model: ModelConfiguration,
+    ) -> ModelConfiguration:
+        if model.provider == "default":
+            raise ValueError("Default settings require a concrete provider")
+        return model
 
 
 class ListRunsRequest(BaseModel):
@@ -144,6 +162,7 @@ class Runtime:
     async def initialize(self, request: Envelope) -> None:
         payload = InitializeRequest.model_validate(request.payload)
         self.services = await RuntimeServices.create(Path(payload.data_dir))
+        await seed_builtin_workflows(self.services.workflows)
         self.approvals = ApprovalCoordinator(self.services.approvals)
         self.workspace_manager = WorkspaceManager(self.services.data_dir)
         self.agent_runner = AgentRunner(
@@ -151,6 +170,7 @@ class Runtime:
             self.approvals,
             self.workspace_manager,
             self.services.credentials,
+            self.services.settings,
         )
         self.workflow_engine = WorkflowEngine(
             self.services.workflows,
@@ -441,7 +461,14 @@ class Runtime:
 
         if self.workflow_engine is None:
             raise RuntimeError("Workflow engine is not initialized")
-        await self.workflow_engine.run(request, send)
+        try:
+            await self.workflow_engine.run(request, send)
+        except asyncio.CancelledError:
+            await send("workflow.cancelled", {}, None)
+        except Exception as error:
+            message = str(error) or type(error).__name__
+            logging.getLogger(__name__).exception("Workflow task failed")
+            await send("workflow.failed", {"message": message}, None)
 
     def require_services(self) -> RuntimeServices:
         if self.services is None:

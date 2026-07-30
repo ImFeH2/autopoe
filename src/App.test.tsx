@@ -41,6 +41,20 @@ describe("App", () => {
     expect(screen.getAllByText("Discovery").length).toBeGreaterThan(0);
   });
 
+  it("opens and edits the steps inside a loop", async () => {
+    render(<App />);
+
+    fireEvent.doubleClick(await screen.findByText("Quality loop"));
+
+    expect((await screen.findAllByText("Code review")).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByText("Tests")).toBeInTheDocument();
+    expect(screen.getByText("Repair")).toBeInTheDocument();
+    expect(screen.getByText("Verification")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+  });
+
   it("queues a workflow run and opens its console", async () => {
     invokeMock.mockImplementation(async (command: string, args: any) => {
       if (command === "runtime_request" && args.name === "workflow.publish") {

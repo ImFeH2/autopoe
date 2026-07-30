@@ -15,7 +15,13 @@ class AgentMessage(BaseModel):
 class ModelConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["demo", "openai", "openai_compatible", "anthropic"] = "demo"
+    provider: Literal[
+        "default",
+        "demo",
+        "openai",
+        "openai_compatible",
+        "anthropic",
+    ] = "demo"
     model: str = Field(default="flowent-demo", min_length=1)
     api_mode: Literal["responses", "chat"] = "responses"
     api_key: SecretStr | None = Field(default=None, exclude=True)

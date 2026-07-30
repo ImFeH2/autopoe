@@ -26,10 +26,11 @@ from flowent_agent.agents.models import (
     AgentExecutionResult,
     AgentMessage,
     AgentRunRequest,
+    ModelConfiguration,
 )
 from flowent_agent.approval import ApprovalCoordinator, ApprovalScope
 from flowent_agent.persistence.runs import AgentRunStore
-from flowent_agent.persistence.settings import CredentialStore
+from flowent_agent.persistence.settings import CredentialStore, SettingsStore
 from flowent_agent.tools.registry import AgentDependencies, ToolRegistry
 from flowent_agent.tools.workspace import Workspace, WorkspaceManager
 
@@ -43,12 +44,14 @@ class AgentRunner:
         approvals: ApprovalCoordinator | None = None,
         workspace_manager: WorkspaceManager | None = None,
         credentials: CredentialStore | None = None,
+        settings: SettingsStore | None = None,
         model_factory: Callable[..., Any] = create_model,
     ) -> None:
         self.runs = runs
         self.approvals = approvals
         self.workspace_manager = workspace_manager
         self.credentials = credentials
+        self.settings = settings
         self.model_factory = model_factory
         self.tools = ToolRegistry()
 
@@ -59,28 +62,36 @@ class AgentRunner:
         workspace: Workspace | None = None,
     ) -> AgentExecutionResult:
         configuration = request.agent
-        await self.runs.start(
-            request.run_id,
-            request.conversation_id,
-            configuration.model.provider,
-            configuration.model.model,
-            request.workflow_run_id,
-            request.work_item_id,
-            None,
-            request.node_id,
-        )
-        for message in request.messages:
-            await self.runs.add_message(request.run_id, message.role, message.content)
-        await emit(
-            "agent.started",
-            {
-                "agent": configuration.name,
-                "provider": configuration.model.provider,
-                "model": configuration.model.model,
-            },
-        )
-
+        run_started = False
         try:
+            model_configuration = await self.resolve_model_configuration(
+                configuration.model
+            )
+            await self.runs.start(
+                request.run_id,
+                request.conversation_id,
+                model_configuration.provider,
+                model_configuration.model,
+                request.workflow_run_id,
+                request.work_item_id,
+                None,
+                request.node_id,
+            )
+            run_started = True
+            for message in request.messages:
+                await self.runs.add_message(
+                    request.run_id,
+                    message.role,
+                    message.content,
+                )
+            await emit(
+                "agent.started",
+                {
+                    "agent": configuration.name,
+                    "provider": model_configuration.provider,
+                    "model": model_configuration.model,
+                },
+            )
             if workspace is None and request.workspace is not None:
                 if self.workspace_manager is None:
                     raise RuntimeError("Workspace manager is not configured")
@@ -89,7 +100,12 @@ class AgentRunner:
                     request.workspace,
                 )
             async with asyncio.timeout(configuration.limits.timeout_seconds):
-                result = await self.run_loop(request, emit, workspace)
+                result = await self.run_loop(
+                    request,
+                    emit,
+                    workspace,
+                    model_configuration,
+                )
             await self.runs.add_message(request.run_id, "assistant", result["output"])
             await self.runs.finish(request.run_id, "completed", result["usage"])
             await emit("agent.completed", result)
@@ -100,12 +116,14 @@ class AgentRunner:
                 usage=result["usage"],
             )
         except asyncio.CancelledError:
-            await self.runs.finish(request.run_id, "cancelled")
+            if run_started:
+                await self.runs.finish(request.run_id, "cancelled")
             await emit("agent.cancelled", {})
             raise
         except TimeoutError:
             message = "Agent run timed out"
-            await self.runs.finish(request.run_id, "failed", error=message)
+            if run_started:
+                await self.runs.finish(request.run_id, "failed", error=message)
             await emit("agent.failed", {"message": message})
             return AgentExecutionResult(
                 run_id=request.run_id,
@@ -114,7 +132,8 @@ class AgentRunner:
             )
         except Exception as error:
             message = str(error) or type(error).__name__
-            await self.runs.finish(request.run_id, "failed", error=message)
+            if run_started:
+                await self.runs.finish(request.run_id, "failed", error=message)
             await emit("agent.failed", {"message": message})
             return AgentExecutionResult(
                 run_id=request.run_id,
@@ -127,22 +146,9 @@ class AgentRunner:
         request: AgentRunRequest,
         emit: EmitEvent,
         workspace: Workspace | None,
+        model_configuration: ModelConfiguration,
     ) -> dict[str, Any]:
         configuration = request.agent
-        model_configuration = configuration.model
-        if (
-            model_configuration.api_key is None
-            and model_configuration.credential_id is not None
-            and self.credentials is not None
-        ):
-            secret = await self.credentials.get(
-                model_configuration.provider,
-                model_configuration.credential_id,
-            )
-            if secret is not None:
-                model_configuration = model_configuration.model_copy(
-                    update={"api_key": SecretStr(secret)}
-                )
         model = self.model_factory(model_configuration)
         toolset = self.tools.build(configuration.tools)
         if toolset is not None and workspace is None:
@@ -194,6 +200,33 @@ class AgentRunner:
         if result is None:
             raise RuntimeError("Agent run ended without a result")
         return result
+
+    async def resolve_model_configuration(
+        self,
+        model_configuration: ModelConfiguration,
+    ) -> ModelConfiguration:
+        if model_configuration.provider == "default":
+            stored_model = (
+                await self.settings.get("model.default")
+                if self.settings is not None
+                else None
+            )
+            model_configuration = ModelConfiguration.model_validate(stored_model or {})
+        if (
+            model_configuration.api_key is None
+            and model_configuration.credential_id is not None
+            and self.credentials is not None
+            and model_configuration.provider != "demo"
+        ):
+            secret = await self.credentials.get(
+                model_configuration.provider,
+                model_configuration.credential_id,
+            )
+            if secret is not None:
+                model_configuration = model_configuration.model_copy(
+                    update={"api_key": SecretStr(secret)}
+                )
+        return model_configuration
 
     @staticmethod
     def model_settings(request: AgentRunRequest) -> ModelSettings:

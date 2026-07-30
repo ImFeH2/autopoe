@@ -147,6 +147,7 @@ export function SettingsView() {
               <div className="settings-card-body">
                 <strong>Default model</strong>
                 <ModelConfigurationFields
+                  allowDefault={false}
                   model={configuration}
                   onChange={changeConfiguration}
                 />
