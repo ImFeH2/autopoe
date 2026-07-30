@@ -6,10 +6,16 @@ from uuid import uuid4
 
 from flowent_agent.agents import AgentExecutionResult, AgentMessage
 from flowent_agent.agents.models import AgentRunRequest
+from flowent_agent.approval import (
+    ApprovalCoordinator,
+    ApprovalDecision,
+    ApprovalScope,
+)
+from flowent_agent.persistence.artifacts import ArtifactStore
 from flowent_agent.persistence.workflows import WorkflowStore
+from flowent_agent.tools.workspace import Workspace, WorkspaceManager
 from flowent_agent.workflows.models import (
     AgentNode,
-    ApprovalDecision,
     ApprovalNode,
     LoopNode,
     WorkflowNode,
@@ -35,15 +41,25 @@ class AgentExecutor(Protocol):
         self,
         request: AgentRunRequest,
         emit: Callable[[str, dict[str, Any]], Awaitable[None]],
+        workspace: Workspace | None = None,
     ) -> AgentExecutionResult: ...
 
 
 class WorkflowEngine:
-    def __init__(self, workflows: WorkflowStore, agents: AgentExecutor) -> None:
+    def __init__(
+        self,
+        workflows: WorkflowStore,
+        agents: AgentExecutor,
+        approvals: ApprovalCoordinator,
+        workspaces: WorkspaceManager,
+        artifacts: ArtifactStore | None = None,
+    ) -> None:
         self.workflows = workflows
         self.agents = agents
+        self.approvals = approvals
+        self.workspaces = workspaces
+        self.artifacts = artifacts
         self.renderer = TemplateRenderer()
-        self.pending_approvals: dict[str, asyncio.Future[ApprovalDecision]] = {}
 
     async def run(
         self,
@@ -63,7 +79,30 @@ class WorkflowEngine:
                 error=message,
             )
 
-        await self.workflows.start_run(request.run_id, version.id, request.input)
+        workspace: Workspace | None = None
+        if request.workspace is not None:
+            try:
+                workspace = await self.workspaces.prepare(
+                    request.run_id,
+                    request.workspace,
+                )
+            except Exception as error:
+                message = str(error) or type(error).__name__
+                await emit("workflow.failed", {"message": message}, None)
+                return WorkflowRunResult(
+                    run_id=request.run_id,
+                    status="failed",
+                    error=message,
+                )
+        workspace_data = (
+            workspace.info.model_dump(mode="json") if workspace is not None else None
+        )
+        await self.workflows.start_run(
+            request.run_id,
+            version.id,
+            request.input,
+            workspace_data,
+        )
         await emit(
             "workflow.started",
             {
@@ -73,10 +112,13 @@ class WorkflowEngine:
             },
             None,
         )
+        if workspace_data is not None:
+            await emit("workflow.workspace_ready", workspace_data, None)
         semaphore = asyncio.Semaphore(version.definition.max_parallelism)
         context: dict[str, Any] = {
             "input": request.input,
             "outputs": {},
+            "workspace": workspace_data,
         }
         try:
             output = await self.run_graph(
@@ -85,6 +127,12 @@ class WorkflowEngine:
                 context,
                 semaphore,
                 emit,
+                workspace,
+            )
+            output = await self.attach_workspace_result(
+                request.run_id,
+                output,
+                workspace,
             )
             await self.workflows.finish_run(request.run_id, "completed", output)
             await emit("workflow.completed", {"output": output}, None)
@@ -121,6 +169,7 @@ class WorkflowEngine:
         context: dict[str, Any],
         semaphore: asyncio.Semaphore,
         emit: EmitWorkflowEvent,
+        workspace: Workspace | None,
     ) -> dict[str, Any]:
         pending = {node.id: node for node in nodes}
         outputs: dict[str, Any] = {}
@@ -144,6 +193,7 @@ class WorkflowEngine:
                         graph_context,
                         semaphore,
                         emit,
+                        workspace,
                     )
                     for node in ready
                 ),
@@ -163,6 +213,7 @@ class WorkflowEngine:
         context: dict[str, Any],
         semaphore: asyncio.Semaphore,
         emit: EmitWorkflowEvent,
+        workspace: Workspace | None,
     ) -> Any:
         await emit(
             "workflow.node_started",
@@ -177,6 +228,7 @@ class WorkflowEngine:
                     context,
                     semaphore,
                     emit,
+                    workspace,
                 )
             elif isinstance(node, ApprovalNode):
                 output = await self.run_approval_node(
@@ -192,6 +244,7 @@ class WorkflowEngine:
                     context,
                     semaphore,
                     emit,
+                    workspace,
                 )
             else:
                 raise WorkflowNodeError(node.id, f"Unsupported node type: {node.type}")
@@ -226,6 +279,7 @@ class WorkflowEngine:
         context: dict[str, Any],
         semaphore: asyncio.Semaphore,
         emit: EmitWorkflowEvent,
+        workspace: Workspace | None,
     ) -> Any:
         prompt = self.renderer.render(node.prompt, context)
         last_error = "Agent run failed"
@@ -267,7 +321,11 @@ class WorkflowEngine:
             )
             try:
                 async with semaphore:
-                    result = await self.agents.run(request, agent_emit)
+                    result = await self.agents.run(
+                        request,
+                        agent_emit,
+                        workspace,
+                    )
             except asyncio.CancelledError:
                 await self.workflows.finish_work_item(work_item_id, "cancelled")
                 raise
@@ -325,49 +383,40 @@ class WorkflowEngine:
             1,
             "waiting_approval",
         )
-        approval_id = await self.workflows.create_approval(
-            workflow_run_id,
-            prompt,
-        )
-        future = asyncio.get_running_loop().create_future()
-        self.pending_approvals[approval_id] = future
-        await emit(
-            "workflow.approval_required",
-            {
-                "approval_id": approval_id,
-                "work_item_id": work_item_id,
-                "node_id": node.id,
-                "prompt": prompt,
-            },
-            None,
-        )
+
+        async def approval_emit(name: str, payload: dict[str, Any]) -> None:
+            await emit(
+                name,
+                {
+                    "work_item_id": work_item_id,
+                    "node_id": node.id,
+                    **payload,
+                },
+                None,
+            )
+
         try:
-            if node.timeout_seconds is None:
-                decision = await future
-            else:
-                async with asyncio.timeout(node.timeout_seconds):
-                    decision = await future
+            decision = await self.approvals.request(
+                ApprovalScope(
+                    run_id=workflow_run_id,
+                    workflow_run_id=workflow_run_id,
+                ),
+                "workflow_gate",
+                prompt,
+                {"node_id": node.id, "work_item_id": work_item_id},
+                approval_emit,
+                "workflow.approval_required",
+                "workflow.approval_resolved",
+                node.timeout_seconds,
+            )
         except TimeoutError as error:
             await self.workflows.finish_work_item(work_item_id, "failed")
-            await self.workflows.close_approval(approval_id, "expired")
             raise WorkflowNodeError(node.id, "Approval timed out") from error
         except asyncio.CancelledError:
             await self.workflows.finish_work_item(work_item_id, "cancelled")
-            await self.workflows.close_approval(approval_id, "cancelled")
             raise
-        finally:
-            self.pending_approvals.pop(approval_id, None)
 
         output = {"approved": decision.approved, "data": decision.data}
-        await emit(
-            "workflow.approval_resolved",
-            {
-                "approval_id": approval_id,
-                "node_id": node.id,
-                **output,
-            },
-            None,
-        )
         if not decision.approved and node.reject_behavior == "fail":
             await self.workflows.finish_work_item(work_item_id, "failed", output)
             raise WorkflowNodeError(node.id, "Approval was rejected")
@@ -381,6 +430,7 @@ class WorkflowEngine:
         context: dict[str, Any],
         semaphore: asyncio.Semaphore,
         emit: EmitWorkflowEvent,
+        workspace: Workspace | None,
     ) -> dict[str, Any]:
         work_item_id = await self.workflows.start_work_item(
             workflow_run_id,
@@ -409,6 +459,7 @@ class WorkflowEngine:
                     loop_context,
                     semaphore,
                     emit,
+                    workspace,
                 )
                 iterations.append(output)
                 condition_context = {
@@ -450,18 +501,37 @@ class WorkflowEngine:
         return result
 
     async def resolve_approval(self, decision: ApprovalDecision) -> bool:
-        future = self.pending_approvals.get(decision.approval_id)
-        if future is None or future.done():
-            return False
-        resolved = await self.workflows.resolve_approval(
-            decision.approval_id,
-            decision.approved,
-            decision.data,
-        )
-        if not resolved:
-            return False
-        future.set_result(decision)
-        return True
+        return await self.approvals.resolve(decision)
+
+    async def attach_workspace_result(
+        self,
+        workflow_run_id: str,
+        output: dict[str, Any],
+        workspace: Workspace | None,
+    ) -> dict[str, Any]:
+        if workspace is None:
+            return output
+        workspace_result: dict[str, Any] = workspace.info.model_dump(mode="json")
+        if workspace.is_git:
+            workspace_result["status"] = await workspace.git_status()
+            unstaged = await workspace.git_diff()
+            staged = await workspace.git_diff(staged=True)
+            diff = ""
+            if unstaged:
+                diff += f"Unstaged changes\n\n{unstaged}"
+            if staged:
+                separator = "\n\n" if diff else ""
+                diff += f"{separator}Staged changes\n\n{staged}"
+            if diff and self.artifacts is not None:
+                artifact = await self.artifacts.write_bytes(
+                    diff.encode(),
+                    "git_diff",
+                    "Workspace diff",
+                    "text/x-diff",
+                    workflow_run_id=workflow_run_id,
+                )
+                workspace_result["diff_artifact_id"] = artifact.id
+        return {**output, "_workspace": workspace_result}
 
     @staticmethod
     def parse_agent_output(

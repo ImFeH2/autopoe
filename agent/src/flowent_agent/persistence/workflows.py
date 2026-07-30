@@ -134,16 +134,26 @@ class WorkflowStore:
         run_id: str,
         version_id: str,
         input_value: dict[str, Any],
+        workspace: dict[str, Any] | None = None,
     ) -> None:
         timestamp = utc_now()
         async with self.database.write_lock:
             await self.database.connection.execute(
-                "INSERT INTO workflow_runs(id, workflow_version_id, status, input_json, created_at, updated_at, started_at) "
-                "VALUES (?, ?, 'running', ?, ?, ?, ?)",
+                "INSERT INTO workflow_runs(id, workflow_version_id, status, input_json, workspace_json, created_at, updated_at, started_at) "
+                "VALUES (?, ?, 'running', ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     version_id,
                     json.dumps(input_value, ensure_ascii=False, separators=(",", ":")),
+                    (
+                        json.dumps(
+                            workspace,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                        if workspace is not None
+                        else None
+                    ),
                     timestamp,
                     timestamp,
                     timestamp,
@@ -219,55 +229,3 @@ class WorkflowStore:
                 (status, output_json, timestamp, work_item_id),
             )
             await self.database.connection.commit()
-
-    async def create_approval(
-        self,
-        workflow_run_id: str,
-        prompt: str,
-        agent_run_id: str | None = None,
-    ) -> str:
-        approval_id = uuid4().hex
-        async with self.database.write_lock:
-            await self.database.connection.execute(
-                "INSERT INTO approvals(id, workflow_run_id, agent_run_id, status, kind, prompt, created_at) "
-                "VALUES (?, ?, ?, 'pending', 'workflow_gate', ?, ?)",
-                (
-                    approval_id,
-                    workflow_run_id,
-                    agent_run_id,
-                    prompt,
-                    utc_now(),
-                ),
-            )
-            await self.database.connection.commit()
-        return approval_id
-
-    async def resolve_approval(
-        self,
-        approval_id: str,
-        approved: bool,
-        data: dict[str, Any],
-    ) -> bool:
-        timestamp = utc_now()
-        async with self.database.write_lock:
-            cursor = await self.database.connection.execute(
-                "UPDATE approvals SET status = ?, response_json = ?, resolved_at = ? "
-                "WHERE id = ? AND status = 'pending'",
-                (
-                    "approved" if approved else "rejected",
-                    json.dumps(data, ensure_ascii=False, separators=(",", ":")),
-                    timestamp,
-                    approval_id,
-                ),
-            )
-            await self.database.connection.commit()
-        return cursor.rowcount == 1
-
-    async def close_approval(self, approval_id: str, status: str) -> bool:
-        async with self.database.write_lock:
-            cursor = await self.database.connection.execute(
-                "UPDATE approvals SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
-                (status, utc_now(), approval_id),
-            )
-            await self.database.connection.commit()
-        return cursor.rowcount == 1

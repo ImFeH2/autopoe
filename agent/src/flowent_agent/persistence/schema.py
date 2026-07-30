@@ -151,4 +151,41 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX agent_runs_conversation ON agent_runs(conversation_id, created_at);
         """,
     ),
+    (
+        3,
+        """
+        ALTER TABLE approvals RENAME TO approvals_legacy;
+
+        CREATE TABLE approvals (
+            id TEXT PRIMARY KEY,
+            workflow_run_id TEXT REFERENCES workflow_runs(id) ON DELETE CASCADE,
+            agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+            run_id TEXT,
+            tool_call_id TEXT,
+            status TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            response_json TEXT,
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+        );
+
+        INSERT INTO approvals(
+            id, workflow_run_id, agent_run_id, status, kind, prompt,
+            response_json, created_at, resolved_at
+        )
+        SELECT
+            id, workflow_run_id, agent_run_id, status, kind, prompt,
+            response_json, created_at, resolved_at
+        FROM approvals_legacy;
+
+        DROP TABLE approvals_legacy;
+
+        CREATE INDEX approvals_workflow_run ON approvals(workflow_run_id, created_at);
+        CREATE INDEX approvals_agent_run ON approvals(agent_run_id, created_at);
+
+        ALTER TABLE workflow_runs ADD COLUMN workspace_json TEXT;
+        """,
+    ),
 )

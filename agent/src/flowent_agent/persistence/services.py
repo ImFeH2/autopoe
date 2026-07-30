@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from flowent_agent.persistence.approvals import ApprovalStore
 from flowent_agent.persistence.artifacts import ArtifactStore
 from flowent_agent.persistence.database import Database, RecoveryResult
 from flowent_agent.persistence.events import EventStore
@@ -14,6 +15,7 @@ class RuntimeServices:
     database: Database
     events: EventStore
     artifacts: ArtifactStore
+    approvals: ApprovalStore
     runs: AgentRunStore
     workflows: WorkflowStore
     recovery: RecoveryResult
@@ -27,6 +29,7 @@ class RuntimeServices:
             database=database,
             events=EventStore(database),
             artifacts=ArtifactStore(data_dir, database),
+            approvals=ApprovalStore(database),
             runs=AgentRunStore(database),
             workflows=WorkflowStore(database),
             recovery=recovery,

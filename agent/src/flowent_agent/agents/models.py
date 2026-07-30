@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
+from flowent_agent.tools.workspace import WorkspaceConfiguration
+
 
 class AgentMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -61,6 +63,7 @@ class AgentRunRequest(BaseModel):
     workflow_run_id: str | None = None
     work_item_id: str | None = None
     node_id: str | None = None
+    workspace: WorkspaceConfiguration | None = None
     messages: list[AgentMessage] = Field(min_length=1)
     agent: AgentConfiguration = Field(default_factory=AgentConfiguration)
 

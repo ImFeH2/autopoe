@@ -26,7 +26,10 @@ from flowent_agent.agents.models import (
     AgentMessage,
     AgentRunRequest,
 )
+from flowent_agent.approval import ApprovalCoordinator, ApprovalScope
 from flowent_agent.persistence.runs import AgentRunStore
+from flowent_agent.tools.registry import AgentDependencies, ToolRegistry
+from flowent_agent.tools.workspace import Workspace, WorkspaceManager
 
 EmitEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -35,13 +38,21 @@ class AgentRunner:
     def __init__(
         self,
         runs: AgentRunStore,
+        approvals: ApprovalCoordinator | None = None,
+        workspace_manager: WorkspaceManager | None = None,
         model_factory: Callable[..., Any] = create_model,
     ) -> None:
         self.runs = runs
+        self.approvals = approvals
+        self.workspace_manager = workspace_manager
         self.model_factory = model_factory
+        self.tools = ToolRegistry()
 
     async def run(
-        self, request: AgentRunRequest, emit: EmitEvent
+        self,
+        request: AgentRunRequest,
+        emit: EmitEvent,
+        workspace: Workspace | None = None,
     ) -> AgentExecutionResult:
         configuration = request.agent
         await self.runs.start(
@@ -66,8 +77,15 @@ class AgentRunner:
         )
 
         try:
+            if workspace is None and request.workspace is not None:
+                if self.workspace_manager is None:
+                    raise RuntimeError("Workspace manager is not configured")
+                workspace = await self.workspace_manager.prepare(
+                    request.run_id,
+                    request.workspace,
+                )
             async with asyncio.timeout(configuration.limits.timeout_seconds):
-                result = await self.run_loop(request, emit)
+                result = await self.run_loop(request, emit, workspace)
             await self.runs.add_message(request.run_id, "assistant", result["output"])
             await self.runs.finish(request.run_id, "completed", result["usage"])
             await emit("agent.completed", result)
@@ -104,15 +122,31 @@ class AgentRunner:
         self,
         request: AgentRunRequest,
         emit: EmitEvent,
+        workspace: Workspace | None,
     ) -> dict[str, Any]:
         configuration = request.agent
         model = self.model_factory(configuration.model)
+        toolset = self.tools.build(configuration.tools)
+        if toolset is not None and workspace is None:
+            raise ValueError("Workspace tools require an active workspace")
+        dependencies = AgentDependencies(
+            workspace=workspace,
+            approvals=self.approvals,
+            approval_scope=ApprovalScope(
+                run_id=request.workflow_run_id or request.run_id,
+                workflow_run_id=request.workflow_run_id,
+                agent_run_id=request.run_id,
+            ),
+            emit=emit,
+        )
         agent = Agent(
             model,
             name=configuration.name,
             instructions=configuration.instructions,
+            deps_type=AgentDependencies,
             retries=configuration.retries,
             model_settings=self.model_settings(request),
+            toolsets=[toolset] if toolset is not None else None,
         )
         history, prompt = self.message_history(request.messages)
         limits = configuration.limits
@@ -130,6 +164,7 @@ class AgentRunner:
             conversation_id=request.conversation_id or request.run_id,
             run_id=request.run_id,
             usage_limits=usage_limits,
+            deps=dependencies,
         ) as events:
             async for event in events:
                 await self.handle_event(event, emit)
@@ -182,7 +217,7 @@ class AgentRunner:
                 {
                     "call_id": event.tool_call_id,
                     "name": event.part.tool_name,
-                    "arguments": event.part.args_as_dict(),
+                    "arguments": self.safe_value(event.part.args_as_dict()),
                 },
             )
         elif isinstance(event, FunctionToolResultEvent):

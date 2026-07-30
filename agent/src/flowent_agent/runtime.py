@@ -9,8 +9,10 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from flowent_agent.agents import AgentRunner, AgentRunRequest
+from flowent_agent.approval import ApprovalCoordinator
 from flowent_agent.persistence import RuntimeServices
 from flowent_agent.protocol import Envelope, JsonlTransport, Scope
+from flowent_agent.tools.workspace import WorkspaceManager
 from flowent_agent.workflows import (
     ApprovalDecision,
     WorkflowDefinition,
@@ -34,6 +36,8 @@ class Runtime:
         self.services: RuntimeServices | None = None
         self.agent_runner: AgentRunner | None = None
         self.workflow_engine: WorkflowEngine | None = None
+        self.approvals: ApprovalCoordinator | None = None
+        self.workspace_manager: WorkspaceManager | None = None
 
     @classmethod
     def run(cls) -> None:
@@ -75,6 +79,7 @@ class Runtime:
             "workflow.run": self.start_workflow,
             "workflow.cancel": self.cancel_workflow,
             "workflow.approve": self.approve_workflow,
+            "approval.resolve": self.approve_workflow,
         }
         handler = handlers.get(request.name)
         if handler is None:
@@ -106,10 +111,19 @@ class Runtime:
     async def initialize(self, request: Envelope) -> None:
         payload = InitializeRequest.model_validate(request.payload)
         self.services = await RuntimeServices.create(Path(payload.data_dir))
-        self.agent_runner = AgentRunner(self.services.runs)
+        self.approvals = ApprovalCoordinator(self.services.approvals)
+        self.workspace_manager = WorkspaceManager(self.services.data_dir)
+        self.agent_runner = AgentRunner(
+            self.services.runs,
+            self.approvals,
+            self.workspace_manager,
+        )
         self.workflow_engine = WorkflowEngine(
             self.services.workflows,
             self.agent_runner,
+            self.approvals,
+            self.workspace_manager,
+            self.services.artifacts,
         )
         self.initialized = True
         await self.respond(request, {"initialized": True})
@@ -126,6 +140,7 @@ class Runtime:
                     "workflow.run",
                     "workflow.cancel",
                     "workflow.approve",
+                    "approval.resolve",
                 ],
                 "protocol_version": 1,
                 "recovered": {
@@ -216,10 +231,10 @@ class Runtime:
         await self.respond(request, {"accepted": True, "run_id": payload.run_id})
 
     async def approve_workflow(self, request: Envelope) -> None:
-        if self.workflow_engine is None:
-            raise RuntimeError("Workflow engine is not initialized")
+        if self.approvals is None:
+            raise RuntimeError("Approval coordinator is not initialized")
         decision = ApprovalDecision.model_validate(request.payload)
-        resolved = await self.workflow_engine.resolve_approval(decision)
+        resolved = await self.approvals.resolve(decision)
         await self.respond(
             request,
             {"resolved": resolved, "approval_id": decision.approval_id},

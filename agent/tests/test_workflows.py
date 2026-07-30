@@ -6,7 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from flowent_agent.agents import AgentExecutionResult
+from flowent_agent.approval import ApprovalCoordinator
 from flowent_agent.persistence import RuntimeServices
+from flowent_agent.tools.workspace import WorkspaceManager
 from flowent_agent.workflows import (
     ApprovalDecision,
     WorkflowDefinition,
@@ -22,7 +24,12 @@ class FakeAgentRunner:
         self.max_active = 0
         self.node_runs: dict[str, int] = {}
 
-    async def run(self, request: Any, emit: Any) -> AgentExecutionResult:
+    async def run(
+        self,
+        request: Any,
+        emit: Any,
+        workspace: Any = None,
+    ) -> AgentExecutionResult:
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         self.node_runs[request.node_id] = self.node_runs.get(request.node_id, 0) + 1
@@ -127,7 +134,13 @@ async def test_workflow_engine_runs_parallel_agents_and_bounded_loop(
 ) -> None:
     services = await RuntimeServices.create(tmp_path)
     runner = FakeAgentRunner()
-    engine = WorkflowEngine(services.workflows, runner)
+    engine = WorkflowEngine(
+        services.workflows,
+        runner,
+        ApprovalCoordinator(services.approvals),
+        WorkspaceManager(tmp_path),
+        services.artifacts,
+    )
     definition = WorkflowDefinition.model_validate(
         {
             "id": "delivery",
@@ -213,9 +226,13 @@ async def test_workflow_engine_runs_parallel_agents_and_bounded_loop(
 
 async def test_workflow_approval_can_be_resolved(tmp_path: Path) -> None:
     services = await RuntimeServices.create(tmp_path)
+    approvals = ApprovalCoordinator(services.approvals)
     engine = WorkflowEngine(
         services.workflows,
         FakeAgentRunner(),
+        approvals,
+        WorkspaceManager(tmp_path),
+        services.artifacts,
     )
     definition = WorkflowDefinition.model_validate(
         {
@@ -257,7 +274,7 @@ async def test_workflow_approval_can_be_resolved(tmp_path: Path) -> None:
         )
     )
     await asyncio.wait_for(approval_ready.wait(), 1)
-    resolved = await engine.resolve_approval(
+    resolved = await approvals.resolve(
         ApprovalDecision(
             approval_id=approval_id,
             approved=True,

@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from flowent_agent.agents import AgentConfiguration
+from flowent_agent.tools.workspace import WorkspaceConfiguration
 
 NodeId = Annotated[
     str,
@@ -106,6 +107,7 @@ class WorkflowRunRequest(BaseModel):
     workflow_id: str = Field(min_length=1)
     version: int | None = Field(default=None, ge=1)
     input: dict[str, Any] = Field(default_factory=dict)
+    workspace: WorkspaceConfiguration | None = None
 
 
 class WorkflowRunResult(BaseModel):
@@ -115,14 +117,6 @@ class WorkflowRunResult(BaseModel):
     status: Literal["completed", "failed"]
     output: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
-
-
-class ApprovalDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    approval_id: str = Field(min_length=1)
-    approved: bool
-    data: dict[str, Any] = Field(default_factory=dict)
 
 
 def validate_graph(nodes: list[WorkflowNode], owner: str) -> None:
