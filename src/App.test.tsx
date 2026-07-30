@@ -1,10 +1,4 @@
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import type { RunEvent } from "@/types/agent";
@@ -25,17 +19,43 @@ describe("App", () => {
     invokeMock.mockReset();
   });
 
-  it("shows the empty conversation", () => {
+  it("opens the editable workflow workspace", async () => {
     render(<App />);
 
     expect(
-      screen.getByRole("heading", { name: "What should we work on?" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Message" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+      screen.getByRole("button", { name: "Workflows" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      await screen.findByRole("textbox", { name: "Workflow name" }),
+    ).toHaveValue("Software delivery");
+    expect(screen.getAllByText("Requirements").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
-  it("streams an agent response into the conversation", async () => {
+  it("edits the selected workflow node", async () => {
+    render(<App />);
+
+    const nodeName = await screen.findByDisplayValue("Requirements");
+    fireEvent.change(nodeName, { target: { value: "Discovery" } });
+
+    expect(screen.getAllByText("Discovery").length).toBeGreaterThan(0);
+  });
+
+  it("queues a workflow run and opens its console", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Runs" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      (await screen.findAllByText("Software delivery")).length,
+    ).toBeGreaterThan(0);
+    expect(await screen.findByText("workflow queued")).toBeInTheDocument();
+  });
+
+  it("streams an agent response in chat", async () => {
     invokeMock.mockImplementation(
       async (
         _command: string,
@@ -47,12 +67,11 @@ describe("App", () => {
         args.events.onmessage?.({ type: "completed" });
       },
     );
-
     render(<App />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
-      target: { value: "Hello" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    const input = await screen.findByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "Hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByText("Streaming works.")).toBeInTheDocument();
@@ -68,7 +87,7 @@ describe("App", () => {
     });
   });
 
-  it("does not send failed assistant errors as conversation history", async () => {
+  it("excludes failed assistant output from later chat history", async () => {
     invokeMock
       .mockImplementationOnce(
         async (
@@ -93,10 +112,10 @@ describe("App", () => {
           args.events.onmessage?.({ type: "completed" });
         },
       );
-
     render(<App />);
 
-    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    const input = await screen.findByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "First attempt" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("Provider unavailable")).toBeInTheDocument();

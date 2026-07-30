@@ -1,0 +1,84 @@
+:root {
+  --f-black: #000000;
+  --f-white: #f5f5f5;
+  --f-gray-50: #ededed;
+  --f-gray-100: #dedede;
+  --f-gray-200: #c8c8c8;
+  --f-gray-400: #929292;
+  --f-gray-500: #747474;
+  --f-gray-600: #575757;
+  --f-gray-700: #373737;
+  --f-gray-800: #242424;
+  --f-gray-850: #1b1b1b;
+  --f-gray-900: #121212;
+  --f-gray-950: #090909;
+
+  --f-bg-canvas: #070707;
+  --f-bg-sidebar: rgba(10, 10, 10, 0.92);
+  --f-bg-stage: rgba(8, 8, 8, 0.84);
+  --f-surface-0: rgba(255, 255, 255, 0.018);
+  --f-surface-1: rgba(255, 255, 255, 0.028);
+  --f-surface-2: rgba(255, 255, 255, 0.045);
+  --f-surface-3: rgba(255, 255, 255, 0.068);
+  --f-surface-input: rgba(255, 255, 255, 0.035);
+  --f-surface-control: rgba(255, 255, 255, 0.042);
+  --f-surface-control-hover: rgba(255, 255, 255, 0.075);
+  --f-surface-node: rgba(18, 18, 18, 0.9);
+  --f-surface-node-selected: rgba(26, 26, 26, 0.96);
+  --f-overlay: rgba(0, 0, 0, 0.62);
+
+  --f-text-primary: #f0f0f0;
+  --f-text-secondary: #b1b1b1;
+  --f-text-tertiary: #737373;
+  --f-text-disabled: #4c4c4c;
+
+  --f-border-faint: rgba(255, 255, 255, 0.045);
+  --f-border-subtle: rgba(255, 255, 255, 0.085);
+  --f-border-strong: rgba(255, 255, 255, 0.17);
+  --f-border-focus: rgba(255, 255, 255, 0.38);
+  --f-focus: rgba(255, 255, 255, 0.72);
+  --f-selection: rgba(255, 255, 255, 0.2);
+  --f-danger-border: rgba(255, 113, 105, 0.28);
+  --f-danger-text: #e89a96;
+
+  --f-font-sans: Inter, "SF Pro Text", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --f-font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+
+  --f-text-2xs: 10px;
+  --f-text-xs: 12px;
+  --f-text-sm: 13px;
+  --f-text-md: 14px;
+  --f-text-lg: 16px;
+  --f-text-xl: 20px;
+  --f-text-2xl: 28px;
+
+  --f-space-1: 4px;
+  --f-space-2: 8px;
+  --f-space-3: 12px;
+  --f-space-4: 16px;
+  --f-space-5: 20px;
+  --f-space-6: 24px;
+  --f-space-8: 32px;
+  --f-space-10: 40px;
+
+  --f-radius-sm: 6px;
+  --f-radius-md: 9px;
+  --f-radius-lg: 13px;
+  --f-radius-xl: 18px;
+  --f-radius-pill: 999px;
+
+  --f-control-sm: 28px;
+  --f-control-md: 32px;
+  --f-header-height: 46px;
+  --f-toolbar-height: 52px;
+  --f-sidebar-width: 208px;
+  --f-inspector-width: 318px;
+
+  --f-shadow-float: 0 18px 50px rgba(0, 0, 0, 0.38);
+  --f-shadow-node: 0 10px 28px rgba(0, 0, 0, 0.26);
+  --f-blur: blur(20px) saturate(115%);
+
+  --f-duration-fast: 120ms;
+  --f-duration-base: 180ms;
+  --f-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}

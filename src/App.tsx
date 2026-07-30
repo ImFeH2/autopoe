@@ -1,190 +1,112 @@
-import { useRef, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Theme } from "@radix-ui/themes";
-import { ChatComposer } from "@/components/ChatComposer";
-import { MessageList } from "@/components/MessageList";
-import { Sidebar } from "@/components/Sidebar";
-import { runAgent } from "@/lib/agent";
-import type {
-  AgentMessage,
-  ChatMessage,
-  RunEvent,
-} from "@/types/agent";
+import { AppHeader } from "@/components/app/AppHeader";
+import { AppSidebar } from "@/components/app/AppSidebar";
+import { cloneDefaultWorkflow } from "@/data/defaultWorkflow";
+import type { AppView } from "@/types/navigation";
+import type { WorkflowRun } from "@/types/run";
 
-const suggestions = ["Plan a feature", "Review a change", "Explain this code"];
+const viewTitles: Record<AppView, string> = {
+  workflows: "Workflows",
+  agents: "Agents",
+  runs: "Runs",
+  chat: "Chat",
+  settings: "Settings",
+};
 
-let messageSequence = 0;
+const WorkflowEditor = lazy(() =>
+  import("@/features/workflows/WorkflowEditor").then((module) => ({
+    default: module.WorkflowEditor,
+  })),
+);
+const AgentsView = lazy(() =>
+  import("@/features/agents/AgentsView").then((module) => ({
+    default: module.AgentsView,
+  })),
+);
+const RunsView = lazy(() =>
+  import("@/features/runs/RunsView").then((module) => ({
+    default: module.RunsView,
+  })),
+);
+const ChatView = lazy(() =>
+  import("@/features/chat/ChatView").then((module) => ({
+    default: module.ChatView,
+  })),
+);
+const SettingsView = lazy(() =>
+  import("@/features/settings/SettingsView").then((module) => ({
+    default: module.SettingsView,
+  })),
+);
 
-function createMessageId(role: ChatMessage["role"]) {
-  messageSequence += 1;
-  return `${role}-${Date.now()}-${messageSequence}`;
-}
-
-function getConversationTitle(messages: ChatMessage[]) {
-  const firstUserMessage = messages.find((message) => message.role === "user");
-  if (!firstUserMessage) {
-    return "New conversation";
-  }
-
-  const title = firstUserMessage.content.trim();
-  return title.length > 32 ? `${title.slice(0, 32)}…` : title;
-}
-
-function toAgentMessages(messages: ChatMessage[]): AgentMessage[] {
-  return messages
-    .filter(
-      (message) =>
-        message.content.trim().length > 0 &&
-        (message.role === "user" || message.state === "completed"),
-    )
-    .map(({ role, content }) => ({ role, content }));
-}
-
-function applyRunEvent(
-  messages: ChatMessage[],
-  assistantId: string,
-  event: RunEvent,
-) {
-  return messages.map((message) => {
-    if (message.id !== assistantId) {
-      return message;
-    }
-
-    switch (event.type) {
-      case "started":
-        return { ...message, state: "running" as const };
-      case "text_delta":
-        return {
-          ...message,
-          content: `${message.content}${event.delta}`,
-          state: "running" as const,
-        };
-      case "completed":
-        return { ...message, state: "completed" as const };
-      case "failed":
-        return {
-          ...message,
-          content: message.content || event.message,
-          state: "failed" as const,
-        };
-      case "cancelled":
-        return { ...message, state: "cancelled" as const };
-    }
-  });
-}
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+function currentTime() {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
 }
 
 function App() {
-  const [draft, setDraft] = useState("");
-  const [isRunning, setIsRunning] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const runningRef = useRef(false);
+  const [activeView, setActiveView] = useState<AppView>("workflows");
+  const [workflow, setWorkflow] = useState(cloneDefaultWorkflow);
+  const [runs, setRuns] = useState<WorkflowRun[]>([]);
 
-  async function sendMessage(value = draft) {
-    const content = value.trim();
-    if (content.length === 0 || runningRef.current) {
-      return;
-    }
-
-    runningRef.current = true;
-    setIsRunning(true);
-    setDraft("");
-
-    const userMessage: ChatMessage = {
-      id: createMessageId("user"),
-      role: "user",
-      content,
-    };
-    const assistantMessage: ChatMessage = {
-      id: createMessageId("assistant"),
-      role: "assistant",
-      content: "",
-      state: "pending",
-    };
-    const nextMessages = [...messages, userMessage];
-    let terminalEventReceived = false;
-
-    setMessages([...nextMessages, assistantMessage]);
-
-    try {
-      await runAgent(toAgentMessages(nextMessages), (event) => {
-        if (
-          event.type === "completed" ||
-          event.type === "failed" ||
-          event.type === "cancelled"
-        ) {
-          terminalEventReceived = true;
-        }
-        setMessages((current) =>
-          applyRunEvent(current, assistantMessage.id, event),
-        );
-      });
-    } catch (error) {
-      if (!terminalEventReceived) {
-        setMessages((current) =>
-          applyRunEvent(current, assistantMessage.id, {
-            type: "failed",
-            message: getErrorMessage(error),
-          }),
-        );
-      }
-    } finally {
-      runningRef.current = false;
-      setIsRunning(false);
-    }
-  }
-
-  function startNewConversation() {
-    if (runningRef.current) {
-      return;
-    }
-    setDraft("");
-    setMessages([]);
+  function startRun() {
+    const id = `run-${Date.now().toString(36)}`;
+    setRuns((current) => [
+      {
+        id,
+        workflowName: workflow.name,
+        status: "queued",
+        startedAt: currentTime(),
+        events: [
+          {
+            id: `${id}-queued`,
+            name: "workflow.queued",
+            timestamp: currentTime(),
+          },
+        ],
+      },
+      ...current,
+    ]);
+    setActiveView("runs");
   }
 
   return (
     <Theme
-      accentColor="lime"
+      accentColor="gray"
       appearance="dark"
       className="flowent-theme"
-      grayColor="olive"
-      radius="large"
+      grayColor="gray"
+      panelBackground="translucent"
+      radius="medium"
       scaling="100%"
     >
       <main className="app-shell">
-        <Sidebar
-          disabled={isRunning}
-          onNew={startNewConversation}
-          title={getConversationTitle(messages)}
-        />
-        <section className="conversation">
-          <header className="topbar">
-            <div className="mobile-brand">
-              <span className="brand-mark" aria-hidden="true">
-                <span />
-              </span>
-              Flowent
-            </div>
-            <span className="conversation-title">
-              {getConversationTitle(messages)}
-            </span>
-            <span className="demo-pill">Demo</span>
-          </header>
-          <div className="conversation-body">
-            <MessageList
-              disabled={isRunning}
-              messages={messages}
-              onSuggestion={(suggestion) => void sendMessage(suggestion)}
-              suggestions={suggestions}
-            />
-            <ChatComposer
-              disabled={isRunning}
-              onChange={setDraft}
-              onSubmit={() => void sendMessage()}
-              value={draft}
-            />
+        <AppSidebar activeView={activeView} onNavigate={setActiveView} />
+        <section className="app-stage">
+          <AppHeader
+            meta={activeView === "workflows" ? workflow.name : undefined}
+            title={viewTitles[activeView]}
+          />
+          <div className="app-content" data-view={activeView}>
+            <Suspense fallback={<div className="view-loading">Loading</div>}>
+              {activeView === "workflows" ? (
+                <WorkflowEditor
+                  onChange={setWorkflow}
+                  onRun={startRun}
+                  onSave={() => undefined}
+                  workflow={workflow}
+                />
+              ) : null}
+              {activeView === "agents" ? (
+                <AgentsView onChange={setWorkflow} workflow={workflow} />
+              ) : null}
+              {activeView === "runs" ? <RunsView runs={runs} /> : null}
+              {activeView === "chat" ? <ChatView /> : null}
+              {activeView === "settings" ? <SettingsView /> : null}
+            </Suspense>
           </div>
         </section>
       </main>

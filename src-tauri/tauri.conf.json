@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "Flowent",
-        "width": 800,
-        "height": 600
+        "width": 1360,
+        "height": 860,
+        "minWidth": 1040,
+        "minHeight": 680
       }
     ],
     "security": {

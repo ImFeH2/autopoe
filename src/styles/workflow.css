@@ -1,0 +1,379 @@
+.workflow-editor {
+  display: grid;
+  grid-template-rows: var(--f-toolbar-height) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.workflow-toolbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--f-space-5);
+  padding: 0 var(--f-space-4);
+  border-bottom: 1px solid var(--f-border-subtle);
+  background: rgba(12, 12, 12, 0.62);
+  backdrop-filter: var(--f-blur);
+}
+
+.workflow-identity,
+.toolbar-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--f-space-2);
+}
+
+.workflow-identity > svg {
+  flex: 0 0 auto;
+  color: var(--f-text-tertiary);
+}
+
+.workflow-name-field.rt-TextFieldRoot {
+  width: min(260px, 28vw);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--f-text-primary);
+  font-size: var(--f-text-sm);
+  font-weight: 620;
+}
+
+.workflow-name-field.rt-TextFieldRoot:focus-within {
+  background: var(--f-surface-2);
+  box-shadow: inset 0 0 0 1px var(--f-border-subtle);
+}
+
+.node-count {
+  flex: 0 0 auto;
+  color: var(--f-text-disabled);
+  font-family: var(--f-font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.workflow-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--f-inspector-width);
+  min-width: 0;
+  min-height: 0;
+}
+
+.workflow-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: rgba(5, 5, 5, 0.46);
+}
+
+.workflow-canvas .react-flow__pane {
+  cursor: default;
+}
+
+.workflow-canvas .react-flow__edge-path {
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 1.2;
+}
+
+.workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: rgba(255, 255, 255, 0.56);
+}
+
+.workflow-canvas .react-flow__connection-path {
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 1.2;
+}
+
+.workflow-canvas .react-flow__controls {
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--f-border-subtle);
+  border-radius: var(--f-radius-md);
+  background: rgba(18, 18, 18, 0.82);
+  box-shadow: var(--f-shadow-float);
+  backdrop-filter: var(--f-blur);
+}
+
+.workflow-canvas .react-flow__controls-button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-right: 1px solid var(--f-border-subtle);
+  background: transparent;
+  color: var(--f-text-secondary);
+}
+
+.workflow-canvas .react-flow__controls-button:last-child {
+  border-right: 0;
+}
+
+.workflow-canvas .react-flow__controls-button:hover {
+  background: var(--f-surface-3);
+  color: var(--f-text-primary);
+}
+
+.workflow-canvas .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.workflow-node-card {
+  position: relative;
+  display: flex;
+  width: 206px;
+  min-height: 126px;
+  flex-direction: column;
+  padding: var(--f-space-3);
+  border: 1px solid var(--f-border-subtle);
+  border-radius: var(--f-radius-lg);
+  background: rgba(20, 20, 20, 0.94);
+  box-shadow: var(--f-shadow-node);
+  color: var(--f-text-primary);
+  backdrop-filter: var(--f-blur);
+  transition:
+    border-color var(--f-duration-fast) var(--f-ease),
+    background var(--f-duration-fast) var(--f-ease),
+    transform var(--f-duration-fast) var(--f-ease);
+}
+
+.workflow-node-card:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.workflow-node-card[data-selected="true"] {
+  border-color: rgba(255, 255, 255, 0.48);
+  background: var(--f-surface-node-selected);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    var(--f-shadow-node);
+}
+
+.workflow-node-card[data-kind="loop"] {
+  border-style: dashed;
+}
+
+.workflow-node-card[data-kind="approval"] .node-icon {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.node-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--f-space-2);
+  margin-bottom: var(--f-space-4);
+}
+
+.node-icon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid var(--f-border-subtle);
+  border-radius: 8px;
+  background: var(--f-surface-2);
+  color: var(--f-text-secondary);
+}
+
+.node-kind {
+  color: var(--f-text-tertiary);
+  font-family: var(--f-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.node-merge-icon {
+  margin-left: auto;
+  color: var(--f-text-disabled);
+}
+
+.workflow-node-card > strong {
+  overflow: hidden;
+  font-size: var(--f-text-sm);
+  font-weight: 630;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-detail {
+  overflow: hidden;
+  margin-top: 5px;
+  color: #858585;
+  font-size: var(--f-text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-model {
+  overflow: hidden;
+  max-width: 100%;
+  align-self: flex-start;
+  margin-top: var(--f-space-3);
+  padding: 2px 6px;
+  border: 1px solid var(--f-border-faint);
+  border-radius: 5px;
+  color: var(--f-text-disabled);
+  font-family: var(--f-font-mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-handle.react-flow__handle {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--f-gray-500);
+  background: var(--f-gray-900);
+}
+
+.workflow-node-card[data-selected="true"] .workflow-handle {
+  border-color: var(--f-gray-100);
+}
+
+.inspector {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--f-border-subtle);
+  background: rgba(13, 13, 13, 0.78);
+  backdrop-filter: var(--f-blur);
+}
+
+.inspector-empty {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--f-space-2);
+  color: var(--f-text-tertiary);
+}
+
+.inspector-empty strong {
+  color: var(--f-text-secondary);
+  font-size: var(--f-text-sm);
+  font-weight: 560;
+}
+
+.inspector-head {
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--f-space-3);
+  padding: 0 var(--f-space-4);
+  border-bottom: 1px solid var(--f-border-subtle);
+}
+
+.inspector-head > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-head strong {
+  overflow: hidden;
+  font-size: var(--f-text-sm);
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.danger-icon-button.rt-Button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--f-text-tertiary);
+}
+
+.danger-icon-button.rt-Button:hover {
+  color: var(--f-danger-text);
+}
+
+.inspector-tabs {
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.inspector-tabs > .rt-TabsList {
+  padding: 0 var(--f-space-4);
+  border-bottom: 1px solid var(--f-border-subtle);
+  box-shadow: none;
+}
+
+.inspector-tabs .rt-TabsTrigger {
+  color: var(--f-text-tertiary);
+  font-size: var(--f-text-2xs);
+}
+
+.inspector-scroll {
+  width: 100%;
+  height: 100%;
+}
+
+.inspector-scroll .rt-TabsContent {
+  padding: var(--f-space-5) var(--f-space-4) var(--f-space-8);
+}
+
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--f-border-subtle);
+  border-radius: var(--f-radius-md);
+  background: var(--f-surface-1);
+}
+
+.tool-toggle {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--f-space-3);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--f-border-faint);
+  color: var(--f-text-secondary);
+  font-family: var(--f-font-mono);
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.tool-toggle:last-child {
+  border-bottom: 0;
+}
+
+.runtime-fields {
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-row {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--f-border-faint);
+  color: var(--f-text-tertiary);
+  font-size: var(--f-text-xs);
+}
+
+.metric-row strong {
+  color: var(--f-text-secondary);
+  font-family: var(--f-font-mono);
+  font-size: var(--f-text-2xs);
+  font-weight: 500;
+}
+
+@media (max-width: 820px) {
+  .workflow-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .inspector {
+    display: none;
+  }
+}
