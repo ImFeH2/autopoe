@@ -1,9 +1,11 @@
 use std::{
     collections::HashMap,
-    path::PathBuf,
     sync::{Mutex, RwLock},
     time::Duration,
 };
+
+#[cfg(debug_assertions)]
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: agent/uv.lock
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Python dependencies
+        run: uv sync --project agent --all-groups --frozen
+      - name: Check frontend
+        run: pnpm typecheck && pnpm test && pnpm build
+      - name: Check Python
+        working-directory: agent
+        run: uv run ruff check . && uv run ruff format --check . && uv run pytest -q
+      - name: Check Rust
+        working-directory: src-tauri
+        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo check --release
+
+  sidecar:
+    name: Sidecar (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: agent/uv.lock
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Python dependencies
+        run: uv sync --project agent --all-groups --frozen
+      - name: Build sidecar
+        run: pnpm build:sidecar
+      - name: Test sidecar
+        run: pnpm test:sidecar

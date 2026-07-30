@@ -3,13 +3,17 @@
   "private": true,
   "version": "0.0.1",
   "description": "Just say what you need. Flowent gets it done.",
+  "packageManager": "pnpm@11.16.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:desktop": "pnpm build && pnpm build:sidecar",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:sidecar": "node scripts/smoke-sidecar.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
