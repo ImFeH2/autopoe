@@ -21,7 +21,11 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from flowent_agent.agents.model_factory import create_model
-from flowent_agent.agents.models import AgentMessage, AgentRunRequest
+from flowent_agent.agents.models import (
+    AgentExecutionResult,
+    AgentMessage,
+    AgentRunRequest,
+)
 from flowent_agent.persistence.runs import AgentRunStore
 
 EmitEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -36,13 +40,19 @@ class AgentRunner:
         self.runs = runs
         self.model_factory = model_factory
 
-    async def run(self, request: AgentRunRequest, emit: EmitEvent) -> None:
+    async def run(
+        self, request: AgentRunRequest, emit: EmitEvent
+    ) -> AgentExecutionResult:
         configuration = request.agent
         await self.runs.start(
             request.run_id,
             request.conversation_id,
             configuration.model.provider,
             configuration.model.model,
+            request.workflow_run_id,
+            request.work_item_id,
+            None,
+            request.node_id,
         )
         for message in request.messages:
             await self.runs.add_message(request.run_id, message.role, message.content)
@@ -61,6 +71,12 @@ class AgentRunner:
             await self.runs.add_message(request.run_id, "assistant", result["output"])
             await self.runs.finish(request.run_id, "completed", result["usage"])
             await emit("agent.completed", result)
+            return AgentExecutionResult(
+                run_id=request.run_id,
+                status="completed",
+                output=result["output"],
+                usage=result["usage"],
+            )
         except asyncio.CancelledError:
             await self.runs.finish(request.run_id, "cancelled")
             await emit("agent.cancelled", {})
@@ -69,10 +85,20 @@ class AgentRunner:
             message = "Agent run timed out"
             await self.runs.finish(request.run_id, "failed", error=message)
             await emit("agent.failed", {"message": message})
+            return AgentExecutionResult(
+                run_id=request.run_id,
+                status="failed",
+                error=message,
+            )
         except Exception as error:
             message = str(error) or type(error).__name__
             await self.runs.finish(request.run_id, "failed", error=message)
             await emit("agent.failed", {"message": message})
+            return AgentExecutionResult(
+                run_id=request.run_id,
+                status="failed",
+                error=message,
+            )
 
     async def run_loop(
         self,

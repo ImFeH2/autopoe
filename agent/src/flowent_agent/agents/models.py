@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
@@ -16,7 +16,7 @@ class ModelConfiguration(BaseModel):
     provider: Literal["demo", "openai", "openai_compatible", "anthropic"] = "demo"
     model: str = Field(default="flowent-demo", min_length=1)
     api_mode: Literal["responses", "chat"] = "responses"
-    api_key: SecretStr | None = None
+    api_key: SecretStr | None = Field(default=None, exclude=True)
     base_url: str | None = None
 
     @model_validator(mode="after")
@@ -58,6 +58,9 @@ class AgentRunRequest(BaseModel):
 
     run_id: str = Field(min_length=1)
     conversation_id: str | None = None
+    workflow_run_id: str | None = None
+    work_item_id: str | None = None
+    node_id: str | None = None
     messages: list[AgentMessage] = Field(min_length=1)
     agent: AgentConfiguration = Field(default_factory=AgentConfiguration)
 
@@ -66,3 +69,13 @@ class AgentRunRequest(BaseModel):
         if self.messages[-1].role != "user":
             raise ValueError("The last message must be from the user")
         return self
+
+
+class AgentExecutionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    status: Literal["completed", "failed"]
+    output: str | None = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None

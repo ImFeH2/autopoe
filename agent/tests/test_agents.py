@@ -32,6 +32,13 @@ def test_demo_model_can_be_created_without_credentials() -> None:
     assert model.model_name == "flowent-demo"
 
 
+def test_model_credentials_are_never_serialized() -> None:
+    configuration = ModelConfiguration(api_key="secret-value")
+
+    assert "secret-value" not in configuration.model_dump_json()
+    assert "api_key" not in configuration.model_dump_json()
+
+
 async def test_agent_runner_streams_and_persists_run(tmp_path: Path) -> None:
     services = await RuntimeServices.create(tmp_path)
     runner = AgentRunner(services.runs)

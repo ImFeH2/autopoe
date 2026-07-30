@@ -5,6 +5,7 @@ from flowent_agent.persistence.artifacts import ArtifactStore
 from flowent_agent.persistence.database import Database, RecoveryResult
 from flowent_agent.persistence.events import EventStore
 from flowent_agent.persistence.runs import AgentRunStore
+from flowent_agent.persistence.workflows import WorkflowStore
 
 
 @dataclass
@@ -14,6 +15,7 @@ class RuntimeServices:
     events: EventStore
     artifacts: ArtifactStore
     runs: AgentRunStore
+    workflows: WorkflowStore
     recovery: RecoveryResult
 
     @classmethod
@@ -26,6 +28,7 @@ class RuntimeServices:
             events=EventStore(database),
             artifacts=ArtifactStore(data_dir, database),
             runs=AgentRunStore(database),
+            workflows=WorkflowStore(database),
             recovery=recovery,
         )
 

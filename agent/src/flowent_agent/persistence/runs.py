@@ -33,15 +33,24 @@ class AgentRunStore:
         conversation_id: str | None,
         provider: str,
         model: str,
+        workflow_run_id: str | None = None,
+        work_item_id: str | None = None,
+        agent_definition_id: str | None = None,
+        node_id: str | None = None,
     ) -> AgentRunRecord:
         timestamp = utc_now()
         async with self.database.write_lock:
             await self.database.connection.execute(
-                "INSERT INTO agent_runs(id, conversation_id, status, provider, model, created_at, updated_at, started_at) "
-                "VALUES (?, ?, 'running', ?, ?, ?, ?, ?)",
+                "INSERT INTO agent_runs(id, conversation_id, workflow_run_id, work_item_id, agent_definition_id, node_id, "
+                "status, provider, model, created_at, updated_at, started_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     conversation_id,
+                    workflow_run_id,
+                    work_item_id,
+                    agent_definition_id,
+                    node_id,
                     provider,
                     model,
                     timestamp,
