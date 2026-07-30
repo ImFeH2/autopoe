@@ -2,11 +2,13 @@ import asyncio
 import logging
 import sys
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from flowent_agent.persistence import RuntimeServices
 from flowent_agent.protocol import Envelope, JsonlTransport, Scope
 
 
@@ -24,12 +26,19 @@ class AgentRunRequest(BaseModel):
     messages: list[AgentMessage]
 
 
+class InitializeRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    data_dir: str = Field(min_length=1)
+
+
 class Runtime:
     def __init__(self) -> None:
         self.transport = JsonlTransport()
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.initialized = False
         self.stopping = False
+        self.services: RuntimeServices | None = None
 
     @classmethod
     def run(cls) -> None:
@@ -54,6 +63,8 @@ class Runtime:
                 continue
             await self.handle_request(envelope)
         await self.stop_tasks()
+        if self.services is not None:
+            await self.services.close()
 
     async def handle_request(self, request: Envelope) -> None:
         handlers: dict[str, Callable[[Envelope], Awaitable[None]]] = {
@@ -91,6 +102,8 @@ class Runtime:
             )
 
     async def initialize(self, request: Envelope) -> None:
+        payload = InitializeRequest.model_validate(request.payload)
+        self.services = await RuntimeServices.create(Path(payload.data_dir))
         self.initialized = True
         await self.respond(request, {"initialized": True})
         await self.emit(
@@ -98,6 +111,11 @@ class Runtime:
             {
                 "capabilities": ["agent.run", "agent.cancel"],
                 "protocol_version": 1,
+                "recovered": {
+                    "workflow_runs": self.services.recovery.workflow_runs,
+                    "agent_runs": self.services.recovery.agent_runs,
+                    "work_items": self.services.recovery.work_items,
+                },
             },
         )
 
@@ -127,17 +145,12 @@ class Runtime:
         await self.respond(request, {"cancelled": task is not None, "run_id": run_id})
 
     async def run_demo_agent(self, request: AgentRunRequest) -> None:
-        sequence = 0
-
         async def send(name: str, payload: dict[str, Any] | None = None) -> None:
-            nonlocal sequence
             await self.emit(
                 name,
                 payload or {},
                 scope=Scope(run_id=request.run_id),
-                sequence=sequence,
             )
-            sequence += 1
 
         await send("agent.started")
         try:
@@ -194,9 +207,22 @@ class Runtime:
         scope: Scope | None = None,
         sequence: int | None = None,
     ) -> None:
+        event_id = uuid4().hex
+        if self.services is not None and scope is not None:
+            scope_data = scope.model_dump()
+            stream_key = scope.agent_run_id or scope.workflow_run_id or scope.run_id
+            if stream_key is not None:
+                record = await self.services.events.append(
+                    event_id,
+                    f"run:{stream_key}",
+                    name,
+                    payload,
+                    scope_data,
+                )
+                sequence = record.sequence
         await self.transport.send(
             Envelope(
-                id=uuid4().hex,
+                id=event_id,
                 kind="event",
                 name=name,
                 scope=scope,
