@@ -1,60 +1,71 @@
 import { useEffect, useState } from "react";
 
-import { type AppInfo, getAppInfo } from "@/lib/app-info";
+import { send, subscribe } from "@/lib/agent";
+import { type AppInfo, appInfoRequest, readAppInfoReply } from "@/lib/app-info";
 
 type AppState =
-  | { status: "loading" }
+  | { status: "connecting" }
   | { status: "ready"; info: AppInfo }
   | { status: "error" };
 
-export function Identity({ info }: { info: AppInfo }) {
+let nextRequestId = 1;
+
+export function AppStatus({ state }: { state: AppState }) {
+  const text =
+    state.status === "ready"
+      ? `${state.info.name} v${state.info.version}`
+      : state.status === "connecting"
+        ? "Connecting"
+        : "Unavailable";
+
   return (
-    <section className="identity" aria-label={`${info.name} ${info.version}`}>
-      <div className="identity__halo" />
-      <div className="identity__content">
-        <h1>{info.name}</h1>
-        <span className="identity__version">v{info.version}</span>
-      </div>
-    </section>
+    <p className="app__status" aria-live="polite">
+      {text}
+    </p>
   );
 }
 
 function App() {
-  const [state, setState] = useState<AppState>({ status: "loading" });
+  const [state, setState] = useState<AppState>({ status: "connecting" });
 
   useEffect(() => {
     let active = true;
+    let unsubscribe: (() => void) | undefined;
+    const requestId = `app-info-${nextRequestId++}`;
 
-    getAppInfo().then(
-      (info) => {
-        if (active) {
-          setState({ status: "ready", info });
+    const connect = async () => {
+      const stop = await subscribe((message) => {
+        if (!active) {
+          return;
         }
-      },
-      () => {
-        if (active) {
-          setState({ status: "error" });
+        const reply = readAppInfoReply(message, requestId);
+        if (reply) {
+          setState(reply);
         }
-      },
-    );
+      });
+      if (!active) {
+        stop();
+        return;
+      }
+      unsubscribe = stop;
+      await send(appInfoRequest(requestId));
+    };
+
+    connect().catch(() => {
+      if (active) {
+        setState({ status: "error" });
+      }
+    });
 
     return () => {
       active = false;
+      unsubscribe?.();
     };
   }, []);
 
   return (
     <main className="app">
-      {state.status === "ready" ? (
-        <Identity info={state.info} />
-      ) : (
-        <p
-          className={`app__status app__status--${state.status}`}
-          aria-live="polite"
-        >
-          {state.status === "loading" ? "Connecting" : "Unavailable"}
-        </p>
-      )}
+      <AppStatus state={state} />
     </main>
   );
 }

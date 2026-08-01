@@ -1,21 +1,27 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+import { appInfoRequest, readAppInfoReply } from "@/lib/app-info";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-
-import { getAppInfo } from "@/lib/app-info";
-
-describe("getAppInfo", () => {
-  beforeEach(() => {
-    invoke.mockReset();
+describe("app info protocol", () => {
+  it("creates an app information request", () => {
+    expect(appInfoRequest("ui-1")).toEqual({
+      id: "ui-1",
+      method: "app/info",
+    });
   });
 
-  it("loads app information through Tauri", async () => {
-    const info = { name: "Flowent", version: "0.0.0" };
-    invoke.mockResolvedValue(info);
-
-    await expect(getAppInfo()).resolves.toEqual(info);
-    expect(invoke).toHaveBeenCalledWith("get_app_info");
+  it("reads the matching response", () => {
+    expect(
+      readAppInfoReply(
+        {
+          id: "ui-1",
+          result: { name: "Flowent", version: "0.0.0" },
+        },
+        "ui-1",
+      ),
+    ).toEqual({
+      status: "ready",
+      info: { name: "Flowent", version: "0.0.0" },
+    });
   });
 });

@@ -10,11 +10,15 @@ def test_sidecar_lifecycle() -> None:
     requests = [
         {
             "id": "info",
-            "type": "app.info",
+            "method": "app/info",
+        },
+        {
+            "id": "unknown",
+            "method": "unknown",
         },
         {
             "id": "shutdown",
-            "type": "runtime.shutdown",
+            "method": "runtime/shutdown",
         },
     ]
     result = subprocess.run(
@@ -29,17 +33,19 @@ def test_sidecar_lifecycle() -> None:
 
     assert messages == [
         {
-            "type": "runtime.ready",
-            "data": {"capabilities": ["app.info"]},
+            "method": "runtime/ready",
+            "params": {"capabilities": ["app/info", "runtime/shutdown"]},
         },
         {
             "id": "info",
-            "type": "app.info",
-            "data": {"name": "Flowent", "version": version("flowent")},
+            "result": {"name": "Flowent", "version": version("flowent")},
+        },
+        {
+            "id": "unknown",
+            "error": {"message": "unknown method: unknown"},
         },
         {
             "id": "shutdown",
-            "type": "runtime.shutdown",
-            "data": {"stopping": True},
+            "result": {"stopping": True},
         },
     ]

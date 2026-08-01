@@ -7,6 +7,9 @@ from typing import Any
 
 APP_NAME = "Flowent"
 APP_VERSION = version("flowent")
+APP_INFO = "app/info"
+RUNTIME_READY = "runtime/ready"
+RUNTIME_SHUTDOWN = "runtime/shutdown"
 
 
 def send(message: dict[str, Any]) -> None:
@@ -14,11 +17,19 @@ def send(message: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
+def respond(request_id: str, result: dict[str, Any]) -> None:
+    send({"id": request_id, "result": result})
+
+
+def reject(request_id: str, message: str) -> None:
+    send({"id": request_id, "error": {"message": message}})
+
+
 def main() -> None:
     send(
         {
-            "type": "runtime.ready",
-            "data": {"capabilities": ["app.info"]},
+            "method": RUNTIME_READY,
+            "params": {"capabilities": [APP_INFO, RUNTIME_SHUTDOWN]},
         }
     )
     for line in sys.stdin:
@@ -28,24 +39,19 @@ def main() -> None:
             continue
         if not isinstance(message, dict):
             continue
-        if message.get("type") == "app.info":
-            send(
-                {
-                    "id": message.get("id"),
-                    "type": "app.info",
-                    "data": {"name": APP_NAME, "version": APP_VERSION},
-                }
-            )
+
+        request_id = message.get("id")
+        method = message.get("method")
+        if not isinstance(request_id, str) or not isinstance(method, str):
             continue
-        if message.get("type") == "runtime.shutdown":
-            send(
-                {
-                    "id": message.get("id"),
-                    "type": "runtime.shutdown",
-                    "data": {"stopping": True},
-                }
-            )
+
+        if method == APP_INFO:
+            respond(request_id, {"name": APP_NAME, "version": APP_VERSION})
+            continue
+        if method == RUNTIME_SHUTDOWN:
+            respond(request_id, {"stopping": True})
             return
+        reject(request_id, f"unknown method: {method}")
 
 
 if __name__ == "__main__":
