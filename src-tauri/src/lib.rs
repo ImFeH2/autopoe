@@ -1,13 +1,19 @@
 mod sidecar;
 
-use sidecar::Sidecar;
-use tauri::Manager;
+use sidecar::{AppInfo, Sidecar};
+use tauri::{Manager, State};
+
+#[tauri::command]
+async fn get_app_info(sidecar: State<'_, Sidecar>) -> Result<AppInfo, String> {
+    sidecar.app_info().await
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(Sidecar::default())
+        .invoke_handler(tauri::generate_handler![get_app_info])
         .setup(|app| {
             app.state::<Sidecar>()
                 .start(app.handle())

@@ -1,8 +1,11 @@
+from PyInstaller.utils.hooks import copy_metadata
+
+
 analysis = Analysis(
     ["src/flowent/__main__.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=copy_metadata("flowent"),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
