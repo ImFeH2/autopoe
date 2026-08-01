@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use tauri::{AppHandle, ipc::Channel};
 use tauri_plugin_shell::{
@@ -29,11 +30,11 @@ impl Outbound {
         self.pending.push_back(message);
     }
 
-    fn subscribe(&mut self, channel: Channel<Value>) -> Result<(), String> {
+    fn subscribe(&mut self, channel: Channel<Value>) -> Result<()> {
         while let Some(message) = self.pending.pop_front() {
             if let Err(error) = channel.send(message.clone()) {
                 self.pending.push_front(message);
-                return Err(error.to_string());
+                return Err(error.into());
             }
         }
         self.channel = Some(channel);
@@ -48,14 +49,17 @@ pub struct Sidecar {
 }
 
 impl Sidecar {
-    pub fn start(&self, app: &AppHandle) -> Result<(), String> {
+    pub fn start(&self, app: &AppHandle) -> Result<()> {
         let (mut events, child) = app
             .shell()
             .sidecar("flowent-agent")
-            .map_err(|error| error.to_string())?
+            .context("create sidecar command")?
             .spawn()
-            .map_err(|error| error.to_string())?;
-        *self.child.lock().map_err(|error| error.to_string())? = Some(child);
+            .context("start sidecar")?;
+        *self
+            .child
+            .lock()
+            .map_err(|_| anyhow!("sidecar child lock poisoned"))? = Some(child);
 
         let child = Arc::clone(&self.child);
         let outbound = Arc::clone(&self.outbound);
@@ -82,21 +86,21 @@ impl Sidecar {
         Ok(())
     }
 
-    pub fn send(&self, message: &Value) -> Result<(), String> {
+    pub fn send(&self, message: &Value) -> Result<()> {
         let message = encode(message)?;
         self.child
             .lock()
-            .map_err(|error| error.to_string())?
+            .map_err(|_| anyhow!("sidecar child lock poisoned"))?
             .as_mut()
-            .ok_or_else(|| "sidecar is not running".to_owned())?
+            .context("sidecar is not running")?
             .write(&message)
-            .map_err(|error| error.to_string())
+            .context("write sidecar message")
     }
 
-    pub fn subscribe(&self, channel: Channel<Value>) -> Result<(), String> {
+    pub fn subscribe(&self, channel: Channel<Value>) -> Result<()> {
         self.outbound
             .lock()
-            .map_err(|error| error.to_string())?
+            .map_err(|_| anyhow!("sidecar outbound lock poisoned"))?
             .subscribe(channel)
     }
 
@@ -111,15 +115,17 @@ impl Sidecar {
     }
 }
 
-fn encode(message: &Value) -> Result<Vec<u8>, String> {
-    let mut encoded = serde_json::to_vec(message).map_err(|error| error.to_string())?;
+fn encode(message: &Value) -> Result<Vec<u8>> {
+    let mut encoded = serde_json::to_vec(message).context("encode sidecar message")?;
     encoded.push(b'\n');
     Ok(encoded)
 }
 
-fn dispatch(outbound: &OutboundMessages, line: &[u8]) -> Result<(), String> {
-    let message = serde_json::from_slice(line).map_err(|error| error.to_string())?;
-    let mut outbound = outbound.lock().map_err(|error| error.to_string())?;
+fn dispatch(outbound: &OutboundMessages, line: &[u8]) -> Result<()> {
+    let message = serde_json::from_slice(line).context("decode sidecar message")?;
+    let mut outbound = outbound
+        .lock()
+        .map_err(|_| anyhow!("sidecar outbound lock poisoned"))?;
     outbound.send(message);
     Ok(())
 }
