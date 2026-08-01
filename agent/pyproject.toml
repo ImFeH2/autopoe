@@ -6,15 +6,10 @@ authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
 ]
 requires-python = ">=3.13"
-dependencies = [
-    "aiosqlite>=0.22.1",
-    "keyring>=25.7",
-    "pydantic>=2.13.4",
-    "pydantic-ai-slim[anthropic,openai]>=2.0.0",
-]
+dependencies = []
 
 [project.scripts]
-flowent = "flowent:main"
+flowent = "flowent.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12.0"]
@@ -23,13 +18,5 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pyinstaller>=6.21.0",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
     "ruff>=0.16.0",
 ]
-
-[tool.ruff.lint]
-ignore = ["BLE001"]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"

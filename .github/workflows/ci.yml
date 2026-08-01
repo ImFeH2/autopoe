@@ -44,10 +44,10 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --project agent --all-groups --frozen
       - name: Check frontend
-        run: pnpm typecheck && pnpm test && pnpm build
+        run: pnpm typecheck && pnpm build
       - name: Check Python
         working-directory: agent
-        run: uv run ruff check . && uv run ruff format --check . && uv run pytest -q
+        run: uv run ruff check . && uv run ruff format --check .
       - name: Check Rust
         working-directory: src-tauri
         run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo check --release

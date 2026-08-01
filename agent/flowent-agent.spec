@@ -1,19 +1,9 @@
-from PyInstaller.utils.hooks import (
-    collect_submodules,
-    copy_metadata,
-)
-
-datas = copy_metadata("pydantic-ai-slim", recursive=True)
-datas += copy_metadata("keyring", recursive=True)
-binaries = []
-hiddenimports = collect_submodules("keyring.backends")
-
 analysis = Analysis(
     ["src/flowent/__main__.py"],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -12,30 +12,20 @@
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run",
     "test:sidecar": "node scripts/smoke-sidecar.mjs",
-    "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@radix-ui/themes": "^3.3.0",
-    "@tauri-apps/api": "^2.11.1",
-    "@xyflow/react": "^12.11.2",
-    "lucide-react": "^1.27.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@testing-library/jest-dom": "^7.0.0",
-    "@testing-library/react": "^16.3.2",
     "@types/node": "^26.1.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
-    "jsdom": "^29.1.1",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4",
-    "vitest": "^4.1.10"
+    "vite": "^7.0.4"
   }
 }

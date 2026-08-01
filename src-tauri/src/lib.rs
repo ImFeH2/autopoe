@@ -1,28 +1,25 @@
-mod commands;
-mod runtime;
+mod sidecar;
 
-use commands::{run_agent, run_workflow, runtime_request, runtime_status};
-use runtime::RuntimeManager;
+use sidecar::Sidecar;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(RuntimeManager::default())
+        .manage(Sidecar::default())
         .setup(|app| {
-            let runtime = app.state::<RuntimeManager>();
-            if let Err(error) = runtime.start(app.handle().clone()) {
-                runtime.fail(error);
-            }
+            app.state::<Sidecar>()
+                .start(app.handle())
+                .map_err(std::io::Error::other)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            run_agent,
-            run_workflow,
-            runtime_request,
-            runtime_status
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            app_handle.state::<Sidecar>().stop();
+        }
+    });
 }

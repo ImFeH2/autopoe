@@ -12,16 +12,11 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-
-    "paths": {
-      "@/*": ["./src/*"]
-    },
-
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "vitest.setup.ts"],
+  "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

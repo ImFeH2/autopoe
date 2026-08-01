@@ -1,9 +1,3 @@
-@import "./tokens.css";
-@import "./shell.css";
-@import "./workflow.css";
-@import "./views.css";
-@import "./chat.css";
-
 * {
   box-sizing: border-box;
 }
@@ -11,7 +5,7 @@
 html,
 body,
 #root,
-.flowent-theme {
+.app {
   width: 100%;
   height: 100%;
   margin: 0;
@@ -20,140 +14,5 @@ body,
 body {
   min-width: 320px;
   overflow: hidden;
-  background: var(--f-bg-canvas);
-}
-
-button,
-textarea,
-input {
-  font: inherit;
-}
-
-::selection {
-  background: var(--f-selection);
-  color: var(--f-text-primary);
-}
-
-.flowent-theme {
-  background: var(--f-bg-canvas);
-  color: var(--f-text-primary);
-  font-family: var(--f-font-sans);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-}
-
-.flowent-theme :focus-visible {
-  outline: 1px solid var(--f-focus);
-  outline-offset: 2px;
-}
-
-.eyebrow {
-  color: var(--f-text-tertiary);
-  font-family: var(--f-font-mono);
-  font-size: var(--f-text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.field-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--f-space-5);
-}
-
-.field-label {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--f-space-2);
-  color: var(--f-text-secondary);
-  font-size: var(--f-text-xs);
-  font-weight: 520;
-}
-
-.field-label > span:first-child {
-  color: var(--f-text-tertiary);
-  font-size: var(--f-text-2xs);
-  font-weight: 560;
-}
-
-.field-label .rt-TextFieldRoot,
-.field-label .rt-TextArea,
-.field-select.rt-SelectTrigger {
-  border: 1px solid var(--f-border-subtle);
-  background: var(--f-surface-input);
-  box-shadow: none;
-  color: var(--f-text-primary);
-}
-
-.field-label .rt-TextFieldRoot:focus-within,
-.field-label .rt-TextArea:focus,
-.field-select.rt-SelectTrigger:focus {
-  border-color: var(--f-border-focus);
-  box-shadow: 0 0 0 1px var(--f-border-focus);
-}
-
-.field-select.rt-SelectTrigger {
-  width: 100%;
-  justify-content: space-between;
-}
-
-.primary-button.rt-Button,
-.secondary-button.rt-Button {
-  height: var(--f-control-md);
-  gap: var(--f-space-2);
-  padding: 0 var(--f-space-4);
-  border-radius: var(--f-radius-md);
-  box-shadow: none;
-  font-size: var(--f-text-xs);
-  font-weight: 620;
-}
-
-.primary-button.rt-Button {
-  border: 1px solid var(--f-white);
-  background: var(--f-white);
-  color: var(--f-black);
-}
-
-.primary-button.rt-Button:hover {
-  border-color: var(--f-gray-200);
-  background: var(--f-gray-200);
-}
-
-.secondary-button.rt-Button {
-  border: 1px solid var(--f-border-subtle);
-  background: var(--f-surface-control);
-  color: var(--f-text-secondary);
-}
-
-.secondary-button.rt-Button:hover {
-  border-color: var(--f-border-strong);
-  background: var(--f-surface-control-hover);
-  color: var(--f-text-primary);
-}
-
-.status-label {
-  display: inline-flex;
-  align-items: center;
-  min-height: 20px;
-  padding: 0 var(--f-space-2);
-  border: 1px solid var(--f-border-subtle);
-  border-radius: var(--f-radius-pill);
-  color: var(--f-text-tertiary);
-  font-family: var(--f-font-mono);
-  font-size: 9px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.status-label[data-status="running"],
-.status-label[data-status="completed"] {
-  color: var(--f-text-primary);
-}
-
-.status-label[data-status="failed"],
-.status-label[data-status="interrupted"] {
-  border-color: var(--f-danger-border);
-  color: var(--f-danger-text);
+  background: #000;
 }

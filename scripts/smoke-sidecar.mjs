@@ -1,7 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -15,25 +13,13 @@ const executable = resolve(
   "binaries",
   `flowent-agent-${target}${extension}`,
 );
-const dataDir = mkdtempSync(join(tmpdir(), "flowent-sidecar-"));
 const child = spawn(executable, [], { stdio: ["pipe", "pipe", "pipe"] });
 const decoder = new TextDecoder();
 let stdout = "";
 let stderr = "";
-let output = "";
+let ready = false;
+let acknowledged = false;
 let settled = false;
-
-function request(id, name, payload) {
-  child.stdin.write(
-    `${JSON.stringify({
-      protocol_version: 1,
-      id,
-      kind: "request",
-      name,
-      payload,
-    })}\n`,
-  );
-}
 
 const completion = new Promise((resolvePromise, rejectPromise) => {
   const timeout = setTimeout(() => {
@@ -54,36 +40,28 @@ const completion = new Promise((resolvePromise, rejectPromise) => {
     }
   }
 
-  function handle(envelope) {
-    if (envelope.name === "runtime.error") {
-      finish(new Error(envelope.payload?.message ?? "Runtime error"));
-      return;
-    }
-    if (envelope.kind === "event" && envelope.name === "runtime.hello") {
-      request("initialize", "runtime.initialize", { data_dir: dataDir });
-      return;
-    }
-    if (envelope.kind === "event" && envelope.name === "runtime.ready") {
-      request("agent", "agent.run", {
-        run_id: "smoke-agent",
-        messages: [{ role: "user", content: "Frozen sidecar smoke test" }],
-      });
-      return;
-    }
-    if (envelope.kind === "event" && envelope.name === "agent.text_delta") {
-      output += envelope.payload?.delta ?? "";
-      return;
-    }
-    if (envelope.kind === "event" && envelope.name === "agent.completed") {
-      if (!output.includes("Frozen sidecar smoke test")) {
-        finish(new Error("Sidecar did not stream the expected output"));
+  function handle(message) {
+    if (message.kind === "event" && message.name === "runtime.ready") {
+      ready = true;
+      if (message.payload?.capabilities?.length !== 0) {
+        child.kill();
+        finish(new Error("Sidecar exposes unexpected capabilities"));
         return;
       }
-      request("shutdown", "runtime.shutdown", {});
+      child.stdin.write(
+        `${JSON.stringify({
+          protocol_version: 1,
+          id: "shutdown",
+          kind: "request",
+          name: "runtime.shutdown",
+          payload: {},
+        })}\n`,
+      );
       return;
     }
-    if (envelope.kind === "response" && envelope.reply_to === "shutdown") {
-      finish();
+    if (message.kind === "response" && message.reply_to === "shutdown") {
+      acknowledged = true;
+      child.stdin.end();
     }
   }
 
@@ -102,16 +80,17 @@ const completion = new Promise((resolvePromise, rejectPromise) => {
   });
   child.on("error", finish);
   child.on("exit", (code) => {
-    if (!settled) {
+    if (code !== 0) {
       finish(new Error(`Sidecar exited with code ${code}: ${stderr}`));
+      return;
     }
+    if (!ready || !acknowledged) {
+      finish(new Error("Sidecar lifecycle handshake was incomplete"));
+      return;
+    }
+    finish();
   });
 });
 
-try {
-  await completion;
-  process.stdout.write("Sidecar smoke test passed\n");
-} finally {
-  child.stdin.end();
-  rmSync(dataDir, { force: true, recursive: true });
-}
+await completion;
+process.stdout.write("Sidecar smoke test passed\n");
