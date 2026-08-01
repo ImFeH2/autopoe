@@ -19,9 +19,9 @@ export function AppStatus({ state }: { state: AppState }) {
         : "Unavailable";
 
   return (
-    <p className="app__status" aria-live="polite">
+    <h1 className="app__title" aria-live="polite">
       {text}
-    </p>
+    </h1>
   );
 }
 
