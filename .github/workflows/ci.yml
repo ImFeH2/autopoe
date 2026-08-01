@@ -19,6 +19,8 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-22.04
+    env:
+      TAURI_CONFIG: '{"bundle":{"externalBin":[]}}'
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
