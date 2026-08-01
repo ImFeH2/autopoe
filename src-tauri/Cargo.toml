@@ -1,6 +1,6 @@
 [package]
 name = "flowent"
-version = "0.0.1"
+version = "0.3.14"
 description = "Just say what you need. Flowent gets it done."
 authors = ["ImFeH2 <i@feh2.im>"]
 edition = "2024"

@@ -29,13 +29,17 @@ function output(command, args) {
     encoding: "utf8",
   });
   if (result.error || result.status !== 0) {
-    throw result.error ?? new Error(`${command} exited with status ${result.status}`);
+    throw (
+      result.error ??
+      new Error(`${command} exited with status ${result.status}`)
+    );
   }
   return result.stdout.trim();
 }
 
 const target =
-  process.env.TAURI_ENV_TARGET_TRIPLE || output("rustc", ["--print", "host-tuple"]);
+  process.env.TAURI_ENV_TARGET_TRIPLE ||
+  output("rustc", ["--print", "host-tuple"]);
 const extension = process.platform === "win32" ? ".exe" : "";
 
 mkdirSync(binaries, { recursive: true });

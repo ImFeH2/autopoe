@@ -1,0 +1,46 @@
+{
+  "$schema": "https://unpkg.com/release-it@21/schema/release-it.json",
+  "git": {
+    "requireCleanWorkingDir": true,
+    "requireBranch": "main",
+    "requireUpstream": true,
+    "commitMessage": "chore: release v${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "Release v${version}",
+    "push": true
+  },
+  "github": {
+    "release": false
+  },
+  "npm": {
+    "publish": false
+  },
+  "hooks": {
+    "before:init": "pnpm verify",
+    "after:bump": [
+      "uv lock --project agent",
+      "cargo check --manifest-path src-tauri/Cargo.toml"
+    ]
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": {
+        "name": "conventionalcommits"
+      },
+      "infile": "CHANGELOG.md",
+      "header": "# Changelog"
+    },
+    "@release-it/bumper": {
+      "out": [
+        {
+          "file": "src-tauri/Cargo.toml",
+          "path": "package.version"
+        },
+        {
+          "file": "agent/pyproject.toml",
+          "path": "project.version"
+        }
+      ]
+    }
+  }
+}

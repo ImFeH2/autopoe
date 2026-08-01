@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Flowent",
-  "version": "0.0.1",
+  "version": "../package.json",
   "identifier": "im.feh2.flowent",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -25,9 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "externalBin": [
-      "binaries/flowent-agent"
-    ],
+    "externalBin": ["binaries/flowent-agent"],
     "targets": "all",
     "icon": [
       "icons/32x32.png",

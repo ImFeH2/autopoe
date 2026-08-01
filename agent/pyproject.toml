@@ -1,6 +1,6 @@
 [project]
 name = "flowent"
-version = "0.1.0"
+version = "0.3.14"
 description = "Just say what you need. Flowent gets it done."
 authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
@@ -18,5 +18,6 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pyinstaller>=6.21.0",
+    "pytest>=9.1.1",
     "ruff>=0.16.0",
 ]

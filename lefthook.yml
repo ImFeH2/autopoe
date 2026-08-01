@@ -1,0 +1,18 @@
+commit-msg:
+  jobs:
+    - name: commit message
+      run: pnpm exec commitlint --edit {1}
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: frontend
+      run: pnpm check && pnpm test
+    - name: python
+      root: agent
+      run: uv run ruff check . && uv run ruff format --check . && uv run pytest
+    - name: rust
+      root: src-tauri
+      run: cargo fmt --check && cargo check && cargo clippy --all-targets -- -D warnings && cargo test
+    - name: sidecar
+      run: pnpm build:sidecar && pnpm test:sidecar
