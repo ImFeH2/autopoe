@@ -1,20 +1,21 @@
+mod error;
 mod sidecar;
 
+use error::CommandResult;
 use serde_json::Value;
 use sidecar::Sidecar;
-use tauri::{
-    Manager, State,
-    ipc::{Channel, InvokeError},
-};
+use tauri::{Manager, State, ipc::Channel};
 
 #[tauri::command]
-fn send(sidecar: State<'_, Sidecar>, message: Value) -> Result<(), InvokeError> {
-    sidecar.send(&message).map_err(InvokeError::from_anyhow)
+fn send(sidecar: State<'_, Sidecar>, message: Value) -> CommandResult<()> {
+    sidecar.send(&message)?;
+    Ok(())
 }
 
 #[tauri::command]
-fn subscribe(sidecar: State<'_, Sidecar>, channel: Channel<Value>) -> Result<(), InvokeError> {
-    sidecar.subscribe(channel).map_err(InvokeError::from_anyhow)
+fn subscribe(sidecar: State<'_, Sidecar>, channel: Channel<Value>) -> CommandResult<()> {
+    sidecar.subscribe(channel)?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
