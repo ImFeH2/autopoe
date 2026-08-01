@@ -1,11 +1,9 @@
-#[cfg(debug_assertions)]
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use tauri::AppHandle;
 use tauri_plugin_shell::{
     ShellExt,
-    process::{Command, CommandChild, CommandEvent},
+    process::{CommandChild, CommandEvent},
 };
 
 #[derive(Default)]
@@ -15,7 +13,10 @@ pub struct Sidecar {
 
 impl Sidecar {
     pub fn start(&self, app: &AppHandle) -> Result<(), String> {
-        let (mut events, child) = sidecar_command(app)?
+        let (mut events, child) = app
+            .shell()
+            .sidecar("flowent-agent")
+            .map_err(|error| error.to_string())?
             .spawn()
             .map_err(|error| error.to_string())?;
         *self.child.lock().expect("sidecar child lock") = Some(child);
@@ -41,23 +42,4 @@ impl Sidecar {
             let _ = child.kill();
         }
     }
-}
-
-#[cfg(debug_assertions)]
-fn sidecar_command(app: &AppHandle) -> Result<Command, String> {
-    let agent_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../agent");
-    Ok(app
-        .shell()
-        .command("uv")
-        .arg("run")
-        .arg("--project")
-        .arg(agent_dir)
-        .arg("flowent"))
-}
-
-#[cfg(not(debug_assertions))]
-fn sidecar_command(app: &AppHandle) -> Result<Command, String> {
-    app.shell()
-        .sidecar("flowent-agent")
-        .map_err(|error| error.to_string())
 }

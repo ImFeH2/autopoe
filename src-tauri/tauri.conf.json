@@ -4,7 +4,7 @@
   "version": "../package.json",
   "identifier": "im.feh2.flowent",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm dev:desktop",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build:desktop",
     "frontendDist": "../dist"

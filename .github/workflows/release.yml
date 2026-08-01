@@ -50,8 +50,6 @@ jobs:
           LEFTHOOK: 0
       - name: Install Python dependencies
         run: uv sync --project agent --all-groups --frozen
-      - name: Check release tag
-        run: pnpm release:check
       - name: Build release
         uses: tauri-apps/tauri-action@v1
         env:

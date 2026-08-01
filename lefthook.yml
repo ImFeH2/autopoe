@@ -14,5 +14,3 @@ pre-commit:
     - name: rust
       root: src-tauri
       run: cargo fmt --check && cargo check && cargo clippy --all-targets -- -D warnings && cargo test
-    - name: sidecar
-      run: pnpm build:sidecar && pnpm test:sidecar

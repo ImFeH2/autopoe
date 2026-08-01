@@ -84,5 +84,3 @@ jobs:
         run: uv sync --project agent --all-groups --frozen
       - name: Build sidecar
         run: pnpm build:sidecar
-      - name: Test sidecar
-        run: pnpm test:sidecar

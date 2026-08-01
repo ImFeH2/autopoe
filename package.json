@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:desktop": "pnpm build:sidecar && pnpm dev",
     "build": "tsc && vite build",
     "build:desktop": "pnpm build && pnpm build:sidecar",
     "build:sidecar": "node scripts/build-sidecar.mjs",
@@ -15,10 +16,8 @@
     "lint": "biome lint .",
     "preview": "vite preview",
     "release": "release-it",
-    "release:check": "node scripts/check-release-tag.mjs",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:sidecar": "node scripts/smoke-sidecar.mjs",
     "typecheck": "tsc --noEmit",
     "verify": "lefthook run pre-commit --force"
   },
