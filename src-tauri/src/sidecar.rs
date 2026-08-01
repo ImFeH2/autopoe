@@ -8,7 +8,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tauri::AppHandle;
 use tauri_plugin_shell::{
     ShellExt,
@@ -16,7 +16,6 @@ use tauri_plugin_shell::{
 };
 use tokio::{sync::oneshot, time::timeout};
 
-const PROTOCOL_VERSION: u8 = 1;
 const APP_INFO: &str = "app.info";
 type PendingResponses = Arc<Mutex<HashMap<String, oneshot::Sender<IncomingMessage>>>>;
 
@@ -28,20 +27,17 @@ pub struct AppInfo {
 
 #[derive(Debug, Deserialize)]
 struct IncomingMessage {
-    protocol_version: u8,
-    kind: String,
-    name: String,
-    reply_to: Option<String>,
-    payload: Value,
+    id: Option<String>,
+    #[serde(rename = "type")]
+    message_type: String,
+    data: Value,
 }
 
 #[derive(Serialize)]
 struct OutgoingRequest<'a> {
-    protocol_version: u8,
     id: &'a str,
-    kind: &'static str,
-    name: &'static str,
-    payload: Value,
+    #[serde(rename = "type")]
+    message_type: &'static str,
 }
 
 pub struct Sidecar {
@@ -98,11 +94,8 @@ impl Sidecar {
     pub async fn app_info(&self) -> Result<AppInfo, String> {
         let id = format!("app-info-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
         let request = OutgoingRequest {
-            protocol_version: PROTOCOL_VERSION,
             id: &id,
-            kind: "request",
-            name: APP_INFO,
-            payload: json!({}),
+            message_type: APP_INFO,
         };
         let mut message = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
         message.push(b'\n');
@@ -159,16 +152,13 @@ impl Sidecar {
 fn dispatch_response(pending: &PendingResponses, line: &[u8]) -> Result<(), String> {
     let message: IncomingMessage =
         serde_json::from_slice(line).map_err(|error| error.to_string())?;
-    if message.protocol_version != PROTOCOL_VERSION || message.kind != "response" {
-        return Ok(());
-    }
-    let Some(reply_to) = message.reply_to.as_ref() else {
+    let Some(id) = message.id.as_ref() else {
         return Ok(());
     };
     let sender = pending
         .lock()
         .map_err(|error| error.to_string())?
-        .remove(reply_to);
+        .remove(id);
     if let Some(sender) = sender {
         let _ = sender.send(message);
     }
@@ -176,14 +166,10 @@ fn dispatch_response(pending: &PendingResponses, line: &[u8]) -> Result<(), Stri
 }
 
 fn app_info_from_response(response: IncomingMessage, request_id: &str) -> Result<AppInfo, String> {
-    if response.protocol_version != PROTOCOL_VERSION
-        || response.kind != "response"
-        || response.name != APP_INFO
-        || response.reply_to.as_deref() != Some(request_id)
-    {
+    if response.message_type != APP_INFO || response.id.as_deref() != Some(request_id) {
         return Err("invalid sidecar response".to_owned());
     }
-    serde_json::from_value(response.payload).map_err(|error| error.to_string())
+    serde_json::from_value(response.data).map_err(|error| error.to_string())
 }
 
 fn clear_process(child: &Arc<Mutex<Option<CommandChild>>>, pending: &PendingResponses) {
@@ -210,7 +196,7 @@ mod tests {
 
         dispatch_response(
             &pending,
-            br#"{"protocol_version":1,"kind":"response","name":"app.info","reply_to":"app-info-1","payload":{"name":"Flowent","version":"0.0.0"}}"#,
+            br#"{"id":"app-info-1","type":"app.info","data":{"name":"Flowent","version":"0.0.0"}}"#,
         )
         .expect("dispatch response");
 

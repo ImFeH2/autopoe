@@ -17,10 +17,8 @@ def send(message: dict[str, Any]) -> None:
 def main() -> None:
     send(
         {
-            "protocol_version": 1,
-            "kind": "event",
-            "name": "runtime.ready",
-            "payload": {"capabilities": ["app.info"]},
+            "type": "runtime.ready",
+            "data": {"capabilities": ["app.info"]},
         }
     )
     for line in sys.stdin:
@@ -30,27 +28,21 @@ def main() -> None:
             continue
         if not isinstance(message, dict):
             continue
-        if message.get("kind") != "request":
-            continue
-        if message.get("name") == "app.info":
+        if message.get("type") == "app.info":
             send(
                 {
-                    "protocol_version": 1,
-                    "kind": "response",
-                    "name": "app.info",
-                    "reply_to": message.get("id"),
-                    "payload": {"name": APP_NAME, "version": APP_VERSION},
+                    "id": message.get("id"),
+                    "type": "app.info",
+                    "data": {"name": APP_NAME, "version": APP_VERSION},
                 }
             )
             continue
-        if message.get("name") == "runtime.shutdown":
+        if message.get("type") == "runtime.shutdown":
             send(
                 {
-                    "protocol_version": 1,
-                    "kind": "response",
-                    "name": "runtime.shutdown",
-                    "reply_to": message.get("id"),
-                    "payload": {"stopping": True},
+                    "id": message.get("id"),
+                    "type": "runtime.shutdown",
+                    "data": {"stopping": True},
                 }
             )
             return

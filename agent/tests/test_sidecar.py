@@ -9,18 +9,12 @@ from importlib.metadata import version
 def test_sidecar_lifecycle() -> None:
     requests = [
         {
-            "protocol_version": 1,
             "id": "info",
-            "kind": "request",
-            "name": "app.info",
-            "payload": {},
+            "type": "app.info",
         },
         {
-            "protocol_version": 1,
             "id": "shutdown",
-            "kind": "request",
-            "name": "runtime.shutdown",
-            "payload": {},
+            "type": "runtime.shutdown",
         },
     ]
     result = subprocess.run(
@@ -35,23 +29,17 @@ def test_sidecar_lifecycle() -> None:
 
     assert messages == [
         {
-            "protocol_version": 1,
-            "kind": "event",
-            "name": "runtime.ready",
-            "payload": {"capabilities": ["app.info"]},
+            "type": "runtime.ready",
+            "data": {"capabilities": ["app.info"]},
         },
         {
-            "protocol_version": 1,
-            "kind": "response",
-            "name": "app.info",
-            "reply_to": "info",
-            "payload": {"name": "Flowent", "version": version("flowent")},
+            "id": "info",
+            "type": "app.info",
+            "data": {"name": "Flowent", "version": version("flowent")},
         },
         {
-            "protocol_version": 1,
-            "kind": "response",
-            "name": "runtime.shutdown",
-            "reply_to": "shutdown",
-            "payload": {"stopping": True},
+            "id": "shutdown",
+            "type": "runtime.shutdown",
+            "data": {"stopping": True},
         },
     ]
