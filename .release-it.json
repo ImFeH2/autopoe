@@ -1,6 +1,7 @@
 {
   "$schema": "https://unpkg.com/release-it@21/schema/release-it.json",
   "git": {
+    "changelog": "",
     "requireCleanWorkingDir": true,
     "requireBranch": "main",
     "requireUpstream": true,
@@ -23,13 +24,6 @@
     ]
   },
   "plugins": {
-    "@release-it/conventional-changelog": {
-      "preset": {
-        "name": "conventionalcommits"
-      },
-      "infile": "CHANGELOG.md",
-      "header": "# Changelog"
-    },
     "@release-it/bumper": {
       "out": [
         {

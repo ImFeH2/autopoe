@@ -64,7 +64,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Flowent ${{ github.ref_name }}
-          releaseBody: See CHANGELOG.md for details.
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
 
