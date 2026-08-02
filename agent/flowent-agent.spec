@@ -5,7 +5,8 @@ analysis = Analysis(
     ["src/flowent/__main__.py"],
     pathex=[],
     binaries=[],
-    datas=copy_metadata("flowent"),
+    datas=copy_metadata("flowent")
+    + copy_metadata("pydantic-ai-slim", recursive=True),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

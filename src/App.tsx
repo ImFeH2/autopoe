@@ -1,46 +1,48 @@
-import { useEffect, useState } from "react";
+import { MessageSquare } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
+import { AppSidebar } from "@/components/AppSidebar";
+import { ChatComposer } from "@/components/ChatComposer";
+import { ChatMessages } from "@/components/ChatMessages";
+import { ContextInspector } from "@/components/ContextInspector";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 import { send, subscribe } from "@/lib/agent";
-import { type AppInfo, appInfoRequest, readAppInfoReply } from "@/lib/app-info";
-
-type AppState =
-  | { status: "connecting" }
-  | { status: "ready"; info: AppInfo }
-  | { status: "error" };
+import {
+  chatMessage,
+  connectionError,
+  initialRuntimeState,
+  reduceRuntimeMessage,
+  stateRequest,
+} from "@/lib/runtime";
 
 let nextRequestId = 1;
 
-export function AppStatus({ state }: { state: AppState }) {
-  const text =
-    state.status === "ready"
-      ? `${state.info.name} v${state.info.version}`
-      : state.status === "connecting"
-        ? "Connecting"
-        : "Unavailable";
-
-  return (
-    <h1 className="app__title" aria-live="polite">
-      {text}
-    </h1>
-  );
-}
-
 function App() {
-  const [state, setState] = useState<AppState>({ status: "connecting" });
+  const [runtime, setRuntime] = useState(initialRuntimeState);
+  const [draft, setDraft] = useState("");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+  const lastMessage = runtime.messages[runtime.messages.length - 1];
 
   useEffect(() => {
     let active = true;
     let unsubscribe: (() => void) | undefined;
-    const requestId = `app-info-${nextRequestId++}`;
+    const requestId = `state-${nextRequestId++}`;
 
     const connect = async () => {
       const stop = await subscribe((message) => {
-        if (!active) {
-          return;
-        }
-        const reply = readAppInfoReply(message, requestId);
-        if (reply) {
-          setState(reply);
+        if (active) {
+          setRuntime((state) => reduceRuntimeMessage(state, message));
         }
       });
       if (!active) {
@@ -48,12 +50,12 @@ function App() {
         return;
       }
       unsubscribe = stop;
-      await send(appInfoRequest(requestId));
+      await send(stateRequest(requestId));
     };
 
-    connect().catch(() => {
+    connect().catch((error) => {
       if (active) {
-        setState({ status: "error" });
+        setRuntime((state) => connectionError(state, error));
       }
     });
 
@@ -63,10 +65,112 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (lastMessage) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [lastMessage]);
+
+  useEffect(() => {
+    if (runtime.turn || runtime.connection === "error") {
+      setSending(false);
+    }
+  }, [runtime.connection, runtime.turn]);
+
+  const busy = sending || runtime.agent?.status === "running";
+  const canSend =
+    runtime.connection === "ready" && !busy && draft.trim().length > 0;
+
+  const submit = async () => {
+    const content = draft.trim();
+    if (!content || !canSend) {
+      return;
+    }
+
+    setDraft("");
+    setSending(true);
+    try {
+      await send(chatMessage(content));
+    } catch (error) {
+      setDraft(content);
+      setSending(false);
+      setRuntime((state) => connectionError(state, error));
+    }
+  };
+
+  const inspectAgent = () => setInspectorOpen(true);
+
   return (
-    <main className="app">
-      <AppStatus state={state} />
-    </main>
+    <SidebarProvider>
+      <AppSidebar
+        agent={runtime.agent}
+        connection={runtime.connection}
+        onInspect={inspectAgent}
+      />
+
+      <SidebarInset className="h-svh overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger />
+          <Separator className="h-4" orientation="vertical" />
+          <MessageSquare className="size-4" />
+          <span className="text-sm font-medium">General</span>
+
+          <div className="ml-auto">
+            {runtime.agent ? (
+              <Button
+                aria-label={`Inspect ${runtime.agent.name}`}
+                onClick={inspectAgent}
+                size="sm"
+                variant="ghost"
+              >
+                <Avatar size="sm">
+                  <AvatarImage alt="" src="/flowent.png" />
+                  <AvatarFallback>L</AvatarFallback>
+                </Avatar>
+                <span>{runtime.agent.name}</span>
+                <Badge variant="secondary">{runtime.agent.status}</Badge>
+              </Button>
+            ) : (
+              <Badge
+                variant={
+                  runtime.connection === "error" ? "destructive" : "secondary"
+                }
+              >
+                {runtime.connection === "error" ? "Unavailable" : "Connecting"}
+              </Badge>
+            )}
+          </div>
+        </header>
+
+        <ScrollArea className="min-h-0 flex-1">
+          <ChatMessages
+            agent={runtime.agent}
+            connection={runtime.connection}
+            error={runtime.error}
+            messages={runtime.messages}
+            onInspect={inspectAgent}
+          />
+          <div ref={endRef} />
+        </ScrollArea>
+
+        <ChatComposer
+          canSend={canSend}
+          disabled={runtime.connection !== "ready" || busy}
+          onChange={setDraft}
+          onSend={submit}
+          value={draft}
+        />
+      </SidebarInset>
+
+      {runtime.agent ? (
+        <ContextInspector
+          agent={runtime.agent}
+          onOpenChange={setInspectorOpen}
+          open={inspectorOpen}
+          turn={runtime.turn}
+        />
+      ) : null}
+    </SidebarProvider>
   );
 }
 

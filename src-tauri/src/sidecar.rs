@@ -1,11 +1,12 @@
 use std::{
     collections::VecDeque,
+    fs,
     sync::{Arc, Mutex},
 };
 
 use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
-use tauri::{AppHandle, ipc::Channel};
+use tauri::{AppHandle, Manager, ipc::Channel};
 use tauri_plugin_shell::{
     ShellExt,
     process::{CommandChild, CommandEvent},
@@ -50,10 +51,16 @@ pub struct Sidecar {
 
 impl Sidecar {
     pub fn start(&self, app: &AppHandle) -> Result<()> {
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .context("resolve app data directory")?;
+        fs::create_dir_all(&data_dir).context("create app data directory")?;
         let (mut events, child) = app
             .shell()
             .sidecar("flowent-agent")
             .context("create sidecar command")?
+            .env("FLOWENT_DATA_DIR", data_dir)
             .spawn()
             .context("start sidecar")?;
         *self

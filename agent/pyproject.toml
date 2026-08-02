@@ -6,7 +6,11 @@ authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "aiosqlite>=0.22,<1",
+    "pydantic>=2.12,<3",
+    "pydantic-ai-slim[openai]>=2.0.0,<3",
+]
 
 [project.scripts]
 flowent = "flowent.__main__:main"
@@ -21,3 +25,6 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.0",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"src/flowent/runtime.py" = ["BLE001"]
