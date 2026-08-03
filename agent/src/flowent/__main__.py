@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from flowent.project import Project, ProjectStore
 from flowent.runtime import AgentRuntime
 
 RUNTIME_READY = "runtime/ready"
@@ -26,22 +27,44 @@ def reject(request_id: str, message: str) -> None:
     send({"id": request_id, "error": {"message": message}})
 
 
+def state(project: Project | None, runtime: AgentRuntime | None) -> dict[str, Any]:
+    runtime_state = (
+        runtime.state()
+        if runtime
+        else {"agent": None, "messages": [], "last_turn": None}
+    )
+    return {
+        "project": project.to_dict() if project else None,
+        **runtime_state,
+    }
+
+
 async def serve() -> None:
     data_dir = os.environ.get("FLOWENT_DATA_DIR")
     if not data_dir:
         raise RuntimeError("FLOWENT_DATA_DIR is required")
 
-    runtime = AgentRuntime(
-        Path(data_dir),
-        send,
-        os.environ.get("FLOWENT_MODEL"),
+    root = Path(data_dir)
+    store = ProjectStore(root)
+    await store.initialize()
+    project = await store.current()
+    runtime = (
+        AgentRuntime(root, project, send, os.environ.get("FLOWENT_MODEL"))
+        if project
+        else None
     )
     send(
         {
             "method": RUNTIME_READY,
             "params": {
-                "agent": runtime.agent_info(),
-                "capabilities": ["state/get", "chat/send", RUNTIME_SHUTDOWN],
+                "project": project.to_dict() if project else None,
+                "agent": runtime.agent_info() if runtime else None,
+                "capabilities": [
+                    "state/get",
+                    "project/open",
+                    "chat/send",
+                    RUNTIME_SHUTDOWN,
+                ],
             },
         }
     )
@@ -61,13 +84,32 @@ async def serve() -> None:
         if method == "chat/send":
             params = message.get("params")
             content = params.get("content") if isinstance(params, dict) else None
-            if isinstance(content, str) and content.strip():
+            if runtime and isinstance(content, str) and content.strip():
                 await runtime.run_turn(content.strip())
             continue
         if not isinstance(request_id, str):
             continue
         if method == "state/get":
-            respond(request_id, runtime.state())
+            respond(request_id, state(project, runtime))
+            continue
+        if method == "project/open":
+            params = message.get("params")
+            workspace = params.get("workspace") if isinstance(params, dict) else None
+            if not isinstance(workspace, str) or not workspace.strip():
+                reject(request_id, "workspace is required")
+                continue
+            try:
+                project = await store.open(workspace)
+            except (OSError, ValueError) as error:
+                reject(request_id, str(error))
+                continue
+            runtime = AgentRuntime(
+                root,
+                project,
+                send,
+                os.environ.get("FLOWENT_MODEL"),
+            )
+            respond(request_id, state(project, runtime))
             continue
         if method == RUNTIME_SHUTDOWN:
             respond(request_id, {"stopping": True})

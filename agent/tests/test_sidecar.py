@@ -28,9 +28,16 @@ def run_sidecar(
 
 
 def test_sidecar_streams_agent_turn(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     messages = run_sidecar(
         tmp_path,
         [
+            {
+                "id": "project",
+                "method": "project/open",
+                "params": {"workspace": str(workspace)},
+            },
             {"id": "initial", "method": "state/get"},
             {"method": "chat/send", "params": {"content": "Hello"}},
             {"id": "final", "method": "state/get"},
@@ -39,8 +46,10 @@ def test_sidecar_streams_agent_turn(tmp_path: Path) -> None:
     )
 
     assert messages[0]["method"] == "runtime/ready"
-    assert messages[1]["result"]["agent"]["status"] == "idle"
-    assert messages[2]["method"] == "turn/started"
+    assert messages[0]["params"]["project"] is None
+    assert messages[1]["result"]["project"]["workspace"] == str(workspace)
+    assert messages[2]["result"]["agent"]["status"] == "idle"
+    assert messages[3]["method"] == "turn/started"
 
     events = [
         message["params"]["event"]
@@ -65,13 +74,23 @@ def test_sidecar_streams_agent_turn(tmp_path: Path) -> None:
     final = next(message for message in messages if message.get("id") == "final")
     assert len(final["result"]["messages"]) == 2
     assert final["result"]["last_turn"]["status"] == "completed"
-    assert (tmp_path / "projects/default/agents/leader/home/AGENTS.md").is_file()
+    project_id = final["result"]["project"]["id"]
+    assert (
+        tmp_path / "projects" / project_id / "agents/leader/home/AGENTS.md"
+    ).is_file()
 
 
 def test_sidecar_reports_failed_turn(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     messages = run_sidecar(
         tmp_path,
         [
+            {
+                "id": "project",
+                "method": "project/open",
+                "params": {"workspace": str(workspace)},
+            },
             {"method": "chat/send", "params": {"content": "Hello"}},
             {"id": "shutdown", "method": "runtime/shutdown"},
         ],
@@ -84,3 +103,52 @@ def test_sidecar_reports_failed_turn(tmp_path: Path) -> None:
     assert failed["params"]["agent"]["status"] == "failed"
     assert failed["params"]["message"]["status"] == "failed"
     assert failed["params"]["turn"]["error"]
+
+
+def test_sidecar_restores_latest_project(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    opened = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "project",
+                "method": "project/open",
+                "params": {"workspace": str(workspace)},
+            },
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+    project = opened[1]["result"]["project"]
+
+    restored = run_sidecar(
+        tmp_path,
+        [
+            {"id": "state", "method": "state/get"},
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+
+    assert restored[0]["params"]["project"] == project
+    assert restored[1]["result"]["project"] == project
+    assert restored[1]["result"]["agent"]["home"].startswith(
+        str(tmp_path / "projects" / project["id"])
+    )
+    assert restored[1]["result"]["messages"] == []
+
+
+def test_sidecar_rejects_invalid_workspace(tmp_path: Path) -> None:
+    messages = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "project",
+                "method": "project/open",
+                "params": {"workspace": str(tmp_path / "missing")},
+            },
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+
+    assert messages[1]["id"] == "project"
+    assert messages[1]["error"]["message"]

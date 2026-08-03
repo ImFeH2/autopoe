@@ -18,14 +18,22 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.test import TestModel
 from pydantic_core import to_jsonable_python
 
+from flowent.project import Project
+
 Emit = Callable[[dict[str, Any]], None]
 
 
 class AgentRuntime:
-    def __init__(self, data_dir: Path, emit: Emit, model_name: str | None = None):
+    def __init__(
+        self,
+        data_dir: Path,
+        project: Project,
+        emit: Emit,
+        model_name: str | None = None,
+    ):
         self.emit = emit
         self.model_name = model_name or "test"
-        self.home = data_dir / "projects" / "default" / "agents" / "leader" / "home"
+        self.home = data_dir / "projects" / project.id / "agents" / "leader" / "home"
         self.home.mkdir(parents=True, exist_ok=True)
         self.instructions_path = self.home / "AGENTS.md"
         self.instructions_path.touch(exist_ok=True)

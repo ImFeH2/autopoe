@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   chatMessage,
   initialRuntimeState,
+  projectOpenRequest,
   reduceRuntimeMessage,
+  runtimeError,
   stateRequest,
 } from "@/lib/runtime";
 
@@ -14,6 +16,12 @@ const agent = {
   status: "running",
   model: "test",
   home: "/data/projects/default/agents/leader/home",
+};
+
+const project = {
+  id: "project-1",
+  name: "Flowent",
+  workspace: "/projects/flowent",
 };
 
 const turn = {
@@ -31,7 +39,7 @@ const turn = {
 };
 
 describe("runtime protocol", () => {
-  it("creates state and chat messages", () => {
+  it("creates state, project, and chat messages", () => {
     expect(stateRequest("state-1")).toEqual({
       id: "state-1",
       method: "state/get",
@@ -39,6 +47,11 @@ describe("runtime protocol", () => {
     expect(chatMessage("Hello")).toEqual({
       method: "chat/send",
       params: { content: "Hello" },
+    });
+    expect(projectOpenRequest("project-1", project.workspace)).toEqual({
+      id: "project-1",
+      method: "project/open",
+      params: { workspace: project.workspace },
     });
   });
 
@@ -98,6 +111,7 @@ describe("runtime protocol", () => {
     const state = reduceRuntimeMessage(initialRuntimeState, {
       id: "state-1",
       result: {
+        project,
         agent: { ...agent, status: "idle" },
         messages: [],
         last_turn: null,
@@ -105,6 +119,33 @@ describe("runtime protocol", () => {
     });
 
     expect(state.connection).toBe("ready");
+    expect(state.project).toEqual(project);
     expect(state.agent?.name).toBe("Leader");
+  });
+
+  it("restores an empty project state", () => {
+    const state = reduceRuntimeMessage(initialRuntimeState, {
+      id: "state-1",
+      result: {
+        project: null,
+        agent: null,
+        messages: [],
+        last_turn: null,
+      },
+    });
+
+    expect(state.connection).toBe("ready");
+    expect(state.project).toBeNull();
+    expect(state.agent).toBeNull();
+  });
+
+  it("reports a project error without disconnecting the runtime", () => {
+    const state = runtimeError(
+      { ...initialRuntimeState, connection: "ready" },
+      new Error("Workspace is unavailable"),
+    );
+
+    expect(state.connection).toBe("ready");
+    expect(state.error).toBe("Workspace is unavailable");
   });
 });

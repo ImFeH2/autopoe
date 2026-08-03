@@ -20,12 +20,13 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import type { AgentInfo, RuntimeState } from "@/lib/runtime";
+import type { AgentInfo, ProjectInfo, RuntimeState } from "@/lib/runtime";
 
 interface AppSidebarProps {
   agent: AgentInfo | null;
   connection: RuntimeState["connection"];
   onInspect: () => void;
+  project: ProjectInfo;
 }
 
 const connectionLabel = {
@@ -38,7 +39,12 @@ function capitalize(value: string) {
   return value[0]?.toUpperCase() + value.slice(1);
 }
 
-export function AppSidebar({ agent, connection, onInspect }: AppSidebarProps) {
+export function AppSidebar({
+  agent,
+  connection,
+  onInspect,
+  project,
+}: AppSidebarProps) {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -121,16 +127,16 @@ export function AppSidebar({ agent, connection, onInspect }: AppSidebarProps) {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" tooltip="Workspace">
+            <SidebarMenuButton size="lg" tooltip={project.workspace}>
               <Avatar size="sm">
                 <AvatarFallback>
                   <FolderOpen />
                 </AvatarFallback>
               </Avatar>
               <span className="grid flex-1 text-left leading-tight">
-                <span className="truncate font-medium">Workspace</span>
+                <span className="truncate font-medium">{project.name}</span>
                 <span className="truncate text-xs text-muted-foreground">
-                  Local
+                  {project.workspace}
                 </span>
               </span>
             </SidebarMenuButton>

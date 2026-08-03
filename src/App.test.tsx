@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatMessages } from "@/components/ChatMessages";
+import { ProjectEmptyState } from "@/components/ProjectEmptyState";
 
 const agent = {
   id: "leader",
@@ -48,5 +49,35 @@ describe("ChatMessages", () => {
 
     expect(markup).toContain("Leader");
     expect(markup).toContain("Flowent");
+  });
+});
+
+describe("ProjectEmptyState", () => {
+  it("renders the project action", () => {
+    const markup = renderToStaticMarkup(
+      <ProjectEmptyState
+        connection="ready"
+        error={null}
+        onOpen={() => undefined}
+        opening={false}
+      />,
+    );
+
+    expect(markup).toContain("Open a project");
+    expect(markup).toContain(">Open<");
+  });
+
+  it("renders a runtime error", () => {
+    const markup = renderToStaticMarkup(
+      <ProjectEmptyState
+        connection="error"
+        error="Sidecar unavailable"
+        onOpen={() => undefined}
+        opening={false}
+      />,
+    );
+
+    expect(markup).toContain("Runtime unavailable");
+    expect(markup).toContain("Sidecar unavailable");
   });
 });

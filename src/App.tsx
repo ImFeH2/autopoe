@@ -1,3 +1,4 @@
+import { open } from "@tauri-apps/plugin-dialog";
 import { MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -5,6 +6,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatMessages } from "@/components/ChatMessages";
 import { ContextInspector } from "@/components/ContextInspector";
+import { ProjectEmptyState } from "@/components/ProjectEmptyState";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +22,9 @@ import {
   chatMessage,
   connectionError,
   initialRuntimeState,
+  projectOpenRequest,
   reduceRuntimeMessage,
+  runtimeError,
   stateRequest,
 } from "@/lib/runtime";
 
@@ -30,8 +34,10 @@ function App() {
   const [runtime, setRuntime] = useState(initialRuntimeState);
   const [draft, setDraft] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [openingProject, setOpeningProject] = useState(false);
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const projectRequestRef = useRef<string | null>(null);
   const lastMessage = runtime.messages[runtime.messages.length - 1];
 
   useEffect(() => {
@@ -43,6 +49,10 @@ function App() {
       const stop = await subscribe((message) => {
         if (active) {
           setRuntime((state) => reduceRuntimeMessage(state, message));
+          if ("id" in message && message.id === projectRequestRef.current) {
+            projectRequestRef.current = null;
+            setOpeningProject(false);
+          }
         }
       });
       if (!active) {
@@ -100,12 +110,47 @@ function App() {
 
   const inspectAgent = () => setInspectorOpen(true);
 
+  const openProject = async () => {
+    try {
+      const workspace = await open({
+        directory: true,
+        multiple: false,
+        title: "Open project",
+      });
+      if (!workspace) {
+        return;
+      }
+
+      const requestId = `project-${nextRequestId++}`;
+      projectRequestRef.current = requestId;
+      setOpeningProject(true);
+      setRuntime((state) => ({ ...state, error: null }));
+      await send(projectOpenRequest(requestId, workspace));
+    } catch (error) {
+      projectRequestRef.current = null;
+      setOpeningProject(false);
+      setRuntime((state) => runtimeError(state, error));
+    }
+  };
+
+  if (!runtime.project) {
+    return (
+      <ProjectEmptyState
+        connection={runtime.connection}
+        error={runtime.error}
+        onOpen={openProject}
+        opening={openingProject}
+      />
+    );
+  }
+
   return (
     <SidebarProvider>
       <AppSidebar
         agent={runtime.agent}
         connection={runtime.connection}
         onInspect={inspectAgent}
+        project={runtime.project}
       />
 
       <SidebarInset className="h-svh overflow-hidden">

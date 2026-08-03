@@ -4,6 +4,12 @@ export type AgentStatus = "idle" | "running" | "failed";
 export type MessageStatus = "streaming" | "complete" | "failed";
 export type TurnStatus = "running" | "completed" | "failed";
 
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  workspace: string;
+}
+
 export interface AgentInfo {
   id: string;
   name: string;
@@ -47,6 +53,7 @@ export interface TurnSnapshot {
 
 export interface RuntimeState {
   connection: "connecting" | "ready" | "error";
+  project: ProjectInfo | null;
   agent: AgentInfo | null;
   messages: ChatMessage[];
   turn: TurnSnapshot | null;
@@ -54,9 +61,15 @@ export interface RuntimeState {
 }
 
 interface RuntimeSnapshot {
-  agent: AgentInfo;
+  project: ProjectInfo | null;
+  agent: AgentInfo | null;
   messages: ChatMessage[];
   last_turn: TurnSnapshot | null;
+}
+
+interface RuntimeReady {
+  project: ProjectInfo | null;
+  agent: AgentInfo | null;
 }
 
 interface TurnStarted {
@@ -79,6 +92,7 @@ interface TurnFinished {
 
 export const initialRuntimeState: RuntimeState = {
   connection: "connecting",
+  project: null,
   agent: null,
   messages: [],
   turn: null,
@@ -87,6 +101,10 @@ export const initialRuntimeState: RuntimeState = {
 
 export function stateRequest(id: string): Request {
   return { id, method: "state/get" };
+}
+
+export function projectOpenRequest(id: string, workspace: string): Request {
+  return { id, method: "project/open", params: { workspace } };
 }
 
 export function chatMessage(content: string): Notification {
@@ -98,8 +116,17 @@ export function connectionError(
   error: unknown,
 ): RuntimeState {
   return {
-    ...state,
+    ...runtimeError(state, error),
     connection: "error",
+  };
+}
+
+export function runtimeError(
+  state: RuntimeState,
+  error: unknown,
+): RuntimeState {
+  return {
+    ...state,
     error: error instanceof Error ? error.message : String(error),
   };
 }
@@ -108,17 +135,24 @@ export function reduceRuntimeMessage(
   state: RuntimeState,
   message: Message,
 ): RuntimeState {
-  if ("result" in message && isRecord(message.result)) {
+  if ("error" in message) {
+    return { ...state, error: message.error.message };
+  }
+
+  if (
+    "result" in message &&
+    isRecord(message.result) &&
+    Array.isArray(message.result.messages)
+  ) {
     const snapshot = message.result as unknown as RuntimeSnapshot;
-    if (snapshot.agent && Array.isArray(snapshot.messages)) {
-      return {
-        connection: "ready",
-        agent: snapshot.agent,
-        messages: snapshot.messages,
-        turn: snapshot.last_turn,
-        error: snapshot.last_turn?.error ?? null,
-      };
-    }
+    return {
+      connection: "ready",
+      project: snapshot.project,
+      agent: snapshot.agent,
+      messages: snapshot.messages,
+      turn: snapshot.last_turn,
+      error: snapshot.last_turn?.error ?? null,
+    };
   }
 
   if (!("method" in message) || !isRecord(message.params)) {
@@ -126,10 +160,14 @@ export function reduceRuntimeMessage(
   }
 
   if (message.method === "runtime/ready") {
-    const { agent } = message.params as unknown as { agent: AgentInfo };
-    return agent
-      ? { ...state, connection: "ready", agent, error: null }
-      : state;
+    const params = message.params as unknown as RuntimeReady;
+    return {
+      ...state,
+      connection: "ready",
+      project: params.project,
+      agent: params.agent,
+      error: null,
+    };
   }
 
   if (message.method === "turn/started") {
