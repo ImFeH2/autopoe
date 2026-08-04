@@ -62,15 +62,14 @@ describe("providers", () => {
     });
   });
 
-  it("fetches models with a temporary API key", async () => {
+  it("fetches provider models", async () => {
     mocks.request.mockResolvedValue([{ id: "model-1", name: "Model 1" }]);
 
-    await expect(fetchProviderModels("provider-1", "secret")).resolves.toEqual([
+    await expect(fetchProviderModels("provider-1")).resolves.toEqual([
       { id: "model-1", name: "Model 1" },
     ]);
     expect(mocks.request).toHaveBeenCalledWith("providers/models", {
       id: "provider-1",
-      api_key: "secret",
     });
   });
 

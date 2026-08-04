@@ -20,19 +20,14 @@ fn subscribe(sidecar: State<'_, Sidecar>, channel: Channel<Value>) -> CommandRes
 }
 
 #[tauri::command]
-fn set_secret(key: String, value: String) -> CommandResult<()> {
-    secrets::set(&key, &value)?;
+fn set_provider_secret(provider_id: String, value: String) -> CommandResult<()> {
+    secrets::set_provider(&provider_id, &value)?;
     Ok(())
 }
 
 #[tauri::command]
-fn get_secret(key: String) -> CommandResult<Option<String>> {
-    Ok(secrets::get(&key)?)
-}
-
-#[tauri::command]
-fn delete_secret(key: String) -> CommandResult<()> {
-    secrets::delete(&key)?;
+fn delete_provider_secret(provider_id: String) -> CommandResult<()> {
+    secrets::delete_provider(&provider_id)?;
     Ok(())
 }
 
@@ -45,9 +40,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             send,
             subscribe,
-            set_secret,
-            get_secret,
-            delete_secret
+            set_provider_secret,
+            delete_provider_secret
         ])
         .setup(|app| {
             app.state::<Sidecar>()

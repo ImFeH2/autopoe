@@ -50,6 +50,20 @@ describe("ChatMessages", () => {
     expect(markup).toContain("Leader");
     expect(markup).toContain("Flowent");
   });
+
+  it("renders an unconfigured agent", () => {
+    const markup = renderToStaticMarkup(
+      <ChatMessages
+        agent={{ ...agent, model: null }}
+        connection="ready"
+        error={null}
+        messages={[]}
+        onInspect={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("No model");
+  });
 });
 
 describe("ProjectEmptyState", () => {

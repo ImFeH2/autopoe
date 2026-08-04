@@ -5,12 +5,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, ipc::Channel};
 use tauri_plugin_shell::{
     ShellExt,
     process::{CommandChild, CommandEvent},
 };
+
+use crate::secrets;
 
 type OutboundMessages = Arc<Mutex<Outbound>>;
 
@@ -75,7 +77,7 @@ impl Sidecar {
             while let Some(event) = events.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
-                        if let Err(error) = dispatch(&outbound, &line) {
+                        if let Err(error) = dispatch(&child, &outbound, &line) {
                             eprintln!("flowent-agent: {error}");
                         }
                     }
@@ -94,14 +96,7 @@ impl Sidecar {
     }
 
     pub fn send(&self, message: &Value) -> Result<()> {
-        let message = encode(message)?;
-        self.child
-            .lock()
-            .map_err(|_| anyhow!("sidecar child lock poisoned"))?
-            .as_mut()
-            .context("sidecar is not running")?
-            .write(&message)
-            .context("write sidecar message")
+        write(&self.child, message)
     }
 
     pub fn subscribe(&self, channel: Channel<Value>) -> Result<()> {
@@ -128,13 +123,52 @@ fn encode(message: &Value) -> Result<Vec<u8>> {
     Ok(encoded)
 }
 
-fn dispatch(outbound: &OutboundMessages, line: &[u8]) -> Result<()> {
+fn dispatch(
+    child: &Arc<Mutex<Option<CommandChild>>>,
+    outbound: &OutboundMessages,
+    line: &[u8],
+) -> Result<()> {
     let message = serde_json::from_slice(line).context("decode sidecar message")?;
+    if let Some(response) = internal_response(&message, secrets::get_provider) {
+        return write(child, &response);
+    }
     let mut outbound = outbound
         .lock()
         .map_err(|_| anyhow!("sidecar outbound lock poisoned"))?;
     outbound.send(message);
     Ok(())
+}
+
+fn internal_response<F>(message: &Value, get_secret: F) -> Option<Value>
+where
+    F: FnOnce(&str) -> Result<Option<String>>,
+{
+    if message.get("method").and_then(Value::as_str) != Some("providers/secret") {
+        return None;
+    }
+
+    let id = message.get("id").cloned().unwrap_or(Value::Null);
+    let result = message
+        .get("params")
+        .and_then(|params| params.get("id"))
+        .and_then(Value::as_str)
+        .context("provider ID is required")
+        .and_then(get_secret);
+    Some(match result {
+        Ok(secret) => json!({"id": id, "result": secret}),
+        Err(error) => json!({"id": id, "error": {"message": format!("{error:#}")}}),
+    })
+}
+
+fn write(child: &Arc<Mutex<Option<CommandChild>>>, message: &Value) -> Result<()> {
+    let message = encode(message)?;
+    child
+        .lock()
+        .map_err(|_| anyhow!("sidecar child lock poisoned"))?
+        .as_mut()
+        .context("sidecar is not running")?
+        .write(&message)
+        .context("write sidecar message")
 }
 
 fn clear_process(child: &Arc<Mutex<Option<CommandChild>>>) {
@@ -184,5 +218,25 @@ mod tests {
             *received.lock().expect("received message lock"),
             vec![message]
         );
+    }
+
+    #[test]
+    fn handles_provider_secret_requests_internally() {
+        let request = json!({
+            "id": "desktop-1",
+            "method": "providers/secret",
+            "params": {"id": "provider-1"}
+        });
+
+        let response = internal_response(&request, |provider_id| {
+            assert_eq!(provider_id, "provider-1");
+            Ok(Some("secret".to_string()))
+        });
+
+        assert_eq!(
+            response,
+            Some(json!({"id": "desktop-1", "result": "secret"}))
+        );
+        assert!(internal_response(&json!({"method": "runtime/ready"}), |_| Ok(None)).is_none());
     }
 }

@@ -5,7 +5,7 @@ import {
   MessageSquare,
   Settings,
 } from "lucide-react";
-
+import type { SettingsPage } from "@/components/SettingsHeader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Sidebar,
@@ -24,11 +24,11 @@ import {
 import type { AgentInfo, ProjectInfo, RuntimeState } from "@/lib/runtime";
 
 interface AppSidebarProps {
-  activePage: "chat" | "providers";
+  activePage: "chat" | SettingsPage;
   agent: AgentInfo | null;
   connection: RuntimeState["connection"];
   onInspect: () => void;
-  onPageChange: (page: "chat" | "providers") => void;
+  onPageChange: (page: "chat" | SettingsPage) => void;
   project: ProjectInfo | null;
 }
 
@@ -141,8 +141,8 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              isActive={activePage === "providers"}
-              onClick={() => onPageChange("providers")}
+              isActive={activePage !== "chat"}
+              onClick={() => onPageChange("model")}
               tooltip="Settings"
             >
               <Settings />

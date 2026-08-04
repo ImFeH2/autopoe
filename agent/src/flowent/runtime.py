@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +15,13 @@ from pydantic_ai import (
     TextPartDelta,
 )
 from pydantic_ai.messages import ModelMessage
-from pydantic_ai.models.test import TestModel
+from pydantic_ai.models import Model
 from pydantic_core import to_jsonable_python
 
 from flowent.project import Project
 
 Emit = Callable[[dict[str, Any]], None]
+ResolveModel = Callable[[], Awaitable[Model]]
 
 
 class AgentRuntime:
@@ -29,9 +30,12 @@ class AgentRuntime:
         data_dir: Path,
         project: Project,
         emit: Emit,
+        model_name: str | None,
+        resolve_model: ResolveModel,
     ):
         self.emit = emit
-        self.model_name = "test"
+        self.model_name = model_name
+        self.resolve_model = resolve_model
         self.home = data_dir / "projects" / project.id / "agents" / "leader" / "home"
         self.home.mkdir(parents=True, exist_ok=True)
         self.instructions_path = self.home / "AGENTS.md"
@@ -51,7 +55,10 @@ class AgentRuntime:
             raise ValueError("path escapes agent home")
         return target.read_text()
 
-    def agent_info(self) -> dict[str, str]:
+    def set_model(self, model_name: str | None) -> None:
+        self.model_name = model_name
+
+    def agent_info(self) -> dict[str, str | None]:
         return {
             "id": "leader",
             "name": "Leader",
@@ -113,7 +120,7 @@ class AgentRuntime:
 
         result = None
         try:
-            model = TestModel(custom_output_text=f"Flowent received: {content}")
+            model = await self.resolve_model()
             async with self.agent.run_stream_events(
                 content,
                 message_history=self.history,

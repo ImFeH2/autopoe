@@ -6,8 +6,10 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatMessages } from "@/components/ChatMessages";
 import { ContextInspector } from "@/components/ContextInspector";
+import { ModelPage } from "@/components/ModelPage";
 import { ProjectEmptyState } from "@/components/ProjectEmptyState";
 import { ProvidersPage } from "@/components/ProvidersPage";
+import type { SettingsPage } from "@/components/SettingsHeader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +35,7 @@ let nextRequestId = 1;
 
 function App() {
   const [runtime, setRuntime] = useState(initialRuntimeState);
-  const [page, setPage] = useState<"chat" | "providers">("chat");
+  const [page, setPage] = useState<"chat" | SettingsPage>("chat");
   const [draft, setDraft] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [openingProject, setOpeningProject] = useState(false);
@@ -91,7 +93,10 @@ function App() {
 
   const busy = sending || runtime.agent?.status === "running";
   const canSend =
-    runtime.connection === "ready" && !busy && draft.trim().length > 0;
+    runtime.connection === "ready" &&
+    Boolean(runtime.agent?.model) &&
+    !busy &&
+    draft.trim().length > 0;
 
   const submit = async () => {
     const content = draft.trim();
@@ -112,7 +117,7 @@ function App() {
 
   const inspectAgent = () => setInspectorOpen(true);
 
-  const changePage = (nextPage: "chat" | "providers") => {
+  const changePage = (nextPage: "chat" | SettingsPage) => {
     setPage(nextPage);
     if (nextPage !== "chat") {
       setInspectorOpen(false);
@@ -153,8 +158,10 @@ function App() {
         project={runtime.project}
       />
 
-      {page === "providers" ? (
-        <ProvidersPage />
+      {page === "model" ? (
+        <ModelPage onNavigate={changePage} />
+      ) : page === "providers" ? (
+        <ProvidersPage onNavigate={changePage} />
       ) : runtime.project ? (
         <SidebarInset className="h-svh overflow-hidden">
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -176,7 +183,9 @@ function App() {
                     <AvatarFallback>L</AvatarFallback>
                   </Avatar>
                   <span>{runtime.agent.name}</span>
-                  <Badge variant="secondary">{runtime.agent.status}</Badge>
+                  <Badge variant="secondary">
+                    {runtime.agent.model ? runtime.agent.status : "No model"}
+                  </Badge>
                 </Button>
               ) : (
                 <Badge
@@ -205,7 +214,9 @@ function App() {
 
           <ChatComposer
             canSend={canSend}
-            disabled={runtime.connection !== "ready" || busy}
+            disabled={
+              runtime.connection !== "ready" || !runtime.agent?.model || busy
+            }
             onChange={setDraft}
             onSend={submit}
             value={draft}

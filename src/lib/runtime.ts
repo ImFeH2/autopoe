@@ -15,7 +15,7 @@ export interface AgentInfo {
   name: string;
   role: string;
   status: AgentStatus;
-  model: string;
+  model: string | null;
   home: string;
 }
 
@@ -183,6 +183,14 @@ export function reduceRuntimeMessage(
         params.agent_message,
       ],
       turn: params.turn,
+      error: null,
+    };
+  }
+
+  if (message.method === "agent/updated") {
+    return {
+      ...state,
+      agent: message.params as unknown as AgentInfo,
       error: null,
     };
   }

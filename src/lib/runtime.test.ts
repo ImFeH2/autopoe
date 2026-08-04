@@ -13,7 +13,7 @@ const agent = {
   id: "leader",
   name: "Leader",
   role: "Leader",
-  status: "running",
+  status: "running" as const,
   model: "test",
   home: "/data/projects/default/agents/leader/home",
 };
@@ -121,6 +121,23 @@ describe("runtime protocol", () => {
     expect(state.connection).toBe("ready");
     expect(state.project).toEqual(project);
     expect(state.agent?.name).toBe("Leader");
+  });
+
+  it("updates the active agent model", () => {
+    const state = reduceRuntimeMessage(
+      {
+        ...initialRuntimeState,
+        agent: { ...agent, model: null },
+        error: "model is not configured",
+      },
+      {
+        method: "agent/updated",
+        params: { ...agent, status: "idle", model: "gpt-5.4" },
+      },
+    );
+
+    expect(state.agent?.model).toBe("gpt-5.4");
+    expect(state.error).toBeNull();
   });
 
   it("restores an empty project state", () => {

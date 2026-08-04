@@ -3,10 +3,11 @@ import {
   LoaderCircle,
   Plus,
   RefreshCw,
-  Settings,
   Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+
+import { SettingsHeader, type SettingsPage } from "@/components/SettingsHeader";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -38,7 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarInset } from "@/components/ui/sidebar";
 import {
   deleteProvider,
   fetchProviderModels,
@@ -50,11 +51,7 @@ import {
   providerTypes,
   saveProvider,
 } from "@/lib/providers";
-import {
-  deleteProviderSecret,
-  getProviderSecret,
-  setProviderSecret,
-} from "@/lib/secrets";
+import { deleteProviderSecret, setProviderSecret } from "@/lib/secrets";
 
 interface ProviderForm {
   id: string | null;
@@ -62,6 +59,10 @@ interface ProviderForm {
   type: ProviderType;
   baseUrl: string;
   apiKey: string;
+}
+
+interface ProvidersPageProps {
+  onNavigate: (page: SettingsPage) => void;
 }
 
 function newProvider(): ProviderForm {
@@ -83,7 +84,7 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function ProvidersPage() {
+export function ProvidersPage({ onNavigate }: ProvidersPageProps) {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [form, setForm] = useState<ProviderForm>(newProvider);
   const [models, setModels] = useState<ProviderModel[] | null>(null);
@@ -123,11 +124,13 @@ export function ProvidersPage() {
   }, []);
 
   const saved = providers.find((provider) => provider.id === form.id);
-  const dirty = saved
-    ? saved.name !== form.name.trim() ||
-      saved.type !== form.type ||
-      saved.baseUrl !== form.baseUrl.trim()
-    : true;
+  const dirty =
+    form.apiKey.trim() !== "" ||
+    (saved
+      ? saved.name !== form.name.trim() ||
+        saved.type !== form.type ||
+        saved.baseUrl !== form.baseUrl.trim()
+      : true);
   const busy = loading || saving || fetching || deleting;
   const valid = form.name.trim() !== "" && form.baseUrl.trim() !== "";
 
@@ -196,14 +199,7 @@ export function ProvidersPage() {
     setFetching(true);
     setError(null);
     try {
-      const storedKey = form.apiKey.trim()
-        ? form.apiKey.trim()
-        : await getProviderSecret(form.id);
-      const apiKey = storedKey ?? "";
-      if (providerType(form.type).requiresApiKey && !apiKey) {
-        throw new Error("API key is required");
-      }
-      setModels(await fetchProviderModels(form.id, apiKey));
+      setModels(await fetchProviderModels(form.id));
     } catch (reason) {
       setModels(null);
       setError(messageOf(reason));
@@ -235,12 +231,7 @@ export function ProvidersPage() {
 
   return (
     <SidebarInset className="h-svh overflow-hidden">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger />
-        <Separator className="h-4" orientation="vertical" />
-        <Settings className="size-4" />
-        <span className="text-sm font-medium">Providers</span>
-      </header>
+      <SettingsHeader activePage="providers" onNavigate={onNavigate} />
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto grid w-full max-w-5xl gap-4 p-6 md:grid-cols-[15rem_minmax(0,1fr)]">
@@ -310,7 +301,7 @@ export function ProvidersPage() {
                   )}
                   Fetch
                 </Button>
-                <Button disabled={!valid || busy} onClick={save}>
+                <Button disabled={!valid || !dirty || busy} onClick={save}>
                   {saving ? <LoaderCircle className="animate-spin" /> : null}
                   Save
                 </Button>

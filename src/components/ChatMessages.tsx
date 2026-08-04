@@ -30,7 +30,9 @@ export function ChatMessages({
 }: ChatMessagesProps) {
   const agentName = agent?.name ?? "Leader";
   const state = agent
-    ? agentStatusLabel[agent.status]
+    ? agent.model
+      ? agentStatusLabel[agent.status]
+      : "No model"
     : connection === "connecting"
       ? "Connecting"
       : "Unavailable";

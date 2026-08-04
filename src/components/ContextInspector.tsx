@@ -50,7 +50,9 @@ export function ContextInspector({
                 <dt className="text-muted-foreground">Role</dt>
                 <dd>{agent.role}</dd>
                 <dt className="text-muted-foreground">Model</dt>
-                <dd className="font-mono text-xs">{agent.model}</dd>
+                <dd className="font-mono text-xs">
+                  {agent.model ?? "Not configured"}
+                </dd>
                 <dt className="text-muted-foreground">Home</dt>
                 <dd className="break-all font-mono text-xs">{agent.home}</dd>
               </dl>

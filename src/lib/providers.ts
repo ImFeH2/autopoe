@@ -81,11 +81,9 @@ export async function deleteProvider(providerId: string): Promise<void> {
 
 export async function fetchProviderModels(
   providerId: string,
-  apiKey: string,
 ): Promise<ProviderModel[]> {
   const result = await request("providers/models", {
     id: providerId,
-    api_key: apiKey,
   });
   if (!Array.isArray(result)) {
     throw new Error("Invalid model list");
