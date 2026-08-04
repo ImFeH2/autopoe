@@ -20,6 +20,7 @@ from pydantic_core import to_jsonable_python
 
 from flowent.collaboration import CollaborationSnapshot, CollaborationStore
 from flowent.project import Project
+from flowent.tools import FileTools
 
 Emit = Callable[[dict[str, Any]], None]
 ResolveModel = Callable[[], Awaitable[Model]]
@@ -49,8 +50,8 @@ class AgentRuntime:
         self.home.mkdir(parents=True, exist_ok=True)
         self.instructions_path = self.home / "AGENTS.md"
         self.instructions_path.touch(exist_ok=True)
-        self.agent = Agent()
-        self.agent.tool_plain(self.read_home_file)
+        self.file_tools = FileTools(project.workspace, self.home)
+        self.agent = Agent(tools=self.file_tools.functions)
         self.history = snapshot.history
         self.messages = [message.to_dict() for message in snapshot.messages]
         self.last_turn = snapshot.last_turn
@@ -59,13 +60,6 @@ class AgentRuntime:
             if self.last_turn and self.last_turn["status"] in {"failed", "interrupted"}
             else "idle"
         )
-
-    def read_home_file(self, path: str = "AGENTS.md") -> str:
-        home = self.home.resolve()
-        target = (home / path).resolve()
-        if not target.is_relative_to(home):
-            raise ValueError("path escapes agent home")
-        return target.read_text()
 
     def set_model(self, model_name: str | None) -> None:
         self.model_name = model_name
@@ -97,7 +91,7 @@ class AgentRuntime:
             content,
             instructions,
             self._public_messages(self.history),
-            ["read_home_file"],
+            self.file_tools.names,
         )
         turn_id = start.id
         user_message = start.user_message.to_dict()

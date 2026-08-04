@@ -56,6 +56,13 @@ def test_sidecar_requires_a_configured_model(tmp_path: Path) -> None:
     assert failed["params"]["agent"]["status"] == "failed"
     assert failed["params"]["message"]["status"] == "failed"
     assert failed["params"]["turn"]["error"] == "model is not configured"
+    assert failed["params"]["turn"]["context"]["tools"] == [
+        "list_files",
+        "read_file",
+        "search_files",
+        "write_file",
+        "replace_in_file",
+    ]
     final = next(message for message in messages if message.get("id") == "final")
     assert len(final["result"]["messages"]) == 2
     assert final["result"]["last_turn"]["status"] == "failed"

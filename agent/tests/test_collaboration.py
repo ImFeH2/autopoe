@@ -54,7 +54,7 @@ def test_collaboration_store_persists_messages_turns_and_model_history(
             "Hello",
             "Be concise",
             [],
-            ["read_home_file"],
+            ["read_file"],
         )
         result = await Agent().run(
             "Hello",
@@ -100,7 +100,7 @@ def test_collaboration_store_recovers_interrupted_turns(tmp_path: Path) -> None:
             "Hello",
             "",
             [],
-            ["read_home_file"],
+            ["read_file"],
         )
 
         restarted = CollaborationStore(tmp_path)
@@ -131,7 +131,7 @@ def test_collaboration_store_isolates_projects(tmp_path: Path) -> None:
             "Hello",
             "",
             [],
-            ["read_home_file"],
+            ["read_file"],
         )
         turn.snapshot["status"] = "failed"
         turn.snapshot["error"] = "Failed"
