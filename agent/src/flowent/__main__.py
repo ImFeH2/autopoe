@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from flowent.collaboration import CollaborationStore
 from flowent.models import ModelError, ModelStore, resolve_model
 from flowent.project import Project, ProjectStore
 from flowent.protocol import JsonlConnection, ProtocolError
@@ -27,7 +28,7 @@ def state(project: Project | None, runtime: AgentRuntime | None) -> dict[str, An
     runtime_state = (
         runtime.state()
         if runtime
-        else {"agent": None, "messages": [], "last_turn": None}
+        else {"agent": None, "chat": None, "messages": [], "last_turn": None}
     )
     return {
         "project": project.to_dict() if project else None,
@@ -44,9 +45,11 @@ async def serve() -> None:
 
     root = Path(data_dir)
     store = ProjectStore(root)
+    collaboration_store = CollaborationStore(root)
     provider_store = ProviderStore(root)
     model_store = ModelStore(root)
     await store.initialize()
+    await collaboration_store.initialize()
     await provider_store.initialize()
     await model_store.initialize()
     selection = await model_store.get()
@@ -63,23 +66,27 @@ async def serve() -> None:
             raise ModelError("model is not configured")
         return await resolve_model(selected, provider_store, provider_secret)
 
-    def create_runtime(current_project: Project) -> AgentRuntime:
+    async def create_runtime(current_project: Project) -> AgentRuntime:
+        snapshot = await collaboration_store.open_project(current_project.id)
         return AgentRuntime(
             root,
             current_project,
             connection.send,
             selection.model_id if selection else None,
             selected_model,
+            collaboration_store,
+            snapshot,
         )
 
     project = await store.current()
-    runtime = create_runtime(project) if project else None
+    runtime = await create_runtime(project) if project else None
     connection.send(
         {
             "method": RUNTIME_READY,
             "params": {
                 "project": project.to_dict() if project else None,
                 "agent": runtime.agent_info() if runtime else None,
+                "chat": runtime.chat.to_dict() if runtime else None,
                 "capabilities": [
                     "state/get",
                     "project/open",
@@ -123,7 +130,7 @@ async def serve() -> None:
             except (OSError, ValueError) as error:
                 reject(connection, request_id, str(error))
                 continue
-            runtime = create_runtime(project)
+            runtime = await create_runtime(project)
             respond(connection, request_id, state(project, runtime))
             continue
         if method == "providers/list":

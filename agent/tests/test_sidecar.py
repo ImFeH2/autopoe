@@ -56,7 +56,6 @@ def test_sidecar_requires_a_configured_model(tmp_path: Path) -> None:
     assert failed["params"]["agent"]["status"] == "failed"
     assert failed["params"]["message"]["status"] == "failed"
     assert failed["params"]["turn"]["error"] == "model is not configured"
-
     final = next(message for message in messages if message.get("id") == "final")
     assert len(final["result"]["messages"]) == 2
     assert final["result"]["last_turn"]["status"] == "failed"
@@ -96,6 +95,41 @@ def test_sidecar_restores_latest_project(tmp_path: Path) -> None:
         str(tmp_path / "projects" / project["id"])
     )
     assert restored[1]["result"]["messages"] == []
+
+
+def test_sidecar_restores_chat_messages_and_failed_turns(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "project",
+                "method": "project/open",
+                "params": {"workspace": str(workspace)},
+            },
+            {"method": "chat/send", "params": {"content": "Hello"}},
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+
+    restored = run_sidecar(
+        tmp_path,
+        [
+            {"id": "state", "method": "state/get"},
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+    state = restored[1]["result"]
+
+    assert restored[0]["params"]["chat"]["title"] == "General"
+    assert state["agent"]["status"] == "failed"
+    assert state["chat"]["title"] == "General"
+    assert [message["content"] for message in state["messages"]] == [
+        "Hello",
+        "model is not configured",
+    ]
+    assert state["last_turn"]["status"] == "failed"
 
 
 def test_sidecar_rejects_invalid_workspace(tmp_path: Path) -> None:

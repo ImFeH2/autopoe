@@ -38,6 +38,8 @@ describe("ChatMessages", () => {
         messages={[
           {
             id: "turn-1-agent",
+            chat_id: "general",
+            turn_id: "turn-1",
             author: "leader",
             content: "Flowent",
             status: "streaming",

@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from pydantic_ai.models.test import TestModel
 
+from flowent.collaboration import CollaborationStore
 from flowent.models import ModelSelection, ModelStore, resolve_model
-from flowent.project import Project
+from flowent.project import ProjectStore
 from flowent.providers import ProviderStore
 from flowent.runtime import AgentRuntime
 
@@ -59,12 +61,22 @@ def test_agent_runtime_streams_with_the_resolved_model(tmp_path: Path) -> None:
         async def model() -> TestModel:
             return TestModel(custom_output_text="Flowent")
 
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        projects = ProjectStore(tmp_path)
+        await projects.initialize()
+        project = await projects.open(str(workspace))
+        collaboration = CollaborationStore(tmp_path)
+        await collaboration.initialize()
+        snapshot = await collaboration.open_project(project.id)
         runtime = AgentRuntime(
             tmp_path,
-            Project("project-1", "Project", tmp_path),
+            project,
             emitted.append,
             "test",
             model,
+            collaboration,
+            snapshot,
         )
 
         await runtime.run_turn("Hello")
@@ -82,5 +94,60 @@ def test_agent_runtime_streams_with_the_resolved_model(tmp_path: Path) -> None:
         )
         assert runtime.state()["messages"][-1]["status"] == "complete"
         assert runtime.agent_info()["status"] == "idle"
+
+        restored = AgentRuntime(
+            tmp_path,
+            project,
+            emitted.append,
+            "test",
+            model,
+            collaboration,
+            await collaboration.snapshot(project.id),
+        )
+        assert restored.state()["messages"][-1]["content"] == "Flowent"
+        assert restored.history == runtime.history
+
+        await restored.run_turn("Again")
+        assert len(restored.history) > len(runtime.history)
+
+    asyncio.run(run())
+
+
+def test_agent_runtime_commits_before_the_completed_notification(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        async def model() -> TestModel:
+            return TestModel(custom_output_text="Flowent")
+
+        def emit(message: dict[str, object]) -> None:
+            if message.get("method") == "turn/completed":
+                raise RuntimeError("desktop connection closed")
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        projects = ProjectStore(tmp_path)
+        await projects.initialize()
+        project = await projects.open(str(workspace))
+        collaboration = CollaborationStore(tmp_path)
+        await collaboration.initialize()
+        runtime = AgentRuntime(
+            tmp_path,
+            project,
+            emit,
+            "test",
+            model,
+            collaboration,
+            await collaboration.open_project(project.id),
+        )
+
+        with pytest.raises(RuntimeError, match="desktop connection closed"):
+            await runtime.run_turn("Hello")
+
+        restored = await collaboration.snapshot(project.id)
+        assert restored.last_turn is not None
+        assert restored.last_turn["status"] == "completed"
+        assert restored.messages[-1].status == "complete"
+        assert restored.history
 
     asyncio.run(run())

@@ -21,11 +21,17 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import type { AgentInfo, ProjectInfo, RuntimeState } from "@/lib/runtime";
+import type {
+  AgentInfo,
+  ChatInfo,
+  ProjectInfo,
+  RuntimeState,
+} from "@/lib/runtime";
 
 interface AppSidebarProps {
   activePage: "chat" | SettingsPage;
   agent: AgentInfo | null;
+  chat: ChatInfo | null;
   connection: RuntimeState["connection"];
   onInspect: () => void;
   onPageChange: (page: "chat" | SettingsPage) => void;
@@ -45,6 +51,7 @@ function capitalize(value: string) {
 export function AppSidebar({
   activePage,
   agent,
+  chat,
   connection,
   onInspect,
   onPageChange,
@@ -79,10 +86,10 @@ export function AppSidebar({
                 <SidebarMenuButton
                   isActive={activePage === "chat"}
                   onClick={() => onPageChange("chat")}
-                  tooltip="General"
+                  tooltip={chat?.title ?? "General"}
                 >
                   <MessageSquare />
-                  <span>General</span>
+                  <span>{chat?.title ?? "General"}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

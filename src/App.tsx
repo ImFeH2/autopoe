@@ -152,6 +152,7 @@ function App() {
       <AppSidebar
         activePage={page}
         agent={runtime.agent}
+        chat={runtime.chat}
         connection={runtime.connection}
         onInspect={inspectAgent}
         onPageChange={changePage}
@@ -168,7 +169,9 @@ function App() {
             <SidebarTrigger />
             <Separator className="h-4" orientation="vertical" />
             <MessageSquare className="size-4" />
-            <span className="text-sm font-medium">General</span>
+            <span className="text-sm font-medium">
+              {runtime.chat?.title ?? "General"}
+            </span>
 
             <div className="ml-auto">
               {runtime.agent ? (

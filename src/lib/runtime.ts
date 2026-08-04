@@ -1,8 +1,8 @@
 import type { JsonValue, Message, Notification, Request } from "@/lib/agent";
 
 export type AgentStatus = "idle" | "running" | "failed";
-export type MessageStatus = "streaming" | "complete" | "failed";
-export type TurnStatus = "running" | "completed" | "failed";
+export type MessageStatus = "streaming" | "complete" | "failed" | "interrupted";
+export type TurnStatus = "running" | "completed" | "failed" | "interrupted";
 
 export interface ProjectInfo {
   id: string;
@@ -19,9 +19,17 @@ export interface AgentInfo {
   home: string;
 }
 
+export interface ChatInfo {
+  id: string;
+  title: string;
+  purpose: string;
+}
+
 export interface ChatMessage {
   id: string;
-  author: "user" | "leader";
+  chat_id: string;
+  turn_id: string | null;
+  author: string;
   content: string;
   status: MessageStatus;
 }
@@ -55,6 +63,7 @@ export interface RuntimeState {
   connection: "connecting" | "ready" | "error";
   project: ProjectInfo | null;
   agent: AgentInfo | null;
+  chat: ChatInfo | null;
   messages: ChatMessage[];
   turn: TurnSnapshot | null;
   error: string | null;
@@ -63,6 +72,7 @@ export interface RuntimeState {
 interface RuntimeSnapshot {
   project: ProjectInfo | null;
   agent: AgentInfo | null;
+  chat: ChatInfo | null;
   messages: ChatMessage[];
   last_turn: TurnSnapshot | null;
 }
@@ -70,6 +80,7 @@ interface RuntimeSnapshot {
 interface RuntimeReady {
   project: ProjectInfo | null;
   agent: AgentInfo | null;
+  chat: ChatInfo | null;
 }
 
 interface TurnStarted {
@@ -94,6 +105,7 @@ export const initialRuntimeState: RuntimeState = {
   connection: "connecting",
   project: null,
   agent: null,
+  chat: null,
   messages: [],
   turn: null,
   error: null,
@@ -149,9 +161,10 @@ export function reduceRuntimeMessage(
       connection: "ready",
       project: snapshot.project,
       agent: snapshot.agent,
+      chat: snapshot.chat,
       messages: snapshot.messages,
       turn: snapshot.last_turn,
-      error: snapshot.last_turn?.error ?? null,
+      error: null,
     };
   }
 
@@ -166,6 +179,7 @@ export function reduceRuntimeMessage(
       connection: "ready",
       project: params.project,
       agent: params.agent,
+      chat: params.chat,
       error: null,
     };
   }
@@ -227,7 +241,7 @@ export function reduceRuntimeMessage(
         item.id === params.message.id ? params.message : item,
       ),
       turn: params.turn,
-      error: params.turn.error,
+      error: null,
     };
   }
 

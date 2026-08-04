@@ -62,12 +62,16 @@ describe("runtime protocol", () => {
         agent,
         user_message: {
           id: "turn-1-user",
+          chat_id: "general",
+          turn_id: "turn-1",
           author: "user",
           content: "Hello",
           status: "complete",
         },
         agent_message: {
           id: "turn-1-agent",
+          chat_id: "general",
+          turn_id: "turn-1",
           author: "leader",
           content: "",
           status: "streaming",
@@ -88,6 +92,8 @@ describe("runtime protocol", () => {
         agent: { ...agent, status: "idle" },
         message: {
           id: "turn-1-agent",
+          chat_id: "general",
+          turn_id: "turn-1",
           author: "leader",
           content: "Flowent",
           status: "complete",
@@ -113,6 +119,7 @@ describe("runtime protocol", () => {
       result: {
         project,
         agent: { ...agent, status: "idle" },
+        chat: { id: "general", title: "General", purpose: "" },
         messages: [],
         last_turn: null,
       },
@@ -121,6 +128,36 @@ describe("runtime protocol", () => {
     expect(state.connection).toBe("ready");
     expect(state.project).toEqual(project);
     expect(state.agent?.name).toBe("Leader");
+  });
+
+  it("keeps a restored failed turn in the conversation", () => {
+    const state = reduceRuntimeMessage(initialRuntimeState, {
+      id: "state-1",
+      result: {
+        project,
+        agent: { ...agent, status: "failed" },
+        chat: { id: "general", title: "General", purpose: "" },
+        messages: [
+          {
+            id: "turn-1-agent",
+            chat_id: "general",
+            turn_id: "turn-1",
+            author: "leader",
+            content: "Model unavailable",
+            status: "failed",
+          },
+        ],
+        last_turn: {
+          ...turn,
+          status: "failed",
+          error: "Model unavailable",
+        },
+      },
+    });
+
+    expect(state.error).toBeNull();
+    expect(state.messages[0]?.content).toBe("Model unavailable");
+    expect(state.turn?.status).toBe("failed");
   });
 
   it("updates the active agent model", () => {
@@ -146,6 +183,7 @@ describe("runtime protocol", () => {
       result: {
         project: null,
         agent: null,
+        chat: null,
         messages: [],
         last_turn: null,
       },
