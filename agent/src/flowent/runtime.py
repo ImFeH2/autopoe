@@ -29,10 +29,9 @@ class AgentRuntime:
         data_dir: Path,
         project: Project,
         emit: Emit,
-        model_name: str | None = None,
     ):
         self.emit = emit
-        self.model_name = model_name or "test"
+        self.model_name = "test"
         self.home = data_dir / "projects" / project.id / "agents" / "leader" / "home"
         self.home.mkdir(parents=True, exist_ok=True)
         self.instructions_path = self.home / "AGENTS.md"
@@ -114,11 +113,7 @@ class AgentRuntime:
 
         result = None
         try:
-            model = (
-                self.model_name
-                if self.model_name != "test"
-                else TestModel(custom_output_text=f"Flowent received: {content}")
-            )
+            model = TestModel(custom_output_text=f"Flowent received: {content}")
             async with self.agent.run_stream_events(
                 content,
                 message_history=self.history,

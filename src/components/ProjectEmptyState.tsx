@@ -27,7 +27,7 @@ export function ProjectEmptyState({
   const disabled = connection !== "ready" || opening;
 
   return (
-    <main className="flex h-svh items-center justify-center p-6">
+    <div className="flex min-h-0 flex-1 items-center justify-center p-6">
       <Empty>
         <EmptyHeader>
           <EmptyMedia variant="icon">
@@ -59,6 +59,6 @@ export function ProjectEmptyState({
           ) : null}
         </EmptyContent>
       </Empty>
-    </main>
+    </div>
   );
 }

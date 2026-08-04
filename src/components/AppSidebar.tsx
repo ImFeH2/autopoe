@@ -3,6 +3,7 @@ import {
   FolderOpen,
   LoaderCircle,
   MessageSquare,
+  Settings,
 } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -23,10 +24,12 @@ import {
 import type { AgentInfo, ProjectInfo, RuntimeState } from "@/lib/runtime";
 
 interface AppSidebarProps {
+  activePage: "chat" | "providers";
   agent: AgentInfo | null;
   connection: RuntimeState["connection"];
   onInspect: () => void;
-  project: ProjectInfo;
+  onPageChange: (page: "chat" | "providers") => void;
+  project: ProjectInfo | null;
 }
 
 const connectionLabel = {
@@ -40,9 +43,11 @@ function capitalize(value: string) {
 }
 
 export function AppSidebar({
+  activePage,
   agent,
   connection,
   onInspect,
+  onPageChange,
   project,
 }: AppSidebarProps) {
   return (
@@ -50,7 +55,11 @@ export function AppSidebar({
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" tooltip="Flowent">
+            <SidebarMenuButton
+              onClick={() => onPageChange("chat")}
+              size="lg"
+              tooltip="Flowent"
+            >
               <Avatar size="sm">
                 <AvatarImage alt="" src="/flowent.png" />
                 <AvatarFallback>F</AvatarFallback>
@@ -67,7 +76,11 @@ export function AppSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive tooltip="General">
+                <SidebarMenuButton
+                  isActive={activePage === "chat"}
+                  onClick={() => onPageChange("chat")}
+                  tooltip="General"
+                >
                   <MessageSquare />
                   <span>General</span>
                 </SidebarMenuButton>
@@ -127,20 +140,32 @@ export function AppSidebar({
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" tooltip={project.workspace}>
-              <Avatar size="sm">
-                <AvatarFallback>
-                  <FolderOpen />
-                </AvatarFallback>
-              </Avatar>
-              <span className="grid flex-1 text-left leading-tight">
-                <span className="truncate font-medium">{project.name}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {project.workspace}
-                </span>
-              </span>
+            <SidebarMenuButton
+              isActive={activePage === "providers"}
+              onClick={() => onPageChange("providers")}
+              tooltip="Settings"
+            >
+              <Settings />
+              <span>Settings</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {project ? (
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg" tooltip={project.workspace}>
+                <Avatar size="sm">
+                  <AvatarFallback>
+                    <FolderOpen />
+                  </AvatarFallback>
+                </Avatar>
+                <span className="grid flex-1 text-left leading-tight">
+                  <span className="truncate font-medium">{project.name}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {project.workspace}
+                  </span>
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ) : null}
         </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />

@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { MessageSquare } from "lucide-react";
+import { FolderOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AppSidebar } from "@/components/AppSidebar";
@@ -7,6 +7,7 @@ import { ChatComposer } from "@/components/ChatComposer";
 import { ChatMessages } from "@/components/ChatMessages";
 import { ContextInspector } from "@/components/ContextInspector";
 import { ProjectEmptyState } from "@/components/ProjectEmptyState";
+import { ProvidersPage } from "@/components/ProvidersPage";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ let nextRequestId = 1;
 
 function App() {
   const [runtime, setRuntime] = useState(initialRuntimeState);
+  const [page, setPage] = useState<"chat" | "providers">("chat");
   const [draft, setDraft] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [openingProject, setOpeningProject] = useState(false);
@@ -110,6 +112,13 @@ function App() {
 
   const inspectAgent = () => setInspectorOpen(true);
 
+  const changePage = (nextPage: "chat" | "providers") => {
+    setPage(nextPage);
+    if (nextPage !== "chat") {
+      setInspectorOpen(false);
+    }
+  };
+
   const openProject = async () => {
     try {
       const workspace = await open({
@@ -133,81 +142,93 @@ function App() {
     }
   };
 
-  if (!runtime.project) {
-    return (
-      <ProjectEmptyState
-        connection={runtime.connection}
-        error={runtime.error}
-        onOpen={openProject}
-        opening={openingProject}
-      />
-    );
-  }
-
   return (
     <SidebarProvider>
       <AppSidebar
+        activePage={page}
         agent={runtime.agent}
         connection={runtime.connection}
         onInspect={inspectAgent}
+        onPageChange={changePage}
         project={runtime.project}
       />
 
-      <SidebarInset className="h-svh overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger />
-          <Separator className="h-4" orientation="vertical" />
-          <MessageSquare className="size-4" />
-          <span className="text-sm font-medium">General</span>
+      {page === "providers" ? (
+        <ProvidersPage />
+      ) : runtime.project ? (
+        <SidebarInset className="h-svh overflow-hidden">
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+            <SidebarTrigger />
+            <Separator className="h-4" orientation="vertical" />
+            <MessageSquare className="size-4" />
+            <span className="text-sm font-medium">General</span>
 
-          <div className="ml-auto">
-            {runtime.agent ? (
-              <Button
-                aria-label={`Inspect ${runtime.agent.name}`}
-                onClick={inspectAgent}
-                size="sm"
-                variant="ghost"
-              >
-                <Avatar size="sm">
-                  <AvatarImage alt="" src="/flowent.png" />
-                  <AvatarFallback>L</AvatarFallback>
-                </Avatar>
-                <span>{runtime.agent.name}</span>
-                <Badge variant="secondary">{runtime.agent.status}</Badge>
-              </Button>
-            ) : (
-              <Badge
-                variant={
-                  runtime.connection === "error" ? "destructive" : "secondary"
-                }
-              >
-                {runtime.connection === "error" ? "Unavailable" : "Connecting"}
-              </Badge>
-            )}
-          </div>
-        </header>
+            <div className="ml-auto">
+              {runtime.agent ? (
+                <Button
+                  aria-label={`Inspect ${runtime.agent.name}`}
+                  onClick={inspectAgent}
+                  size="sm"
+                  variant="ghost"
+                >
+                  <Avatar size="sm">
+                    <AvatarImage alt="" src="/flowent.png" />
+                    <AvatarFallback>L</AvatarFallback>
+                  </Avatar>
+                  <span>{runtime.agent.name}</span>
+                  <Badge variant="secondary">{runtime.agent.status}</Badge>
+                </Button>
+              ) : (
+                <Badge
+                  variant={
+                    runtime.connection === "error" ? "destructive" : "secondary"
+                  }
+                >
+                  {runtime.connection === "error"
+                    ? "Unavailable"
+                    : "Connecting"}
+                </Badge>
+              )}
+            </div>
+          </header>
 
-        <ScrollArea className="min-h-0 flex-1">
-          <ChatMessages
-            agent={runtime.agent}
+          <ScrollArea className="min-h-0 flex-1">
+            <ChatMessages
+              agent={runtime.agent}
+              connection={runtime.connection}
+              error={runtime.error}
+              messages={runtime.messages}
+              onInspect={inspectAgent}
+            />
+            <div ref={endRef} />
+          </ScrollArea>
+
+          <ChatComposer
+            canSend={canSend}
+            disabled={runtime.connection !== "ready" || busy}
+            onChange={setDraft}
+            onSend={submit}
+            value={draft}
+          />
+        </SidebarInset>
+      ) : (
+        <SidebarInset className="h-svh overflow-hidden">
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+            <SidebarTrigger />
+            <Separator className="h-4" orientation="vertical" />
+            <FolderOpen className="size-4" />
+            <span className="text-sm font-medium">Project</span>
+          </header>
+          <ProjectEmptyState
             connection={runtime.connection}
             error={runtime.error}
-            messages={runtime.messages}
-            onInspect={inspectAgent}
+            onOpen={openProject}
+            opening={openingProject}
           />
-          <div ref={endRef} />
-        </ScrollArea>
+        </SidebarInset>
+      )}
 
-        <ChatComposer
-          canSend={canSend}
-          disabled={runtime.connection !== "ready" || busy}
-          onChange={setDraft}
-          onSend={submit}
-          value={draft}
-        />
-      </SidebarInset>
-
-      {runtime.agent ? (
+      {page === "chat" && runtime.agent ? (
         <ContextInspector
           agent={runtime.agent}
           onOpenChange={setInspectorOpen}

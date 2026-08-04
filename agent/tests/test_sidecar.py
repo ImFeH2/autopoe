@@ -10,11 +10,8 @@ from pathlib import Path
 def run_sidecar(
     data_dir: Path,
     messages: list[dict[str, object]],
-    model: str | None = None,
 ) -> list[dict[str, object]]:
     env = {**os.environ, "FLOWENT_DATA_DIR": str(data_dir)}
-    if model:
-        env["FLOWENT_MODEL"] = model
     result = subprocess.run(
         [sys.executable, "-m", "flowent"],
         input="".join(f"{json.dumps(message)}\n" for message in messages),
@@ -80,31 +77,6 @@ def test_sidecar_streams_agent_turn(tmp_path: Path) -> None:
     ).is_file()
 
 
-def test_sidecar_reports_failed_turn(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    messages = run_sidecar(
-        tmp_path,
-        [
-            {
-                "id": "project",
-                "method": "project/open",
-                "params": {"workspace": str(workspace)},
-            },
-            {"method": "chat/send", "params": {"content": "Hello"}},
-            {"id": "shutdown", "method": "runtime/shutdown"},
-        ],
-        model="missing:model",
-    )
-
-    failed = next(
-        message for message in messages if message.get("method") == "turn/failed"
-    )
-    assert failed["params"]["agent"]["status"] == "failed"
-    assert failed["params"]["message"]["status"] == "failed"
-    assert failed["params"]["turn"]["error"]
-
-
 def test_sidecar_restores_latest_project(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -152,3 +124,33 @@ def test_sidecar_rejects_invalid_workspace(tmp_path: Path) -> None:
 
     assert messages[1]["id"] == "project"
     assert messages[1]["error"]["message"]
+
+
+def test_sidecar_manages_providers(tmp_path: Path) -> None:
+    messages = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "save",
+                "method": "providers/save",
+                "params": {
+                    "name": "Anthropic",
+                    "type": "anthropic",
+                    "base_url": "https://api.anthropic.com",
+                },
+            },
+            {"id": "list", "method": "providers/list"},
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+
+    provider = next(message for message in messages if message.get("id") == "save")[
+        "result"
+    ]
+    providers = next(message for message in messages if message.get("id") == "list")[
+        "result"
+    ]
+
+    assert provider["type"] == "anthropic"
+    assert providers == [provider]
+    assert "api_key" not in provider

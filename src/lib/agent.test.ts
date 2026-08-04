@@ -57,4 +57,46 @@ describe("agent transport", () => {
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).toHaveBeenCalledTimes(2);
   });
+
+  it("resolves request responses", async () => {
+    const { request, subscribe } = await import("@/lib/agent");
+    const handler = vi.fn();
+    await subscribe(handler);
+    const result = request("providers/list");
+    await vi.waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith("send", {
+        message: {
+          id: "request-1",
+          method: "providers/list",
+          params: undefined,
+        },
+      });
+    });
+
+    mocks.channels[0]?.onmessage({ id: "request-1", result: [] });
+
+    await expect(result).resolves.toEqual([]);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("rejects request errors", async () => {
+    const { request } = await import("@/lib/agent");
+    const result = request("providers/list");
+    await vi.waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith("send", {
+        message: {
+          id: "request-1",
+          method: "providers/list",
+          params: undefined,
+        },
+      });
+    });
+
+    mocks.channels[0]?.onmessage({
+      id: "request-1",
+      error: { message: "Unavailable" },
+    });
+
+    await expect(result).rejects.toThrow("Unavailable");
+  });
 });

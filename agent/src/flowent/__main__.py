@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from flowent.project import Project, ProjectStore
+from flowent.providers import ProviderError, ProviderStore, fetch_models
 from flowent.runtime import AgentRuntime
 
 RUNTIME_READY = "runtime/ready"
@@ -46,13 +47,11 @@ async def serve() -> None:
 
     root = Path(data_dir)
     store = ProjectStore(root)
+    provider_store = ProviderStore(root)
     await store.initialize()
+    await provider_store.initialize()
     project = await store.current()
-    runtime = (
-        AgentRuntime(root, project, send, os.environ.get("FLOWENT_MODEL"))
-        if project
-        else None
-    )
+    runtime = AgentRuntime(root, project, send) if project else None
     send(
         {
             "method": RUNTIME_READY,
@@ -62,6 +61,10 @@ async def serve() -> None:
                 "capabilities": [
                     "state/get",
                     "project/open",
+                    "providers/list",
+                    "providers/save",
+                    "providers/delete",
+                    "providers/models",
                     "chat/send",
                     RUNTIME_SHUTDOWN,
                 ],
@@ -103,13 +106,69 @@ async def serve() -> None:
             except (OSError, ValueError) as error:
                 reject(request_id, str(error))
                 continue
-            runtime = AgentRuntime(
-                root,
-                project,
-                send,
-                os.environ.get("FLOWENT_MODEL"),
-            )
+            runtime = AgentRuntime(root, project, send)
             respond(request_id, state(project, runtime))
+            continue
+        if method == "providers/list":
+            providers = await provider_store.list()
+            respond(request_id, [provider.to_dict() for provider in providers])
+            continue
+        if method == "providers/save":
+            params = message.get("params")
+            if not isinstance(params, dict):
+                reject(request_id, "provider is required")
+                continue
+            provider_id = params.get("id")
+            name = params.get("name")
+            provider_type = params.get("type")
+            base_url = params.get("base_url")
+            if provider_id is not None and not isinstance(provider_id, str):
+                reject(request_id, "invalid provider ID")
+                continue
+            if not all(
+                isinstance(value, str) for value in (name, provider_type, base_url)
+            ):
+                reject(request_id, "provider fields are required")
+                continue
+            try:
+                provider = await provider_store.save(
+                    provider_id,
+                    name,
+                    provider_type,
+                    base_url,
+                )
+            except ProviderError as error:
+                reject(request_id, str(error))
+                continue
+            respond(request_id, provider.to_dict())
+            continue
+        if method == "providers/delete":
+            params = message.get("params")
+            provider_id = params.get("id") if isinstance(params, dict) else None
+            if not isinstance(provider_id, str):
+                reject(request_id, "provider ID is required")
+                continue
+            try:
+                await provider_store.delete(provider_id)
+            except ProviderError as error:
+                reject(request_id, str(error))
+                continue
+            respond(request_id, {"deleted": provider_id})
+            continue
+        if method == "providers/models":
+            params = message.get("params")
+            provider_id = params.get("id") if isinstance(params, dict) else None
+            api_key = params.get("api_key") if isinstance(params, dict) else None
+            if not isinstance(provider_id, str) or not isinstance(api_key, str):
+                reject(request_id, "provider ID and API key are required")
+                continue
+            try:
+                provider = await provider_store.get(provider_id)
+                models = await fetch_models(provider, api_key)
+            except ProviderError as error:
+                reject(request_id, str(error))
+                continue
+            respond(request_id, [model.to_dict() for model in models])
             continue
         if method == RUNTIME_SHUTDOWN:
             respond(request_id, {"stopping": True})

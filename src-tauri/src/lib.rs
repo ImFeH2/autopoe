@@ -1,4 +1,5 @@
 mod error;
+mod secrets;
 mod sidecar;
 
 use error::CommandResult;
@@ -18,13 +19,36 @@ fn subscribe(sidecar: State<'_, Sidecar>, channel: Channel<Value>) -> CommandRes
     Ok(())
 }
 
+#[tauri::command]
+fn set_secret(key: String, value: String) -> CommandResult<()> {
+    secrets::set(&key, &value)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_secret(key: String) -> CommandResult<Option<String>> {
+    Ok(secrets::get(&key)?)
+}
+
+#[tauri::command]
+fn delete_secret(key: String) -> CommandResult<()> {
+    secrets::delete(&key)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .manage(Sidecar::default())
-        .invoke_handler(tauri::generate_handler![send, subscribe])
+        .invoke_handler(tauri::generate_handler![
+            send,
+            subscribe,
+            set_secret,
+            get_secret,
+            delete_secret
+        ])
         .setup(|app| {
             app.state::<Sidecar>()
                 .start(app.handle())
