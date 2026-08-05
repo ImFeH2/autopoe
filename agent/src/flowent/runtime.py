@@ -29,7 +29,7 @@ from flowent.tools import CommandTools, FileTools, SpacePaths
 Emit = Callable[[dict[str, Any]], None]
 ResolveModel = Callable[[], Awaitable[Model]]
 RequestApproval = Callable[[dict[str, Any]], Awaitable[bool]]
-RoleTool = Callable[..., Any]
+ProjectTool = Callable[..., Any]
 
 
 class AgentRuntime:
@@ -43,7 +43,7 @@ class AgentRuntime:
         request_approval: RequestApproval,
         store: CollaborationStore,
         snapshot: CollaborationSnapshot,
-        role_tools: list[RoleTool] | None = None,
+        project_tools: list[ProjectTool] | None = None,
     ):
         self.project = project
         self.emit = emit
@@ -62,17 +62,17 @@ class AgentRuntime:
         self.spaces = SpacePaths(project.workspace, self.home)
         self.file_tools = FileTools(self.spaces)
         self.command_tools = CommandTools(self.spaces)
-        self.role_tools = role_tools or []
+        self.project_tools = project_tools or []
         self.tool_names = [
             *self.file_tools.names,
             *self.command_tools.names,
-            *(tool.__name__ for tool in self.role_tools),
+            *(tool.__name__ for tool in self.project_tools),
         ]
         self.agent = Agent(
             tools=[
                 *self.file_tools.functions,
                 *self.command_tools.tools,
-                *self.role_tools,
+                *self.project_tools,
             ],
             output_type=[str, DeferredToolRequests],
         )

@@ -63,6 +63,12 @@ def test_sidecar_requires_a_configured_model(tmp_path: Path) -> None:
         "write_file",
         "replace_in_file",
         "run_command",
+        "list_agents",
+        "list_chats",
+        "create_chat",
+        "read_chat",
+        "send_message",
+        "mark_processed",
         "list_workers",
         "create_worker",
     ]
@@ -203,6 +209,99 @@ def test_sidecar_manages_project_workers(tmp_path: Path) -> None:
     assert updated["name"] == "API Engineer"
     assert [agent["id"] for agent in listed] == ["leader", worker_id]
     assert [agent["id"] for agent in final] == ["leader"]
+
+
+def test_sidecar_manages_project_chats(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    setup = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "project",
+                "method": "project/open",
+                "params": {"workspace": str(workspace)},
+            },
+            {
+                "id": "worker",
+                "method": "agents/create",
+                "params": {"name": "Reviewer", "role": "Review"},
+            },
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+    worker = next(message for message in setup if message.get("id") == "worker")[
+        "result"
+    ]
+    created_messages = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "create",
+                "method": "chats/create",
+                "params": {
+                    "title": "Review",
+                    "purpose": "Code review",
+                    "members": ["leader", worker["id"]],
+                },
+            },
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+    chat = next(
+        message for message in created_messages if message.get("id") == "create"
+    )["result"]
+
+    messages = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "send",
+                "method": "chats/send",
+                "params": {"id": chat["id"], "content": "Review the change"},
+            },
+            {
+                "id": "messages",
+                "method": "chats/messages",
+                "params": {"id": chat["id"]},
+            },
+            {
+                "id": "update",
+                "method": "chats/update",
+                "params": {
+                    "id": chat["id"],
+                    "title": "Final review",
+                    "purpose": "Approval",
+                    "members": ["leader"],
+                },
+            },
+            {
+                "id": "close",
+                "method": "chats/close",
+                "params": {"id": chat["id"]},
+            },
+            {"id": "list", "method": "chats/list"},
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+    sent = next(message for message in messages if message.get("id") == "send")[
+        "result"
+    ]
+    listed_messages = next(
+        message for message in messages if message.get("id") == "messages"
+    )["result"]
+    updated = next(message for message in messages if message.get("id") == "update")[
+        "result"
+    ]
+    chats = next(message for message in messages if message.get("id") == "list")[
+        "result"
+    ]
+
+    assert chat["members"] == ["leader", worker["id"]]
+    assert sent["author"] == "user"
+    assert listed_messages == [sent]
+    assert updated["members"] == ["leader"]
+    assert [item["kind"] for item in chats] == ["general"]
 
 
 def test_sidecar_rejects_invalid_workspace(tmp_path: Path) -> None:

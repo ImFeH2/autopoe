@@ -26,8 +26,18 @@ const project = {
   workspace: "/projects/flowent",
 };
 
+const chat = {
+  id: "general",
+  title: "General",
+  purpose: "",
+  kind: "general" as const,
+  created_by: "user",
+  members: ["leader"],
+};
+
 const turn = {
   id: "turn-1",
+  chat_id: "general",
   status: "running" as const,
   context: {
     instructions: "",
@@ -119,10 +129,10 @@ describe("runtime protocol", () => {
       },
     });
 
-    expect(streamed.messages[1]?.content).toBe("Flowent");
+    expect(streamed.messagesByChat.general?.[1]?.content).toBe("Flowent");
     expect(streamed.turn?.events).toHaveLength(2);
     expect(completed.agent?.status).toBe("idle");
-    expect(completed.messages[1]?.status).toBe("complete");
+    expect(completed.messagesByChat.general?.[1]?.status).toBe("complete");
     expect(completed.turn?.status).toBe("completed");
   });
 
@@ -133,7 +143,8 @@ describe("runtime protocol", () => {
         project,
         agent: { ...agent, status: "idle" },
         agents: [{ ...agent, status: "idle" }],
-        chat: { id: "general", title: "General", purpose: "" },
+        chat,
+        chats: [chat],
         messages: [],
         last_turn: null,
       },
@@ -151,7 +162,8 @@ describe("runtime protocol", () => {
         project,
         agent: { ...agent, status: "failed" },
         agents: [{ ...agent, status: "failed" }],
-        chat: { id: "general", title: "General", purpose: "" },
+        chat,
+        chats: [chat],
         messages: [
           {
             id: "turn-1-agent",
@@ -171,7 +183,9 @@ describe("runtime protocol", () => {
     });
 
     expect(state.error).toBeNull();
-    expect(state.messages[0]?.content).toBe("Model unavailable");
+    expect(state.messagesByChat.general?.[0]?.content).toBe(
+      "Model unavailable",
+    );
     expect(state.turn?.status).toBe("failed");
   });
 
@@ -211,6 +225,38 @@ describe("runtime protocol", () => {
 
     expect(state.agent?.id).toBe("leader");
     expect(state.agents).toEqual([agent, worker]);
+  });
+
+  it("updates the chat directory and routes messages by chat", () => {
+    const custom = {
+      ...chat,
+      id: "chat-1",
+      kind: "custom" as const,
+      title: "Review",
+    };
+    const updated = reduceRuntimeMessage(
+      { ...initialRuntimeState, chat, chats: [chat] },
+      {
+        method: "chats/updated",
+        params: { chats: [chat, custom] },
+      },
+    );
+    const messaged = reduceRuntimeMessage(updated, {
+      method: "chat/message",
+      params: {
+        id: "message-1",
+        chat_id: custom.id,
+        turn_id: null,
+        author: "user",
+        content: "Review this",
+        status: "complete",
+      },
+    });
+
+    expect(updated.chats).toEqual([chat, custom]);
+    expect(messaged.messagesByChat[custom.id]?.[0]?.content).toBe(
+      "Review this",
+    );
   });
 
   it("tracks a command approval until it is resolved", () => {
@@ -255,6 +301,7 @@ describe("runtime protocol", () => {
         agent: null,
         agents: [],
         chat: null,
+        chats: [],
         messages: [],
         last_turn: null,
       },

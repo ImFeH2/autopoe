@@ -140,3 +140,41 @@ def test_project_runtime_archives_worker_when_runtime_creation_fails(
         assert next(agent for agent in all_agents if agent.kind == "worker").archived
 
     asyncio.run(run())
+
+
+def test_project_runtime_binds_chat_tools_to_each_agent(tmp_path: Path) -> None:
+    async def run() -> None:
+        async def model() -> TestModel:
+            return TestModel(custom_output_text="Flowent")
+
+        runtime = await open_runtime(tmp_path, model, [])
+        worker = await runtime.create_worker("Researcher", "Research")
+        worker_runtime = runtime.runtimes[worker["id"]]
+        tools = {tool.__name__: tool for tool in worker_runtime.project_tools}
+
+        assert set(tools) == {
+            "list_agents",
+            "list_chats",
+            "create_chat",
+            "read_chat",
+            "send_message",
+            "mark_processed",
+        }
+        directory = tools["list_agents"]()
+        assert set(directory[0]) == {"id", "name", "role", "kind"}
+        chat = await tools["create_chat"](
+            "Research",
+            "Findings",
+            ["leader"],
+        )
+        message = await tools["send_message"](
+            chat["id"],
+            "Initial findings",
+        )
+        leader_view = await runtime.read_chat(chat["id"], "leader")
+
+        assert worker["id"] in chat["members"]
+        assert message["author"] == worker["id"]
+        assert leader_view["messages"][0]["processing"] == "pending"
+
+    asyncio.run(run())

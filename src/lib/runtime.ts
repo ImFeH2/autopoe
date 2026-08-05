@@ -5,9 +5,11 @@ import type {
   Request,
   SuccessResponse,
 } from "@/lib/agent";
+import type { ChatInfo, ChatMessage } from "@/lib/chats";
+
+export type { ChatInfo, ChatMessage } from "@/lib/chats";
 
 export type AgentStatus = "idle" | "running" | "waiting" | "failed";
-export type MessageStatus = "streaming" | "complete" | "failed" | "interrupted";
 export type TurnStatus = "running" | "completed" | "failed" | "interrupted";
 
 export interface ProjectInfo {
@@ -24,21 +26,6 @@ export interface AgentInfo {
   status: AgentStatus;
   model: string | null;
   home: string;
-}
-
-export interface ChatInfo {
-  id: string;
-  title: string;
-  purpose: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  chat_id: string;
-  turn_id: string | null;
-  author: string;
-  content: string;
-  status: MessageStatus;
 }
 
 export interface TurnContext {
@@ -75,6 +62,7 @@ export interface CommandApproval {
 
 export interface TurnSnapshot {
   id: string;
+  chat_id: string;
   status: TurnStatus;
   context: TurnContext;
   events: TurnEvent[];
@@ -88,7 +76,8 @@ export interface RuntimeState {
   agent: AgentInfo | null;
   agents: AgentInfo[];
   chat: ChatInfo | null;
-  messages: ChatMessage[];
+  chats: ChatInfo[];
+  messagesByChat: Record<string, ChatMessage[]>;
   turn: TurnSnapshot | null;
   approval: CommandApproval | null;
   error: string | null;
@@ -99,6 +88,7 @@ interface RuntimeSnapshot {
   agent: AgentInfo | null;
   agents: AgentInfo[];
   chat: ChatInfo | null;
+  chats: ChatInfo[];
   messages: ChatMessage[];
   last_turn: TurnSnapshot | null;
 }
@@ -108,6 +98,7 @@ interface RuntimeReady {
   agent: AgentInfo | null;
   agents: AgentInfo[];
   chat: ChatInfo | null;
+  chats: ChatInfo[];
 }
 
 interface TurnStarted {
@@ -132,13 +123,18 @@ interface AgentsUpdated {
   agents: AgentInfo[];
 }
 
+interface ChatsUpdated {
+  chats: ChatInfo[];
+}
+
 export const initialRuntimeState: RuntimeState = {
   connection: "connecting",
   project: null,
   agent: null,
   agents: [],
   chat: null,
-  messages: [],
+  chats: [],
+  messagesByChat: {},
   turn: null,
   approval: null,
   error: null,
@@ -183,6 +179,31 @@ export function runtimeError(
   };
 }
 
+export function replaceChatMessages(
+  state: RuntimeState,
+  chatId: string,
+  messages: ChatMessage[],
+): RuntimeState {
+  return {
+    ...state,
+    messagesByChat: { ...state.messagesByChat, [chatId]: messages },
+    error: null,
+  };
+}
+
+export function addChatMessage(
+  state: RuntimeState,
+  message: ChatMessage,
+): RuntimeState {
+  return {
+    ...state,
+    messagesByChat: upsertMessages(state.messagesByChat, message.chat_id, [
+      message,
+    ]),
+    error: null,
+  };
+}
+
 export function reduceRuntimeMessage(
   state: RuntimeState,
   message: Message,
@@ -203,7 +224,10 @@ export function reduceRuntimeMessage(
       agent: snapshot.agent,
       agents: snapshot.agents,
       chat: snapshot.chat,
-      messages: snapshot.messages,
+      chats: snapshot.chats,
+      messagesByChat: snapshot.chat
+        ? { [snapshot.chat.id]: snapshot.messages }
+        : {},
       turn: snapshot.last_turn,
       approval: null,
       error: null,
@@ -223,6 +247,7 @@ export function reduceRuntimeMessage(
       agent: params.agent,
       agents: params.agents,
       chat: params.chat,
+      chats: params.chats,
       approval: null,
       error: null,
     };
@@ -230,17 +255,16 @@ export function reduceRuntimeMessage(
 
   if (message.method === "turn/started") {
     const params = message.params as unknown as TurnStarted;
-    const ids = new Set([params.user_message.id, params.agent_message.id]);
     return {
       ...state,
       connection: "ready",
       agent: params.agent,
       agents: replaceAgent(state.agents, params.agent),
-      messages: [
-        ...state.messages.filter((item) => !ids.has(item.id)),
-        params.user_message,
-        params.agent_message,
-      ],
+      messagesByChat: upsertMessages(
+        state.messagesByChat,
+        params.user_message.chat_id,
+        [params.user_message, params.agent_message],
+      ),
       turn: params.turn,
       approval: null,
       error: null,
@@ -266,6 +290,18 @@ export function reduceRuntimeMessage(
     return { ...state, agent, agents: params.agents, error: null };
   }
 
+  if (message.method === "chats/updated") {
+    const params = message.params as unknown as ChatsUpdated;
+    const chat = state.chat
+      ? (params.chats.find((item) => item.id === state.chat?.id) ?? state.chat)
+      : (params.chats.find((item) => item.kind === "general") ?? null);
+    return { ...state, chat, chats: params.chats, error: null };
+  }
+
+  if (message.method === "chat/message") {
+    return addChatMessage(state, message.params as unknown as ChatMessage);
+  }
+
   if (message.method === "approval/request" && "id" in message) {
     return {
       ...state,
@@ -282,17 +318,22 @@ export function reduceRuntimeMessage(
     if (state.turn?.id !== params.turn_id) {
       return state;
     }
-    const messages =
+    const chatId = state.turn.chat_id;
+    const messages = state.messagesByChat[chatId] ?? [];
+    const updatedMessages =
       params.event.kind === "text_delta" && params.event.content
-        ? state.messages.map((item) =>
+        ? messages.map((item) =>
             item.id === `${params.turn_id}-agent`
               ? { ...item, content: item.content + params.event.content }
               : item,
           )
-        : state.messages;
+        : messages;
     return {
       ...state,
-      messages,
+      messagesByChat: {
+        ...state.messagesByChat,
+        [chatId]: updatedMessages,
+      },
       approval:
         params.event.kind === "approval_resolved" &&
         params.event.tool_call_id === state.approval?.tool_call_id
@@ -311,8 +352,10 @@ export function reduceRuntimeMessage(
       ...state,
       agent: params.agent,
       agents: replaceAgent(state.agents, params.agent),
-      messages: state.messages.map((item) =>
-        item.id === params.message.id ? params.message : item,
+      messagesByChat: upsertMessages(
+        state.messagesByChat,
+        params.message.chat_id,
+        [params.message],
       ),
       turn: params.turn,
       approval: null,
@@ -331,4 +374,18 @@ function replaceAgent(agents: AgentInfo[], agent: AgentInfo): AgentInfo[] {
   return agents.some((item) => item.id === agent.id)
     ? agents.map((item) => (item.id === agent.id ? agent : item))
     : [...agents, agent];
+}
+
+function upsertMessages(
+  messagesByChat: Record<string, ChatMessage[]>,
+  chatId: string,
+  messages: ChatMessage[],
+): Record<string, ChatMessage[]> {
+  const incoming = new Map(messages.map((message) => [message.id, message]));
+  const current = (messagesByChat[chatId] ?? []).map(
+    (message) => incoming.get(message.id) ?? message,
+  );
+  const existing = new Set(current.map((message) => message.id));
+  const added = messages.filter((message) => !existing.has(message.id));
+  return { ...messagesByChat, [chatId]: [...current, ...added] };
 }

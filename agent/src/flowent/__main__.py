@@ -33,6 +33,7 @@ def state(project: Project | None, runtime: ProjectRuntime | None) -> dict[str, 
             "agent": None,
             "agents": [],
             "chat": None,
+            "chats": [],
             "messages": [],
             "last_turn": None,
         }
@@ -106,6 +107,7 @@ async def serve() -> None:
                 "agent": runtime.agent_info() if runtime else None,
                 "agents": runtime.agent_infos() if runtime else [],
                 "chat": runtime.chat.to_dict() if runtime else None,
+                "chats": runtime.chat_infos() if runtime else [],
                 "capabilities": [
                     "state/get",
                     "project/open",
@@ -119,6 +121,12 @@ async def serve() -> None:
                     "agents/create",
                     "agents/update",
                     "agents/archive",
+                    "chats/list",
+                    "chats/create",
+                    "chats/update",
+                    "chats/close",
+                    "chats/messages",
+                    "chats/send",
                     "chat/send",
                     RUNTIME_SHUTDOWN,
                 ],
@@ -212,6 +220,114 @@ async def serve() -> None:
                 reject(connection, request_id, str(error))
                 continue
             respond(connection, request_id, {"archived": agent_id})
+            continue
+        if method == "chats/list":
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            respond(connection, request_id, runtime.chat_infos())
+            continue
+        if method == "chats/create":
+            params = message.get("params")
+            title = params.get("title") if isinstance(params, dict) else None
+            purpose = params.get("purpose") if isinstance(params, dict) else None
+            members = params.get("members") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if (
+                not isinstance(title, str)
+                or not isinstance(purpose, str)
+                or not isinstance(members, list)
+                or not all(isinstance(member, str) for member in members)
+            ):
+                reject(connection, request_id, "chat fields are required")
+                continue
+            try:
+                chat = await runtime.create_chat(title, purpose, members)
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, chat)
+            continue
+        if method == "chats/update":
+            params = message.get("params")
+            chat_id = params.get("id") if isinstance(params, dict) else None
+            title = params.get("title") if isinstance(params, dict) else None
+            purpose = params.get("purpose") if isinstance(params, dict) else None
+            members = params.get("members") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if (
+                not isinstance(chat_id, str)
+                or not isinstance(title, str)
+                or not isinstance(purpose, str)
+                or not isinstance(members, list)
+                or not all(isinstance(member, str) for member in members)
+            ):
+                reject(connection, request_id, "chat fields are required")
+                continue
+            try:
+                chat = await runtime.update_chat(
+                    chat_id,
+                    title,
+                    purpose,
+                    members,
+                )
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, chat)
+            continue
+        if method == "chats/close":
+            params = message.get("params")
+            chat_id = params.get("id") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if not isinstance(chat_id, str):
+                reject(connection, request_id, "chat ID is required")
+                continue
+            try:
+                await runtime.close_chat(chat_id)
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, {"closed": chat_id})
+            continue
+        if method == "chats/messages":
+            params = message.get("params")
+            chat_id = params.get("id") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if not isinstance(chat_id, str):
+                reject(connection, request_id, "chat ID is required")
+                continue
+            try:
+                messages = await runtime.chat_messages(chat_id)
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, messages)
+            continue
+        if method == "chats/send":
+            params = message.get("params")
+            chat_id = params.get("id") if isinstance(params, dict) else None
+            content = params.get("content") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if not isinstance(chat_id, str) or not isinstance(content, str):
+                reject(connection, request_id, "message fields are required")
+                continue
+            try:
+                chat_message = await runtime.send_message(chat_id, content)
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, chat_message)
             continue
         if method == "providers/list":
             providers = await provider_store.list()

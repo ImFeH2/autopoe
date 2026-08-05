@@ -22,12 +22,19 @@ class Chat:
     project_id: str
     title: str
     purpose: str
+    kind: str
+    created_by: str
+    members: tuple[str, ...]
+    closed: bool
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
             "purpose": self.purpose,
+            "kind": self.kind,
+            "created_by": self.created_by,
+            "members": list(self.members),
         }
 
 
@@ -39,6 +46,7 @@ class ChatMessage:
     author: str
     content: str
     status: str
+    created_at: int
 
     def to_dict(self) -> dict[str, str | None]:
         return {

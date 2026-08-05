@@ -1,3 +1,4 @@
+from flowent.collaboration.chat_tools import ChatTools
 from flowent.collaboration.domain import (
     AgentRecord,
     Chat,
@@ -12,6 +13,7 @@ __all__ = [
     "AgentRecord",
     "Chat",
     "ChatMessage",
+    "ChatTools",
     "CollaborationSnapshot",
     "CollaborationStore",
     "TurnStart",

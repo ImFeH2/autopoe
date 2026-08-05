@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 interface ChatComposerProps {
   canSend: boolean;
   disabled: boolean;
+  label: string;
   onChange: (value: string) => void;
   onSend: () => void;
   value: string;
@@ -15,6 +16,7 @@ interface ChatComposerProps {
 export function ChatComposer({
   canSend,
   disabled,
+  label,
   onChange,
   onSend,
   value,
@@ -44,12 +46,13 @@ export function ChatComposer({
         onSubmit={submit}
       >
         <Textarea
-          aria-label="Message Leader"
+          aria-label={label}
           disabled={disabled}
+          maxLength={20_000}
           name="message"
           onChange={(event) => onChange(event.currentTarget.value)}
           onKeyDown={submitOnEnter}
-          placeholder="Message Leader"
+          placeholder={label}
           rows={1}
           value={value}
         />

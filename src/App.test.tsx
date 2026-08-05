@@ -17,27 +17,36 @@ const agent = {
   home: "/data/projects/default/agents/leader/home",
 };
 
+const chat = {
+  id: "general",
+  title: "General",
+  purpose: "",
+  kind: "general" as const,
+  created_by: "user",
+  members: ["leader"],
+};
+
 describe("ChatMessages", () => {
   it("renders the empty chat", () => {
     const markup = renderToStaticMarkup(
       <ChatMessages
-        agent={agent}
-        connection="ready"
+        agents={[agent]}
+        chat={chat}
         error={null}
         messages={[]}
         onInspect={() => undefined}
       />,
     );
 
-    expect(markup).toContain("Leader");
-    expect(markup).toContain("Ready");
+    expect(markup).toContain("General");
+    expect(markup).toContain("1 member");
   });
 
   it("renders streamed agent content", () => {
     const markup = renderToStaticMarkup(
       <ChatMessages
-        agent={agent}
-        connection="ready"
+        agents={[agent]}
+        chat={chat}
         error={null}
         messages={[
           {
@@ -57,18 +66,25 @@ describe("ChatMessages", () => {
     expect(markup).toContain("Flowent");
   });
 
-  it("renders an unconfigured agent", () => {
+  it("renders a custom chat purpose", () => {
     const markup = renderToStaticMarkup(
       <ChatMessages
-        agent={{ ...agent, model: null }}
-        connection="ready"
+        agents={[agent]}
+        chat={{
+          ...chat,
+          id: "review",
+          title: "Review",
+          purpose: "Code review",
+          kind: "custom",
+        }}
         error={null}
         messages={[]}
         onInspect={() => undefined}
       />,
     );
 
-    expect(markup).toContain("No model");
+    expect(markup).toContain("Review");
+    expect(markup).toContain("Code review");
   });
 });
 

@@ -14,9 +14,15 @@ from pydantic_ai import ModelMessagesTypeAdapter
 from pydantic_ai.messages import ModelMessage
 from pydantic_core import to_json
 
+from flowent.collaboration.chat_store import (
+    ChatStore,
+    active_chat_members,
+    chat_from_row,
+    insert_chat_message,
+    message_from_row,
+)
 from flowent.collaboration.domain import (
     AgentRecord,
-    Chat,
     ChatMessage,
     CollaborationSnapshot,
     TurnStart,
@@ -28,6 +34,7 @@ INTERRUPTED = "Runtime interrupted"
 class CollaborationStore:
     def __init__(self, data_dir: Path):
         self.database_path = data_dir / "flowent.db"
+        self.chat_store = ChatStore(self._database, self._ensure_project)
 
     @asynccontextmanager
     async def _database(self) -> AsyncIterator[aiosqlite.Connection]:
@@ -174,6 +181,13 @@ class CollaborationStore:
                 WHERE archived_at IS NULL
                 """
             )
+            await database.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS chats_project_active_title
+                ON chats(project_id, title COLLATE NOCASE)
+                WHERE closed_at IS NULL
+                """
+            )
             await self._recover(database)
             await database.commit()
 
@@ -198,7 +212,7 @@ class CollaborationStore:
                 agent_row = await cursor.fetchone()
             async with database.execute(
                 """
-                SELECT id, project_id, title, purpose
+                SELECT id, project_id, title, purpose, kind, created_by, closed_at
                 FROM chats
                 WHERE project_id = ? AND kind = 'general'
                 """,
@@ -210,7 +224,22 @@ class CollaborationStore:
 
             async with database.execute(
                 """
-                SELECT id, chat_id, turn_id, author_type, author_id, content, status
+                SELECT cm.agent_id
+                FROM chat_members AS cm
+                JOIN agents AS a
+                    ON a.project_id = cm.project_id AND a.id = cm.agent_id
+                WHERE cm.project_id = ? AND cm.chat_id = ?
+                    AND a.archived_at IS NULL
+                ORDER BY a.kind, a.name COLLATE NOCASE, a.id
+                """,
+                (project_id, chat_row["id"]),
+            ) as cursor:
+                member_rows = await cursor.fetchall()
+
+            async with database.execute(
+                """
+                SELECT id, chat_id, turn_id, author_type, author_id, content,
+                    status, created_at
                 FROM chat_messages
                 WHERE chat_id = ?
                 ORDER BY created_at, id
@@ -220,7 +249,8 @@ class CollaborationStore:
                 message_rows = await cursor.fetchall()
             async with database.execute(
                 """
-                SELECT status, context_json, events_json, usage_json, error, id
+                SELECT id, chat_id, status, context_json, events_json,
+                    usage_json, error
                 FROM turns
                 WHERE project_id = ? AND agent_id = ?
                 ORDER BY started_at DESC
@@ -246,8 +276,8 @@ class CollaborationStore:
         )
         return CollaborationSnapshot(
             self._agent(agent_row),
-            self._chat(chat_row),
-            [self._message(row) for row in message_rows],
+            chat_from_row(chat_row, tuple(row["agent_id"] for row in member_rows)),
+            [message_from_row(row) for row in message_rows],
             self._turn(turn_row) if turn_row else None,
             history,
         )
@@ -284,6 +314,7 @@ class CollaborationStore:
         tools: list[str],
     ) -> TurnStart:
         turn_id = uuid4().hex
+        now = time.time_ns()
         user_message = ChatMessage(
             f"{turn_id}-user",
             chat_id,
@@ -291,6 +322,7 @@ class CollaborationStore:
             "user",
             content,
             "complete",
+            now,
         )
         agent_message = ChatMessage(
             f"{turn_id}-agent",
@@ -299,9 +331,11 @@ class CollaborationStore:
             agent_id,
             "",
             "streaming",
+            now + 1,
         )
         turn = {
             "id": turn_id,
+            "chat_id": chat_id,
             "status": "running",
             "context": {
                 "instructions": instructions,
@@ -313,8 +347,10 @@ class CollaborationStore:
             "usage": None,
             "error": None,
         }
-        now = time.time_ns()
         async with self._database() as database:
+            members = await active_chat_members(database, project_id, chat_id)
+            if agent_id not in members:
+                raise ValueError("chat not found")
             await database.execute(
                 """
                 INSERT INTO turns (
@@ -337,8 +373,22 @@ class CollaborationStore:
                     now,
                 ),
             )
-            await self._insert_message(database, project_id, user_message, now)
-            await self._insert_message(database, project_id, agent_message, now + 1)
+            await insert_chat_message(
+                database,
+                project_id,
+                user_message,
+                now,
+                members,
+                agent_id,
+            )
+            await insert_chat_message(
+                database,
+                project_id,
+                agent_message,
+                now + 1,
+                members,
+                agent_id,
+            )
             await database.commit()
         return TurnStart(turn_id, user_message, agent_message, turn)
 
@@ -573,6 +623,20 @@ class CollaborationStore:
             columns = {row["name"] for row in await cursor.fetchall()}
         if "archived_at" not in columns:
             await database.execute("ALTER TABLE agents ADD COLUMN archived_at INTEGER")
+        await database.execute(
+            """
+            INSERT OR IGNORE INTO message_processing (
+                project_id, message_id, agent_id, status, processed_at
+            )
+            SELECT m.project_id, m.id, cm.agent_id, 'processed', m.updated_at
+            FROM chat_messages AS m
+            JOIN chat_members AS cm
+                ON cm.project_id = m.project_id AND cm.chat_id = m.chat_id
+            JOIN agents AS a
+                ON a.project_id = cm.project_id AND a.id = cm.agent_id
+            WHERE a.archived_at IS NULL
+            """
+        )
 
     async def _recover(self, database: aiosqlite.Connection) -> None:
         async with database.execute(
@@ -604,37 +668,6 @@ class CollaborationStore:
                 """,
                 (INTERRUPTED, now, row["output_message_id"]),
             )
-
-    @staticmethod
-    async def _insert_message(
-        database: aiosqlite.Connection,
-        project_id: str,
-        message: ChatMessage,
-        created_at: int,
-    ) -> None:
-        author_type = "user" if message.author == "user" else "agent"
-        author_id = None if message.author == "user" else message.author
-        await database.execute(
-            """
-            INSERT INTO chat_messages (
-                id, project_id, chat_id, turn_id, author_type, author_id,
-                content, status, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                message.id,
-                project_id,
-                message.chat_id,
-                message.turn_id,
-                author_type,
-                author_id,
-                message.content,
-                message.status,
-                created_at,
-                created_at,
-            ),
-        )
 
     @classmethod
     async def _update_turn(
@@ -674,28 +707,11 @@ class CollaborationStore:
             row["archived_at"] is not None,
         )
 
-    @staticmethod
-    def _chat(row: aiosqlite.Row) -> Chat:
-        return Chat(row["id"], row["project_id"], row["title"], row["purpose"])
-
-    @staticmethod
-    def _message(row: aiosqlite.Row) -> ChatMessage:
-        author = (
-            row["author_id"] if row["author_type"] == "agent" else row["author_type"]
-        )
-        return ChatMessage(
-            row["id"],
-            row["chat_id"],
-            row["turn_id"],
-            author,
-            row["content"],
-            row["status"],
-        )
-
     @classmethod
     def _turn(cls, row: aiosqlite.Row) -> dict[str, Any]:
         return {
             "id": row["id"],
+            "chat_id": row["chat_id"],
             "status": row["status"],
             "context": cls._load(row["context_json"]),
             "events": cls._load(row["events_json"]),

@@ -1,43 +1,28 @@
-import { CircleAlert, LoaderCircle } from "lucide-react";
+import { CircleAlert, LoaderCircle, MessageSquare } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import type { AgentInfo, ChatMessage, RuntimeState } from "@/lib/runtime";
+import type { ChatInfo, ChatMessage } from "@/lib/chats";
+import type { AgentInfo } from "@/lib/runtime";
 
 interface ChatMessagesProps {
-  agent: AgentInfo | null;
-  connection: RuntimeState["connection"];
+  agents: AgentInfo[];
+  chat: ChatInfo;
   error: string | null;
   messages: ChatMessage[];
-  onInspect: () => void;
+  onInspect: (agentId: string) => void;
 }
 
-const agentStatusLabel = {
-  idle: "Ready",
-  running: "Working",
-  waiting: "Waiting",
-  failed: "Failed",
-} as const;
-
 export function ChatMessages({
-  agent,
-  connection,
+  agents,
+  chat,
   error,
   messages,
   onInspect,
 }: ChatMessagesProps) {
-  const agentName = agent?.name ?? "Leader";
-  const state = agent
-    ? agent.model
-      ? agentStatusLabel[agent.status]
-      : "No model"
-    : connection === "connecting"
-      ? "Connecting"
-      : "Unavailable";
-
   if (error) {
     return (
       <div className="flex min-h-full items-center justify-center p-6">
@@ -52,49 +37,43 @@ export function ChatMessages({
 
   return (
     <div className="mx-auto min-h-full w-full max-w-4xl px-6 py-8">
-      <section className="flex flex-col items-center gap-3 py-8 text-center">
-        <Button
-          aria-label={`Inspect ${agentName}`}
-          disabled={!agent}
-          onClick={onInspect}
-          size="icon-lg"
-          variant="ghost"
-        >
-          <Avatar>
-            <AvatarImage alt="" src="/flowent.png" />
-            <AvatarFallback>L</AvatarFallback>
-          </Avatar>
-        </Button>
-        <h1 className="text-xl font-medium">{agentName}</h1>
-        <Badge variant="secondary">{state}</Badge>
-      </section>
-
       {messages.length > 0 ? (
         <div className="space-y-6 pb-8" aria-live="polite">
-          {messages.map((message) =>
-            message.author === "user" ? (
-              <Card className="ml-auto max-w-[75%]" key={message.id} size="sm">
-                <CardContent className="whitespace-pre-wrap leading-6">
-                  {message.content}
-                </CardContent>
-              </Card>
-            ) : (
+          {messages.map((message) => {
+            if (message.author === "user") {
+              return (
+                <Card
+                  className="ml-auto max-w-[75%]"
+                  key={message.id}
+                  size="sm"
+                >
+                  <CardContent className="whitespace-pre-wrap leading-6">
+                    {message.content}
+                  </CardContent>
+                </Card>
+              );
+            }
+            const author = agents.find((agent) => agent.id === message.author);
+            const authorName = author?.name ?? "Flowent";
+            return (
               <article className="flex gap-3" key={message.id}>
                 <Button
-                  aria-label={`Inspect ${agentName}`}
-                  disabled={!agent}
-                  onClick={onInspect}
+                  aria-label={`Inspect ${authorName}`}
+                  disabled={!author}
+                  onClick={() => author && onInspect(author.id)}
                   size="icon"
                   variant="ghost"
                 >
                   <Avatar size="sm">
                     <AvatarImage alt="" src="/flowent.png" />
-                    <AvatarFallback>L</AvatarFallback>
+                    <AvatarFallback>
+                      {authorName.charAt(0).toUpperCase()}
+                    </AvatarFallback>
                   </Avatar>
                 </Button>
                 <div className="min-w-0 flex-1 pt-1">
                   <strong className="mb-1 block text-sm font-medium">
-                    {agentName}
+                    {authorName}
                   </strong>
                   {message.content ? (
                     <p className="whitespace-pre-wrap text-sm leading-6">
@@ -109,10 +88,24 @@ export function ChatMessages({
                   )}
                 </div>
               </article>
-            ),
-          )}
+            );
+          })}
         </div>
-      ) : null}
+      ) : (
+        <section className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
+          <MessageSquare className="size-6 text-muted-foreground" />
+          <h1 className="text-xl font-medium">{chat.title}</h1>
+          {chat.purpose ? (
+            <p className="max-w-md text-sm text-muted-foreground">
+              {chat.purpose}
+            </p>
+          ) : null}
+          <Badge variant="secondary">
+            {chat.members.length}{" "}
+            {chat.members.length === 1 ? "member" : "members"}
+          </Badge>
+        </section>
+      )}
     </div>
   );
 }

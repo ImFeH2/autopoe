@@ -32,10 +32,13 @@ import type {
 
 interface AppSidebarProps {
   activePage: "chat" | SettingsPage;
+  activeChatId: string | null;
   agents: AgentInfo[];
-  chat: ChatInfo | null;
+  chats: ChatInfo[];
   connection: RuntimeState["connection"];
   onInspect: (agentId: string) => void;
+  onNewChat: () => void;
+  onSelectChat: (chatId: string) => void;
   onPageChange: (page: "chat" | SettingsPage) => void;
   project: ProjectInfo | null;
 }
@@ -52,10 +55,13 @@ function capitalize(value: string) {
 
 export function AppSidebar({
   activePage,
+  activeChatId,
   agents,
-  chat,
+  chats,
   connection,
   onInspect,
+  onNewChat,
+  onSelectChat,
   onPageChange,
   project,
 }: AppSidebarProps) {
@@ -82,18 +88,46 @@ export function AppSidebar({
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Chats</SidebarGroupLabel>
+          <SidebarGroupAction
+            aria-label="New chat"
+            disabled={!project}
+            onClick={onNewChat}
+          >
+            <Plus />
+          </SidebarGroupAction>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={activePage === "chat"}
-                  onClick={() => onPageChange("chat")}
-                  tooltip={chat?.title ?? "General"}
-                >
-                  <MessageSquare />
-                  <span>{chat?.title ?? "General"}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {chats.length ? (
+                chats.map((chat) => (
+                  <SidebarMenuItem key={chat.id}>
+                    <SidebarMenuButton
+                      isActive={
+                        activePage === "chat" && activeChatId === chat.id
+                      }
+                      onClick={() => onSelectChat(chat.id)}
+                      tooltip={chat.title}
+                    >
+                      <MessageSquare />
+                      <span>{chat.title}</span>
+                    </SidebarMenuButton>
+                    <SidebarMenuBadge>{chat.members.length}</SidebarMenuBadge>
+                  </SidebarMenuItem>
+                ))
+              ) : (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    disabled
+                    tooltip={connectionLabel[connection]}
+                  >
+                    {connection === "error" ? (
+                      <CircleAlert />
+                    ) : (
+                      <LoaderCircle className="animate-spin" />
+                    )}
+                    <span>{connectionLabel[connection]}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
