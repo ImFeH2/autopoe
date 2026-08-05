@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AgentsPage } from "@/components/AgentsPage";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatMessages } from "@/components/ChatMessages";
@@ -39,6 +40,7 @@ function App() {
   const [page, setPage] = useState<"chat" | SettingsPage>("chat");
   const [draft, setDraft] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectedAgentId, setInspectedAgentId] = useState<string | null>(null);
   const [openingProject, setOpeningProject] = useState(false);
   const [sending, setSending] = useState(false);
   const [respondingApprovalId, setRespondingApprovalId] = useState<
@@ -47,6 +49,9 @@ function App() {
   const endRef = useRef<HTMLDivElement>(null);
   const projectRequestRef = useRef<string | null>(null);
   const lastMessage = runtime.messages[runtime.messages.length - 1];
+  const inspectedAgent =
+    runtime.agents.find((agent) => agent.id === inspectedAgentId) ??
+    runtime.agent;
 
   useEffect(() => {
     let active = true;
@@ -122,7 +127,13 @@ function App() {
     }
   };
 
-  const inspectAgent = () => setInspectorOpen(true);
+  const inspectAgent = (agentId = runtime.agent?.id) => {
+    if (!agentId) {
+      return;
+    }
+    setInspectedAgentId(agentId);
+    setInspectorOpen(true);
+  };
 
   const respondToApproval = async (approved: boolean) => {
     const approval = runtime.approval;
@@ -172,7 +183,7 @@ function App() {
     <SidebarProvider>
       <AppSidebar
         activePage={page}
-        agent={runtime.agent}
+        agents={runtime.agents}
         chat={runtime.chat}
         connection={runtime.connection}
         onInspect={inspectAgent}
@@ -180,7 +191,13 @@ function App() {
         project={runtime.project}
       />
 
-      {page === "model" ? (
+      {page === "agents" ? (
+        <AgentsPage
+          agents={runtime.agents}
+          onNavigate={changePage}
+          project={runtime.project}
+        />
+      ) : page === "model" ? (
         <ModelPage onNavigate={changePage} />
       ) : page === "providers" ? (
         <ProvidersPage onNavigate={changePage} />
@@ -198,7 +215,7 @@ function App() {
               {runtime.agent ? (
                 <Button
                   aria-label={`Inspect ${runtime.agent.name}`}
-                  onClick={inspectAgent}
+                  onClick={() => inspectAgent(runtime.agent?.id)}
                   size="sm"
                   variant="ghost"
                 >
@@ -231,7 +248,7 @@ function App() {
               connection={runtime.connection}
               error={runtime.error}
               messages={runtime.messages}
-              onInspect={inspectAgent}
+              onInspect={() => inspectAgent(runtime.agent?.id)}
             />
             <div ref={endRef} />
           </ScrollArea>
@@ -263,12 +280,12 @@ function App() {
         </SidebarInset>
       )}
 
-      {page === "chat" && runtime.agent ? (
+      {inspectedAgent ? (
         <ContextInspector
-          agent={runtime.agent}
+          agent={inspectedAgent}
           onOpenChange={setInspectorOpen}
           open={inspectorOpen}
-          turn={runtime.turn}
+          turn={inspectedAgent.id === runtime.agent?.id ? runtime.turn : null}
         />
       ) : null}
 

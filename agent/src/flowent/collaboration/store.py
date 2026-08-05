@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -47,6 +48,7 @@ class CollaborationStore:
                     kind TEXT NOT NULL CHECK (kind IN ('leader', 'worker')),
                     name TEXT NOT NULL,
                     role TEXT NOT NULL,
+                    archived_at INTEGER,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     PRIMARY KEY (project_id, id),
@@ -164,6 +166,14 @@ class CollaborationStore:
                 );
                 """
             )
+            await self._migrate(database)
+            await database.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS agents_project_active_name
+                ON agents(project_id, name COLLATE NOCASE)
+                WHERE archived_at IS NULL
+                """
+            )
             await self._recover(database)
             await database.commit()
 
@@ -171,15 +181,19 @@ class CollaborationStore:
         await self._ensure_project(project_id)
         return await self.snapshot(project_id)
 
-    async def snapshot(self, project_id: str) -> CollaborationSnapshot:
+    async def snapshot(
+        self,
+        project_id: str,
+        agent_id: str = "leader",
+    ) -> CollaborationSnapshot:
         async with self._database() as database:
             async with database.execute(
                 """
-                SELECT id, project_id, name, role, kind
+                SELECT id, project_id, name, role, kind, archived_at
                 FROM agents
-                WHERE project_id = ? AND kind = 'leader'
+                WHERE project_id = ? AND id = ? AND archived_at IS NULL
                 """,
-                (project_id,),
+                (project_id, agent_id),
             ) as cursor:
                 agent_row = await cursor.fetchone()
             async with database.execute(
@@ -237,6 +251,27 @@ class CollaborationStore:
             self._turn(turn_row) if turn_row else None,
             history,
         )
+
+    async def list_agents(
+        self,
+        project_id: str,
+        include_archived: bool = False,
+    ) -> list[AgentRecord]:
+        archived = "" if include_archived else "AND archived_at IS NULL"
+        async with (
+            self._database() as database,
+            database.execute(
+                f"""
+            SELECT id, project_id, name, role, kind, archived_at
+            FROM agents
+            WHERE project_id = ? {archived}
+            ORDER BY kind, name COLLATE NOCASE, id
+            """,
+                (project_id,),
+            ) as cursor,
+        ):
+            rows = await cursor.fetchall()
+        return [self._agent(row) for row in rows]
 
     async def start_turn(
         self,
@@ -306,6 +341,107 @@ class CollaborationStore:
             await self._insert_message(database, project_id, agent_message, now + 1)
             await database.commit()
         return TurnStart(turn_id, user_message, agent_message, turn)
+
+    async def create_worker(
+        self,
+        project_id: str,
+        name: str,
+        role: str,
+    ) -> AgentRecord:
+        await self._ensure_project(project_id)
+        name = self._identity(name, "name", 80)
+        role = self._identity(role, "role", 160)
+        agent_id = uuid4().hex
+        now = time.time_ns()
+        async with self._database() as database:
+            try:
+                await database.execute(
+                    """
+                    INSERT INTO agents (
+                        project_id, id, kind, name, role, archived_at,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, 'worker', ?, ?, NULL, ?, ?)
+                    """,
+                    (project_id, agent_id, name, role, now, now),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError("agent name already exists") from error
+            async with database.execute(
+                """
+                SELECT id
+                FROM chats
+                WHERE project_id = ? AND kind = 'general'
+                """,
+                (project_id,),
+            ) as cursor:
+                chat = await cursor.fetchone()
+            if chat is None:
+                raise RuntimeError("project general chat is missing")
+            await database.execute(
+                """
+                INSERT INTO chat_members (
+                    project_id, chat_id, agent_id, joined_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (project_id, chat["id"], agent_id, now),
+            )
+            await database.execute(
+                """
+                INSERT INTO agent_contexts (
+                    project_id, agent_id, model_messages_json, updated_at
+                )
+                VALUES (?, ?, '[]', ?)
+                """,
+                (project_id, agent_id, now),
+            )
+            await database.commit()
+        return AgentRecord(agent_id, project_id, name, role, "worker", False)
+
+    async def update_worker(
+        self,
+        project_id: str,
+        agent_id: str,
+        name: str,
+        role: str,
+    ) -> AgentRecord:
+        name = self._identity(name, "name", 80)
+        role = self._identity(role, "role", 160)
+        now = time.time_ns()
+        async with self._database() as database:
+            try:
+                cursor = await database.execute(
+                    """
+                    UPDATE agents
+                    SET name = ?, role = ?, updated_at = ?
+                    WHERE project_id = ? AND id = ? AND kind = 'worker'
+                        AND archived_at IS NULL
+                    """,
+                    (name, role, now, project_id, agent_id),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError("agent name already exists") from error
+            if cursor.rowcount != 1:
+                raise ValueError("worker not found")
+            await database.commit()
+        return AgentRecord(agent_id, project_id, name, role, "worker", False)
+
+    async def archive_worker(self, project_id: str, agent_id: str) -> None:
+        now = time.time_ns()
+        async with self._database() as database:
+            cursor = await database.execute(
+                """
+                UPDATE agents
+                SET archived_at = ?, updated_at = ?
+                WHERE project_id = ? AND id = ? AND kind = 'worker'
+                    AND archived_at IS NULL
+                """,
+                (now, now, project_id, agent_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("worker not found")
+            await database.commit()
 
     async def complete_turn(
         self,
@@ -380,7 +516,7 @@ class CollaborationStore:
                 """
                 SELECT id
                 FROM agents
-                WHERE project_id = ? AND kind = 'leader'
+                WHERE project_id = ? AND kind = 'leader' AND archived_at IS NULL
                 """,
                 (project_id,),
             ) as cursor:
@@ -430,6 +566,13 @@ class CollaborationStore:
                 (project_id, agent_row["id"], now),
             )
             await database.commit()
+
+    @staticmethod
+    async def _migrate(database: aiosqlite.Connection) -> None:
+        async with database.execute("PRAGMA table_info(agents)") as cursor:
+            columns = {row["name"] for row in await cursor.fetchall()}
+        if "archived_at" not in columns:
+            await database.execute("ALTER TABLE agents ADD COLUMN archived_at INTEGER")
 
     async def _recover(self, database: aiosqlite.Connection) -> None:
         async with database.execute(
@@ -528,6 +671,7 @@ class CollaborationStore:
             row["name"],
             row["role"],
             row["kind"],
+            row["archived_at"] is not None,
         )
 
     @staticmethod
@@ -566,3 +710,12 @@ class CollaborationStore:
     @staticmethod
     def _load(value: str) -> Any:
         return json.loads(value)
+
+    @staticmethod
+    def _identity(value: str, field: str, limit: int) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(f"agent {field} is required")
+        if len(value) > limit:
+            raise ValueError(f"agent {field} is too long")
+        return value

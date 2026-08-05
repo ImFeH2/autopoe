@@ -12,6 +12,7 @@ import {
 
 const agent = {
   id: "leader",
+  kind: "leader" as const,
   name: "Leader",
   role: "Leader",
   status: "running" as const,
@@ -131,6 +132,7 @@ describe("runtime protocol", () => {
       result: {
         project,
         agent: { ...agent, status: "idle" },
+        agents: [{ ...agent, status: "idle" }],
         chat: { id: "general", title: "General", purpose: "" },
         messages: [],
         last_turn: null,
@@ -148,6 +150,7 @@ describe("runtime protocol", () => {
       result: {
         project,
         agent: { ...agent, status: "failed" },
+        agents: [{ ...agent, status: "failed" }],
         chat: { id: "general", title: "General", purpose: "" },
         messages: [
           {
@@ -187,6 +190,27 @@ describe("runtime protocol", () => {
 
     expect(state.agent?.model).toBe("gpt-5.4");
     expect(state.error).toBeNull();
+  });
+
+  it("updates the project agent directory", () => {
+    const worker = {
+      ...agent,
+      id: "worker-1",
+      kind: "worker" as const,
+      name: "Backend Engineer",
+      role: "Backend",
+      status: "idle" as const,
+    };
+    const state = reduceRuntimeMessage(
+      { ...initialRuntimeState, agent, agents: [agent] },
+      {
+        method: "agents/updated",
+        params: { agents: [agent, worker] },
+      },
+    );
+
+    expect(state.agent?.id).toBe("leader");
+    expect(state.agents).toEqual([agent, worker]);
   });
 
   it("tracks a command approval until it is resolved", () => {
@@ -229,6 +253,7 @@ describe("runtime protocol", () => {
       result: {
         project: null,
         agent: null,
+        agents: [],
         chat: null,
         messages: [],
         last_turn: null,

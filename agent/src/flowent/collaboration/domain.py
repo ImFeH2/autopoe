@@ -13,6 +13,7 @@ class AgentRecord:
     name: str
     role: str
     kind: str
+    archived: bool
 
 
 @dataclass(frozen=True, slots=True)

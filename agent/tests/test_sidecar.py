@@ -63,6 +63,8 @@ def test_sidecar_requires_a_configured_model(tmp_path: Path) -> None:
         "write_file",
         "replace_in_file",
         "run_command",
+        "list_workers",
+        "create_worker",
     ]
     final = next(message for message in messages if message.get("id") == "final")
     assert len(final["result"]["messages"]) == 2
@@ -138,6 +140,69 @@ def test_sidecar_restores_chat_messages_and_failed_turns(tmp_path: Path) -> None
         "model is not configured",
     ]
     assert state["last_turn"]["status"] == "failed"
+
+
+def test_sidecar_manages_project_workers(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    messages = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "project",
+                "method": "project/open",
+                "params": {"workspace": str(workspace)},
+            },
+            {
+                "id": "create",
+                "method": "agents/create",
+                "params": {"name": "Backend Engineer", "role": "Backend"},
+            },
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+    created = next(message for message in messages if message.get("id") == "create")[
+        "result"
+    ]
+    worker_id = created["id"]
+
+    updated_messages = run_sidecar(
+        tmp_path,
+        [
+            {
+                "id": "update",
+                "method": "agents/update",
+                "params": {
+                    "id": worker_id,
+                    "name": "API Engineer",
+                    "role": "API",
+                },
+            },
+            {"id": "list", "method": "agents/list"},
+            {
+                "id": "archive",
+                "method": "agents/archive",
+                "params": {"id": worker_id},
+            },
+            {"id": "final", "method": "agents/list"},
+            {"id": "shutdown", "method": "runtime/shutdown"},
+        ],
+    )
+    updated = next(
+        message for message in updated_messages if message.get("id") == "update"
+    )["result"]
+    listed = next(
+        message for message in updated_messages if message.get("id") == "list"
+    )["result"]
+    final = next(
+        message for message in updated_messages if message.get("id") == "final"
+    )["result"]
+
+    assert created["kind"] == "worker"
+    assert Path(created["home"]).is_dir()
+    assert updated["name"] == "API Engineer"
+    assert [agent["id"] for agent in listed] == ["leader", worker_id]
+    assert [agent["id"] for agent in final] == ["leader"]
 
 
 def test_sidecar_rejects_invalid_workspace(tmp_path: Path) -> None:

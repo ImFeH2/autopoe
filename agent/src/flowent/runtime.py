@@ -22,13 +22,14 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models import Model
 from pydantic_core import to_jsonable_python
 
-from flowent.collaboration import CollaborationSnapshot, CollaborationStore
+from flowent.collaboration import AgentRecord, CollaborationSnapshot, CollaborationStore
 from flowent.project import Project
 from flowent.tools import CommandTools, FileTools, SpacePaths
 
 Emit = Callable[[dict[str, Any]], None]
 ResolveModel = Callable[[], Awaitable[Model]]
 RequestApproval = Callable[[dict[str, Any]], Awaitable[bool]]
+RoleTool = Callable[..., Any]
 
 
 class AgentRuntime:
@@ -42,6 +43,7 @@ class AgentRuntime:
         request_approval: RequestApproval,
         store: CollaborationStore,
         snapshot: CollaborationSnapshot,
+        role_tools: list[RoleTool] | None = None,
     ):
         self.project = project
         self.emit = emit
@@ -60,14 +62,17 @@ class AgentRuntime:
         self.spaces = SpacePaths(project.workspace, self.home)
         self.file_tools = FileTools(self.spaces)
         self.command_tools = CommandTools(self.spaces)
+        self.role_tools = role_tools or []
         self.tool_names = [
             *self.file_tools.names,
             *self.command_tools.names,
+            *(tool.__name__ for tool in self.role_tools),
         ]
         self.agent = Agent(
             tools=[
                 *self.file_tools.functions,
                 *self.command_tools.tools,
+                *self.role_tools,
             ],
             output_type=[str, DeferredToolRequests],
         )
@@ -88,10 +93,16 @@ class AgentRuntime:
             "id": self.record.id,
             "name": self.record.name,
             "role": self.record.role,
+            "kind": self.record.kind,
             "status": self.status,
             "model": self.model_name,
             "home": str(self.home),
         }
+
+    def update_record(self, record: AgentRecord) -> None:
+        if record.id != self.record.id:
+            raise ValueError("agent ID does not match runtime")
+        self.record = record
 
     def state(self) -> dict[str, Any]:
         return {

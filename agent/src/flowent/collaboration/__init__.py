@@ -6,6 +6,7 @@ from flowent.collaboration.domain import (
     TurnStart,
 )
 from flowent.collaboration.store import CollaborationStore
+from flowent.collaboration.worker_tools import WorkerTools
 
 __all__ = [
     "AgentRecord",
@@ -14,4 +15,5 @@ __all__ = [
     "CollaborationSnapshot",
     "CollaborationStore",
     "TurnStart",
+    "WorkerTools",
 ]

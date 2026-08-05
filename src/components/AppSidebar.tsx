@@ -3,6 +3,7 @@ import {
   FolderOpen,
   LoaderCircle,
   MessageSquare,
+  Plus,
   Settings,
 } from "lucide-react";
 import type { SettingsPage } from "@/components/SettingsHeader";
@@ -12,6 +13,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -30,10 +32,10 @@ import type {
 
 interface AppSidebarProps {
   activePage: "chat" | SettingsPage;
-  agent: AgentInfo | null;
+  agents: AgentInfo[];
   chat: ChatInfo | null;
   connection: RuntimeState["connection"];
-  onInspect: () => void;
+  onInspect: (agentId: string) => void;
   onPageChange: (page: "chat" | SettingsPage) => void;
   project: ProjectInfo | null;
 }
@@ -50,7 +52,7 @@ function capitalize(value: string) {
 
 export function AppSidebar({
   activePage,
-  agent,
+  agents,
   chat,
   connection,
   onInspect,
@@ -98,19 +100,27 @@ export function AppSidebar({
 
         <SidebarGroup>
           <SidebarGroupLabel>Agents</SidebarGroupLabel>
+          <SidebarGroupAction
+            aria-label="Manage agents"
+            onClick={() => onPageChange("agents")}
+          >
+            <Plus />
+          </SidebarGroupAction>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                {agent ? (
-                  <>
+              {agents.length ? (
+                agents.map((agent) => (
+                  <SidebarMenuItem key={agent.id}>
                     <SidebarMenuButton
-                      onClick={onInspect}
+                      onClick={() => onInspect(agent.id)}
                       size="lg"
                       tooltip={agent.name}
                     >
                       <Avatar size="sm">
                         <AvatarImage alt="" src="/flowent.png" />
-                        <AvatarFallback>L</AvatarFallback>
+                        <AvatarFallback>
+                          {agent.name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
                       </Avatar>
                       <span className="grid flex-1 text-left leading-tight">
                         <span className="truncate font-medium">
@@ -124,8 +134,10 @@ export function AppSidebar({
                     <SidebarMenuBadge>
                       {capitalize(agent.status)}
                     </SidebarMenuBadge>
-                  </>
-                ) : (
+                  </SidebarMenuItem>
+                ))
+              ) : (
+                <SidebarMenuItem>
                   <SidebarMenuButton
                     disabled
                     tooltip={connectionLabel[connection]}
@@ -137,8 +149,8 @@ export function AppSidebar({
                     )}
                     <span>{connectionLabel[connection]}</span>
                   </SidebarMenuButton>
-                )}
-              </SidebarMenuItem>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

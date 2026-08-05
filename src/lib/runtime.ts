@@ -18,6 +18,7 @@ export interface ProjectInfo {
 
 export interface AgentInfo {
   id: string;
+  kind: "leader" | "worker";
   name: string;
   role: string;
   status: AgentStatus;
@@ -85,6 +86,7 @@ export interface RuntimeState {
   connection: "connecting" | "ready" | "error";
   project: ProjectInfo | null;
   agent: AgentInfo | null;
+  agents: AgentInfo[];
   chat: ChatInfo | null;
   messages: ChatMessage[];
   turn: TurnSnapshot | null;
@@ -95,6 +97,7 @@ export interface RuntimeState {
 interface RuntimeSnapshot {
   project: ProjectInfo | null;
   agent: AgentInfo | null;
+  agents: AgentInfo[];
   chat: ChatInfo | null;
   messages: ChatMessage[];
   last_turn: TurnSnapshot | null;
@@ -103,6 +106,7 @@ interface RuntimeSnapshot {
 interface RuntimeReady {
   project: ProjectInfo | null;
   agent: AgentInfo | null;
+  agents: AgentInfo[];
   chat: ChatInfo | null;
 }
 
@@ -124,10 +128,15 @@ interface TurnFinished {
   turn: TurnSnapshot;
 }
 
+interface AgentsUpdated {
+  agents: AgentInfo[];
+}
+
 export const initialRuntimeState: RuntimeState = {
   connection: "connecting",
   project: null,
   agent: null,
+  agents: [],
   chat: null,
   messages: [],
   turn: null,
@@ -192,6 +201,7 @@ export function reduceRuntimeMessage(
       connection: "ready",
       project: snapshot.project,
       agent: snapshot.agent,
+      agents: snapshot.agents,
       chat: snapshot.chat,
       messages: snapshot.messages,
       turn: snapshot.last_turn,
@@ -211,6 +221,7 @@ export function reduceRuntimeMessage(
       connection: "ready",
       project: params.project,
       agent: params.agent,
+      agents: params.agents,
       chat: params.chat,
       approval: null,
       error: null,
@@ -224,6 +235,7 @@ export function reduceRuntimeMessage(
       ...state,
       connection: "ready",
       agent: params.agent,
+      agents: replaceAgent(state.agents, params.agent),
       messages: [
         ...state.messages.filter((item) => !ids.has(item.id)),
         params.user_message,
@@ -236,11 +248,22 @@ export function reduceRuntimeMessage(
   }
 
   if (message.method === "agent/updated") {
+    const agent = message.params as unknown as AgentInfo;
     return {
       ...state,
-      agent: message.params as unknown as AgentInfo,
+      agent,
+      agents: replaceAgent(state.agents, agent),
       error: null,
     };
+  }
+
+  if (message.method === "agents/updated") {
+    const params = message.params as unknown as AgentsUpdated;
+    const agent = state.agent
+      ? (params.agents.find((item) => item.id === state.agent?.id) ??
+        state.agent)
+      : (params.agents.find((item) => item.kind === "leader") ?? null);
+    return { ...state, agent, agents: params.agents, error: null };
   }
 
   if (message.method === "approval/request" && "id" in message) {
@@ -287,6 +310,7 @@ export function reduceRuntimeMessage(
     return {
       ...state,
       agent: params.agent,
+      agents: replaceAgent(state.agents, params.agent),
       messages: state.messages.map((item) =>
         item.id === params.message.id ? params.message : item,
       ),
@@ -301,4 +325,10 @@ export function reduceRuntimeMessage(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function replaceAgent(agents: AgentInfo[], agent: AgentInfo): AgentInfo[] {
+  return agents.some((item) => item.id === agent.id)
+    ? agents.map((item) => (item.id === agent.id ? agent : item))
+    : [...agents, agent];
 }

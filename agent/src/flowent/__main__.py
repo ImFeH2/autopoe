@@ -8,9 +8,9 @@ from typing import Any
 from flowent.collaboration import CollaborationStore
 from flowent.models import ModelError, ModelStore, resolve_model
 from flowent.project import Project, ProjectStore
+from flowent.project_runtime import ProjectRuntime
 from flowent.protocol import JsonlConnection, ProtocolError
 from flowent.providers import ProviderError, ProviderStore, fetch_models
-from flowent.runtime import AgentRuntime
 
 RUNTIME_READY = "runtime/ready"
 RUNTIME_SHUTDOWN = "runtime/shutdown"
@@ -25,11 +25,17 @@ def reject(connection: JsonlConnection, request_id: str, message: str) -> None:
     connection.send({"id": request_id, "error": {"message": message}})
 
 
-def state(project: Project | None, runtime: AgentRuntime | None) -> dict[str, Any]:
+def state(project: Project | None, runtime: ProjectRuntime | None) -> dict[str, Any]:
     runtime_state = (
         runtime.state()
         if runtime
-        else {"agent": None, "chat": None, "messages": [], "last_turn": None}
+        else {
+            "agent": None,
+            "agents": [],
+            "chat": None,
+            "messages": [],
+            "last_turn": None,
+        }
     )
     return {
         "project": project.to_dict() if project else None,
@@ -79,9 +85,8 @@ async def serve() -> None:
             raise ProtocolError("desktop returned an invalid approval")
         return result
 
-    async def create_runtime(current_project: Project) -> AgentRuntime:
-        snapshot = await collaboration_store.open_project(current_project.id)
-        return AgentRuntime(
+    async def create_runtime(current_project: Project) -> ProjectRuntime:
+        return await ProjectRuntime.open(
             root,
             current_project,
             connection.send,
@@ -89,7 +94,6 @@ async def serve() -> None:
             selected_model,
             request_approval,
             collaboration_store,
-            snapshot,
         )
 
     project = await store.current()
@@ -100,6 +104,7 @@ async def serve() -> None:
             "params": {
                 "project": project.to_dict() if project else None,
                 "agent": runtime.agent_info() if runtime else None,
+                "agents": runtime.agent_infos() if runtime else [],
                 "chat": runtime.chat.to_dict() if runtime else None,
                 "capabilities": [
                     "state/get",
@@ -110,6 +115,10 @@ async def serve() -> None:
                     "providers/models",
                     "model/get",
                     "model/set",
+                    "agents/list",
+                    "agents/create",
+                    "agents/update",
+                    "agents/archive",
                     "chat/send",
                     RUNTIME_SHUTDOWN,
                 ],
@@ -146,6 +155,63 @@ async def serve() -> None:
                 continue
             runtime = await create_runtime(project)
             respond(connection, request_id, state(project, runtime))
+            continue
+        if method == "agents/list":
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            respond(connection, request_id, runtime.agent_infos())
+            continue
+        if method == "agents/create":
+            params = message.get("params")
+            name = params.get("name") if isinstance(params, dict) else None
+            role = params.get("role") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if not isinstance(name, str) or not isinstance(role, str):
+                reject(connection, request_id, "worker fields are required")
+                continue
+            try:
+                agent = await runtime.create_worker(name, role)
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, agent)
+            continue
+        if method == "agents/update":
+            params = message.get("params")
+            agent_id = params.get("id") if isinstance(params, dict) else None
+            name = params.get("name") if isinstance(params, dict) else None
+            role = params.get("role") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if not all(isinstance(value, str) for value in (agent_id, name, role)):
+                reject(connection, request_id, "worker fields are required")
+                continue
+            try:
+                agent = await runtime.update_worker(agent_id, name, role)
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, agent)
+            continue
+        if method == "agents/archive":
+            params = message.get("params")
+            agent_id = params.get("id") if isinstance(params, dict) else None
+            if runtime is None:
+                reject(connection, request_id, "project is required")
+                continue
+            if not isinstance(agent_id, str):
+                reject(connection, request_id, "worker ID is required")
+                continue
+            try:
+                await runtime.archive_worker(agent_id)
+            except (RuntimeError, ValueError) as error:
+                reject(connection, request_id, str(error))
+                continue
+            respond(connection, request_id, {"archived": agent_id})
             continue
         if method == "providers/list":
             providers = await provider_store.list()
@@ -199,9 +265,6 @@ async def serve() -> None:
                 selection = None
                 if runtime:
                     runtime.set_model(None)
-                    connection.send(
-                        {"method": "agent/updated", "params": runtime.agent_info()}
-                    )
             respond(connection, request_id, {"deleted": provider_id})
             continue
         if method == "providers/models":
@@ -248,9 +311,6 @@ async def serve() -> None:
             respond(connection, request_id, selection.to_dict())
             if runtime:
                 runtime.set_model(selection.model_id)
-                connection.send(
-                    {"method": "agent/updated", "params": runtime.agent_info()}
-                )
             continue
         if method == RUNTIME_SHUTDOWN:
             respond(connection, request_id, {"stopping": True})

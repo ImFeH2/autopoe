@@ -1,12 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { AgentsPage } from "@/components/AgentsPage";
 import { ChatMessages } from "@/components/ChatMessages";
 import { CommandApproval } from "@/components/CommandApproval";
 import { ProjectEmptyState } from "@/components/ProjectEmptyState";
+import { SidebarProvider } from "@/components/ui/sidebar";
 
 const agent = {
   id: "leader",
+  kind: "leader" as const,
   name: "Leader",
   role: "Leader",
   status: "idle" as const,
@@ -93,6 +96,37 @@ describe("CommandApproval", () => {
     expect(markup).toContain("pnpm test");
     expect(markup).toContain("Deny");
     expect(markup).toContain(">Run<");
+  });
+});
+
+describe("AgentsPage", () => {
+  it("renders the project agent directory", () => {
+    const markup = renderToStaticMarkup(
+      <SidebarProvider>
+        <AgentsPage
+          agents={[
+            agent,
+            {
+              ...agent,
+              id: "worker-1",
+              kind: "worker",
+              name: "Backend Engineer",
+              role: "Backend",
+            },
+          ]}
+          onNavigate={() => undefined}
+          project={{
+            id: "project-1",
+            name: "Flowent",
+            workspace: "/projects/flowent",
+          }}
+        />
+      </SidebarProvider>,
+    );
+
+    expect(markup).toContain("Agents");
+    expect(markup).toContain("Backend Engineer");
+    expect(markup).toContain("New worker");
   });
 });
 

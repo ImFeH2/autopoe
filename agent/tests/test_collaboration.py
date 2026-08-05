@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from pathlib import Path
 
+import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from pydantic_core import to_jsonable_python
@@ -140,5 +142,76 @@ def test_collaboration_store_isolates_projects(tmp_path: Path) -> None:
 
         assert len((await store.snapshot(first_project.id)).messages) == 2
         assert (await store.snapshot(second_project.id)).messages == []
+
+    asyncio.run(run())
+
+
+def test_collaboration_store_manages_worker_lifecycle(tmp_path: Path) -> None:
+    async def run() -> None:
+        project = await open_project(tmp_path)
+        store = CollaborationStore(tmp_path)
+        await store.initialize()
+        await store.open_project(project.id)
+
+        worker = await store.create_worker(
+            project.id, " Backend Engineer ", " Backend "
+        )
+
+        assert worker.name == "Backend Engineer"
+        assert worker.role == "Backend"
+        assert [agent.kind for agent in await store.list_agents(project.id)] == [
+            "leader",
+            "worker",
+        ]
+        assert (await store.snapshot(project.id, worker.id)).agent == worker
+        with pytest.raises(ValueError, match="already exists"):
+            await store.create_worker(project.id, "backend engineer", "Duplicate")
+
+        updated = await store.update_worker(
+            project.id,
+            worker.id,
+            "API Engineer",
+            "API",
+        )
+        await store.archive_worker(project.id, worker.id)
+
+        assert updated.name == "API Engineer"
+        assert [agent.id for agent in await store.list_agents(project.id)] == ["leader"]
+        archived = await store.list_agents(project.id, include_archived=True)
+        assert archived[-1].archived
+        with pytest.raises(RuntimeError, match="missing"):
+            await store.snapshot(project.id, worker.id)
+        replacement = await store.create_worker(project.id, "API Engineer", "API")
+        assert replacement.id != worker.id
+
+    asyncio.run(run())
+
+
+def test_collaboration_store_migrates_existing_agent_tables(tmp_path: Path) -> None:
+    async def run() -> None:
+        projects = ProjectStore(tmp_path)
+        await projects.initialize()
+        with sqlite3.connect(tmp_path / "flowent.db") as database:
+            database.execute(
+                """
+                CREATE TABLE agents (
+                    project_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (project_id, id)
+                )
+                """
+            )
+
+        store = CollaborationStore(tmp_path)
+        await store.initialize()
+
+        with sqlite3.connect(tmp_path / "flowent.db") as database:
+            columns = {row[1] for row in database.execute("PRAGMA table_info(agents)")}
+        assert "archived_at" in columns
 
     asyncio.run(run())

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
-export type SettingsPage = "model" | "providers";
+export type SettingsPage = "agents" | "model" | "providers";
 
 interface SettingsHeaderProps {
   activePage: SettingsPage;
@@ -22,6 +22,14 @@ export function SettingsHeader({
       <Settings className="size-4" />
       <span className="text-sm font-medium">Settings</span>
       <div className="ml-auto flex items-center gap-1">
+        <Button
+          aria-current={activePage === "agents" ? "page" : undefined}
+          onClick={() => onNavigate("agents")}
+          size="sm"
+          variant={activePage === "agents" ? "secondary" : "ghost"}
+        >
+          Agents
+        </Button>
         <Button
           aria-current={activePage === "model" ? "page" : undefined}
           onClick={() => onNavigate("model")}
