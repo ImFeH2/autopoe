@@ -18,6 +18,7 @@ interface ChatMessagesProps {
 const agentStatusLabel = {
   idle: "Ready",
   running: "Working",
+  waiting: "Waiting",
   failed: "Failed",
 } as const;
 

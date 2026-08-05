@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approvalResponse,
   chatMessage,
   initialRuntimeState,
   projectOpenRequest,
@@ -26,7 +27,7 @@ const project = {
 
 const turn = {
   id: "turn-1",
-  status: "running",
+  status: "running" as const,
   context: {
     instructions: "",
     input: "Hello",
@@ -37,6 +38,7 @@ const turn = {
       "search_files",
       "write_file",
       "replace_in_file",
+      "run_command",
     ],
   },
   events: [{ kind: "started" }],
@@ -53,6 +55,10 @@ describe("runtime protocol", () => {
     expect(chatMessage("Hello")).toEqual({
       method: "chat/send",
       params: { content: "Hello" },
+    });
+    expect(approvalResponse("desktop-1", true)).toEqual({
+      id: "desktop-1",
+      result: true,
     });
     expect(projectOpenRequest("project-1", project.workspace)).toEqual({
       id: "project-1",
@@ -181,6 +187,40 @@ describe("runtime protocol", () => {
 
     expect(state.agent?.model).toBe("gpt-5.4");
     expect(state.error).toBeNull();
+  });
+
+  it("tracks a command approval until it is resolved", () => {
+    const requested = reduceRuntimeMessage(
+      { ...initialRuntimeState, turn },
+      {
+        id: "desktop-1",
+        method: "approval/request",
+        params: {
+          turn_id: "turn-1",
+          agent_id: "leader",
+          tool_call_id: "command-1",
+          tool: "run_command",
+          input: {
+            space: "workspace",
+            command: "pnpm test",
+          },
+        },
+      },
+    );
+    const resolved = reduceRuntimeMessage(requested, {
+      method: "turn/event",
+      params: {
+        turn_id: "turn-1",
+        event: {
+          kind: "approval_resolved",
+          tool_call_id: "command-1",
+          approved: true,
+        },
+      },
+    });
+
+    expect(requested.approval?.input.command).toBe("pnpm test");
+    expect(resolved.approval).toBeNull();
   });
 
   it("restores an empty project state", () => {

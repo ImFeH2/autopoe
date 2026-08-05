@@ -16,6 +16,10 @@ from flowent.providers import ProviderStore
 from flowent.runtime import AgentRuntime
 
 
+async def deny_approval(_: dict[str, object]) -> bool:
+    return False
+
+
 def test_model_store_persists_the_default_model(tmp_path: Path) -> None:
     async def run() -> None:
         store = ModelStore(tmp_path)
@@ -78,6 +82,7 @@ def test_agent_runtime_streams_with_the_resolved_model(tmp_path: Path) -> None:
             emitted.append,
             "test",
             model,
+            deny_approval,
             collaboration,
             snapshot,
         )
@@ -104,6 +109,7 @@ def test_agent_runtime_streams_with_the_resolved_model(tmp_path: Path) -> None:
             emitted.append,
             "test",
             model,
+            deny_approval,
             collaboration,
             await collaboration.snapshot(project.id),
         )
@@ -140,6 +146,7 @@ def test_agent_runtime_commits_before_the_completed_notification(
             emit,
             "test",
             model,
+            deny_approval,
             collaboration,
             await collaboration.open_project(project.id),
         )
@@ -171,6 +178,7 @@ def test_agent_runtime_streams_and_persists_file_tool_events(tmp_path: Path) -> 
                     "search_files",
                     "write_file",
                     "replace_in_file",
+                    "run_command",
                 }
                 yield {
                     0: DeltaToolCall(
@@ -201,6 +209,7 @@ def test_agent_runtime_streams_and_persists_file_tool_events(tmp_path: Path) -> 
             emitted.append,
             "test",
             model,
+            deny_approval,
             collaboration,
             await collaboration.open_project(project.id),
         )
@@ -219,6 +228,96 @@ def test_agent_runtime_streams_and_persists_file_tool_events(tmp_path: Path) -> 
         ]
         assert events[1]["name"] == "read_file"
         assert events[2]["output"]["content"] == "Flowent"
-        assert restored.last_turn["context"]["tools"] == runtime.file_tools.names
+        assert restored.last_turn["context"]["tools"] == runtime.tool_names
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_agent_runtime_resumes_after_command_approval(
+    tmp_path: Path,
+    approved: bool,
+) -> None:
+    async def run() -> None:
+        approvals: list[dict[str, object]] = []
+        emitted: list[dict[str, object]] = []
+
+        async def request_approval(params: dict[str, object]) -> bool:
+            approvals.append(params)
+            return approved
+
+        async def run_command(
+            messages: list[ModelMessage],
+            _: AgentInfo,
+        ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+            if len(messages) == 1:
+                yield {
+                    0: DeltaToolCall(
+                        "run_command",
+                        '{"space":"workspace","command":"echo Flowent > command.txt"}',
+                        tool_call_id="command-1",
+                    )
+                }
+                return
+            result = messages[-1].parts[0]
+            assert result.part_kind == "tool-return"
+            if approved:
+                assert result.content["exit_code"] == 0
+            yield "Approved" if approved else "Denied"
+
+        async def model() -> FunctionModel:
+            return FunctionModel(stream_function=run_command)
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        projects = ProjectStore(tmp_path)
+        await projects.initialize()
+        project = await projects.open(str(workspace))
+        collaboration = CollaborationStore(tmp_path)
+        await collaboration.initialize()
+        runtime = AgentRuntime(
+            tmp_path,
+            project,
+            emitted.append,
+            "test",
+            model,
+            request_approval,
+            collaboration,
+            await collaboration.open_project(project.id),
+        )
+
+        await runtime.run_turn("Run the command")
+
+        restored = await collaboration.snapshot(project.id)
+        assert approvals == [
+            {
+                "turn_id": restored.last_turn["id"],
+                "agent_id": "leader",
+                "tool_call_id": "command-1",
+                "tool": "run_command",
+                "input": {
+                    "space": "workspace",
+                    "command": "echo Flowent > command.txt",
+                },
+            }
+        ]
+        assert (workspace / "command.txt").exists() is approved
+        assert restored.messages[-1].content == ("Approved" if approved else "Denied")
+        events = restored.last_turn["events"]
+        requested = next(
+            event for event in events if event["kind"] == "approval_requested"
+        )
+        resolved = next(
+            event for event in events if event["kind"] == "approval_resolved"
+        )
+        assert requested["tool_call_id"] == "command-1"
+        assert resolved["approved"] is approved
+        statuses = [
+            message["params"]["status"]
+            for message in emitted
+            if message.get("method") == "agent/updated"
+        ]
+        assert statuses == ["waiting", "running"]
+        assert any(event["kind"] == "tool_result" for event in events)
 
     asyncio.run(run())

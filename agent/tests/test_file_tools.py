@@ -7,7 +7,7 @@ import pytest
 from pydantic_ai import Agent, ModelMessage, ModelResponse, TextPart, ToolFailed
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from flowent.tools import FileTools
+from flowent.tools import FileTools, SpacePaths
 
 
 def file_tools(tmp_path: Path) -> tuple[FileTools, Path, Path]:
@@ -15,7 +15,7 @@ def file_tools(tmp_path: Path) -> tuple[FileTools, Path, Path]:
     home = tmp_path / "home"
     workspace.mkdir()
     home.mkdir()
-    return FileTools(workspace, home), workspace, home
+    return FileTools(SpacePaths(workspace, home)), workspace, home
 
 
 def test_file_tools_keep_workspace_and_home_isolated(tmp_path: Path) -> None:

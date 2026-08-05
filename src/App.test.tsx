@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatMessages } from "@/components/ChatMessages";
+import { CommandApproval } from "@/components/CommandApproval";
 import { ProjectEmptyState } from "@/components/ProjectEmptyState";
 
 const agent = {
@@ -65,6 +66,33 @@ describe("ChatMessages", () => {
     );
 
     expect(markup).toContain("No model");
+  });
+});
+
+describe("CommandApproval", () => {
+  it("renders the command and actions", () => {
+    const markup = renderToStaticMarkup(
+      <CommandApproval
+        approval={{
+          id: "desktop-1",
+          turn_id: "turn-1",
+          agent_id: "leader",
+          tool_call_id: "command-1",
+          tool: "run_command",
+          input: {
+            space: "workspace",
+            command: "pnpm test",
+          },
+        }}
+        onRespond={() => undefined}
+        responding={false}
+      />,
+    );
+
+    expect(markup).toContain("Run command");
+    expect(markup).toContain("pnpm test");
+    expect(markup).toContain("Deny");
+    expect(markup).toContain(">Run<");
   });
 });
 

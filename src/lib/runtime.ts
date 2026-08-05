@@ -1,6 +1,12 @@
-import type { JsonValue, Message, Notification, Request } from "@/lib/agent";
+import type {
+  JsonValue,
+  Message,
+  Notification,
+  Request,
+  SuccessResponse,
+} from "@/lib/agent";
 
-export type AgentStatus = "idle" | "running" | "failed";
+export type AgentStatus = "idle" | "running" | "waiting" | "failed";
 export type MessageStatus = "streaming" | "complete" | "failed" | "interrupted";
 export type TurnStatus = "running" | "completed" | "failed" | "interrupted";
 
@@ -45,9 +51,25 @@ export interface TurnEvent {
   kind: string;
   content?: string;
   name?: string;
+  tool_call_id?: string;
+  approved?: boolean;
   input?: JsonValue;
   output?: JsonValue;
   message?: string;
+}
+
+export interface CommandApproval {
+  id: string;
+  turn_id: string;
+  agent_id: string;
+  tool_call_id: string;
+  tool: string;
+  input: {
+    space: "workspace" | "home";
+    command: string;
+    path?: string;
+    timeout?: number;
+  };
 }
 
 export interface TurnSnapshot {
@@ -66,6 +88,7 @@ export interface RuntimeState {
   chat: ChatInfo | null;
   messages: ChatMessage[];
   turn: TurnSnapshot | null;
+  approval: CommandApproval | null;
   error: string | null;
 }
 
@@ -108,6 +131,7 @@ export const initialRuntimeState: RuntimeState = {
   chat: null,
   messages: [],
   turn: null,
+  approval: null,
   error: null,
 };
 
@@ -121,6 +145,13 @@ export function projectOpenRequest(id: string, workspace: string): Request {
 
 export function chatMessage(content: string): Notification {
   return { method: "chat/send", params: { content } };
+}
+
+export function approvalResponse(
+  id: string,
+  approved: boolean,
+): SuccessResponse {
+  return { id, result: approved };
 }
 
 export function connectionError(
@@ -164,6 +195,7 @@ export function reduceRuntimeMessage(
       chat: snapshot.chat,
       messages: snapshot.messages,
       turn: snapshot.last_turn,
+      approval: null,
       error: null,
     };
   }
@@ -180,6 +212,7 @@ export function reduceRuntimeMessage(
       project: params.project,
       agent: params.agent,
       chat: params.chat,
+      approval: null,
       error: null,
     };
   }
@@ -197,6 +230,7 @@ export function reduceRuntimeMessage(
         params.agent_message,
       ],
       turn: params.turn,
+      approval: null,
       error: null,
     };
   }
@@ -205,6 +239,17 @@ export function reduceRuntimeMessage(
     return {
       ...state,
       agent: message.params as unknown as AgentInfo,
+      error: null,
+    };
+  }
+
+  if (message.method === "approval/request" && "id" in message) {
+    return {
+      ...state,
+      approval: {
+        id: message.id,
+        ...(message.params as unknown as Omit<CommandApproval, "id">),
+      },
       error: null,
     };
   }
@@ -225,6 +270,11 @@ export function reduceRuntimeMessage(
     return {
       ...state,
       messages,
+      approval:
+        params.event.kind === "approval_resolved" &&
+        params.event.tool_call_id === state.approval?.tool_call_id
+          ? null
+          : state.approval,
       turn: {
         ...state.turn,
         events: [...state.turn.events, params.event],
@@ -241,6 +291,7 @@ export function reduceRuntimeMessage(
         item.id === params.message.id ? params.message : item,
       ),
       turn: params.turn,
+      approval: null,
       error: null,
     };
   }

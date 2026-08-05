@@ -14,6 +14,7 @@ from flowent.runtime import AgentRuntime
 
 RUNTIME_READY = "runtime/ready"
 RUNTIME_SHUTDOWN = "runtime/shutdown"
+APPROVAL_TIMEOUT = 300
 
 
 def respond(connection: JsonlConnection, request_id: str, result: Any) -> None:
@@ -66,6 +67,18 @@ async def serve() -> None:
             raise ModelError("model is not configured")
         return await resolve_model(selected, provider_store, provider_secret)
 
+    async def request_approval(params: dict[str, Any]) -> bool:
+        try:
+            result = await asyncio.wait_for(
+                connection.request("approval/request", params),
+                APPROVAL_TIMEOUT,
+            )
+        except TimeoutError as error:
+            raise ProtocolError("approval timed out") from error
+        if not isinstance(result, bool):
+            raise ProtocolError("desktop returned an invalid approval")
+        return result
+
     async def create_runtime(current_project: Project) -> AgentRuntime:
         snapshot = await collaboration_store.open_project(current_project.id)
         return AgentRuntime(
@@ -74,6 +87,7 @@ async def serve() -> None:
             connection.send,
             selection.model_id if selection else None,
             selected_model,
+            request_approval,
             collaboration_store,
             snapshot,
         )

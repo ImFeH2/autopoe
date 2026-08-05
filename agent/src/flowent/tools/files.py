@@ -5,12 +5,13 @@ import stat
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import Field
 from pydantic_ai import ToolFailed
 
-FileSpace = Literal["workspace", "home"]
+from flowent.tools.space import Space, SpacePaths
+
 Depth = Annotated[int, Field(ge=1, le=5)]
 EntryLimit = Annotated[int, Field(ge=1, le=500)]
 LineNumber = Annotated[int, Field(ge=1)]
@@ -26,11 +27,8 @@ SKIPPED_DIRECTORIES = frozenset(
 
 
 class FileTools:
-    def __init__(self, workspace: Path, home: Path):
-        self.roots = {
-            "workspace": workspace.resolve(),
-            "home": home.resolve(),
-        }
+    def __init__(self, spaces: SpacePaths):
+        self.spaces = spaces
 
     @property
     def functions(self) -> list[Callable[..., Any]]:
@@ -48,7 +46,7 @@ class FileTools:
 
     def list_files(
         self,
-        space: FileSpace,
+        space: Space,
         path: str = ".",
         depth: Depth = 1,
         max_entries: EntryLimit = 200,
@@ -93,7 +91,7 @@ class FileTools:
 
     def read_file(
         self,
-        space: FileSpace,
+        space: Space,
         path: str,
         start_line: LineNumber = 1,
         line_count: LineCount = 200,
@@ -122,7 +120,7 @@ class FileTools:
 
     def search_files(
         self,
-        space: FileSpace,
+        space: Space,
         query: str,
         path: str = ".",
         case_sensitive: bool = False,
@@ -201,7 +199,7 @@ class FileTools:
 
     def write_file(
         self,
-        space: FileSpace,
+        space: Space,
         path: str,
         content: str,
         overwrite: bool = False,
@@ -229,7 +227,7 @@ class FileTools:
 
     def replace_in_file(
         self,
-        space: FileSpace,
+        space: Space,
         path: str,
         old_text: str,
         new_text: str,
@@ -259,26 +257,13 @@ class FileTools:
             "bytes": len(data),
         }
 
-    def _root(self, space: FileSpace) -> Path:
-        try:
-            return self.roots[space]
-        except KeyError as error:
-            raise ToolFailed("space must be workspace or home") from error
+    def _root(self, space: Space) -> Path:
+        return self.spaces.root(space)
 
-    def _resolve(self, space: FileSpace, path: str) -> Path:
-        root = self._root(space)
-        requested = Path(path)
-        if requested.is_absolute():
-            raise ToolFailed("Path must be relative to the selected space")
-        try:
-            target = (root / requested).resolve()
-        except OSError as error:
-            raise ToolFailed(f"Could not resolve path: {path}") from error
-        if not target.is_relative_to(root):
-            raise ToolFailed("Path escapes the selected space")
-        return target
+    def _resolve(self, space: Space, path: str) -> Path:
+        return self.spaces.resolve(space, path)
 
-    def _file(self, space: FileSpace, path: str) -> Path:
+    def _file(self, space: Space, path: str) -> Path:
         target = self._resolve(space, path)
         if not target.exists():
             raise ToolFailed(f"File not found: {path}")
@@ -311,7 +296,7 @@ class FileTools:
             for filename in sorted(filenames, key=str.casefold):
                 yield Path(directory) / filename
 
-    def _entry(self, space: FileSpace, path: Path) -> dict[str, Any]:
+    def _entry(self, space: Space, path: Path) -> dict[str, Any]:
         try:
             if path.is_symlink():
                 kind = "symlink"
@@ -333,14 +318,8 @@ class FileTools:
             "size": size,
         }
 
-    def _display(self, space: FileSpace, path: Path) -> str:
-        root = self._root(space)
-        try:
-            relative = path.relative_to(root)
-        except ValueError:
-            relative = path.resolve().relative_to(root)
-        value = relative.as_posix()
-        return value or "."
+    def _display(self, space: Space, path: Path) -> str:
+        return self.spaces.display(space, path)
 
     @staticmethod
     def _encode_text(content: str) -> bytes:

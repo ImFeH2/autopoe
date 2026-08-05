@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     fs,
     sync::{Arc, Mutex},
 };
@@ -20,10 +20,26 @@ type OutboundMessages = Arc<Mutex<Outbound>>;
 struct Outbound {
     channel: Option<Channel<Value>>,
     pending: VecDeque<Value>,
+    approvals: BTreeMap<String, Value>,
 }
 
 impl Outbound {
     fn send(&mut self, message: Value) {
+        if matches!(
+            message.get("method").and_then(Value::as_str),
+            Some("turn/completed" | "turn/failed")
+        ) {
+            self.approvals.clear();
+        }
+        if let Some(id) = approval_id(&message) {
+            self.approvals.insert(id, message.clone());
+            if let Some(channel) = self.channel.as_ref()
+                && channel.send(message).is_err()
+            {
+                self.channel = None;
+            }
+            return;
+        }
         if let Some(channel) = self.channel.as_ref() {
             if channel.send(message.clone()).is_ok() {
                 return;
@@ -40,8 +56,20 @@ impl Outbound {
                 return Err(error.into());
             }
         }
+        for message in self.approvals.values() {
+            channel.send(message.clone())?;
+        }
         self.channel = Some(channel);
         Ok(())
+    }
+
+    fn resolve(&mut self, message: &Value) {
+        if message.get("method").is_none()
+            && (message.get("result").is_some() || message.get("error").is_some())
+            && let Some(id) = message.get("id").and_then(Value::as_str)
+        {
+            self.approvals.remove(id);
+        }
     }
 }
 
@@ -96,7 +124,12 @@ impl Sidecar {
     }
 
     pub fn send(&self, message: &Value) -> Result<()> {
-        write(&self.child, message)
+        write(&self.child, message)?;
+        self.outbound
+            .lock()
+            .map_err(|_| anyhow!("sidecar outbound lock poisoned"))?
+            .resolve(message);
+        Ok(())
     }
 
     pub fn subscribe(&self, channel: Channel<Value>) -> Result<()> {
@@ -113,6 +146,7 @@ impl Sidecar {
         if let Ok(mut outbound) = self.outbound.lock() {
             outbound.channel = None;
             outbound.pending.clear();
+            outbound.approvals.clear();
         }
     }
 }
@@ -121,6 +155,13 @@ fn encode(message: &Value) -> Result<Vec<u8>> {
     let mut encoded = serde_json::to_vec(message).context("encode sidecar message")?;
     encoded.push(b'\n');
     Ok(encoded)
+}
+
+fn approval_id(message: &Value) -> Option<String> {
+    if message.get("method").and_then(Value::as_str) != Some("approval/request") {
+        return None;
+    }
+    message.get("id").and_then(Value::as_str).map(str::to_owned)
 }
 
 fn dispatch(
@@ -238,5 +279,62 @@ mod tests {
             Some(json!({"id": "desktop-1", "result": "secret"}))
         );
         assert!(internal_response(&json!({"method": "runtime/ready"}), |_| Ok(None)).is_none());
+    }
+
+    #[test]
+    fn replays_unresolved_approval_requests() {
+        let mut outbound = Outbound::default();
+        let first = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let first_channel = Arc::clone(&first);
+        outbound
+            .subscribe(Channel::new(move |body| {
+                let InvokeResponseBody::Json(value) = body else {
+                    panic!("expected JSON channel payload");
+                };
+                first_channel
+                    .lock()
+                    .expect("first channel lock")
+                    .push(serde_json::from_str(&value).expect("decode channel payload"));
+                Ok(())
+            }))
+            .expect("subscribe first channel");
+        let request = json!({
+            "id": "desktop-1",
+            "method": "approval/request",
+            "params": {"tool": "run_command"}
+        });
+        outbound.send(request.clone());
+
+        let second = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let second_channel = Arc::clone(&second);
+        outbound
+            .subscribe(Channel::new(move |body| {
+                let InvokeResponseBody::Json(value) = body else {
+                    panic!("expected JSON channel payload");
+                };
+                second_channel
+                    .lock()
+                    .expect("second channel lock")
+                    .push(serde_json::from_str(&value).expect("decode channel payload"));
+                Ok(())
+            }))
+            .expect("subscribe second channel");
+
+        outbound.resolve(&json!({"id": "desktop-1", "result": false}));
+
+        assert_eq!(
+            *first.lock().expect("first messages lock"),
+            vec![request.clone()]
+        );
+        assert_eq!(*second.lock().expect("second messages lock"), vec![request]);
+        assert!(outbound.approvals.is_empty());
+
+        outbound.send(json!({
+            "id": "desktop-2",
+            "method": "approval/request",
+            "params": {"tool": "run_command"}
+        }));
+        outbound.send(json!({"method": "turn/failed", "params": {}}));
+        assert!(outbound.approvals.is_empty());
     }
 }

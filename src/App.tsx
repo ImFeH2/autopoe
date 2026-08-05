@@ -1,10 +1,10 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-
 import { AppSidebar } from "@/components/AppSidebar";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatMessages } from "@/components/ChatMessages";
+import { CommandApproval } from "@/components/CommandApproval";
 import { ContextInspector } from "@/components/ContextInspector";
 import { ModelPage } from "@/components/ModelPage";
 import { ProjectEmptyState } from "@/components/ProjectEmptyState";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { send, subscribe } from "@/lib/agent";
 import {
+  approvalResponse,
   chatMessage,
   connectionError,
   initialRuntimeState,
@@ -40,6 +41,9 @@ function App() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [openingProject, setOpeningProject] = useState(false);
   const [sending, setSending] = useState(false);
+  const [respondingApprovalId, setRespondingApprovalId] = useState<
+    string | null
+  >(null);
   const endRef = useRef<HTMLDivElement>(null);
   const projectRequestRef = useRef<string | null>(null);
   const lastMessage = runtime.messages[runtime.messages.length - 1];
@@ -91,7 +95,10 @@ function App() {
     }
   }, [runtime.connection, runtime.turn]);
 
-  const busy = sending || runtime.agent?.status === "running";
+  const busy =
+    sending ||
+    runtime.agent?.status === "running" ||
+    runtime.agent?.status === "waiting";
   const canSend =
     runtime.connection === "ready" &&
     Boolean(runtime.agent?.model) &&
@@ -116,6 +123,20 @@ function App() {
   };
 
   const inspectAgent = () => setInspectorOpen(true);
+
+  const respondToApproval = async (approved: boolean) => {
+    const approval = runtime.approval;
+    if (!approval || respondingApprovalId === approval.id) {
+      return;
+    }
+    setRespondingApprovalId(approval.id);
+    try {
+      await send(approvalResponse(approval.id, approved));
+    } catch (error) {
+      setRespondingApprovalId(null);
+      setRuntime((state) => runtimeError(state, error));
+    }
+  };
 
   const changePage = (nextPage: "chat" | SettingsPage) => {
     setPage(nextPage);
@@ -248,6 +269,14 @@ function App() {
           onOpenChange={setInspectorOpen}
           open={inspectorOpen}
           turn={runtime.turn}
+        />
+      ) : null}
+
+      {runtime.approval ? (
+        <CommandApproval
+          approval={runtime.approval}
+          onRespond={respondToApproval}
+          responding={respondingApprovalId === runtime.approval.id}
         />
       ) : null}
     </SidebarProvider>
