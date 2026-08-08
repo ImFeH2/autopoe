@@ -1,12 +1,8 @@
-from PyInstaller.utils.hooks import copy_metadata
-
-
-analysis = Analysis(
+a = Analysis(
     ["src/flowent/__main__.py"],
     pathex=[],
     binaries=[],
-    datas=copy_metadata("flowent")
-    + copy_metadata("pydantic-ai-slim", recursive=True),
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -15,13 +11,13 @@ analysis = Analysis(
     noarchive=False,
     optimize=0,
 )
-archive = PYZ(analysis.pure)
+pyz = PYZ(a.pure)
 
-executable = EXE(
-    archive,
-    analysis.scripts,
-    analysis.binaries,
-    analysis.datas,
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
     [],
     name="flowent-agent",
     debug=False,
