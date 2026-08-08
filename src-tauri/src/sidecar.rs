@@ -27,8 +27,13 @@ impl Sidecar {
 
         tauri::async_runtime::spawn(async move {
             while let Some(event) = events.recv().await {
-                if matches!(event, CommandEvent::Terminated(_)) {
-                    break;
+                match event {
+                    CommandEvent::Stderr(line) => {
+                        eprint!("[Sidecar] {}", String::from_utf8_lossy(&line));
+                    }
+                    CommandEvent::Error(error) => eprintln!("[Sidecar] {error}"),
+                    CommandEvent::Terminated(_) => break,
+                    _ => {}
                 }
             }
         });

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "im.feh2.flowent.e2e",
+  "build": {
+    "beforeBuildCommand": "pnpm build:desktop:e2e:frontend",
+    "frontendDist": "../dist-e2e"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "desktop-e2e",
+          "description": "Capability for desktop tests",
+          "windows": ["main"],
+          "permissions": ["wdio:default"]
+        }
+      ]
+    }
+  }
+}

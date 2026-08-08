@@ -16,3 +16,8 @@ tauri-build = { version = "2", features = [] }
 anyhow = "1"
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+tauri-plugin-wdio = { version = "1", optional = true }
+tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+
+[features]
+desktop-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]

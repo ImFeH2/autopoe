@@ -9,7 +9,9 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-e2e
 dist-ssr
+/artifacts/
 /target
 *.local
 
