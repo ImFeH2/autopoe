@@ -11,7 +11,10 @@ async function createDiscussion(topic: string) {
   await expect($(`h2=${topic}`)).toExist();
 }
 
-async function sendMessage(body: string) {
+async function sendMessage(body: string, mentionAgent = false) {
+  if (mentionAgent) {
+    await $("#message-mention-2").click();
+  }
   await $("[aria-label='Message']").setValue(body);
   await $("form[aria-label='Send Message'] button").click();
   await expect($("[role='log']")).toHaveText(expect.stringContaining(body));
@@ -39,10 +42,20 @@ describe("Flowent desktop", () => {
 
     await createDiscussion("Ship the first slice");
     await expect($("p=You, Ada")).toExist();
-    await sendMessage("First Discussion message one.");
-    await sendMessage("First Discussion message two.");
+    await sendMessage("Please handle the first Discussion.", true);
     await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("MESSAGE 2"),
+      expect.stringContaining("@Ada · ACKED"),
+    );
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining(
+        "Ada received: Please handle the first Discussion.",
+      ),
+    );
+    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
+
+    await sendMessage("Human follow-up without a mention.");
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("MESSAGE 3"),
     );
 
     await createDiscussion("Review the first slice");
@@ -56,10 +69,10 @@ describe("Flowent desktop", () => {
 
     await $("button*=Ship the first slice").click();
     await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("First Discussion message one."),
+      expect.stringContaining("Please handle the first Discussion."),
     );
     await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("MESSAGE 2"),
+      expect.stringContaining("MESSAGE 3"),
     );
     await expect($("[role='log']")).not.toHaveText(
       expect.stringContaining("Second Discussion message one."),

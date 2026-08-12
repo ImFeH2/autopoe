@@ -35,7 +35,7 @@ def test_dispatches_mutations_and_returns_complete_snapshot() -> None:
     assert isinstance(snapshot, dict)
     assert snapshot["members"][1]["name"] == "Ada"
     assert snapshot["discussions"][0]["messages"] == [
-        {"id": 1, "sender_id": 1, "body": "Begin."}
+        {"id": 1, "sender_id": 1, "body": "Begin.", "mentions": []}
     ]
 
 

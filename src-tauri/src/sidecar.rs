@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    ffi::OsString,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -21,6 +22,8 @@ use tauri_plugin_shell::{
 type PendingResponse = Result<Value, String>;
 type PendingSender = Sender<PendingResponse>;
 type SharedBridge = Arc<Mutex<BridgeState>>;
+
+const TEST_RUNNER_ENV: &str = "FLOWENT_TEST_RUNNER";
 
 struct BridgeState {
     child: Option<CommandChild>,
@@ -56,13 +59,16 @@ impl Default for Sidecar {
 
 impl Sidecar {
     pub fn start(&self, app: &AppHandle) -> Result<()> {
-        let (mut events, child) = app
+        let command = app
             .shell()
             .sidecar("flowent-agent")
             .context("create sidecar command")?
-            .current_dir(&self.working_directory)
-            .spawn()
-            .context("start sidecar")?;
+            .env_clear()
+            .envs(filtered_environment(std::env::vars_os()))
+            .current_dir(&self.working_directory);
+        #[cfg(feature = "desktop-e2e")]
+        let command = command.env(TEST_RUNNER_ENV, "deterministic");
+        let (mut events, child) = command.spawn().context("start sidecar")?;
 
         {
             let mut bridge = self
@@ -129,6 +135,15 @@ impl Sidecar {
     pub fn stop(&self) {
         fail_bridge(&self.bridge, "Sidecar stopped");
     }
+}
+
+fn filtered_environment(
+    environment: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    environment
+        .into_iter()
+        .filter(|(key, _)| !key.eq_ignore_ascii_case(TEST_RUNNER_ENV))
+        .collect()
 }
 
 fn handle_event(bridge: &SharedBridge, event: CommandEvent) -> bool {
@@ -241,6 +256,30 @@ mod tests {
         let (sender, receiver) = channel(1);
         bridge.lock().unwrap().pending.insert(request_id, sender);
         receiver
+    }
+
+    #[test]
+    fn removes_test_runner_from_inherited_environment() {
+        let environment = filtered_environment([
+            (OsString::from("PATH"), OsString::from("/bin")),
+            (
+                OsString::from(TEST_RUNNER_ENV),
+                OsString::from("deterministic"),
+            ),
+            (
+                OsString::from("flowent_test_runner"),
+                OsString::from("deterministic"),
+            ),
+            (
+                OsString::from("Flowent_Test_Runner"),
+                OsString::from("deterministic"),
+            ),
+        ]);
+
+        assert_eq!(
+            environment,
+            vec![(OsString::from("PATH"), OsString::from("/bin"))]
+        );
     }
 
     #[test]

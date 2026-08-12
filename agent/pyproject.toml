@@ -6,7 +6,10 @@ authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic-ai-slim[openai]>=2.28.0",
+    "python-dotenv>=1.2.2",
+]
 
 [project.scripts]
 flowent = "flowent.__main__:main"

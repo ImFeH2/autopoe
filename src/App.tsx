@@ -21,6 +21,12 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function toggleId(ids: number[], id: number) {
+  return ids.includes(id)
+    ? ids.filter((current) => current !== id)
+    : [...ids, id];
+}
+
 function App() {
   const [requestState, setRequestState] = useState<RequestState>({
     status: "loading",
@@ -32,6 +38,7 @@ function App() {
   const [topic, setTopic] = useState("");
   const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
   const [messageBody, setMessageBody] = useState("");
+  const [messageMentionIds, setMessageMentionIds] = useState<number[]>([]);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -39,20 +46,31 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    backend
-      .getOrganization()
-      .then((snapshot) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function refresh() {
+      try {
+        const snapshot = await backend.getOrganization();
         if (active) {
           setRequestState({ status: "ready", snapshot });
         }
-      })
-      .catch((error: unknown) => {
+      } catch (error) {
         if (active) {
           setRequestState({ status: "error", message: errorMessage(error) });
         }
-      });
+      } finally {
+        if (active) {
+          timer = setTimeout(() => void refresh(), 250);
+        }
+      }
+    }
+
+    void refresh();
     return () => {
       active = false;
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, []);
 
@@ -116,6 +134,8 @@ function App() {
         nextSnapshot.discussions[nextSnapshot.discussions.length - 1];
       setTopic("");
       setSelectedMemberIds([]);
+      setMessageBody("");
+      setMessageMentionIds([]);
       setSelectedDiscussionId(created?.id ?? null);
     }
   }
@@ -126,20 +146,31 @@ function App() {
       return;
     }
     const nextSnapshot = await mutate(() =>
-      backend.sendMessage(selectedDiscussion.id, messageBody),
+      backend.sendMessage(
+        selectedDiscussion.id,
+        messageBody,
+        messageMentionIds,
+      ),
     );
     if (nextSnapshot) {
       restoreMessageFocusRef.current = true;
       setMessageBody("");
+      setMessageMentionIds([]);
     }
   }
 
   function toggleMember(memberId: number) {
-    setSelectedMemberIds((current) =>
-      current.includes(memberId)
-        ? current.filter((id) => id !== memberId)
-        : [...current, memberId],
-    );
+    setSelectedMemberIds((current) => toggleId(current, memberId));
+  }
+
+  function toggleMessageMention(memberId: number) {
+    setMessageMentionIds((current) => toggleId(current, memberId));
+  }
+
+  function selectDiscussion(discussionId: number) {
+    setSelectedDiscussionId(discussionId);
+    setMessageBody("");
+    setMessageMentionIds([]);
   }
 
   return (
@@ -174,14 +205,21 @@ function App() {
           </div>
           <ul className="m-0 mb-3 grid list-none gap-1 p-0">
             {snapshot.members.map((member) => (
-              <li
-                className="body-compact flex min-h-7 items-center justify-between gap-2"
-                key={member.id}
-              >
+              <li className="member-row body-compact min-h-7" key={member.id}>
                 <span className="truncate">{member.name}</span>
                 <span className="meta-text font-mono text-text-tertiary">
-                  {member.type === "agent" ? "IDLE" : "HUMAN"} · {member.id}
+                  {member.type === "agent"
+                    ? `${member.status.toUpperCase()} · ${member.id}`
+                    : `HUMAN · ${member.id}`}
                 </span>
+                {member.type === "agent" && member.error ? (
+                  <span
+                    className="member-error caption-text text-danger"
+                    role="status"
+                  >
+                    {member.error}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -238,7 +276,7 @@ function App() {
                           : undefined
                       }
                       className="w-full justify-start"
-                      onClick={() => setSelectedDiscussionId(discussion.id)}
+                      onClick={() => selectDiscussion(discussion.id)}
                       variant={
                         selectedDiscussion?.id === discussion.id
                           ? "secondary"
@@ -277,7 +315,9 @@ function App() {
             members={snapshot.members}
             messageBody={messageBody}
             messageInputRef={messageInputRef}
+            messageMentionIds={messageMentionIds}
             onMessageChange={setMessageBody}
+            onMentionToggle={toggleMessageMention}
             onSend={handleSendMessage}
           />
         ) : (
@@ -400,7 +440,9 @@ type DiscussionViewProps = {
   members: OrganizationSnapshot["members"];
   messageBody: string;
   messageInputRef: React.RefObject<HTMLTextAreaElement | null>;
+  messageMentionIds: number[];
   onMessageChange: (body: string) => void;
+  onMentionToggle: (memberId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -410,7 +452,9 @@ function DiscussionView({
   members,
   messageBody,
   messageInputRef,
+  messageMentionIds,
   onMessageChange,
+  onMentionToggle,
   onSend,
 }: DiscussionViewProps) {
   const membersById = new Map(members.map((member) => [member.id, member]));
@@ -418,6 +462,9 @@ function DiscussionView({
     .map((id) => membersById.get(id)?.name)
     .filter(Boolean)
     .join(", ");
+  const discussionAgents = discussion.member_ids
+    .map((id) => membersById.get(id))
+    .filter((member) => member?.type === "agent");
 
   return (
     <>
@@ -462,9 +509,26 @@ function DiscussionView({
                       MESSAGE {message.id}
                     </p>
                   </div>
-                  <p className="message-body m-0 whitespace-pre-wrap leading-6">
-                    {message.body}
-                  </p>
+                  <div className="message-content">
+                    <p className="message-body m-0 whitespace-pre-wrap leading-6">
+                      {message.body}
+                    </p>
+                    {message.mentions.length > 0 ? (
+                      <ul className="mention-statuses" aria-label="Mentions">
+                        {message.mentions.map((mention) => (
+                          <li
+                            className="meta-text font-mono text-text-secondary"
+                            key={mention.member_id}
+                          >
+                            @
+                            {membersById.get(mention.member_id)?.name ??
+                              mention.member_id}{" "}
+                            · {mention.status.toUpperCase()}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                 </li>
               );
             })}
@@ -476,6 +540,27 @@ function DiscussionView({
         aria-label="Send Message"
         onSubmit={onSend}
       >
+        <fieldset className="mention-picker">
+          <legend className="section-label text-text-secondary">Mention</legend>
+          {discussionAgents.map((agent) => {
+            const mentionId = `message-mention-${agent.id}`;
+            return (
+              <label
+                className="caption-text mention-option text-text-secondary"
+                htmlFor={mentionId}
+                key={agent.id}
+              >
+                <Checkbox
+                  checked={messageMentionIds.includes(agent.id)}
+                  disabled={disabled}
+                  id={mentionId}
+                  onChange={() => onMentionToggle(agent.id)}
+                />
+                @{agent.name}
+              </label>
+            );
+          })}
+        </fieldset>
         <div className="flex items-end gap-3">
           <Textarea
             aria-label="Message"

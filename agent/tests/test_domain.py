@@ -32,8 +32,14 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
                         "id": 1,
                         "sender_id": 1,
                         "body": "Start with the domain model.",
+                        "mentions": [],
                     },
-                    {"id": 2, "sender_id": 2, "body": "I will take it."},
+                    {
+                        "id": 2,
+                        "sender_id": 2,
+                        "body": "I will take it.",
+                        "mentions": [],
+                    },
                 ],
             }
         ],

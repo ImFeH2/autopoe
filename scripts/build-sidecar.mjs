@@ -67,4 +67,22 @@ copyFileSync(source, destination);
 if (process.platform !== "win32") {
   chmodSync(destination, 0o755);
 }
+
+const smoke = spawnSync(destination, [], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, FLOWENT_TEST_RUNNER: "deterministic" },
+  input: '{"id":1,"method":"organization.get","params":{}}\n',
+  timeout: 15_000,
+});
+if (smoke.error || smoke.status !== 0) {
+  throw (
+    smoke.error ?? new Error(`Sidecar smoke exited with status ${smoke.status}`)
+  );
+}
+const response = JSON.parse(smoke.stdout.trim());
+if (response.id !== 1 || response.result?.organization?.id !== 1) {
+  throw new Error("Sidecar smoke returned an invalid response");
+}
+
 process.stdout.write(`${destination}\n`);

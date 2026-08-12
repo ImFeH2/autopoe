@@ -13,7 +13,14 @@ const validSnapshot = {
       id: 1,
       topic: "Ship",
       member_ids: [1, 2],
-      messages: [{ id: 1, sender_id: 1, body: "Begin." }],
+      messages: [
+        {
+          id: 1,
+          sender_id: 1,
+          body: "Begin.",
+          mentions: [{ member_id: 2, status: "pending" }],
+        },
+      ],
     },
   ],
 };
@@ -50,6 +57,20 @@ describe("parseOrganizationSnapshot", () => {
     value.discussions[0].messages[0].sender_id = 3;
 
     expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "must belong to the Discussion",
+    );
+  });
+
+  it("rejects Mentions targeting a Human or unknown Member", () => {
+    const humanMention = structuredClone(validSnapshot);
+    humanMention.discussions[0].messages[0].mentions[0].member_id = 1;
+    expect(() => parseOrganizationSnapshot(humanMention)).toThrow(
+      "must identify an Agent",
+    );
+
+    const unknownMention = structuredClone(validSnapshot);
+    unknownMention.discussions[0].messages[0].mentions[0].member_id = 99;
+    expect(() => parseOrganizationSnapshot(unknownMention)).toThrow(
       "must belong to the Discussion",
     );
   });

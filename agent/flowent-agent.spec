@@ -1,8 +1,11 @@
+from PyInstaller.utils.hooks import copy_metadata
+
+
 a = Analysis(
     ["src/flowent/__main__.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=copy_metadata("pydantic-ai-slim", recursive=True),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

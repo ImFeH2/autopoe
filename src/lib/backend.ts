@@ -10,15 +10,22 @@ export type AgentMember = {
   id: number;
   type: "agent";
   name: string;
-  status: "idle";
+  status: "idle" | "running" | "error";
+  error?: string;
 };
 
 export type Member = HumanMember | AgentMember;
+
+export type Mention = {
+  member_id: number;
+  status: "pending" | "read" | "acked";
+};
 
 export type Message = {
   id: number;
   sender_id: number;
   body: string;
+  mentions: Mention[];
 };
 
 export type Discussion = {
@@ -67,6 +74,13 @@ function array(value: unknown, path: string): unknown[] {
   return value;
 }
 
+function mentionStatus(value: unknown, path: string): Mention["status"] {
+  if (value === "pending" || value === "read" || value === "acked") {
+    return value;
+  }
+  return invalidSnapshot(`${path} is invalid`);
+}
+
 function parseMember(value: unknown, index: number): Member {
   const item = record(value, `members[${index}]`);
   const id = positiveInteger(item.id, `members[${index}].id`);
@@ -75,8 +89,25 @@ function parseMember(value: unknown, index: number): Member {
   if (item.type === "human") {
     return { id, type: "human", name };
   }
-  if (item.type === "agent" && item.status === "idle") {
-    return { id, type: "agent", name, status: "idle" };
+  if (
+    item.type === "agent" &&
+    (item.status === "idle" ||
+      item.status === "running" ||
+      item.status === "error")
+  ) {
+    const member: AgentMember = {
+      id,
+      type: "agent",
+      name,
+      status: item.status,
+    };
+    if (item.error !== undefined) {
+      member.error = nonEmptyString(item.error, `members[${index}].error`);
+    }
+    if (member.status === "error" && !member.error) {
+      invalidSnapshot(`members[${index}].error is required for error status`);
+    }
+    return member;
   }
   return invalidSnapshot(`members[${index}] has an invalid type or status`);
 }
@@ -85,7 +116,7 @@ function parseMessage(
   value: unknown,
   discussionIndex: number,
   messageIndex: number,
-  discussionMemberIds: Set<number>,
+  discussionMembers: Map<number, Member>,
 ): Message {
   const path = `discussions[${discussionIndex}].messages[${messageIndex}]`;
   const item = record(value, path);
@@ -94,20 +125,49 @@ function parseMessage(
     invalidSnapshot(`${path}.id must follow Discussion order`);
   }
   const senderId = positiveInteger(item.sender_id, `${path}.sender_id`);
-  if (!discussionMemberIds.has(senderId)) {
+  if (!discussionMembers.has(senderId)) {
     invalidSnapshot(`${path}.sender_id must belong to the Discussion`);
   }
+  const mentionIds = new Set<number>();
+  const mentions = array(item.mentions, `${path}.mentions`).map(
+    (mention, mentionIndex) => {
+      const mentionPath = `${path}.mentions[${mentionIndex}]`;
+      const mentionItem = record(mention, mentionPath);
+      const memberId = positiveInteger(
+        mentionItem.member_id,
+        `${mentionPath}.member_id`,
+      );
+      const mentionedMember = discussionMembers.get(memberId);
+      if (!mentionedMember) {
+        invalidSnapshot(
+          `${mentionPath}.member_id must belong to the Discussion`,
+        );
+      }
+      if (mentionedMember.type !== "agent") {
+        invalidSnapshot(`${mentionPath}.member_id must identify an Agent`);
+      }
+      if (mentionIds.has(memberId)) {
+        invalidSnapshot(`${path}.mentions must target unique Members`);
+      }
+      mentionIds.add(memberId);
+      return {
+        member_id: memberId,
+        status: mentionStatus(mentionItem.status, `${mentionPath}.status`),
+      };
+    },
+  );
   return {
     id,
     sender_id: senderId,
     body: nonEmptyString(item.body, `${path}.body`),
+    mentions,
   };
 }
 
 function parseDiscussion(
   value: unknown,
   index: number,
-  memberIds: Set<number>,
+  membersById: Map<number, Member>,
 ): Discussion {
   const path = `discussions[${index}]`;
   const item = record(value, path);
@@ -126,18 +186,24 @@ function parseDiscussion(
     );
   }
   for (const memberId of discussionMemberIds) {
-    if (!memberIds.has(memberId)) {
+    if (!membersById.has(memberId)) {
       invalidSnapshot(`${path}.member_ids contains an unknown Member`);
     }
   }
 
+  const discussionMembers = new Map(
+    discussionMemberIds.map((memberId) => [
+      memberId,
+      membersById.get(memberId) as Member,
+    ]),
+  );
   return {
     id,
     topic: nonEmptyString(item.topic, `${path}.topic`),
     member_ids: discussionMemberIds,
     messages: array(item.messages, `${path}.messages`).map(
       (message, messageIndex) =>
-        parseMessage(message, index, messageIndex, uniqueMemberIds),
+        parseMessage(message, index, messageIndex, discussionMembers),
     ),
   };
 }
@@ -164,8 +230,9 @@ export function parseOrganizationSnapshot(
     invalidSnapshot('Member 1 must be the current Human "You"');
   }
 
+  const membersById = new Map(members.map((member) => [member.id, member]));
   const discussions = array(snapshot.discussions, "discussions").map(
-    (discussion, index) => parseDiscussion(discussion, index, memberIds),
+    (discussion, index) => parseDiscussion(discussion, index, membersById),
   );
   const discussionIds = new Set(discussions.map((discussion) => discussion.id));
   if (discussionIds.size !== discussions.length) {
@@ -200,10 +267,11 @@ export const backend = {
       creator_id: 1,
       member_ids: memberIds,
     }),
-  sendMessage: (discussionId: number, body: string) =>
+  sendMessage: (discussionId: number, body: string, mentionIds: number[]) =>
     request("discussion.send", {
       discussion_id: discussionId,
       sender_id: 1,
       body,
+      mention_ids: mentionIds,
     }),
 };

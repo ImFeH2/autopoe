@@ -71,14 +71,59 @@ body {
   font-size: 10px;
 }
 
+.member-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.member-error {
+  grid-column: 1 / -1;
+}
+
 .message-row {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);
 }
 
+.message-content {
+  min-width: 0;
+}
+
 .message-body {
   max-width: 760px;
   font-size: 14px;
+}
+
+.mention-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mention-picker {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 8px;
+  border: 0;
+  padding: 0;
+}
+
+.mention-picker legend {
+  float: left;
+  margin-right: 4px;
+}
+
+.mention-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 button,

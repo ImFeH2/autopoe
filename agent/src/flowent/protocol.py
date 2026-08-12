@@ -68,6 +68,7 @@ class Dispatcher:
             discussion_id=require_integer(params, "discussion_id"),
             sender_id=require_integer(params, "sender_id"),
             body=require_string(params, "body"),
+            mention_ids=require_optional_integer_list(params, "mention_ids"),
         )
 
 
@@ -90,6 +91,12 @@ def require_integer_list(params: dict[str, Any], key: str) -> list[int]:
     if not isinstance(value, list) or any(type(item) is not int for item in value):
         raise ProtocolError(f"{key} must be a list of integers")
     return value
+
+
+def require_optional_integer_list(params: dict[str, Any], key: str) -> list[int]:
+    if key not in params:
+        return []
+    return require_integer_list(params, key)
 
 
 def serve(
