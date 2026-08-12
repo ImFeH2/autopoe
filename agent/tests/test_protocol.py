@@ -73,6 +73,29 @@ def test_rejects_boolean_request_id_without_stopping_the_stream() -> None:
     assert responses[1]["result"]["organization"] == {"id": 1}
 
 
+def test_shutdown_calls_cleanup_and_stops_processing() -> None:
+    input_stream = io.StringIO(
+        json.dumps({"id": 1, "method": "system.shutdown", "params": {}})
+        + "\n"
+        + json.dumps({"id": 2, "method": "organization.get", "params": {}})
+        + "\n"
+    )
+    output_stream = io.StringIO()
+    calls: list[str] = []
+
+    serve(
+        input_stream,
+        output_stream,
+        OrganizationState(),
+        lambda: calls.append("stopped"),
+    )
+
+    assert calls == ["stopped"]
+    assert [json.loads(line) for line in output_stream.getvalue().splitlines()] == [
+        {"id": 1, "result": {"stopped": True}}
+    ]
+
+
 def test_rejects_invalid_params_as_a_request_error() -> None:
     responses = run_requests(
         {"id": 1, "method": "organization.create_agent", "params": {}},

@@ -4,12 +4,20 @@ use serde_json::Value;
 use sidecar::Sidecar;
 use tauri::Manager;
 
+fn validate_frontend_method(method: &str) -> Result<(), String> {
+    if method.starts_with("system.") {
+        return Err("Internal Sidecar method".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn sidecar_request(
     sidecar: tauri::State<'_, Sidecar>,
     method: String,
     params: Value,
 ) -> Result<Value, String> {
+    validate_frontend_method(&method)?;
     sidecar.request(method, params).await
 }
 
@@ -39,4 +47,18 @@ pub fn run() {
             app_handle.state::<Sidecar>().stop();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_frontend_method;
+
+    #[test]
+    fn reserves_internal_sidecar_methods() {
+        assert!(validate_frontend_method("organization.get").is_ok());
+        assert_eq!(
+            validate_frontend_method("system.shutdown").unwrap_err(),
+            "Internal Sidecar method"
+        );
+    }
 }

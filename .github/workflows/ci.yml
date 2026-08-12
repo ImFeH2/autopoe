@@ -55,3 +55,23 @@ jobs:
       - name: Check release build
         working-directory: src-tauri
         run: cargo check --release
+
+  host-tools:
+    name: Host tools (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-15
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: agent/uv.lock
+      - name: Install Python dependencies
+        run: uv sync --project agent --all-groups --frozen
+      - name: Verify host tools and Sidecar lifecycle
+        run: uv run --project agent pytest agent/tests/test_host_tools.py agent/tests/test_runtime.py agent/tests/test_sidecar.py -q -W error

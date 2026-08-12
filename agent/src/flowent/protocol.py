@@ -12,13 +12,20 @@ class ProtocolError(Exception):
 
 
 class Dispatcher:
-    def __init__(self, state: OrganizationState) -> None:
+    def __init__(
+        self,
+        state: OrganizationState,
+        on_shutdown: Callable[[], None] | None = None,
+    ) -> None:
         self._state = state
+        self._on_shutdown = on_shutdown
+        self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
             "discussion.create": self._create_discussion,
             "discussion.send": self._send_message,
+            "system.shutdown": self._shutdown,
         }
 
     def dispatch(self, request: Any) -> dict[str, Any]:
@@ -52,6 +59,14 @@ class Dispatcher:
                 "id": request_id,
                 "error": {"code": "invalid_request", "message": str(error)},
             }
+
+    def _shutdown(self, params: dict[str, Any]) -> dict[str, Any]:
+        if params:
+            raise ProtocolError("system.shutdown does not accept params")
+        self.shutdown_requested = True
+        if self._on_shutdown is not None:
+            self._on_shutdown()
+        return {"stopped": True}
 
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
@@ -100,9 +115,12 @@ def require_optional_integer_list(params: dict[str, Any], key: str) -> list[int]
 
 
 def serve(
-    input_stream: TextIO, output_stream: TextIO, state: OrganizationState
+    input_stream: TextIO,
+    output_stream: TextIO,
+    state: OrganizationState,
+    on_shutdown: Callable[[], None] | None = None,
 ) -> None:
-    dispatcher = Dispatcher(state)
+    dispatcher = Dispatcher(state, on_shutdown)
     for line in input_stream:
         try:
             request = json.loads(line)
@@ -116,3 +134,5 @@ def serve(
 
         output_stream.write(json.dumps(response, separators=(",", ":")) + "\n")
         output_stream.flush()
+        if dispatcher.shutdown_requested:
+            return

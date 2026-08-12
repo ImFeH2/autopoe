@@ -72,7 +72,9 @@ const smoke = spawnSync(destination, [], {
   cwd: root,
   encoding: "utf8",
   env: { ...process.env, FLOWENT_TEST_RUNNER: "deterministic" },
-  input: '{"id":1,"method":"organization.get","params":{}}\n',
+  input:
+    '{"id":1,"method":"organization.get","params":{}}\n' +
+    '{"id":2,"method":"system.shutdown","params":{}}\n',
   timeout: 15_000,
 });
 if (smoke.error || smoke.status !== 0) {
@@ -80,8 +82,17 @@ if (smoke.error || smoke.status !== 0) {
     smoke.error ?? new Error(`Sidecar smoke exited with status ${smoke.status}`)
   );
 }
-const response = JSON.parse(smoke.stdout.trim());
-if (response.id !== 1 || response.result?.organization?.id !== 1) {
+const responses = smoke.stdout
+  .trim()
+  .split("\n")
+  .map((line) => JSON.parse(line));
+if (
+  responses.length !== 2 ||
+  responses[0].id !== 1 ||
+  responses[0].result?.organization?.id !== 1 ||
+  responses[1].id !== 2 ||
+  responses[1].result?.stopped !== true
+) {
   throw new Error("Sidecar smoke returned an invalid response");
 }
 

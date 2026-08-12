@@ -12,6 +12,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIModelName
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from flowent.domain import Activation, DomainError
+from flowent.host_tools import HostToolError
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRunner
 
 
@@ -58,10 +59,31 @@ class DeterministicRunner:
                 if message["id"] in item.message_ids
             ]
             bodies = " | ".join(message["body"] for message in requested)
+            if bodies.startswith("E2E_REPOSITORY_TASK:"):
+                directory = "artifacts/desktop/e2e-agent-work"
+                inspected = context.exec(["git", "status", "--short"], ".", 10)
+                context.patch(
+                    """diff --git a/artifacts/desktop/e2e-agent-work/input.txt b/artifacts/desktop/e2e-agent-work/input.txt
+--- a/artifacts/desktop/e2e-agent-work/input.txt
++++ b/artifacts/desktop/e2e-agent-work/input.txt
+@@ -1 +1 @@
+-before
++after
+"""
+                )
+                verified = context.exec(
+                    ["git", "diff", "--", "input.txt"], directory, 10
+                )
+                body = (
+                    f"{agent['name']} used exec and patch. "
+                    f"status={inspected['exit_code']} verify={verified['exit_code']}"
+                )
+            else:
+                body = f"{agent['name']} received: {bodies}"
             context.discussion(
                 "send",
                 discussion_id=item.discussion_id,
-                body=f"{agent['name']} received: {bodies}",
+                body=body,
             )
             context.discussion(
                 "ack",
@@ -86,6 +108,9 @@ class PydanticAgentRunner:
                 "Use discussion action=read for every listed Message before deciding what to do. "
                 "Communicate only with discussion action=send. Use organization and discussion tools "
                 "to discover Members, create Agents, or open a new Discussion when useful. "
+                "Use exec with an argv list to inspect the launch directory and run commands. "
+                "Use patch with a unified diff to create, modify, delete, or rename text files. "
+                "Never read or expose .env files, environment variables, credentials, tokens, or secrets. "
                 "Acknowledge each triggering Message with discussion action=ack only after you have "
                 "finished handling it. Do not claim you used tools that are not available."
             ),
@@ -94,6 +119,27 @@ class PydanticAgentRunner:
         self._register_tools()
 
     def _register_tools(self) -> None:
+        @self._agent.tool(name="exec", sequential=True)
+        def execute_command(
+            ctx: RunContext[AgentRunContext],
+            argv: list[str],
+            cwd: str | None = None,
+            timeout_seconds: int = 60,
+        ) -> Any:
+            """Run argv without a shell inside the launch directory and return captured output."""
+            try:
+                return ctx.deps.exec(argv, cwd, timeout_seconds)
+            except HostToolError as error:
+                raise ModelRetry(str(error)) from error
+
+        @self._agent.tool(sequential=True)
+        def patch(ctx: RunContext[AgentRunContext], diff: str) -> Any:
+            """Atomically apply a unified text diff inside the launch directory."""
+            try:
+                return ctx.deps.patch(diff)
+            except HostToolError as error:
+                raise ModelRetry(str(error)) from error
+
         @self._agent.tool
         def organization(
             ctx: RunContext[AgentRunContext],

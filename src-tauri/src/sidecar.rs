@@ -6,6 +6,8 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
+    thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -133,6 +135,48 @@ impl Sidecar {
     }
 
     pub fn stop(&self) {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let request = json!({
+            "id": request_id,
+            "method": "system.shutdown",
+            "params": {},
+        });
+        let mut encoded = match serde_json::to_vec(&request) {
+            Ok(encoded) => encoded,
+            Err(_) => {
+                fail_bridge(&self.bridge, "Sidecar stopped");
+                return;
+            }
+        };
+        encoded.push(b'\n');
+
+        let (sender, mut receiver) = channel(1);
+        let write_result = match self.bridge.lock() {
+            Ok(mut bridge) => {
+                if bridge.failure.is_some() || bridge.child.is_none() {
+                    return;
+                }
+                bridge.pending.insert(request_id, sender);
+                bridge
+                    .child
+                    .as_mut()
+                    .expect("sidecar child checked above")
+                    .write(&encoded)
+            }
+            Err(_) => return,
+        };
+        if write_result.is_err() {
+            fail_bridge(&self.bridge, "Sidecar stopped");
+            return;
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(25);
+        while Instant::now() < deadline {
+            if receiver.try_recv().is_ok() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
         fail_bridge(&self.bridge, "Sidecar stopped");
     }
 }

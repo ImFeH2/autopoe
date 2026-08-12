@@ -1,8 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { $, browser, expect } from "@wdio/globals";
 
 const artifactsDir = resolve("artifacts", "desktop");
+const agentWorkDir = resolve(artifactsDir, "e2e-agent-work");
+const agentWorkFile = resolve(agentWorkDir, "input.txt");
 
 async function createDiscussion(topic: string) {
   await $("#topic").setValue(topic);
@@ -22,6 +24,16 @@ async function sendMessage(body: string, mentionAgent = false) {
 }
 
 describe("Flowent desktop", () => {
+  before(async () => {
+    await rm(agentWorkDir, { force: true, recursive: true });
+    await mkdir(agentWorkDir, { recursive: true });
+    await writeFile(agentWorkFile, "before\n");
+  });
+
+  after(async () => {
+    await rm(agentWorkDir, { force: true, recursive: true });
+  });
+
   it("opens an empty in-memory Organization at the launch directory", async () => {
     await expect(browser).toHaveTitle("Flowent");
     await expect($("h1")).toHaveText("Flowent");
@@ -42,16 +54,18 @@ describe("Flowent desktop", () => {
 
     await createDiscussion("Ship the first slice");
     await expect($("p=You, Ada")).toExist();
-    await sendMessage("Please handle the first Discussion.", true);
+    await sendMessage(
+      "E2E_REPOSITORY_TASK: inspect and update the controlled fixture.",
+      true,
+    );
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("@Ada · ACKED"),
     );
     await expect($("[role='log']")).toHaveText(
-      expect.stringContaining(
-        "Ada received: Please handle the first Discussion.",
-      ),
+      expect.stringContaining("Ada used exec and patch. status=0 verify=0"),
     );
     await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
+    expect(await readFile(agentWorkFile, "utf8")).toBe("after\n");
 
     await sendMessage("Human follow-up without a mention.");
     await expect($("[role='log']")).toHaveText(
@@ -69,7 +83,7 @@ describe("Flowent desktop", () => {
 
     await $("button*=Ship the first slice").click();
     await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("Please handle the first Discussion."),
+      expect.stringContaining("E2E_REPOSITORY_TASK:"),
     );
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("MESSAGE 3"),
