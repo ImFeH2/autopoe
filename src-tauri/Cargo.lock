@@ -856,6 +856,7 @@ name = "flowent"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-shell",

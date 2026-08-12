@@ -4,52 +4,74 @@ import { $, browser, expect } from "@wdio/globals";
 
 const artifactsDir = resolve("artifacts", "desktop");
 
+async function createDiscussion(topic: string) {
+  await $("#topic").setValue(topic);
+  await $("#discussion-member-2").click();
+  await $("form[aria-label='Create Discussion'] button").click();
+  await expect($(`h2=${topic}`)).toExist();
+}
+
+async function sendMessage(body: string) {
+  await $("[aria-label='Message']").setValue(body);
+  await $("form[aria-label='Send Message'] button").click();
+  await expect($("[role='log']")).toHaveText(expect.stringContaining(body));
+  await expect($("[aria-label='Message']")).toBeFocused();
+}
+
 describe("Flowent desktop", () => {
-  it("opens the real Tauri window", async () => {
+  it("opens an empty in-memory Organization at the launch directory", async () => {
     await expect(browser).toHaveTitle("Flowent");
     await expect($("h1")).toHaveText("Flowent");
+    await expect($("aside")).toHaveText(
+      expect.stringContaining("/project/flowent"),
+    );
+    await expect($("[aria-label='Discussions']")).toHaveText("No discussions");
 
     const windows = await browser.tauri.listWindows();
     expect(windows).toContain("main");
   });
 
-  it("accepts WebDriver input and clicks", async () => {
-    await browser.execute(() => {
-      const fixture = document.createElement("form");
-      fixture.dataset.testid = "webdriver-probe";
-      fixture.style.cssText =
-        "position:fixed;top:16px;left:16px;z-index:9999;display:flex;gap:8px;padding:8px;background:white;color:black";
+  it("creates and switches Discussions with scoped Message IDs", async () => {
+    await $("[aria-label='Agent name']").setValue("Ada");
+    await $("form[aria-label='Create Agent'] button").click();
+    await expect($("aside")).toHaveText(expect.stringContaining("Ada"));
+    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
 
-      const input = document.createElement("input");
-      input.dataset.testid = "webdriver-input";
-      input.setAttribute("aria-label", "WebDriver input");
+    await createDiscussion("Ship the first slice");
+    await expect($("p=You, Ada")).toExist();
+    await sendMessage("First Discussion message one.");
+    await sendMessage("First Discussion message two.");
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("MESSAGE 2"),
+    );
 
-      const button = document.createElement("button");
-      button.type = "submit";
-      button.dataset.testid = "webdriver-submit";
-      button.textContent = "Apply";
+    await createDiscussion("Review the first slice");
+    await sendMessage("Second Discussion message one.");
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("MESSAGE 1"),
+    );
+    await expect($("[role='log']")).not.toHaveText(
+      expect.stringContaining("MESSAGE 2"),
+    );
 
-      const output = document.createElement("output");
-      output.dataset.testid = "webdriver-output";
+    await $("button*=Ship the first slice").click();
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("First Discussion message one."),
+    );
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("MESSAGE 2"),
+    );
+    await expect($("[role='log']")).not.toHaveText(
+      expect.stringContaining("Second Discussion message one."),
+    );
 
-      fixture.addEventListener("submit", (event) => {
-        event.preventDefault();
-        output.textContent = input.value;
-      });
-      fixture.append(input, button, output);
-      document.body.append(fixture);
-    });
-
-    await $("[data-testid='webdriver-input']").setValue("Flowent");
-    await $("[data-testid='webdriver-submit']").click();
-    await expect($("[data-testid='webdriver-output']")).toHaveText("Flowent");
-
-    await browser.execute(() => {
-      document.querySelector("[data-testid='webdriver-probe']")?.remove();
-    });
+    await $("button*=Review the first slice").click();
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("Second Discussion message one."),
+    );
   });
 
-  it("captures the rendered window", async () => {
+  it("captures the rendered product window", async () => {
     const screenshot = await browser.takeScreenshot();
     expect(screenshot.length).toBeGreaterThan(1_000);
 

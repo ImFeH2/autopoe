@@ -1,16 +1,22 @@
 @import "tailwindcss";
-@import "@fontsource-variable/geist";
+@import "./tokens.css";
+@import "./base.css";
+@import "./motion.css";
 
 @theme inline {
-  --font-sans: "Geist Variable", sans-serif;
-}
-
-@layer base {
-  html {
-    @apply font-sans;
-  }
-
-  body {
-    @apply m-0;
-  }
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --color-canvas: var(--color-canvas);
+  --color-surface: var(--color-surface);
+  --color-surface-subtle: var(--color-surface-subtle);
+  --color-surface-selected: var(--color-surface-selected);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-tertiary: var(--color-text-tertiary);
+  --color-text-inverse: var(--color-text-inverse);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-danger: var(--color-danger);
 }

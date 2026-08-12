@@ -1,0 +1,25 @@
+:root {
+  color-scheme: light;
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #fafafa;
+  --color-surface-selected: #f3f3f3;
+  --color-text-primary: #0a0a0a;
+  --color-text-secondary: #666666;
+  --color-text-tertiary: #666666;
+  --color-text-inverse: #ffffff;
+  --color-border: #e8e8e8;
+  --color-border-strong: #d7d7d7;
+  --color-accent: #0a0a0a;
+  --color-accent-hover: #292929;
+  --color-danger: #b42318;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    "Segoe UI", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono",
+    monospace;
+  --radius-control: 6px;
+  --focus-ring:
+    0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-text-primary);
+}

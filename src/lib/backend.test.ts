@@ -1,0 +1,86 @@
+import { describe, expect, it } from "vitest";
+import { parseOrganizationSnapshot } from "@/lib/backend";
+
+const validSnapshot = {
+  organization: { id: 1 },
+  working_directory: "/project/flowent",
+  members: [
+    { id: 1, type: "human", name: "You" },
+    { id: 2, type: "agent", name: "Ada", status: "idle" },
+  ],
+  discussions: [
+    {
+      id: 1,
+      topic: "Ship",
+      member_ids: [1, 2],
+      messages: [{ id: 1, sender_id: 1, body: "Begin." }],
+    },
+  ],
+};
+
+describe("parseOrganizationSnapshot", () => {
+  it("returns a complete validated snapshot", () => {
+    expect(parseOrganizationSnapshot(validSnapshot)).toEqual(validSnapshot);
+  });
+
+  it.each([null, {}, { ...validSnapshot, members: [] }])(
+    "rejects an invalid root or empty Organization: %j",
+    (value) => {
+      expect(() => parseOrganizationSnapshot(value)).toThrow(
+        "Invalid Organization snapshot",
+      );
+    },
+  );
+
+  it("rejects Discussion references to unknown Members", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].member_ids = [1, 99];
+
+    expect(() => parseOrganizationSnapshot(value)).toThrow("unknown Member");
+  });
+
+  it("rejects a Message sender outside the Discussion", () => {
+    const value = structuredClone(validSnapshot);
+    value.members.push({
+      id: 3,
+      type: "agent",
+      name: "Lin",
+      status: "idle",
+    });
+    value.discussions[0].messages[0].sender_id = 3;
+
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "must belong to the Discussion",
+    );
+  });
+
+  it("rejects out-of-order Message IDs", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].messages[0].id = 2;
+
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "must follow Discussion order",
+    );
+  });
+
+  it("rejects duplicate Member and Discussion IDs", () => {
+    const duplicateMember = structuredClone(validSnapshot);
+    duplicateMember.members.push({
+      id: 2,
+      type: "agent",
+      name: "Lin",
+      status: "idle",
+    });
+    expect(() => parseOrganizationSnapshot(duplicateMember)).toThrow(
+      "Member IDs must be unique",
+    );
+
+    const duplicateDiscussion = structuredClone(validSnapshot);
+    duplicateDiscussion.discussions.push(
+      structuredClone(duplicateDiscussion.discussions[0]),
+    );
+    expect(() => parseOrganizationSnapshot(duplicateDiscussion)).toThrow(
+      "Discussion IDs must be unique",
+    );
+  });
+});
