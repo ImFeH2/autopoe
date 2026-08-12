@@ -14,7 +14,7 @@
           "identifier": "desktop-e2e",
           "description": "Capability for desktop tests",
           "windows": ["main"],
-          "permissions": ["wdio:default"]
+          "permissions": ["wdio:default", "core:window:allow-set-size"]
         }
       ]
     }

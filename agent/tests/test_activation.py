@@ -99,6 +99,46 @@ def test_new_message_during_run_is_visible_and_enters_next_activation() -> None:
     assert second.items[0].message_ids == (2,)
 
 
+def test_acked_work_stays_idle_after_a_late_failure() -> None:
+    state = make_state()
+    state.send_message(1, 1, "Completed", [2])
+    activation, _ = state.claim_next_activation()
+    assert activation is not None
+    state.read_discussion(2, 1, [1])
+    state.ack_messages(2, 1, [1])
+
+    state.complete_activation(2, "Late model failure")
+
+    assert state.snapshot()["members"][1] == {
+        "id": 2,
+        "type": "agent",
+        "name": "Ada",
+        "status": "idle",
+    }
+    assert state.claim_next_activation()[0] is None
+    with pytest.raises(DomainError, match="Only failed Agents"):
+        state.retry_agent(2)
+
+
+def test_read_unacked_work_can_be_retried_after_failure() -> None:
+    state = make_state()
+    state.send_message(1, 1, "Retry me", [2])
+    activation, _ = state.claim_next_activation()
+    assert activation is not None
+    state.read_discussion(2, 1, [1])
+
+    state.complete_activation(2, "Model request failed")
+
+    assert state.snapshot()["members"][1]["status"] == "error"
+    assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 2, "status": "read"}
+    ]
+    state.retry_agent(2)
+    retried, _ = state.claim_next_activation()
+    assert retried is not None
+    assert retried.items[0].message_ids == (1,)
+
+
 def test_new_mention_during_failed_run_is_scheduled_immediately() -> None:
     state = make_state()
     state.send_message(1, 1, "Original", [2])
@@ -112,6 +152,54 @@ def test_new_mention_during_failed_run_is_scheduled_immediately() -> None:
     second, _ = state.claim_next_activation()
     assert second is not None
     assert second.items[0].message_ids == (1, 2)
+
+
+def test_failed_agent_retries_existing_unacked_work_explicitly() -> None:
+    state = make_state()
+    state.send_message(1, 1, "Fails once", [2])
+    first, _ = state.claim_next_activation()
+    assert first is not None
+    state.complete_activation(2, "Provider unavailable")
+
+    snapshot = state.retry_agent(2)
+    retried, _ = state.claim_next_activation()
+
+    assert snapshot["members"][1] == {
+        "id": 2,
+        "type": "agent",
+        "name": "Ada",
+        "status": "idle",
+    }
+    assert retried is not None
+    assert retried.items == first.items
+
+
+@pytest.mark.parametrize("status", ["idle", "running"])
+def test_only_failed_agents_can_be_retried(status: str) -> None:
+    state = make_state()
+    if status == "running":
+        state.send_message(1, 1, "Running", [2])
+        assert state.claim_next_activation()[0] is not None
+
+    with pytest.raises(DomainError, match="Only failed Agents"):
+        state.retry_agent(2)
+
+
+def test_late_failure_after_old_ack_schedules_only_new_work() -> None:
+    state = make_state()
+    state.send_message(1, 1, "Original", [2])
+    first, _ = state.claim_next_activation()
+    assert first is not None
+    state.read_discussion(2, 1, [1])
+    state.ack_messages(2, 1, [1])
+    state.send_message(1, 1, "Arrived while running", [2])
+
+    state.complete_activation(2, "Late model failure")
+
+    assert state.snapshot()["members"][1]["status"] == "idle"
+    second, _ = state.claim_next_activation()
+    assert second is not None
+    assert second.items[0].message_ids == (2,)
 
 
 def test_agent_error_stops_immediate_reactivation_until_new_mention() -> None:

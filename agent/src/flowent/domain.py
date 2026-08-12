@@ -171,6 +171,17 @@ class OrganizationState:
             self._changed()
             return self._snapshot()
 
+    def retry_agent(self, agent_id: int) -> dict[str, Any]:
+        with self._condition:
+            self._require_agent(agent_id)
+            execution = self._agent_execution[agent_id]
+            if execution.status != "error":
+                raise DomainError("invalid_retry", "Only failed Agents can be retried")
+            execution.status = "idle"
+            execution.error = None
+            self._changed()
+            return self._snapshot()
+
     def list_members(self) -> list[dict[str, Any]]:
         with self._condition:
             return [self._member_data(member) for member in self._members.values()]
@@ -300,7 +311,9 @@ class OrganizationState:
             execution = self._agent_execution[agent_id]
             pending_mentions = self._pending_mentions(agent_id)
             has_new_work = bool(pending_mentions - execution.claimed_mentions)
-            execution.status = "error" if error and not has_new_work else "idle"
+            execution.status = (
+                "error" if error and pending_mentions and not has_new_work else "idle"
+            )
             execution.error = error if execution.status == "error" else None
             execution.claimed_mentions = frozenset()
             self._changed()

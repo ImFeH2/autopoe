@@ -108,6 +108,26 @@ class ExecutingRunner:
             self.finished.set()
 
 
+class AckThenFailRunner:
+    def __init__(self) -> None:
+        self.completed = Event()
+
+    def run(self, activation: Activation, context: AgentRunContext) -> None:
+        for item in activation.items:
+            context.discussion(
+                "read",
+                discussion_id=item.discussion_id,
+                message_ids=list(item.message_ids),
+            )
+            context.discussion(
+                "ack",
+                discussion_id=item.discussion_id,
+                message_ids=list(item.message_ids),
+            )
+        self.completed.set()
+        raise AgentRunFailure("Late model failure")
+
+
 class FailingRunner:
     def __init__(self) -> None:
         self.calls = 0
@@ -187,6 +207,29 @@ def test_runtime_can_stop_immediately_after_start(tmp_path: Path) -> None:
             HostTools(tmp_path),
         )
         runtime.start()
+        runtime.stop()
+
+
+def test_runtime_ignores_late_failure_after_ack(tmp_path: Path) -> None:
+    state = ObservableState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    runner = AckThenFailRunner()
+    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime.start()
+
+    try:
+        state.send_message(1, 1, "Complete before failing", [2])
+        assert runner.completed.wait(timeout=1)
+        assert state.completed.wait(timeout=1)
+        assert state.member(2) == {
+            "id": 2,
+            "type": "agent",
+            "name": "Ada",
+            "status": "idle",
+        }
+        assert state.claim_next_activation()[0] is None
+    finally:
         runtime.stop()
 
 

@@ -6,6 +6,41 @@ const artifactsDir = resolve("artifacts", "desktop");
 const agentWorkDir = resolve(artifactsDir, "e2e-agent-work");
 const agentWorkFile = resolve(agentWorkDir, "input.txt");
 
+async function setLogicalWindowSize(width: number, height: number) {
+  await browser.tauri.execute(
+    ({ core }, nextWidth, nextHeight) =>
+      core.invoke("plugin:window|set_size", {
+        label: "main",
+        value: { Logical: { width: nextWidth, height: nextHeight } },
+      }),
+    width,
+    height,
+  );
+  await browser.waitUntil(async () => {
+    const size = await browser.execute(() => ({
+      height: window.innerHeight,
+      width: window.innerWidth,
+    }));
+    return size.width === width && size.height === height;
+  });
+}
+
+async function isFullyVisible(selector: string) {
+  return browser.execute((targetSelector) => {
+    const element = document.querySelector(String(targetSelector));
+    if (!element) {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return (
+      rect.top >= 0 &&
+      rect.left >= 0 &&
+      rect.bottom <= window.innerHeight &&
+      rect.right <= window.innerWidth
+    );
+  }, selector);
+}
+
 async function createDiscussion(topic: string) {
   await $("#topic").setValue(topic);
   await $("#discussion-member-2").click();
@@ -13,9 +48,9 @@ async function createDiscussion(topic: string) {
   await expect($(`h2=${topic}`)).toExist();
 }
 
-async function sendMessage(body: string, mentionAgent = false) {
-  if (mentionAgent) {
-    await $("#message-mention-2").click();
+async function sendMessage(body: string, mentionIds: number[] = []) {
+  for (const mentionId of mentionIds) {
+    await $(`#message-mention-${mentionId}`).click();
   }
   await $("[aria-label='Message']").setValue(body);
   await $("form[aria-label='Send Message'] button").click();
@@ -28,6 +63,19 @@ describe("Flowent desktop", () => {
     await rm(agentWorkDir, { force: true, recursive: true });
     await mkdir(agentWorkDir, { recursive: true });
     await writeFile(agentWorkFile, "before\n");
+    await browser.execute(() => {
+      const errors: string[] = [];
+      const originalConsoleError = console.error;
+      console.error = (...values: unknown[]) => {
+        errors.push(values.map(String).join(" "));
+        originalConsoleError(...values);
+      };
+      window.addEventListener("error", (event) => errors.push(event.message));
+      window.addEventListener("unhandledrejection", (event) =>
+        errors.push(String(event.reason)),
+      );
+      Object.assign(window, { __flowentTestErrors: errors });
+    });
   });
 
   after(async () => {
@@ -46,17 +94,26 @@ describe("Flowent desktop", () => {
     expect(windows).toContain("main");
   });
 
-  it("creates and switches Discussions with scoped Message IDs", async () => {
-    await $("[aria-label='Agent name']").setValue("Ada");
-    await $("form[aria-label='Create Agent'] button").click();
-    await expect($("aside")).toHaveText(expect.stringContaining("Ada"));
+  it("supports daily Human and Agent collaboration", async () => {
+    for (const name of ["Ada", "Lin"]) {
+      await $("[aria-label='Agent name']").setValue(name);
+      await $("form[aria-label='Create Agent'] button").click();
+      await expect($("aside")).toHaveText(expect.stringContaining(name));
+    }
     await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
+    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 3"));
 
-    await createDiscussion("Ship the first slice");
-    await expect($("p=You, Ada")).toExist();
+    await $("#topic").setValue("Repository work");
+    await $("#discussion-member-2").click();
+    await $("#discussion-member-3").click();
+    await $("form[aria-label='Create Discussion'] button").click();
+    await expect($("h2=Repository work")).toExist();
+    await expect($("p=You, Ada, Lin")).toExist();
+    await expect($("[aria-label='Message']")).toBeFocused();
+
     await sendMessage(
       "E2E_REPOSITORY_TASK: inspect and update the controlled fixture.",
-      true,
+      [2],
     );
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("@Ada · ACKED"),
@@ -64,38 +121,116 @@ describe("Flowent desktop", () => {
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("Ada used exec and patch. status=0 verify=0"),
     );
-    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
     expect(await readFile(agentWorkFile, "utf8")).toBe("after\n");
 
-    await sendMessage("Human follow-up without a mention.");
-    await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("MESSAGE 3"),
+    await $("#message-mention-2").click();
+    await $("[aria-label='Message']").setValue(
+      "E2E_RETRY_TASK: recover visibly.",
     );
+    await browser.keys(["Enter"]);
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("E2E_RETRY_TASK: recover visibly."),
+    );
+    await expect($("aside")).toHaveText(
+      expect.stringContaining("Model request failed"),
+    );
+    await expect($("button=Retry")).toExist();
+    await $("button=Retry").click();
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("Ada completed the retried work."),
+    );
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("@Ada · ACKED"),
+    );
+    await expect($("[aria-label='Message']")).toBeFocused();
 
-    await createDiscussion("Review the first slice");
+    await sendMessage(
+      "E2E_AGENT_HANDOFF: collaborate in this Discussion.",
+      [2],
+    );
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("E2E_AGENT_FOLLOWUP: Ada asked Lin to continue."),
+    );
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("Lin completed the Agent handoff."),
+    );
+    expect(await isFullyVisible(".message-row:last-child")).toBe(true);
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("@Lin · ACKED"),
+    );
+    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
+    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 3"));
+
+    await $("#message-mention-3").click();
+    await $("[aria-label='Message']").setValue("Human follow-up");
+    const shiftEnterAccepted = await browser.execute(() => {
+      const message = document.querySelector<HTMLTextAreaElement>(
+        "[aria-label='Message']",
+      );
+      if (!message) {
+        return false;
+      }
+      return message.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "Enter",
+          shiftKey: true,
+        }),
+      );
+    });
+    expect(shiftEnterAccepted).toBe(true);
+    await expect($("[aria-label='Message']")).toHaveValue("Human follow-up");
+    await expect($("[role='log']")).not.toHaveText(
+      expect.stringContaining("Human follow-up"),
+    );
+    await $("[aria-label='Message']").setValue(
+      "Human follow-up\ncontinues here",
+    );
+    await browser.keys(["Enter"]);
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("Human follow-up\ncontinues here"),
+    );
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("Lin received: Human follow-up\ncontinues here"),
+    );
+    await expect($("[role='log']")).toHaveText(
+      expect.stringContaining("@Lin · ACKED"),
+    );
+    await expect($("[aria-label='Message']")).toBeFocused();
+
+    await createDiscussion("Review history");
     await sendMessage("Second Discussion message one.");
+    await $("button*=Repository work").click();
     await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("MESSAGE 1"),
-    );
-    await expect($("[role='log']")).not.toHaveText(
-      expect.stringContaining("MESSAGE 2"),
-    );
-
-    await $("button*=Ship the first slice").click();
-    await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("E2E_REPOSITORY_TASK:"),
-    );
-    await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("MESSAGE 3"),
+      expect.stringContaining("Lin completed the Agent handoff."),
     );
     await expect($("[role='log']")).not.toHaveText(
       expect.stringContaining("Second Discussion message one."),
     );
+  });
 
-    await $("button*=Review the first slice").click();
-    await expect($("[role='log']")).toHaveText(
-      expect.stringContaining("Second Discussion message one."),
+  it("keeps the collaboration workspace usable at target sizes", async () => {
+    for (const [width, height] of [
+      [1440, 900],
+      [1024, 768],
+    ]) {
+      await setLogicalWindowSize(width, height);
+      expect(await isFullyVisible("aside")).toBe(true);
+      expect(await isFullyVisible("form[aria-label='Send Message']")).toBe(
+        true,
+      );
+      expect(await isFullyVisible("[aria-label='Message']")).toBe(true);
+    }
+  });
+
+  it("finishes without renderer errors", async () => {
+    const errors = await browser.execute(
+      () =>
+        (window as Window & { __flowentTestErrors?: string[] })
+          .__flowentTestErrors ?? [],
     );
+    expect(errors).toEqual([]);
   });
 
   it("captures the rendered product window", async () => {

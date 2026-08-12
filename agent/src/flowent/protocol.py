@@ -23,6 +23,7 @@ class Dispatcher:
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
+            "organization.retry_agent": self._retry_agent,
             "discussion.create": self._create_discussion,
             "discussion.send": self._send_message,
             "system.shutdown": self._shutdown,
@@ -70,6 +71,9 @@ class Dispatcher:
 
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
+
+    def _retry_agent(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.retry_agent(agent_id=require_integer(params, "agent_id"))
 
     def _create_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_discussion(

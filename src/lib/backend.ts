@@ -261,6 +261,8 @@ async function request(
 export const backend = {
   getOrganization: () => request("organization.get"),
   createAgent: (name: string) => request("organization.create_agent", { name }),
+  retryAgent: (agentId: number) =>
+    request("organization.retry_agent", { agent_id: agentId }),
   createDiscussion: (topic: string, memberIds: number[]) =>
     request("discussion.create", {
       topic,

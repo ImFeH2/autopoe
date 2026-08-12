@@ -59,6 +59,95 @@ def test_deterministic_runner_uses_exec_and_patch_for_e2e_task(
     assert "used exec and patch" in snapshot["discussions"][0]["messages"][1]["body"]
 
 
+def test_deterministic_runner_retries_the_same_failed_message(
+    tmp_path: Path,
+) -> None:
+    state = OrganizationState(tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Retry", 1, [2])
+    state.send_message(1, 1, "E2E_RETRY_TASK: fail once", [2])
+    activation, _ = state.claim_next_activation()
+    assert activation is not None
+    runner = DeterministicRunner()
+    context = AgentRunContext(2, state, HostTools(tmp_path))
+
+    with pytest.raises(AgentRunFailure, match="Model request failed"):
+        runner.run(activation, context)
+    state.complete_activation(2, "Model request failed")
+    assert state.snapshot()["members"][1]["status"] == "error"
+    assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 2, "status": "read"}
+    ]
+
+    state.retry_agent(2)
+    retried, _ = state.claim_next_activation()
+    assert retried is not None
+    runner.run(retried, context)
+    state.complete_activation(2)
+
+    snapshot = state.snapshot()
+    assert snapshot["members"][1]["status"] == "idle"
+    assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 2, "status": "acked"}
+    ]
+    assert snapshot["discussions"][0]["messages"][1]["body"] == (
+        "Ada completed the retried work."
+    )
+
+
+def test_deterministic_runner_hands_work_to_an_equal_agent(tmp_path: Path) -> None:
+    state = OrganizationState(tmp_path)
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Handoff", 1, [2, 3])
+    state.send_message(1, 1, "E2E_AGENT_HANDOFF: collaborate", [2])
+    runner = DeterministicRunner()
+
+    first, _ = state.claim_next_activation()
+    assert first is not None
+    runner.run(first, AgentRunContext(2, state, HostTools(tmp_path)))
+    state.complete_activation(2)
+    second, _ = state.claim_next_activation()
+    assert second is not None
+    assert second.agent_id == 3
+    runner.run(second, AgentRunContext(3, state, HostTools(tmp_path)))
+    state.complete_activation(3)
+
+    messages = state.snapshot()["discussions"][0]["messages"]
+    assert messages[0]["mentions"] == [{"member_id": 2, "status": "acked"}]
+    assert messages[1] == {
+        "id": 2,
+        "sender_id": 2,
+        "body": "E2E_AGENT_FOLLOWUP: Ada asked Lin to continue.",
+        "mentions": [{"member_id": 3, "status": "acked"}],
+    }
+    assert messages[2]["body"] == "Lin completed the Agent handoff."
+
+
+def test_deterministic_handoff_requires_another_discussion_agent(
+    tmp_path: Path,
+) -> None:
+    state = OrganizationState(tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Handoff", 1, [2])
+    state.send_message(1, 1, "E2E_AGENT_HANDOFF: collaborate", [2])
+    activation, _ = state.claim_next_activation()
+    assert activation is not None
+
+    with pytest.raises(
+        AgentRunFailure,
+        match="Agent handoff requires another Agent",
+    ):
+        DeterministicRunner().run(
+            activation,
+            AgentRunContext(2, state, HostTools(tmp_path)),
+        )
+
+    assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 2, "status": "read"}
+    ]
+
+
 def test_model_config_loads_lowercase_env_without_revealing_key(tmp_path: Path) -> None:
     secret = "not-for-repr"
     (tmp_path / ".env").write_text(

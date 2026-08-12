@@ -1,5 +1,6 @@
 import {
   type FormEvent,
+  type KeyboardEvent,
   startTransition,
   useEffect,
   useRef,
@@ -25,6 +26,18 @@ function toggleId(ids: number[], id: number) {
   return ids.includes(id)
     ? ids.filter((current) => current !== id)
     : [...ids, id];
+}
+
+export function shouldSubmitMessage({
+  isComposing,
+  key,
+  shiftKey,
+}: {
+  isComposing: boolean;
+  key: string;
+  shiftKey: boolean;
+}) {
+  return key === "Enter" && !shiftKey && !isComposing;
 }
 
 function App() {
@@ -124,6 +137,13 @@ function App() {
     }
   }
 
+  async function handleRetryAgent(agentId: number) {
+    const nextSnapshot = await mutate(() => backend.retryAgent(agentId));
+    if (nextSnapshot) {
+      restoreMessageFocusRef.current = true;
+    }
+  }
+
   async function handleCreateDiscussion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextSnapshot = await mutate(() =>
@@ -213,12 +233,23 @@ function App() {
                     : `HUMAN · ${member.id}`}
                 </span>
                 {member.type === "agent" && member.error ? (
-                  <span
-                    className="member-error caption-text text-danger"
-                    role="status"
-                  >
-                    {member.error}
-                  </span>
+                  <div className="member-error">
+                    <span
+                      className="caption-text min-w-0 text-danger"
+                      role="alert"
+                    >
+                      {member.error}
+                    </span>
+                    <Button
+                      aria-label={`Retry ${member.name}`}
+                      disabled={isSaving}
+                      onClick={() => void handleRetryAgent(member.id)}
+                      size="compact"
+                      variant="quiet"
+                    >
+                      Retry
+                    </Button>
+                  </div>
                 ) : null}
               </li>
             ))}
@@ -311,6 +342,7 @@ function App() {
         {selectedDiscussion ? (
           <DiscussionView
             discussion={selectedDiscussion}
+            key={selectedDiscussion.id}
             disabled={isSaving}
             members={snapshot.members}
             messageBody={messageBody}
@@ -457,6 +489,8 @@ function DiscussionView({
   onMentionToggle,
   onSend,
 }: DiscussionViewProps) {
+  const messageLogRef = useRef<HTMLDivElement>(null);
+  const shouldFollowMessagesRef = useRef(true);
   const membersById = new Map(members.map((member) => [member.id, member]));
   const discussionMembers = discussion.member_ids
     .map((id) => membersById.get(id)?.name)
@@ -465,6 +499,46 @@ function DiscussionView({
   const discussionAgents = discussion.member_ids
     .map((id) => membersById.get(id))
     .filter((member) => member?.type === "agent");
+
+  useEffect(() => {
+    const log = messageLogRef.current;
+    if (
+      discussion.messages.length > 0 &&
+      log &&
+      shouldFollowMessagesRef.current
+    ) {
+      log.scrollTop = log.scrollHeight;
+    }
+  }, [discussion.messages.length]);
+
+  function handleMessageScroll() {
+    const log = messageLogRef.current;
+    if (!log) {
+      return;
+    }
+    shouldFollowMessagesRef.current =
+      log.scrollHeight - log.scrollTop - log.clientHeight <= 24;
+  }
+
+  function handleMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      !shouldSubmitMessage({
+        isComposing: event.nativeEvent.isComposing,
+        key: event.key,
+        shiftKey: event.shiftKey,
+      })
+    ) {
+      return;
+    }
+    event.preventDefault();
+    shouldFollowMessagesRef.current = true;
+    event.currentTarget.form?.requestSubmit();
+  }
+
+  function handleSend(event: FormEvent<HTMLFormElement>) {
+    shouldFollowMessagesRef.current = true;
+    onSend(event);
+  }
 
   return (
     <>
@@ -482,8 +556,10 @@ function DiscussionView({
         </p>
       </header>
       <div
-        className="min-h-0 overflow-y-auto px-6 py-2"
+        className="message-log min-h-0 overflow-y-auto px-6 py-2"
         aria-label="Messages"
+        onScroll={handleMessageScroll}
+        ref={messageLogRef}
         role="log"
       >
         {discussion.messages.length === 0 ? (
@@ -538,7 +614,7 @@ function DiscussionView({
       <form
         className="border-border border-t bg-surface-subtle p-4"
         aria-label="Send Message"
-        onSubmit={onSend}
+        onSubmit={handleSend}
       >
         <fieldset className="mention-picker">
           <legend className="section-label text-text-secondary">Mention</legend>
@@ -564,8 +640,10 @@ function DiscussionView({
         <div className="flex items-end gap-3">
           <Textarea
             aria-label="Message"
+            autoFocus
             disabled={disabled}
             onChange={(event) => onMessageChange(event.target.value)}
+            onKeyDown={handleMessageKeyDown}
             placeholder="Write a message"
             ref={messageInputRef}
             required

@@ -45,6 +45,9 @@ class UnavailableRunner:
 
 
 class DeterministicRunner:
+    def __init__(self) -> None:
+        self._failed_messages: set[tuple[int, int, int]] = set()
+
     def run(self, activation: Activation, context: AgentRunContext) -> None:
         agent = context.state.member(activation.agent_id)
         for item in activation.items:
@@ -59,7 +62,43 @@ class DeterministicRunner:
                 if message["id"] in item.message_ids
             ]
             bodies = " | ".join(message["body"] for message in requested)
-            if bodies.startswith("E2E_REPOSITORY_TASK:"):
+            retry_key = (
+                activation.agent_id,
+                item.discussion_id,
+                requested[0]["id"],
+            )
+            mention_ids: list[int] = []
+            if (
+                bodies.startswith("E2E_RETRY_TASK:")
+                and retry_key not in self._failed_messages
+            ):
+                self._failed_messages.add(retry_key)
+                raise AgentRunFailure("Model request failed")
+            if bodies.startswith("E2E_RETRY_TASK:"):
+                body = f"{agent['name']} completed the retried work."
+            elif bodies.startswith("E2E_AGENT_HANDOFF:"):
+                members = context.organization("list_members")
+                discussion_member_ids = set(discussion["member_ids"])
+                target = next(
+                    (
+                        member
+                        for member in members
+                        if member["type"] == "agent"
+                        and member["id"] != activation.agent_id
+                        and member["id"] in discussion_member_ids
+                    ),
+                    None,
+                )
+                if target is None:
+                    raise AgentRunFailure("Agent handoff requires another Agent")
+                body = (
+                    f"E2E_AGENT_FOLLOWUP: {agent['name']} asked "
+                    f"{target['name']} to continue."
+                )
+                mention_ids = [target["id"]]
+            elif bodies.startswith("E2E_AGENT_FOLLOWUP:"):
+                body = f"{agent['name']} completed the Agent handoff."
+            elif bodies.startswith("E2E_REPOSITORY_TASK:"):
                 directory = "artifacts/desktop/e2e-agent-work"
                 inspected = context.exec(["git", "status", "--short"], ".", 10)
                 context.patch(
@@ -84,6 +123,7 @@ class DeterministicRunner:
                 "send",
                 discussion_id=item.discussion_id,
                 body=body,
+                mention_ids=mention_ids,
             )
             context.discussion(
                 "ack",

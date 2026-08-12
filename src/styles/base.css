@@ -79,7 +79,12 @@ body {
 }
 
 .member-error {
+  display: flex;
   grid-column: 1 / -1;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .message-row {
@@ -173,14 +178,23 @@ textarea {
 
 .ui-button {
   display: inline-flex;
-  min-height: 32px;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  padding: 0 12px;
   font-size: 13px;
   font-weight: 500;
+}
+
+.ui-button--default {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.ui-button--compact {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .ui-button:disabled {
@@ -264,4 +278,18 @@ textarea:focus-visible {
   border-radius: 999px;
   background: var(--color-border-strong);
   background-clip: padding-box;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 232px minmax(0, 1fr);
+  }
+
+  .message-row {
+    grid-template-columns: 104px minmax(0, 1fr);
+  }
+
+  .message-log {
+    padding-inline: 20px;
+  }
 }
