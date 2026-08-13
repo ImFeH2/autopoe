@@ -125,6 +125,9 @@ describe("Flowent desktop", () => {
     }
     await expect($("button[aria-label='Overview']")).not.toExist();
     await expect($(".organization-switcher")).not.toExist();
+    expect(
+      await browser.execute(() => getComputedStyle(document.body).fontFamily),
+    ).toMatch(/^system-ui,/);
 
     const windows = await browser.tauri.listWindows();
     expect(windows).toContain("main");

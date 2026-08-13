@@ -14,8 +14,8 @@
   --color-accent-hover: #292929;
   --color-danger: #b42318;
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
-    "Segoe UI", Arial, sans-serif;
+    system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Helvetica Neue", "Segoe UI", sans-serif;
   --font-mono:
     ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono",
     monospace;
