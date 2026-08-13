@@ -2,19 +2,11 @@ import { Bot, Button, MessageSquare, Settings2, Users } from "@/components/ui";
 
 export type WorkspaceView = "discussions" | "members" | "agents" | "settings";
 
-type SidebarDiscussion = {
-  id: number;
-  messageCount: number;
-  topic: string;
-};
-
 type AppSidebarProps = {
   agentCount: number;
-  discussions: SidebarDiscussion[];
+  discussionCount: number;
   memberCount: number;
-  onSelectDiscussion: (discussionId: number) => void;
   onSelectView: (view: WorkspaceView) => void;
-  selectedDiscussionId?: number;
   view: WorkspaceView;
   workingDirectory: string;
 };
@@ -27,16 +19,14 @@ const navigation = [
 
 export function AppSidebar({
   agentCount,
-  discussions,
+  discussionCount,
   memberCount,
-  onSelectDiscussion,
   onSelectView,
-  selectedDiscussionId,
   view,
   workingDirectory,
 }: AppSidebarProps) {
   const counts: Record<Exclude<WorkspaceView, "settings">, number> = {
-    discussions: discussions.length,
+    discussions: discussionCount,
     members: memberCount,
     agents: agentCount,
   };
@@ -69,49 +59,6 @@ export function AppSidebar({
           );
         })}
       </nav>
-
-      <section className="sidebar-recent" aria-labelledby="recent-title">
-        <h2 className="sidebar-section-label" id="recent-title">
-          Recent
-        </h2>
-        <div className="sidebar-recent-list">
-          {discussions.length === 0 ? (
-            <p className="caption-text m-0 text-text-tertiary">
-              No discussions
-            </p>
-          ) : (
-            discussions.map((discussion) => (
-              <Button
-                aria-label={`Open ${discussion.topic}`}
-                aria-current={
-                  view === "discussions" &&
-                  selectedDiscussionId === discussion.id
-                    ? "page"
-                    : undefined
-                }
-                className="sidebar-recent-button"
-                key={discussion.id}
-                onClick={() => onSelectDiscussion(discussion.id)}
-                variant={
-                  view === "discussions" &&
-                  selectedDiscussionId === discussion.id
-                    ? "secondary"
-                    : "quiet"
-                }
-              >
-                <span className="sidebar-recent-copy">
-                  <span className="sidebar-recent-title">
-                    {discussion.topic}
-                  </span>
-                  <span className="meta-text text-text-tertiary">
-                    {discussion.messageCount} messages
-                  </span>
-                </span>
-              </Button>
-            ))
-          )}
-        </div>
-      </section>
 
       <div className="sidebar-footer">
         <Button

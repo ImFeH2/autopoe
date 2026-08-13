@@ -212,6 +212,7 @@ function App() {
     setIsCreatingDiscussion(false);
     setMessageBody("");
     setMessageMentionIds([]);
+    requestAnimationFrame(() => messageInputRef.current?.focus());
   }
 
   function selectWorkspaceView(view: WorkspaceView) {
@@ -238,17 +239,9 @@ function App() {
     <main className="app-shell bg-canvas text-text-primary">
       <AppSidebar
         agentCount={agents.length}
-        discussions={snapshot.discussions.map((discussion) => ({
-          id: discussion.id,
-          messageCount: discussion.messages.length,
-          topic: discussion.topic,
-        }))}
+        discussionCount={snapshot.discussions.length}
         memberCount={snapshot.members.length}
-        onSelectDiscussion={selectDiscussion}
         onSelectView={selectWorkspaceView}
-        selectedDiscussionId={
-          isCreatingDiscussion ? undefined : selectedDiscussion?.id
-        }
         view={workspaceView}
         workingDirectory={snapshot.working_directory}
       />
@@ -289,34 +282,26 @@ function App() {
           />
         ) : null}
         {workspaceView === "discussions" ? (
-          isCreatingDiscussion || !selectedDiscussion ? (
-            <DiscussionStart>
-              <DiscussionForm
-                agents={agents}
-                disabled={isSaving}
-                onSubmit={handleCreateDiscussion}
-                onToggleMember={toggleMember}
-                selectedMemberIds={selectedMemberIds}
-                setTopic={setTopic}
-                topic={topic}
-              />
-            </DiscussionStart>
-          ) : (
-            <section className="discussion-pane">
-              <DiscussionView
-                discussion={selectedDiscussion}
-                key={selectedDiscussion.id}
-                disabled={isSaving}
-                members={snapshot.members}
-                messageBody={messageBody}
-                messageInputRef={messageInputRef}
-                messageMentionIds={messageMentionIds}
-                onMessageChange={setMessageBody}
-                onMentionToggle={toggleMessageMention}
-                onSend={handleSendMessage}
-              />
-            </section>
-          )
+          <DiscussionsPage
+            agents={agents}
+            disabled={isSaving}
+            discussions={snapshot.discussions}
+            isCreating={isCreatingDiscussion}
+            members={snapshot.members}
+            messageBody={messageBody}
+            messageInputRef={messageInputRef}
+            messageMentionIds={messageMentionIds}
+            onCreateDiscussion={handleCreateDiscussion}
+            onMessageChange={setMessageBody}
+            onMentionToggle={toggleMessageMention}
+            onSelectDiscussion={selectDiscussion}
+            onSend={handleSendMessage}
+            onToggleMember={toggleMember}
+            selectedDiscussion={selectedDiscussion}
+            selectedMemberIds={selectedMemberIds}
+            setTopic={setTopic}
+            topic={topic}
+          />
         ) : null}
 
         {mutationError ? (
@@ -614,6 +599,112 @@ function SettingsPage() {
           </p>
         ) : null}
       </form>
+    </section>
+  );
+}
+
+type DiscussionsPageProps = {
+  agents: AgentMember[];
+  disabled: boolean;
+  discussions: Discussion[];
+  isCreating: boolean;
+  members: Member[];
+  messageBody: string;
+  messageInputRef: React.RefObject<HTMLTextAreaElement | null>;
+  messageMentionIds: number[];
+  onCreateDiscussion: (event: FormEvent<HTMLFormElement>) => void;
+  onMessageChange: (body: string) => void;
+  onMentionToggle: (memberId: number) => void;
+  onSelectDiscussion: (discussionId: number) => void;
+  onSend: (event: FormEvent<HTMLFormElement>) => void;
+  onToggleMember: (memberId: number) => void;
+  selectedDiscussion?: Discussion;
+  selectedMemberIds: number[];
+  setTopic: (topic: string) => void;
+  topic: string;
+};
+
+function DiscussionsPage({
+  agents,
+  disabled,
+  discussions,
+  isCreating,
+  members,
+  messageBody,
+  messageInputRef,
+  messageMentionIds,
+  onCreateDiscussion,
+  onMessageChange,
+  onMentionToggle,
+  onSelectDiscussion,
+  onSend,
+  onToggleMember,
+  selectedDiscussion,
+  selectedMemberIds,
+  setTopic,
+  topic,
+}: DiscussionsPageProps) {
+  return (
+    <section className="discussions-workspace">
+      <aside className="discussion-list-pane" aria-label="Discussion list">
+        <header>
+          <h2>Discussions</h2>
+          <span className="font-mono">{discussions.length}</span>
+        </header>
+        {discussions.length === 0 ? (
+          <p className="discussion-list-empty">No discussions</p>
+        ) : (
+          <div className="discussion-list-items">
+            {discussions.map((discussion) => {
+              const selected =
+                !isCreating && selectedDiscussion?.id === discussion.id;
+              return (
+                <Button
+                  aria-current={selected ? "page" : undefined}
+                  aria-label={`Open ${discussion.topic}`}
+                  className="discussion-list-button"
+                  key={discussion.id}
+                  onClick={() => onSelectDiscussion(discussion.id)}
+                  variant={selected ? "secondary" : "quiet"}
+                >
+                  <span>{discussion.topic}</span>
+                  <span>{discussion.messages.length} messages</span>
+                </Button>
+              );
+            })}
+          </div>
+        )}
+      </aside>
+      <div className="discussion-detail-pane">
+        {isCreating || !selectedDiscussion ? (
+          <DiscussionStart>
+            <DiscussionForm
+              agents={agents}
+              disabled={disabled}
+              onSubmit={onCreateDiscussion}
+              onToggleMember={onToggleMember}
+              selectedMemberIds={selectedMemberIds}
+              setTopic={setTopic}
+              topic={topic}
+            />
+          </DiscussionStart>
+        ) : (
+          <section className="discussion-pane">
+            <DiscussionView
+              discussion={selectedDiscussion}
+              key={selectedDiscussion.id}
+              disabled={disabled}
+              members={members}
+              messageBody={messageBody}
+              messageInputRef={messageInputRef}
+              messageMentionIds={messageMentionIds}
+              onMessageChange={onMessageChange}
+              onMentionToggle={onMentionToggle}
+              onSend={onSend}
+            />
+          </section>
+        )}
+      </div>
     </section>
   );
 }

@@ -27,15 +27,13 @@ describe("App", () => {
     ).toBe(false);
   });
 
-  it("separates workspace functions and recent Discussions in the sidebar", () => {
+  it("keeps the sidebar focused on global destinations", () => {
     const markup = renderToStaticMarkup(
       <AppSidebar
         agentCount={2}
-        discussions={[{ id: 1, messageCount: 4, topic: "Launch narrative" }]}
+        discussionCount={1}
         memberCount={3}
-        onSelectDiscussion={() => undefined}
         onSelectView={() => undefined}
-        selectedDiscussionId={1}
         view="discussions"
         workingDirectory="/project/flowent"
       />,
@@ -48,9 +46,8 @@ describe("App", () => {
     expect(markup).toContain(">Members<");
     expect(markup).toContain(">Agents<");
     expect(markup).toContain(">Settings<");
-    expect(markup).toContain("Recent");
-    expect(markup).toContain("Launch narrative");
-    expect(markup).toContain("4 messages");
+    expect(markup).not.toContain("Recent");
+    expect(markup).not.toContain("Launch narrative");
     expect(markup).toContain("/project/flowent");
   });
 
