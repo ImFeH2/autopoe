@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -45,6 +46,29 @@ class ModelConfig:
         if not config.base_url or not config.api_key or not config.model:
             raise RuntimeError("Model configuration is incomplete")
         return config
+
+    @classmethod
+    def restore(cls, values: dict[str, str]) -> ModelConfig:
+        provider = values["provider"]
+        if provider not in ("openai", "anthropic", "google"):
+            raise RuntimeError("Persisted model provider is invalid")
+        config = cls(
+            provider=cast(ProviderType, provider),
+            base_url=values["base_url"],
+            api_key=values["api_key"],
+            model=values["model"],
+        )
+        if not config.base_url or not config.api_key or not config.model:
+            raise RuntimeError("Persisted model configuration is incomplete")
+        return config
+
+    def persistence_data(self) -> dict[str, str]:
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "api_key": self.api_key,
+            "model": self.model,
+        }
 
 
 class UnavailableRunner:
@@ -314,10 +338,12 @@ class ModelRuntime:
         self,
         config: ModelConfig | None = None,
         deterministic: bool = False,
+        on_configure: Callable[[dict[str, str]], None] | None = None,
     ) -> None:
         self._lock = Lock()
         self._config = config
         self._deterministic = deterministic
+        self._on_configure = on_configure
         self._runner = self._create_runner(config)
 
     def _create_runner(self, config: ModelConfig | None) -> AgentRunner:
@@ -373,6 +399,8 @@ class ModelRuntime:
                 model=model,
             )
             runner = self._create_runner(config)
+            if self._on_configure is not None:
+                self._on_configure(config.persistence_data())
             self._config = config
             self._runner = runner
         return self.settings()
@@ -383,13 +411,23 @@ class ModelRuntime:
         runner.run(activation, context)
 
 
-def create_runner(directory: Path) -> ModelRuntime:
+def create_runner(
+    directory: Path,
+    stored_config: dict[str, str] | None = None,
+    on_configure: Callable[[dict[str, str]], None] | None = None,
+) -> ModelRuntime:
     deterministic = os.environ.get("FLOWENT_TEST_RUNNER") == "deterministic"
-    if deterministic:
+    if stored_config is not None:
+        config = ModelConfig.restore(stored_config)
+    elif deterministic:
         config = None
     else:
         try:
             config = ModelConfig.load(directory)
         except RuntimeError:
             config = None
-    return ModelRuntime(config, deterministic=deterministic)
+    return ModelRuntime(
+        config,
+        deterministic=deterministic,
+        on_configure=on_configure,
+    )

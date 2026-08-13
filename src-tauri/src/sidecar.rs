@@ -15,6 +15,8 @@ use tauri_plugin_shell::{
 };
 
 const TEST_RUNNER_ENV: &str = "FLOWENT_TEST_RUNNER";
+#[cfg(feature = "desktop-e2e")]
+const DATA_DIRECTORY_ENV: &str = "FLOWENT_DATA_DIR";
 const SHUTDOWN_ID: u64 = u64::MAX;
 
 type SharedChild = Arc<Mutex<Option<CommandChild>>>;
@@ -46,7 +48,10 @@ impl Sidecar {
             .envs(filtered_environment(std::env::vars_os()))
             .current_dir(&self.working_directory);
         #[cfg(feature = "desktop-e2e")]
-        let command = command.env(TEST_RUNNER_ENV, "deterministic");
+        let command = command.env(TEST_RUNNER_ENV, "deterministic").env(
+            DATA_DIRECTORY_ENV,
+            self.working_directory.join("artifacts/desktop/e2e-state"),
+        );
         let (mut events, child) = command.spawn().context("start sidecar")?;
         *self
             .child

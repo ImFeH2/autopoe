@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Condition, Event, RLock
@@ -64,13 +64,23 @@ class Activation:
 
 
 class OrganizationState:
-    def __init__(self, working_directory: Path | None = None) -> None:
+    def __init__(
+        self,
+        working_directory: Path | None = None,
+        persisted: dict[str, Any] | None = None,
+        on_persist: Callable[[Path, dict[str, Any]], None] | None = None,
+    ) -> None:
         self._working_directory = (working_directory or Path.cwd()).resolve()
-        self._members: dict[int, Member] = {1: Member(id=1, type="human", name="You")}
+        self._on_persist = on_persist
+        self._members: dict[int, Member] = {}
         self._discussions: dict[int, Discussion] = {}
         self._agent_execution: dict[int, AgentExecution] = {}
-        self._next_member_id = 2
-        self._next_discussion_id = 1
+        if persisted is None:
+            self._members[1] = Member(id=1, type="human", name="You")
+        else:
+            self._restore(persisted)
+        self._next_member_id = max(self._members, default=1) + 1
+        self._next_discussion_id = max(self._discussions, default=0) + 1
         self._revision = 0
         self._condition = Condition(RLock())
 
@@ -88,7 +98,7 @@ class OrganizationState:
                 name=normalized_name,
             )
             self._agent_execution[member_id] = AgentExecution()
-            self._changed()
+            self._changed(persist=True)
             return self._snapshot()
 
     def create_discussion(
@@ -117,7 +127,7 @@ class OrganizationState:
                 topic=normalized_topic,
                 member_ids=participants,
             )
-            self._changed()
+            self._changed(persist=True)
             return self._snapshot()
 
     def send_message(
@@ -168,7 +178,7 @@ class OrganizationState:
                 if execution.status == "error":
                     execution.status = "idle"
                     execution.error = None
-            self._changed()
+            self._changed(persist=True)
             return self._snapshot()
 
     def retry_agent(self, agent_id: int) -> dict[str, Any]:
@@ -218,7 +228,7 @@ class OrganizationState:
                     mention.read = True
                     changed = True
             if changed:
-                self._changed()
+                self._changed(persist=True)
             return self._discussion_selection_data(discussion, selected_messages)
 
     def ack_messages(
@@ -248,7 +258,7 @@ class OrganizationState:
                     raise DomainError("invalid_ack", "Message must be read before ack")
             for message_id in target_ids:
                 messages_by_id[message_id].mentions[agent_id].acked = True
-            self._changed()
+            self._changed(persist=True)
             return {"acked_message_ids": list(target_ids)}
 
     def search_messages(
@@ -429,6 +439,71 @@ class OrganizationState:
             ],
         }
 
+    def _restore(self, persisted: dict[str, Any]) -> None:
+        for item in persisted["members"]:
+            member = Member(id=item["id"], type=item["type"], name=item["name"])
+            self._members[member.id] = member
+            if member.type == "agent":
+                self._agent_execution[member.id] = AgentExecution()
+        if self._members.get(1) != Member(id=1, type="human", name="You"):
+            raise RuntimeError("Persisted Organization is missing its Human Member")
+        for item in persisted["discussions"]:
+            messages = [
+                Message(
+                    id=message["id"],
+                    sender_id=message["sender_id"],
+                    body=message["body"],
+                    mentions={
+                        mention["member_id"]: Mention(
+                            member_id=mention["member_id"],
+                            read=mention["read"],
+                            acked=mention["acked"],
+                        )
+                        for mention in message["mentions"]
+                    },
+                )
+                for message in item["messages"]
+            ]
+            discussion = Discussion(
+                id=item["id"],
+                topic=item["topic"],
+                member_ids=tuple(item["member_ids"]),
+                messages=messages,
+            )
+            self._discussions[discussion.id] = discussion
+
+    def _persistence_data(self) -> dict[str, Any]:
+        return {
+            "members": [
+                {"id": member.id, "type": member.type, "name": member.name}
+                for member in self._members.values()
+            ],
+            "discussions": [
+                {
+                    "id": discussion.id,
+                    "topic": discussion.topic,
+                    "member_ids": list(discussion.member_ids),
+                    "messages": [
+                        {
+                            "id": message.id,
+                            "sender_id": message.sender_id,
+                            "body": message.body,
+                            "mentions": [
+                                {
+                                    "member_id": mention.member_id,
+                                    "read": mention.read,
+                                    "acked": mention.acked,
+                                }
+                                for mention in message.mentions.values()
+                            ],
+                        }
+                        for message in discussion.messages
+                    ],
+                }
+                for discussion in self._discussions.values()
+            ],
+        }
+
     def _require_member(self, member_id: int) -> Member:
         member = self._members.get(member_id)
         if member is None:
@@ -451,6 +526,8 @@ class OrganizationState:
             raise DomainError("discussion_not_found", "Discussion not found")
         return discussion
 
-    def _changed(self) -> None:
+    def _changed(self, persist: bool = False) -> None:
+        if persist and self._on_persist is not None:
+            self._on_persist(self._working_directory, self._persistence_data())
         self._revision += 1
         self._condition.notify_all()

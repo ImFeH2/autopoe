@@ -12,13 +12,16 @@ import pytest
 
 
 def start_sidecar(
+    data_directory: Path,
     cwd: Path | None = None,
     environment: dict[str, str] | None = None,
 ) -> subprocess.Popen[str]:
+    isolated_environment = (os.environ if environment is None else environment).copy()
+    isolated_environment["FLOWENT_DATA_DIR"] = str(data_directory)
     return subprocess.Popen(
         [sys.executable, "-m", "flowent"],
         cwd=cwd,
-        env=environment,
+        env=isolated_environment,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -53,8 +56,8 @@ def request(
     return response["result"]
 
 
-def test_sidecar_runs_until_stdin_closes() -> None:
-    process = start_sidecar()
+def test_sidecar_runs_until_stdin_closes(tmp_path: Path) -> None:
+    process = start_sidecar(tmp_path / "data")
 
     try:
         with pytest.raises(subprocess.TimeoutExpired):
@@ -67,14 +70,79 @@ def test_sidecar_runs_until_stdin_closes() -> None:
         close_process(process)
 
 
-def test_sidecar_shutdown_request_stops_the_process() -> None:
-    process = start_sidecar()
+def test_sidecar_shutdown_request_stops_the_process(tmp_path: Path) -> None:
+    process = start_sidecar(tmp_path / "data")
 
     try:
         assert request(process, 1, "system.shutdown", {}) == {"stopped": True}
         assert process.wait(timeout=10) == 0
     finally:
         close_process(process)
+
+
+def test_persists_state_and_model_settings_across_sidecar_restarts(
+    tmp_path: Path,
+) -> None:
+    working_directory = tmp_path / "project"
+    working_directory.mkdir()
+    data = tmp_path / "data"
+    first = start_sidecar(data, working_directory)
+
+    try:
+        request(first, 1, "organization.create_agent", {"name": "Ada"})
+        request(
+            first,
+            2,
+            "discussion.create",
+            {"topic": "Persistent work", "creator_id": 1, "member_ids": [2]},
+        )
+        request(
+            first,
+            3,
+            "discussion.send",
+            {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": "Still here after restart",
+            },
+        )
+        settings = request(
+            first,
+            4,
+            "settings.update_model",
+            {
+                "provider": "openai",
+                "base_url": "https://example.invalid/v1",
+                "api_key": "restart-secret",
+                "model": "test-model",
+            },
+        )
+        assert "restart-secret" not in str(settings)
+        assert request(first, 5, "system.shutdown", {}) == {"stopped": True}
+        assert first.wait(timeout=10) == 0
+    finally:
+        close_process(first)
+
+    second = start_sidecar(data, working_directory)
+    try:
+        snapshot = request(second, 1, "organization.get", {})
+        settings = request(second, 2, "settings.get_model", {})
+        assert snapshot["members"][1]["name"] == "Ada"
+        assert snapshot["discussions"][0]["topic"] == "Persistent work"
+        assert snapshot["discussions"][0]["messages"][0]["body"] == (
+            "Still here after restart"
+        )
+        assert settings == {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "has_api_key": True,
+        }
+        assert "restart-secret" not in str(settings)
+        assert request(second, 3, "system.shutdown", {}) == {"stopped": True}
+        assert second.wait(timeout=10) == 0
+    finally:
+        close_process(second)
 
 
 def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
@@ -93,14 +161,14 @@ def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
         "        context.exec([sys.executable, '-c', \"import os,pathlib,time; "
         "pathlib.Path('long.pid').write_text(str(os.getpid())); time.sleep(60)\"], "
         "'artifacts/desktop/e2e-agent-work', 60)\n"
-        "model_runner.create_runner = lambda directory: LongExecRunner()\n"
+        "model_runner.create_runner = lambda directory, **kwargs: LongExecRunner()\n"
     )
     environment = os.environ.copy()
     python_path = environment.get("PYTHONPATH")
     environment["PYTHONPATH"] = (
         str(support) if not python_path else f"{support}{os.pathsep}{python_path}"
     )
-    process = start_sidecar(tmp_path, environment)
+    process = start_sidecar(tmp_path / "data", tmp_path, environment)
 
     try:
         request(process, 1, "organization.create_agent", {"name": "Ada"})

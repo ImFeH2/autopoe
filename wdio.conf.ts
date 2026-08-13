@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { TauriCapabilities } from "@wdio/tauri-service";
@@ -6,6 +6,7 @@ import type { TauriCapabilities } from "@wdio/tauri-service";
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const artifactsDir = join(rootDir, "artifacts", "desktop");
 const logsDir = join(artifactsDir, "logs");
+const stateDir = join(artifactsDir, "e2e-state");
 mkdirSync(logsDir, { recursive: true });
 
 const binaryName = process.platform === "win32" ? "flowent.exe" : "flowent";
@@ -54,5 +55,8 @@ export const config: WebdriverIO.Config = {
   mochaOpts: {
     ui: "bdd",
     timeout: 60_000,
+  },
+  onPrepare: () => {
+    rmSync(stateDir, { force: true, recursive: true });
   },
 };
