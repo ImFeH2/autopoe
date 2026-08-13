@@ -41,11 +41,40 @@ async function isFullyVisible(selector: string) {
   }, selector);
 }
 
+const destinations = ["Overview", "Discussions", "Members", "Agents"];
+
+async function expectCurrentDestination(label: string) {
+  for (const destination of destinations) {
+    expect(
+      await $(`button[aria-label='${destination}']`).getAttribute(
+        "aria-current",
+      ),
+    ).toBe(destination === label ? "page" : null);
+  }
+}
+
+async function expectSelectedDiscussion(topic: string) {
+  await expectCurrentDestination("Discussions");
+  expect(
+    await $(`button[aria-label='Open ${topic}']`).getAttribute("aria-current"),
+  ).toBe("page");
+  await expect($(".workspace-breadcrumbs strong")).toHaveText(topic);
+}
+
 async function createDiscussion(topic: string) {
+  await $("button=New").click();
+  await expect($(".workspace-breadcrumbs")).toHaveText(
+    expect.stringContaining("New discussion"),
+  );
+  await expect($(".sidebar-recent-button[aria-current='page']")).not.toExist();
+  await expectCurrentDestination("Discussions");
   await $("#topic").setValue(topic);
   await $("#discussion-member-2").click();
   await $("form[aria-label='Create Discussion'] button").click();
   await expect($(`h2=${topic}`)).toExist();
+  await expectSelectedDiscussion(topic);
+  await browser.pause(550);
+  await expectSelectedDiscussion(topic);
 }
 
 async function sendMessage(body: string, mentionIds: number[] = []) {
@@ -88,21 +117,44 @@ describe("Flowent desktop", () => {
     await expect($("aside")).toHaveText(
       expect.stringContaining("/project/flowent"),
     );
-    await expect($("[aria-label='Discussions']")).toHaveText("No discussions");
+    await expect($("[aria-labelledby='recent-title']")).toHaveText(
+      expect.stringContaining("No discussions"),
+    );
+    for (const destination of destinations) {
+      await expect($(`button[aria-label='${destination}']`)).toExist();
+    }
 
     const windows = await browser.tauri.listWindows();
     expect(windows).toContain("main");
   });
 
   it("supports daily Human and Agent collaboration", async () => {
+    await $("button[aria-label='Overview']").click();
+    await expect($("h2=Overview")).toExist();
+    await expect($(".workspace-breadcrumbs")).toHaveText(
+      expect.stringContaining("Overview"),
+    );
+    await expectCurrentDestination("Overview");
+
+    await $("button[aria-label='Agents']").click();
+    await expect($("h2=Agents")).toExist();
+    await expectCurrentDestination("Agents");
     for (const name of ["Ada", "Lin"]) {
       await $("[aria-label='Agent name']").setValue(name);
       await $("form[aria-label='Create Agent'] button").click();
-      await expect($("aside")).toHaveText(expect.stringContaining(name));
+      await expect($(".entity-list")).toHaveText(expect.stringContaining(name));
     }
-    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
-    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 3"));
+    await expect($(".entity-list")).toHaveText(expect.stringContaining("IDLE"));
 
+    await $("button[aria-label='Members']").click();
+    await expect($("h2=Members")).toExist();
+    await expectCurrentDestination("Members");
+    await expect($(".entity-list")).toHaveText(expect.stringContaining("You"));
+    await expect($(".entity-list")).toHaveText(expect.stringContaining("Ada"));
+    await expect($(".entity-list")).toHaveText(expect.stringContaining("Lin"));
+
+    await $("button[aria-label='Discussions']").click();
+    await expectCurrentDestination("Discussions");
     await $("#topic").setValue("Repository work");
     await $("#discussion-member-2").click();
     await $("#discussion-member-3").click();
@@ -131,11 +183,26 @@ describe("Flowent desktop", () => {
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("E2E_RETRY_TASK: recover visibly."),
     );
-    await expect($("aside")).toHaveText(
+    await $("button[aria-label='Agents']").click();
+    await expect($(".entity-list")).toHaveText(
       expect.stringContaining("Model request failed"),
     );
     await expect($("button=Retry")).toExist();
     await $("button=Retry").click();
+    await expect($("[aria-label='Agent name']")).toBeFocused();
+    await expect($(".entity-list")).not.toHaveText(
+      expect.stringContaining("Model request failed"),
+    );
+    await $("button*=Repository work").click();
+    await expectCurrentDestination("Discussions");
+    expect(
+      await $("button[aria-label='Open Repository work']").getAttribute(
+        "aria-current",
+      ),
+    ).toBe("page");
+    await expect($(".workspace-breadcrumbs")).toHaveText(
+      expect.stringContaining("Repository work"),
+    );
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("Ada completed the retried work."),
     );
@@ -158,8 +225,9 @@ describe("Flowent desktop", () => {
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("@Lin · ACKED"),
     );
-    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 2"));
-    await expect($("aside")).toHaveText(expect.stringContaining("IDLE · 3"));
+    await $("button[aria-label='Agents']").click();
+    await expect($(".entity-list")).toHaveText(expect.stringContaining("IDLE"));
+    await $("button*=Repository work").click();
 
     await $("#message-mention-3").click();
     await $("[aria-label='Message']").setValue("Human follow-up");
@@ -217,6 +285,13 @@ describe("Flowent desktop", () => {
     ]) {
       await setLogicalWindowSize(width, height);
       expect(await isFullyVisible("aside")).toBe(true);
+      for (const destination of destinations) {
+        expect(
+          await isFullyVisible(`button[aria-label='${destination}']`),
+        ).toBe(true);
+      }
+      expect(await isFullyVisible(".sidebar-recent-button")).toBe(true);
+      expect(await isFullyVisible(".sidebar-user")).toBe(true);
       expect(await isFullyVisible("form[aria-label='Send Message']")).toBe(
         true,
       );

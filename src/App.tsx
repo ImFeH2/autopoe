@@ -6,10 +6,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { Button, Checkbox, Input, Textarea } from "@/components/ui";
+import { AppSidebar, type WorkspaceView } from "@/components/layout";
+import { Button, Checkbox, Input, Plus, Textarea } from "@/components/ui";
 import {
+  type AgentMember,
   backend,
   type Discussion,
+  type Member,
   type OrganizationSnapshot,
 } from "@/lib/backend";
 
@@ -47,6 +50,9 @@ function App() {
   const [selectedDiscussionId, setSelectedDiscussionId] = useState<
     number | null
   >(null);
+  const [workspaceView, setWorkspaceView] =
+    useState<WorkspaceView>("discussions");
+  const [isCreatingDiscussion, setIsCreatingDiscussion] = useState(false);
   const [agentName, setAgentName] = useState("");
   const [topic, setTopic] = useState("");
   const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
@@ -54,7 +60,9 @@ function App() {
   const [messageMentionIds, setMessageMentionIds] = useState<number[]>([]);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const agentNameInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const restoreAgentFocusRef = useRef(false);
   const restoreMessageFocusRef = useRef(false);
 
   useEffect(() => {
@@ -88,7 +96,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isSaving && restoreMessageFocusRef.current) {
+    if (isSaving) {
+      return;
+    }
+    if (restoreAgentFocusRef.current) {
+      restoreAgentFocusRef.current = false;
+      agentNameInputRef.current?.focus();
+    }
+    if (restoreMessageFocusRef.current) {
       restoreMessageFocusRef.current = false;
       messageInputRef.current?.focus();
     }
@@ -140,7 +155,7 @@ function App() {
   async function handleRetryAgent(agentId: number) {
     const nextSnapshot = await mutate(() => backend.retryAgent(agentId));
     if (nextSnapshot) {
-      restoreMessageFocusRef.current = true;
+      restoreAgentFocusRef.current = true;
     }
   }
 
@@ -157,6 +172,8 @@ function App() {
       setMessageBody("");
       setMessageMentionIds([]);
       setSelectedDiscussionId(created?.id ?? null);
+      setWorkspaceView("discussions");
+      setIsCreatingDiscussion(false);
     }
   }
 
@@ -189,175 +206,122 @@ function App() {
 
   function selectDiscussion(discussionId: number) {
     setSelectedDiscussionId(discussionId);
+    setWorkspaceView("discussions");
+    setIsCreatingDiscussion(false);
     setMessageBody("");
     setMessageMentionIds([]);
   }
 
+  function selectWorkspaceView(view: WorkspaceView) {
+    setWorkspaceView(view);
+    setIsCreatingDiscussion(false);
+  }
+
+  const agents = snapshot.members.filter(
+    (member): member is AgentMember => member.type === "agent",
+  );
+  const viewTitle =
+    workspaceView === "discussions" && isCreatingDiscussion
+      ? "New discussion"
+      : workspaceView === "discussions" && selectedDiscussion
+        ? selectedDiscussion.topic
+        : {
+            overview: "Overview",
+            discussions: "Discussions",
+            members: "Members",
+            agents: "Agents",
+          }[workspaceView];
+
   return (
     <main className="app-shell bg-canvas text-text-primary">
-      <aside className="app-sidebar border-border border-r bg-surface-subtle">
-        <header className="border-border border-b px-4 py-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <h1 className="app-brand m-0 font-semibold">Flowent</h1>
-            <span className="meta-text font-mono text-text-tertiary">
-              ORG 1
-            </span>
-          </div>
-          <p className="meta-text mt-1 mb-0 truncate font-mono text-text-tertiary">
-            {snapshot.working_directory}
-          </p>
-        </header>
+      <AppSidebar
+        agentCount={agents.length}
+        discussions={snapshot.discussions.map((discussion) => ({
+          id: discussion.id,
+          messageCount: discussion.messages.length,
+          topic: discussion.topic,
+        }))}
+        memberCount={snapshot.members.length}
+        onSelectDiscussion={selectDiscussion}
+        onSelectView={selectWorkspaceView}
+        selectedDiscussionId={
+          isCreatingDiscussion ? undefined : selectedDiscussion?.id
+        }
+        view={workspaceView}
+        workingDirectory={snapshot.working_directory}
+      />
 
-        <section
-          className="border-border border-b p-3"
-          aria-labelledby="members-title"
-        >
-          <div className="mb-2 flex items-center justify-between">
-            <h2
-              className="section-label m-0 font-semibold text-text-secondary uppercase"
-              id="members-title"
-            >
-              Members
-            </h2>
-            <span className="meta-text font-mono text-text-tertiary">
-              {snapshot.members.length}
-            </span>
+      <section className="workspace-main bg-surface">
+        <header className="workspace-topbar border-border border-b">
+          <div className="workspace-breadcrumbs">
+            <span>Organization 1</span>
+            <span aria-hidden="true">/</span>
+            <strong>{viewTitle}</strong>
           </div>
-          <ul className="m-0 mb-3 grid list-none gap-1 p-0">
-            {snapshot.members.map((member) => (
-              <li className="member-row body-compact min-h-7" key={member.id}>
-                <span className="truncate">{member.name}</span>
-                <span className="meta-text font-mono text-text-tertiary">
-                  {member.type === "agent"
-                    ? `${member.status.toUpperCase()} · ${member.id}`
-                    : `HUMAN · ${member.id}`}
-                </span>
-                {member.type === "agent" && member.error ? (
-                  <div className="member-error">
-                    <span
-                      className="caption-text min-w-0 text-danger"
-                      role="alert"
-                    >
-                      {member.error}
-                    </span>
-                    <Button
-                      aria-label={`Retry ${member.name}`}
-                      disabled={isSaving}
-                      onClick={() => void handleRetryAgent(member.id)}
-                      size="compact"
-                      variant="quiet"
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          <form
-            className="flex gap-2"
-            aria-label="Create Agent"
-            onSubmit={handleCreateAgent}
-          >
-            <Input
-              aria-label="Agent name"
-              disabled={isSaving}
-              onChange={(event) => setAgentName(event.target.value)}
-              placeholder="Agent name"
-              required
-              value={agentName}
-            />
-            <Button disabled={isSaving} type="submit">
+          {workspaceView === "discussions" ? (
+            <Button
+              disabled={agents.length === 0 || isSaving}
+              onClick={() => setIsCreatingDiscussion(true)}
+              size="compact"
+              variant="primary"
+            >
+              <Plus aria-hidden="true" size={14} />
               New
             </Button>
-          </form>
-        </section>
+          ) : null}
+        </header>
 
-        <section
-          className="flex min-h-0 flex-col"
-          aria-labelledby="discussions-title"
-        >
-          <div className="flex items-center justify-between px-3 pt-3 pb-2">
-            <h2
-              className="section-label m-0 font-semibold text-text-secondary uppercase"
-              id="discussions-title"
-            >
-              Discussions
-            </h2>
-            <span className="meta-text font-mono text-text-tertiary">
-              {snapshot.discussions.length}
-            </span>
-          </div>
-          <nav
-            className="min-h-0 flex-1 overflow-y-auto px-2"
-            aria-label="Discussions"
-          >
-            {snapshot.discussions.length === 0 ? (
-              <p className="caption-text m-0 px-1 py-2 text-text-tertiary">
-                No discussions
-              </p>
-            ) : (
-              <ul className="m-0 grid list-none gap-1 p-0">
-                {snapshot.discussions.map((discussion) => (
-                  <li key={discussion.id}>
-                    <Button
-                      aria-current={
-                        selectedDiscussion?.id === discussion.id
-                          ? "page"
-                          : undefined
-                      }
-                      className="w-full justify-start"
-                      onClick={() => selectDiscussion(discussion.id)}
-                      variant={
-                        selectedDiscussion?.id === discussion.id
-                          ? "secondary"
-                          : "quiet"
-                      }
-                    >
-                      <span className="meta-text mr-2 font-mono text-text-tertiary">
-                        {discussion.id}
-                      </span>
-                      <span className="truncate">{discussion.topic}</span>
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </nav>
-          <DiscussionForm
-            agents={snapshot.members.filter(
-              (member) => member.type === "agent",
-            )}
+        {workspaceView === "overview" ? (
+          <OverviewPage snapshot={snapshot} />
+        ) : null}
+        {workspaceView === "members" ? (
+          <MembersPage members={snapshot.members} />
+        ) : null}
+        {workspaceView === "agents" ? (
+          <AgentsPage
+            agentName={agentName}
+            agentNameInputRef={agentNameInputRef}
+            agents={agents}
             disabled={isSaving}
-            onSubmit={handleCreateDiscussion}
-            onToggleMember={toggleMember}
-            selectedMemberIds={selectedMemberIds}
-            setTopic={setTopic}
-            topic={topic}
+            onAgentNameChange={setAgentName}
+            onCreateAgent={handleCreateAgent}
+            onRetryAgent={handleRetryAgent}
           />
-        </section>
-      </aside>
+        ) : null}
+        {workspaceView === "discussions" ? (
+          isCreatingDiscussion || !selectedDiscussion ? (
+            <DiscussionStart>
+              <DiscussionForm
+                agents={agents}
+                disabled={isSaving}
+                onSubmit={handleCreateDiscussion}
+                onToggleMember={toggleMember}
+                selectedMemberIds={selectedMemberIds}
+                setTopic={setTopic}
+                topic={topic}
+              />
+            </DiscussionStart>
+          ) : (
+            <section className="discussion-pane">
+              <DiscussionView
+                discussion={selectedDiscussion}
+                key={selectedDiscussion.id}
+                disabled={isSaving}
+                members={snapshot.members}
+                messageBody={messageBody}
+                messageInputRef={messageInputRef}
+                messageMentionIds={messageMentionIds}
+                onMessageChange={setMessageBody}
+                onMentionToggle={toggleMessageMention}
+                onSend={handleSendMessage}
+              />
+            </section>
+          )
+        ) : null}
 
-      <section className="discussion-pane bg-surface">
-        {selectedDiscussion ? (
-          <DiscussionView
-            discussion={selectedDiscussion}
-            key={selectedDiscussion.id}
-            disabled={isSaving}
-            members={snapshot.members}
-            messageBody={messageBody}
-            messageInputRef={messageInputRef}
-            messageMentionIds={messageMentionIds}
-            onMessageChange={setMessageBody}
-            onMentionToggle={toggleMessageMention}
-            onSend={handleSendMessage}
-          />
-        ) : (
-          <EmptyDiscussion />
-        )}
         {mutationError ? (
           <p
-            className="caption-text absolute right-4 bottom-4 m-0 border border-danger bg-surface px-3 py-2 text-danger"
+            className="caption-text mutation-error m-0 border border-danger bg-surface px-3 py-2 text-danger"
             role="alert"
           >
             {mutationError}
@@ -384,6 +348,168 @@ function StatusPage({
   );
 }
 
+function PageHeading({ count, title }: { count?: number; title: string }) {
+  return (
+    <header className="page-heading border-border border-b">
+      <h2 className="page-title m-0 font-semibold">{title}</h2>
+      {count !== undefined ? (
+        <span className="meta-text font-mono text-text-tertiary">{count}</span>
+      ) : null}
+    </header>
+  );
+}
+
+function OverviewPage({ snapshot }: { snapshot: OrganizationSnapshot }) {
+  const agentCount = snapshot.members.filter(
+    (member) => member.type === "agent",
+  ).length;
+  return (
+    <section className="page-pane">
+      <PageHeading title="Overview" />
+      <dl className="overview-list">
+        <div>
+          <dt>Organization</dt>
+          <dd>Organization 1</dd>
+        </div>
+        <div>
+          <dt>Members</dt>
+          <dd>{snapshot.members.length}</dd>
+        </div>
+        <div>
+          <dt>Agents</dt>
+          <dd>{agentCount}</dd>
+        </div>
+        <div>
+          <dt>Discussions</dt>
+          <dd>{snapshot.discussions.length}</dd>
+        </div>
+        <div>
+          <dt>Launch directory</dt>
+          <dd className="font-mono">{snapshot.working_directory}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function MembersPage({ members }: { members: Member[] }) {
+  return (
+    <section className="page-pane">
+      <PageHeading count={members.length} title="Members" />
+      <ul className="entity-list">
+        {members.map((member) => (
+          <li key={member.id}>
+            <span className="entity-mark" aria-hidden="true">
+              {member.name.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="entity-copy">
+              <strong>{member.name}</strong>
+              <span>{member.type === "human" ? "Human" : "Agent"}</span>
+            </span>
+            <span className="meta-text font-mono text-text-tertiary">
+              {member.type === "agent" ? member.status.toUpperCase() : "ACTIVE"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+type AgentsPageProps = {
+  agentName: string;
+  agentNameInputRef: React.RefObject<HTMLInputElement | null>;
+  agents: AgentMember[];
+  disabled: boolean;
+  onAgentNameChange: (name: string) => void;
+  onCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
+  onRetryAgent: (agentId: number) => void;
+};
+
+function AgentsPage({
+  agentName,
+  agentNameInputRef,
+  agents,
+  disabled,
+  onAgentNameChange,
+  onCreateAgent,
+  onRetryAgent,
+}: AgentsPageProps) {
+  return (
+    <section className="page-pane page-pane--agents">
+      <PageHeading count={agents.length} title="Agents" />
+      <form
+        className="entity-create-form border-border border-b"
+        aria-label="Create Agent"
+        onSubmit={onCreateAgent}
+      >
+        <Input
+          aria-label="Agent name"
+          disabled={disabled}
+          onChange={(event) => onAgentNameChange(event.target.value)}
+          placeholder="Agent name"
+          ref={agentNameInputRef}
+          required
+          value={agentName}
+        />
+        <Button disabled={disabled} type="submit" variant="primary">
+          New
+        </Button>
+      </form>
+      {agents.length === 0 ? (
+        <div className="page-empty">
+          <p className="body-compact m-0 text-text-tertiary">No Agents</p>
+        </div>
+      ) : (
+        <ul className="entity-list">
+          {agents.map((agent) => (
+            <li key={agent.id}>
+              <span
+                className="entity-mark entity-mark--agent"
+                aria-hidden="true"
+              >
+                {agent.name.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="entity-copy">
+                <strong>{agent.name}</strong>
+                <span>Agent {agent.id}</span>
+              </span>
+              <span className="meta-text font-mono text-text-tertiary">
+                {agent.status.toUpperCase()}
+              </span>
+              {agent.error ? (
+                <div className="entity-error">
+                  <span className="caption-text text-danger" role="alert">
+                    {agent.error}
+                  </span>
+                  <Button
+                    aria-label={`Retry ${agent.name}`}
+                    disabled={disabled}
+                    onClick={() => onRetryAgent(agent.id)}
+                    size="compact"
+                    variant="quiet"
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function DiscussionStart({ children }: { children: React.ReactNode }) {
+  return (
+    <section className="page-pane">
+      <PageHeading title="New discussion" />
+      <div className="discussion-start">{children}</div>
+    </section>
+  );
+}
+
 type DiscussionFormProps = {
   agents: Array<{ id: number; name: string }>;
   disabled: boolean;
@@ -405,7 +531,7 @@ function DiscussionForm({
 }: DiscussionFormProps) {
   return (
     <form
-      className="border-border border-t p-3"
+      className="discussion-form"
       aria-label="Create Discussion"
       onSubmit={onSubmit}
     >
@@ -413,7 +539,7 @@ function DiscussionForm({
         className="section-label mb-2 block font-medium text-text-secondary"
         htmlFor="topic"
       >
-        New discussion
+        Topic
       </label>
       <Input
         disabled={disabled}
@@ -656,19 +782,6 @@ function DiscussionView({
         </div>
       </form>
     </>
-  );
-}
-
-function EmptyDiscussion() {
-  return (
-    <div className="col-span-full row-span-full grid place-items-center">
-      <div className="text-center">
-        <p className="empty-title m-0 font-medium">Create a Discussion</p>
-        <p className="caption-text mt-1 mb-0 text-text-tertiary">
-          Add an Agent, then choose Members and a topic.
-        </p>
-      </div>
-    </div>
   );
 }
 
