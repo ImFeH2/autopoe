@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import sys
 from collections.abc import Callable
 from typing import Any, TextIO
 
@@ -64,6 +66,15 @@ class Dispatcher:
             return {
                 "id": request_id,
                 "error": {"code": "invalid_request", "message": str(error)},
+            }
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            print(
+                f"[Protocol] Request failed: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return {
+                "id": request_id,
+                "error": {"code": "internal_error", "message": "Request failed"},
             }
 
     def _shutdown(self, params: dict[str, Any]) -> dict[str, Any]:

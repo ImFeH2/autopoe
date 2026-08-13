@@ -1,5 +1,6 @@
 import io
 import json
+import sqlite3
 
 from flowent.domain import OrganizationState
 from flowent.model_runner import ModelRuntime
@@ -145,6 +146,61 @@ def test_model_settings_are_shared_without_returning_the_api_key() -> None:
         }
     )
     assert secret not in output
+
+
+def test_persistence_error_does_not_stop_or_expose_request_data(capsys) -> None:
+    secret = "must-not-leak-from-internal-error"
+
+    class FailingModelRuntime(ModelRuntime):
+        def configure(
+            self,
+            provider: str,
+            base_url: str,
+            api_key: str,
+            model: str,
+        ) -> dict[str, object]:
+            del provider, base_url, api_key, model
+            raise sqlite3.OperationalError(secret)
+
+    input_stream = io.StringIO(
+        json.dumps(
+            {
+                "id": 1,
+                "method": "settings.update_model",
+                "params": {
+                    "provider": "openai",
+                    "base_url": "https://example.invalid/v1",
+                    "api_key": secret,
+                    "model": "test-model",
+                },
+            }
+        )
+        + "\n"
+        + json.dumps({"id": 2, "method": "organization.get", "params": {}})
+        + "\n"
+    )
+    output_stream = io.StringIO()
+    state = OrganizationState()
+
+    serve(
+        input_stream,
+        output_stream,
+        state,
+        model_runtime=FailingModelRuntime(deterministic=True),
+    )
+
+    output = output_stream.getvalue()
+    assert [json.loads(line) for line in output.splitlines()] == [
+        {
+            "id": 1,
+            "error": {"code": "internal_error", "message": "Request failed"},
+        },
+        {"id": 2, "result": state.snapshot()},
+    ]
+    captured = capsys.readouterr()
+    assert "OperationalError" in captured.err
+    assert secret not in output
+    assert secret not in captured.err
 
 
 def test_shutdown_calls_cleanup_and_stops_processing() -> None:
