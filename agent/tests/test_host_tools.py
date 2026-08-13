@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -10,7 +11,14 @@ from threading import Event, Thread
 import psutil
 import pytest
 
-from flowent.host_tools import OWNER_ENV, HostToolError, HostTools, ProcessWatcher
+import flowent.host_tools as host_tools_module
+from flowent.host_tools import (
+    OWNER_ENV,
+    HostToolError,
+    HostTools,
+    ProcessWatcher,
+    UnixProcessGroup,
+)
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -52,6 +60,32 @@ def wait_for_process_exit(pid: int) -> None:
     while time.monotonic() < deadline and process_exists(pid):
         time.sleep(0.01)
     assert not process_exists(pid)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix process groups")
+def test_unix_process_group_tolerates_permission_error_during_cleanup(
+    monkeypatch,
+) -> None:
+    signals: list[int] = []
+    cleaned: list[tuple[str, str]] = []
+
+    def kill_process_group(process_group_id: int, sent_signal: int) -> None:
+        assert process_group_id == 123
+        signals.append(sent_signal)
+        if sent_signal == 0:
+            raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "killpg", kill_process_group)
+    monkeypatch.setattr(
+        host_tools_module,
+        "terminate_marked_processes",
+        lambda key, value: cleaned.append((key, value)),
+    )
+
+    UnixProcessGroup(123, "execution-id").terminate()
+
+    assert signals == [signal.SIGTERM, 0, signal.SIGKILL]
+    assert cleaned == [(host_tools_module.EXECUTION_ENV, "execution-id")]
 
 
 def test_exec_uses_launch_root_relative_cwd_without_shell(tmp_path: Path) -> None:

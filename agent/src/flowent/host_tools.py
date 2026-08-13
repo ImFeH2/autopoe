@@ -50,6 +50,25 @@ def marked_processes(
     return matches
 
 
+def terminate_processes(
+    processes: list[psutil.Process],
+    timeout: float = 0.4,
+) -> None:
+    unique = list({process.pid: process for process in processes}.values())
+    for process in unique:
+        try:
+            process.terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    _, alive = psutil.wait_procs(unique, timeout=timeout / 2)
+    for process in alive:
+        try:
+            process.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    psutil.wait_procs(alive, timeout=timeout / 2)
+
+
 def terminate_marked_processes(
     key: str,
     value: str,
@@ -61,18 +80,7 @@ def terminate_marked_processes(
         processes = marked_processes(key, value, protected=protected)
         if not processes:
             return
-        for process in processes:
-            try:
-                process.terminate()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        _, alive = psutil.wait_procs(processes, timeout=0.2)
-        for process in alive:
-            try:
-                process.kill()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        psutil.wait_procs(alive, timeout=0.2)
+        terminate_processes(processes)
 
 
 class ProcessWatcher:
@@ -127,6 +135,7 @@ class ProcessTree(Protocol):
 @dataclass(frozen=True)
 class ManagedProcess:
     process: subprocess.Popen[bytes]
+    execution_id: str
     tree: ProcessTree | None = None
     protected: bool = False
 
@@ -144,19 +153,19 @@ class UnixProcessGroup:
                 return
             try:
                 os.killpg(self._process_group_id, signal.SIGTERM)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 pass
             else:
                 deadline = time.monotonic() + 0.25
                 while time.monotonic() < deadline:
                     try:
                         os.killpg(self._process_group_id, 0)
-                    except ProcessLookupError:
+                    except (ProcessLookupError, PermissionError):
                         break
                     time.sleep(0.01)
                 try:
                     os.killpg(self._process_group_id, signal.SIGKILL)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
                     pass
             terminate_marked_processes(EXECUTION_ENV, self._execution_id)
 
@@ -753,6 +762,7 @@ class HostTools:
                 raise HostToolError(f"{error_prefix}: {error}") from error
             managed = ManagedProcess(
                 process=process,
+                execution_id=execution_id,
                 tree=tree,
                 protected=protected,
             )
@@ -761,16 +771,20 @@ class HostTools:
 
     def _terminate(self, managed: ManagedProcess) -> None:
         process = managed.process
-        if managed.tree is not None:
-            managed.tree.terminate()
-        elif process.poll() is None:
-            process.kill()
+        known_processes = marked_processes(EXECUTION_ENV, managed.execution_id)
         try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+            if managed.tree is not None:
+                managed.tree.terminate()
+            elif process.poll() is None:
+                process.kill()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
         finally:
+            terminate_processes(known_processes, timeout=2)
+            terminate_marked_processes(EXECUTION_ENV, managed.execution_id)
             self._close_tree(managed)
 
     @staticmethod
