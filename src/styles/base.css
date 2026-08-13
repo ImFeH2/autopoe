@@ -17,8 +17,10 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.45;
+  font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .app-shell {
@@ -445,7 +447,7 @@ body {
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--color-border-strong);
-  border-radius: 50%;
+  border-radius: 5px;
   background: var(--color-surface-selected);
   font-size: 9px;
   font-weight: 650;
@@ -464,6 +466,10 @@ body {
   border-radius: var(--radius-bubble);
   padding: 9px 12px 10px;
   background: var(--color-surface-subtle);
+}
+
+.message-row--agent .message-bubble {
+  border-left: 2px solid var(--color-text-primary);
 }
 
 .message-row--human .message-bubble {
@@ -617,8 +623,8 @@ textarea {
 }
 
 .ui-button--secondary {
-  border-color: var(--color-border-strong);
-  background: var(--color-surface);
+  border-color: var(--color-border);
+  background: var(--color-surface-selected);
   color: var(--color-text-primary);
 }
 
