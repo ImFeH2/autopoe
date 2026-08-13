@@ -226,7 +226,6 @@ function App() {
       : workspaceView === "discussions" && selectedDiscussion
         ? selectedDiscussion.topic
         : {
-            overview: "Overview",
             discussions: "Discussions",
             members: "Members",
             agents: "Agents",
@@ -271,9 +270,6 @@ function App() {
           ) : null}
         </header>
 
-        {workspaceView === "overview" ? (
-          <OverviewPage snapshot={snapshot} />
-        ) : null}
         {workspaceView === "members" ? (
           <MembersPage members={snapshot.members} />
         ) : null}
@@ -356,39 +352,6 @@ function PageHeading({ count, title }: { count?: number; title: string }) {
         <span className="meta-text font-mono text-text-tertiary">{count}</span>
       ) : null}
     </header>
-  );
-}
-
-function OverviewPage({ snapshot }: { snapshot: OrganizationSnapshot }) {
-  const agentCount = snapshot.members.filter(
-    (member) => member.type === "agent",
-  ).length;
-  return (
-    <section className="page-pane">
-      <PageHeading title="Overview" />
-      <dl className="overview-list">
-        <div>
-          <dt>Organization</dt>
-          <dd>Organization 1</dd>
-        </div>
-        <div>
-          <dt>Members</dt>
-          <dd>{snapshot.members.length}</dd>
-        </div>
-        <div>
-          <dt>Agents</dt>
-          <dd>{agentCount}</dd>
-        </div>
-        <div>
-          <dt>Discussions</dt>
-          <dd>{snapshot.discussions.length}</dd>
-        </div>
-        <div>
-          <dt>Launch directory</dt>
-          <dd className="font-mono">{snapshot.working_directory}</dd>
-        </div>
-      </dl>
-    </section>
   );
 }
 

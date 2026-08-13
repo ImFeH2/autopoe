@@ -1,14 +1,6 @@
-import {
-  Bot,
-  Button,
-  ChevronDown,
-  Grid2X2,
-  MessageSquare,
-  Settings2,
-  Users,
-} from "@/components/ui";
+import { Bot, Button, MessageSquare, Settings2, Users } from "@/components/ui";
 
-export type WorkspaceView = "overview" | "discussions" | "members" | "agents";
+export type WorkspaceView = "discussions" | "members" | "agents";
 
 type SidebarDiscussion = {
   id: number;
@@ -28,7 +20,6 @@ type AppSidebarProps = {
 };
 
 const navigation = [
-  { icon: Grid2X2, label: "Overview", view: "overview" },
   { icon: MessageSquare, label: "Discussions", view: "discussions" },
   { icon: Users, label: "Members", view: "members" },
   { icon: Bot, label: "Agents", view: "agents" },
@@ -44,8 +35,7 @@ export function AppSidebar({
   view,
   workingDirectory,
 }: AppSidebarProps) {
-  const counts: Record<WorkspaceView, number | undefined> = {
-    overview: undefined,
+  const counts: Record<WorkspaceView, number> = {
     discussions: discussions.length,
     members: memberCount,
     agents: agentCount,
@@ -58,14 +48,6 @@ export function AppSidebar({
           F
         </span>
         <h1 className="app-brand m-0 font-semibold">Flowent</h1>
-      </div>
-
-      <div className="organization-switcher">
-        <span className="organization-mark" aria-hidden="true">
-          1
-        </span>
-        <span className="truncate">Organization 1</span>
-        <ChevronDown aria-hidden="true" size={14} />
       </div>
 
       <nav className="sidebar-navigation" aria-label="Workspace">
@@ -82,9 +64,7 @@ export function AppSidebar({
             >
               <Icon aria-hidden="true" size={15} />
               <span>{item.label}</span>
-              {counts[item.view] !== undefined ? (
-                <span className="sidebar-count">{counts[item.view]}</span>
-              ) : null}
+              <span className="sidebar-count">{counts[item.view]}</span>
             </Button>
           );
         })}

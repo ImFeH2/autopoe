@@ -42,7 +42,8 @@ describe("App", () => {
     );
 
     expect(markup).toContain('aria-label="Workspace"');
-    expect(markup).toContain(">Overview<");
+    expect(markup).not.toContain(">Overview<");
+    expect(markup).not.toContain("Organization 1");
     expect(markup).toContain(">Discussions<");
     expect(markup).toContain(">Members<");
     expect(markup).toContain(">Agents<");

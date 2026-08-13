@@ -41,7 +41,7 @@ async function isFullyVisible(selector: string) {
   }, selector);
 }
 
-const destinations = ["Overview", "Discussions", "Members", "Agents"];
+const destinations = ["Discussions", "Members", "Agents"];
 
 async function expectCurrentDestination(label: string) {
   for (const destination of destinations) {
@@ -123,19 +123,14 @@ describe("Flowent desktop", () => {
     for (const destination of destinations) {
       await expect($(`button[aria-label='${destination}']`)).toExist();
     }
+    await expect($("button[aria-label='Overview']")).not.toExist();
+    await expect($(".organization-switcher")).not.toExist();
 
     const windows = await browser.tauri.listWindows();
     expect(windows).toContain("main");
   });
 
   it("supports daily Human and Agent collaboration", async () => {
-    await $("button[aria-label='Overview']").click();
-    await expect($("h2=Overview")).toExist();
-    await expect($(".workspace-breadcrumbs")).toHaveText(
-      expect.stringContaining("Overview"),
-    );
-    await expectCurrentDestination("Overview");
-
     await $("button[aria-label='Agents']").click();
     await expect($("h2=Agents")).toExist();
     await expectCurrentDestination("Agents");
