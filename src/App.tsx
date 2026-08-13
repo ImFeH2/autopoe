@@ -13,6 +13,8 @@ import {
   backend,
   type Discussion,
   type Member,
+  type ModelProvider,
+  type ModelSettings,
   type OrganizationSnapshot,
 } from "@/lib/backend";
 
@@ -229,6 +231,7 @@ function App() {
             discussions: "Discussions",
             members: "Members",
             agents: "Agents",
+            settings: "Settings",
           }[workspaceView];
 
   return (
@@ -273,6 +276,7 @@ function App() {
         {workspaceView === "members" ? (
           <MembersPage members={snapshot.members} />
         ) : null}
+        {workspaceView === "settings" ? <SettingsPage /> : null}
         {workspaceView === "agents" ? (
           <AgentsPage
             agentName={agentName}
@@ -460,6 +464,156 @@ function AgentsPage({
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+const providerOptions: Array<{ label: string; value: ModelProvider }> = [
+  { label: "OpenAI", value: "openai" },
+  { label: "Anthropic", value: "anthropic" },
+  { label: "Google", value: "google" },
+];
+
+function SettingsPage() {
+  const [settings, setSettings] = useState<ModelSettings | null>(null);
+  const [provider, setProvider] = useState<ModelProvider>("openai");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
+  const [status, setStatus] = useState<
+    "loading" | "ready" | "saving" | "saved"
+  >("loading");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void backend
+      .getModelSettings()
+      .then((current) => {
+        if (!active) {
+          return;
+        }
+        setSettings(current);
+        setProvider(current.provider);
+        setBaseUrl(current.base_url);
+        setModel(current.model);
+        setStatus("ready");
+      })
+      .catch((reason) => {
+        if (active) {
+          setError(errorMessage(reason));
+          setStatus("ready");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("saving");
+    setError(null);
+    try {
+      const current = await backend.updateModelSettings({
+        provider,
+        base_url: baseUrl,
+        api_key: apiKey,
+        model,
+      });
+      setSettings(current);
+      setProvider(current.provider);
+      setBaseUrl(current.base_url);
+      setApiKey("");
+      setModel(current.model);
+      setStatus("saved");
+    } catch (reason) {
+      setError(errorMessage(reason));
+      setStatus("ready");
+    }
+  }
+
+  const disabled = status === "loading" || status === "saving";
+  const hasApiKey = settings?.has_api_key ?? false;
+
+  return (
+    <section className="page-pane page-pane--settings">
+      <PageHeading title="Settings" />
+      <form
+        className="settings-form"
+        aria-label="Model settings"
+        onSubmit={handleSave}
+      >
+        <fieldset className="settings-provider">
+          <legend>Provider</legend>
+          <div>
+            {providerOptions.map((option) => (
+              <Button
+                aria-pressed={provider === option.value}
+                disabled={disabled}
+                key={option.value}
+                onClick={() => setProvider(option.value)}
+                size="compact"
+                variant={provider === option.value ? "secondary" : "quiet"}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        </fieldset>
+        <label className="settings-field" htmlFor="model-base-url">
+          <span>Base URL</span>
+          <Input
+            aria-label="Base URL"
+            id="model-base-url"
+            autoComplete="url"
+            disabled={disabled}
+            onChange={(event) => setBaseUrl(event.target.value)}
+            placeholder="https://api.example.com"
+            required
+            type="url"
+            value={baseUrl}
+          />
+        </label>
+        <label className="settings-field" htmlFor="model-api-key">
+          <span>API key</span>
+          <Input
+            aria-label="API key"
+            id="model-api-key"
+            autoComplete="new-password"
+            disabled={disabled}
+            onChange={(event) => setApiKey(event.target.value)}
+            placeholder={hasApiKey ? "Saved" : "API key"}
+            required={!hasApiKey}
+            type="password"
+            value={apiKey}
+          />
+        </label>
+        <label className="settings-field" htmlFor="model-name">
+          <span>Model</span>
+          <Input
+            aria-label="Model"
+            id="model-name"
+            autoComplete="off"
+            disabled={disabled}
+            onChange={(event) => setModel(event.target.value)}
+            placeholder="Model"
+            required
+            value={model}
+          />
+        </label>
+        <div className="settings-actions">
+          <Button disabled={disabled} type="submit" variant="primary">
+            {status === "saving" ? "Saving" : "Save"}
+          </Button>
+          {status === "saved" ? <span role="status">Saved</span> : null}
+        </div>
+        {error ? (
+          <p className="caption-text m-0 text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </form>
     </section>
   );
 }

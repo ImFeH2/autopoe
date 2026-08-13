@@ -19,14 +19,21 @@ def main() -> None:
     host_tools = HostTools(working_directory)
     watcher = ProcessWatcher(host_tools.process_owner)
     state = OrganizationState(working_directory)
+    model_runtime = create_runner(working_directory)
     runtime = AgentRuntime(
         state,
-        create_runner(working_directory),
+        model_runtime,
         host_tools,
     )
     runtime.start()
     try:
-        serve(sys.stdin, sys.stdout, state, runtime.stop)
+        serve(
+            sys.stdin,
+            sys.stdout,
+            state,
+            runtime.stop,
+            model_runtime,
+        )
     finally:
         runtime.stop()
         watcher.close()

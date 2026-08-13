@@ -2,6 +2,7 @@ import io
 import json
 
 from flowent.domain import OrganizationState
+from flowent.model_runner import ModelRuntime
 from flowent.protocol import Dispatcher, serve
 
 
@@ -98,6 +99,52 @@ def test_rejects_boolean_request_id_without_stopping_the_stream() -> None:
         "message": "Request id must be a positive integer",
     }
     assert responses[1]["result"]["organization"] == {"id": 1}
+
+
+def test_model_settings_are_shared_without_returning_the_api_key() -> None:
+    secret = "must-not-be-returned"
+    input_stream = io.StringIO(
+        "".join(
+            json.dumps(request) + "\n"
+            for request in [
+                {"id": 1, "method": "settings.get_model", "params": {}},
+                {
+                    "id": 2,
+                    "method": "settings.update_model",
+                    "params": {
+                        "provider": "openai",
+                        "base_url": "https://example.invalid/v1",
+                        "api_key": secret,
+                        "model": "test-model",
+                    },
+                },
+                {"id": 3, "method": "settings.get_model", "params": {}},
+            ]
+        )
+    )
+    output_stream = io.StringIO()
+
+    serve(
+        input_stream,
+        output_stream,
+        OrganizationState(),
+        model_runtime=ModelRuntime(deterministic=True),
+    )
+
+    output = output_stream.getvalue()
+    responses = [json.loads(line) for line in output.splitlines()]
+    assert responses[0]["result"]["has_api_key"] is False
+    assert (
+        responses[1]["result"]
+        == responses[2]["result"]
+        == {
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "has_api_key": True,
+        }
+    )
+    assert secret not in output
 
 
 def test_shutdown_calls_cleanup_and_stops_processing() -> None:

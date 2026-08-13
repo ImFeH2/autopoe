@@ -1,6 +1,6 @@
 import { Bot, Button, MessageSquare, Settings2, Users } from "@/components/ui";
 
-export type WorkspaceView = "discussions" | "members" | "agents";
+export type WorkspaceView = "discussions" | "members" | "agents" | "settings";
 
 type SidebarDiscussion = {
   id: number;
@@ -35,7 +35,7 @@ export function AppSidebar({
   view,
   workingDirectory,
 }: AppSidebarProps) {
-  const counts: Record<WorkspaceView, number> = {
+  const counts: Record<Exclude<WorkspaceView, "settings">, number> = {
     discussions: discussions.length,
     members: memberCount,
     agents: agentCount,
@@ -113,16 +113,27 @@ export function AppSidebar({
         </div>
       </section>
 
-      <footer className="sidebar-user" title={workingDirectory}>
-        <span className="sidebar-user-mark" aria-hidden="true">
-          Y
-        </span>
-        <span className="sidebar-user-copy">
-          <strong>You</strong>
-          <span className="truncate">{workingDirectory}</span>
-        </span>
-        <Settings2 aria-hidden="true" size={14} />
-      </footer>
+      <div className="sidebar-footer">
+        <Button
+          aria-current={view === "settings" ? "page" : undefined}
+          aria-label="Settings"
+          className="sidebar-settings-button"
+          onClick={() => onSelectView("settings")}
+          variant={view === "settings" ? "secondary" : "quiet"}
+        >
+          <Settings2 aria-hidden="true" size={15} />
+          <span>Settings</span>
+        </Button>
+        <footer className="sidebar-user" title={workingDirectory}>
+          <span className="sidebar-user-mark" aria-hidden="true">
+            Y
+          </span>
+          <span className="sidebar-user-copy">
+            <strong>You</strong>
+            <span className="truncate">{workingDirectory}</span>
+          </span>
+        </footer>
+      </div>
     </aside>
   );
 }

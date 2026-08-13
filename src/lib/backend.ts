@@ -42,6 +42,22 @@ export type OrganizationSnapshot = {
   discussions: Discussion[];
 };
 
+export type ModelProvider = "openai" | "anthropic" | "google";
+
+export type ModelSettings = {
+  provider: ModelProvider;
+  base_url: string;
+  model: string;
+  has_api_key: boolean;
+};
+
+export type ModelSettingsUpdate = {
+  provider: ModelProvider;
+  base_url: string;
+  api_key: string;
+  model: string;
+};
+
 function invalidSnapshot(message: string): never {
   throw new Error(`Invalid Organization snapshot: ${message}`);
 }
@@ -250,30 +266,68 @@ export function parseOrganizationSnapshot(
   };
 }
 
+export function parseModelSettings(value: unknown): ModelSettings {
+  const settings = record(value, "model settings");
+  if (
+    settings.provider !== "openai" &&
+    settings.provider !== "anthropic" &&
+    settings.provider !== "google"
+  ) {
+    throw new Error("Invalid model settings: provider is invalid");
+  }
+  if (
+    typeof settings.base_url !== "string" ||
+    typeof settings.model !== "string" ||
+    typeof settings.has_api_key !== "boolean"
+  ) {
+    throw new Error("Invalid model settings: fields are invalid");
+  }
+  if (Object.getOwnPropertyDescriptor(settings, "api_key") !== undefined) {
+    throw new Error("Invalid model settings: API key must not be returned");
+  }
+  return {
+    provider: settings.provider,
+    base_url: settings.base_url,
+    model: settings.model,
+    has_api_key: settings.has_api_key,
+  };
+}
+
 async function request(
   method: string,
   params: Record<string, unknown> = {},
+): Promise<unknown> {
+  return sidecar.request(method, params);
+}
+
+async function organizationRequest(
+  method: string,
+  params: Record<string, unknown> = {},
 ): Promise<OrganizationSnapshot> {
-  const value = await sidecar.request(method, params);
-  return parseOrganizationSnapshot(value);
+  return parseOrganizationSnapshot(await request(method, params));
 }
 
 export const backend = {
-  getOrganization: () => request("organization.get"),
-  createAgent: (name: string) => request("organization.create_agent", { name }),
+  getOrganization: () => organizationRequest("organization.get"),
+  createAgent: (name: string) =>
+    organizationRequest("organization.create_agent", { name }),
   retryAgent: (agentId: number) =>
-    request("organization.retry_agent", { agent_id: agentId }),
+    organizationRequest("organization.retry_agent", { agent_id: agentId }),
   createDiscussion: (topic: string, memberIds: number[]) =>
-    request("discussion.create", {
+    organizationRequest("discussion.create", {
       topic,
       creator_id: 1,
       member_ids: memberIds,
     }),
   sendMessage: (discussionId: number, body: string, mentionIds: number[]) =>
-    request("discussion.send", {
+    organizationRequest("discussion.send", {
       discussion_id: discussionId,
       sender_id: 1,
       body,
       mention_ids: mentionIds,
     }),
+  getModelSettings: async () =>
+    parseModelSettings(await request("settings.get_model")),
+  updateModelSettings: async (settings: ModelSettingsUpdate) =>
+    parseModelSettings(await request("settings.update_model", settings)),
 };

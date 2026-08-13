@@ -3,21 +3,29 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any, Literal, cast
 
 from dotenv import dotenv_values
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.exceptions import AgentRunError
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
+from pydantic_ai.models.google import GoogleModel, GoogleModelName
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIModelName
+from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from flowent.domain import Activation, DomainError
 from flowent.host_tools import HostToolError
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRunner
 
+ProviderType = Literal["openai", "anthropic", "google"]
+
 
 @dataclass(frozen=True)
 class ModelConfig:
+    provider: ProviderType
     base_url: str
     api_key: str = field(repr=False)
     model: str
@@ -25,7 +33,11 @@ class ModelConfig:
     @classmethod
     def load(cls, directory: Path) -> ModelConfig:
         values = dotenv_values(directory / ".env")
+        provider = (values.get("provider") or "openai").strip()
+        if provider not in ("openai", "anthropic", "google"):
+            raise RuntimeError("Model provider is invalid")
         config = cls(
+            provider=cast(ProviderType, provider),
             base_url=(values.get("base_url") or "").strip(),
             api_key=(values.get("api_key") or "").strip(),
             model=(values.get("model") or "").strip(),
@@ -134,11 +146,30 @@ class DeterministicRunner:
 
 class PydanticAgentRunner:
     def __init__(self, config: ModelConfig) -> None:
-        provider = OpenAIProvider(base_url=config.base_url, api_key=config.api_key)
-        model = OpenAIChatModel(
-            cast(OpenAIModelName, config.model),
-            provider=provider,
-        )
+        if config.provider == "anthropic":
+            model = AnthropicModel(
+                cast(AnthropicModelName, config.model),
+                provider=AnthropicProvider(
+                    base_url=config.base_url,
+                    api_key=config.api_key,
+                ),
+            )
+        elif config.provider == "google":
+            model = GoogleModel(
+                cast(GoogleModelName, config.model),
+                provider=GoogleProvider(
+                    base_url=config.base_url,
+                    api_key=config.api_key,
+                ),
+            )
+        else:
+            model = OpenAIChatModel(
+                cast(OpenAIModelName, config.model),
+                provider=OpenAIProvider(
+                    base_url=config.base_url,
+                    api_key=config.api_key,
+                ),
+            )
         self._agent = Agent(
             model,
             deps_type=AgentRunContext,
@@ -278,11 +309,87 @@ class PydanticAgentRunner:
             raise AgentRunFailure("Model request failed") from error
 
 
-def create_runner(directory: Path) -> AgentRunner:
-    if os.environ.get("FLOWENT_TEST_RUNNER") == "deterministic":
-        return DeterministicRunner()
-    try:
-        config = ModelConfig.load(directory)
-    except RuntimeError:
-        return UnavailableRunner("Model configuration is incomplete")
-    return PydanticAgentRunner(config)
+class ModelRuntime:
+    def __init__(
+        self,
+        config: ModelConfig | None = None,
+        deterministic: bool = False,
+    ) -> None:
+        self._lock = Lock()
+        self._config = config
+        self._deterministic = deterministic
+        self._runner = self._create_runner(config)
+
+    def _create_runner(self, config: ModelConfig | None) -> AgentRunner:
+        if self._deterministic:
+            return DeterministicRunner()
+        if config is None:
+            return UnavailableRunner("Model configuration is incomplete")
+        return PydanticAgentRunner(config)
+
+    def settings(self) -> dict[str, Any]:
+        with self._lock:
+            config = self._config
+            if config is None:
+                return {
+                    "provider": "openai",
+                    "base_url": "",
+                    "model": "",
+                    "has_api_key": False,
+                }
+            return {
+                "provider": config.provider,
+                "base_url": config.base_url,
+                "model": config.model,
+                "has_api_key": True,
+            }
+
+    def configure(
+        self,
+        provider: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+    ) -> dict[str, Any]:
+        provider = provider.strip()
+        base_url = base_url.strip()
+        api_key = api_key.strip()
+        model = model.strip()
+        if provider not in ("openai", "anthropic", "google"):
+            raise ValueError("provider must be openai, anthropic, or google")
+        with self._lock:
+            if not api_key and self._config is not None:
+                api_key = self._config.api_key
+            if not base_url:
+                raise ValueError("base_url must not be empty")
+            if not api_key:
+                raise ValueError("api_key must not be empty")
+            if not model:
+                raise ValueError("model must not be empty")
+            config = ModelConfig(
+                provider=cast(ProviderType, provider),
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+            )
+            runner = self._create_runner(config)
+            self._config = config
+            self._runner = runner
+        return self.settings()
+
+    def run(self, activation: Activation, context: AgentRunContext) -> None:
+        with self._lock:
+            runner = self._runner
+        runner.run(activation, context)
+
+
+def create_runner(directory: Path) -> ModelRuntime:
+    deterministic = os.environ.get("FLOWENT_TEST_RUNNER") == "deterministic"
+    if deterministic:
+        config = None
+    else:
+        try:
+            config = ModelConfig.load(directory)
+        except RuntimeError:
+            config = None
+    return ModelRuntime(config, deterministic=deterministic)

@@ -155,6 +155,31 @@ describe("Flowent desktop", () => {
 
     const windows = await browser.tauri.listWindows();
     expect(windows).toContain("main");
+
+    await $("button[aria-label='Settings']").click();
+    await expect($("h2=Settings")).toExist();
+    await $("button=Anthropic").click();
+    await $("[aria-label='Base URL']").setValue("https://example.invalid");
+    await $("[aria-label='API key']").setValue("e2e-local-secret");
+    await $("[aria-label='Model']").setValue("claude-test");
+    await $("form[aria-label='Model settings'] button[type='submit']").click();
+    await expect($("[role='status']")).toHaveText("Saved");
+    await expect($("[aria-label='API key']")).toHaveValue("");
+    await expect($("[aria-label='API key']")).toHaveAttribute(
+      "placeholder",
+      "Saved",
+    );
+    expect(
+      await browser.execute(() => document.body.textContent),
+    ).not.toContain("e2e-local-secret");
+    await $("button[aria-label='Discussions']").click();
+    await $("button[aria-label='Settings']").click();
+    await expect($("button=Anthropic")).toHaveAttribute("aria-pressed", "true");
+    await expect($("[aria-label='Base URL']")).toHaveValue(
+      "https://example.invalid",
+    );
+    await expect($("[aria-label='Model']")).toHaveValue("claude-test");
+    await $("button[aria-label='Discussions']").click();
   });
 
   it("supports daily Human and Agent collaboration", async () => {

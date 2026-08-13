@@ -47,6 +47,7 @@ describe("App", () => {
     expect(markup).toContain(">Discussions<");
     expect(markup).toContain(">Members<");
     expect(markup).toContain(">Agents<");
+    expect(markup).toContain(">Settings<");
     expect(markup).toContain("Recent");
     expect(markup).toContain("Launch narrative");
     expect(markup).toContain("4 messages");

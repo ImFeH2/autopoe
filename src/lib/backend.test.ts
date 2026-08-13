@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseOrganizationSnapshot } from "@/lib/backend";
+import { parseModelSettings, parseOrganizationSnapshot } from "@/lib/backend";
 
 const validSnapshot = {
   organization: { id: 1 },
@@ -24,6 +24,36 @@ const validSnapshot = {
     },
   ],
 };
+
+describe("parseModelSettings", () => {
+  it("accepts safe shared model settings", () => {
+    expect(
+      parseModelSettings({
+        provider: "anthropic",
+        base_url: "https://example.invalid",
+        model: "claude-test",
+        has_api_key: true,
+      }),
+    ).toEqual({
+      provider: "anthropic",
+      base_url: "https://example.invalid",
+      model: "claude-test",
+      has_api_key: true,
+    });
+  });
+
+  it("rejects API keys returned by the Sidecar", () => {
+    expect(() =>
+      parseModelSettings({
+        provider: "openai",
+        base_url: "https://example.invalid",
+        model: "test-model",
+        has_api_key: true,
+        api_key: "secret",
+      }),
+    ).toThrow("API key must not be returned");
+  });
+});
 
 describe("parseOrganizationSnapshot", () => {
   it("returns a complete validated snapshot", () => {

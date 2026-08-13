@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any, TextIO
 
 from flowent.domain import DomainError, OrganizationState
+from flowent.model_runner import ModelRuntime
 
 
 class ProtocolError(Exception):
@@ -16,9 +17,11 @@ class Dispatcher:
         self,
         state: OrganizationState,
         on_shutdown: Callable[[], None] | None = None,
+        model_runtime: ModelRuntime | None = None,
     ) -> None:
         self._state = state
         self._on_shutdown = on_shutdown
+        self._model_runtime = model_runtime or ModelRuntime()
         self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
@@ -26,6 +29,8 @@ class Dispatcher:
             "organization.retry_agent": self._retry_agent,
             "discussion.create": self._create_discussion,
             "discussion.send": self._send_message,
+            "settings.get_model": self._get_model_settings,
+            "settings.update_model": self._update_model_settings,
             "system.shutdown": self._shutdown,
         }
 
@@ -68,6 +73,19 @@ class Dispatcher:
         if self._on_shutdown is not None:
             self._on_shutdown()
         return {"stopped": True}
+
+    def _get_model_settings(self, params: dict[str, Any]) -> dict[str, Any]:
+        if params:
+            raise ProtocolError("settings.get_model does not accept params")
+        return self._model_runtime.settings()
+
+    def _update_model_settings(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._model_runtime.configure(
+            provider=require_string(params, "provider"),
+            base_url=require_string(params, "base_url"),
+            api_key=require_string(params, "api_key"),
+            model=require_string(params, "model"),
+        )
 
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
@@ -123,8 +141,9 @@ def serve(
     output_stream: TextIO,
     state: OrganizationState,
     on_shutdown: Callable[[], None] | None = None,
+    model_runtime: ModelRuntime | None = None,
 ) -> None:
-    dispatcher = Dispatcher(state, on_shutdown)
+    dispatcher = Dispatcher(state, on_shutdown, model_runtime)
     for line in input_stream:
         try:
             request = json.loads(line)

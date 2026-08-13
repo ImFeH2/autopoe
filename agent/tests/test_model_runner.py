@@ -9,8 +9,9 @@ from flowent.host_tools import HostTools
 from flowent.model_runner import (
     DeterministicRunner,
     ModelConfig,
+    ModelRuntime,
+    ProviderType,
     PydanticAgentRunner,
-    UnavailableRunner,
     create_runner,
 )
 from flowent.runtime import AgentRunContext, AgentRunFailure
@@ -156,15 +157,98 @@ def test_model_config_loads_lowercase_env_without_revealing_key(tmp_path: Path) 
 
     config = ModelConfig.load(tmp_path)
 
+    assert config.provider == "openai"
     assert config.api_key == secret
     assert secret not in repr(config)
+
+
+def test_shared_model_settings_never_return_the_api_key() -> None:
+    secret = "shared-secret"
+    runtime = ModelRuntime(deterministic=True)
+
+    settings = runtime.configure(
+        provider="anthropic",
+        base_url="https://example.invalid",
+        api_key=secret,
+        model="test-model",
+    )
+
+    assert settings == {
+        "provider": "anthropic",
+        "base_url": "https://example.invalid",
+        "model": "test-model",
+        "has_api_key": True,
+    }
+    assert secret not in repr(runtime.settings())
+    assert (
+        runtime.configure(
+            provider="google",
+            base_url="https://google.invalid",
+            api_key="",
+            model="gemini-test",
+        )["has_api_key"]
+        is True
+    )
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic", "google"])
+def test_pydantic_runner_accepts_supported_provider_configs(
+    provider: ProviderType,
+) -> None:
+    PydanticAgentRunner(
+        ModelConfig(
+            provider=provider,
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+
+
+def test_all_agents_use_the_latest_shared_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, int]] = []
+
+    class RecordingRunner:
+        def __init__(self, model: str) -> None:
+            self.model = model
+
+        def run(self, activation: Activation, context: AgentRunContext) -> None:
+            del context
+            calls.append((self.model, activation.agent_id))
+
+    def create_recording_runner(
+        _runtime: ModelRuntime,
+        config: ModelConfig | None,
+    ) -> RecordingRunner:
+        return RecordingRunner(config.model if config else "unavailable")
+
+    monkeypatch.setattr(ModelRuntime, "_create_runner", create_recording_runner)
+    runtime = ModelRuntime()
+    runtime.configure(
+        provider="openai",
+        base_url="https://example.invalid",
+        api_key="test-key",
+        model="shared-model",
+    )
+    state = OrganizationState(tmp_path)
+    host_tools = HostTools(tmp_path)
+
+    for agent_id in (2, 3):
+        runtime.run(
+            Activation(agent_id=agent_id, items=()),
+            AgentRunContext(agent_id, state, host_tools),
+        )
+
+    assert calls == [("shared-model", 2), ("shared-model", 3)]
 
 
 def test_missing_model_config_returns_runner_that_fails_on_activation(
     tmp_path: Path,
 ) -> None:
     runner = create_runner(tmp_path)
-    assert isinstance(runner, UnavailableRunner)
     activation, context = activation_context(tmp_path)
 
     with pytest.raises(AgentRunFailure, match="configuration is incomplete"):
