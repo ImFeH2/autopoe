@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { sidecar } from "@/lib/sidecar";
 
 export type HumanMember = {
   id: number;
@@ -254,7 +254,7 @@ async function request(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<OrganizationSnapshot> {
-  const value = await invoke<unknown>("sidecar_request", { method, params });
+  const value = await sidecar.request(method, params);
   return parseOrganizationSnapshot(value);
 }
 
