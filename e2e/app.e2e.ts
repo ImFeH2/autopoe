@@ -128,6 +128,30 @@ describe("Flowent desktop", () => {
     expect(
       await browser.execute(() => getComputedStyle(document.body).fontFamily),
     ).toMatch(/^system-ui,/);
+    expect(
+      await browser.execute(() => {
+        const main = document.querySelector("main");
+        const topic = document.querySelector("#topic");
+        if (!main || !topic) {
+          return null;
+        }
+        return {
+          appContextMenu: main.dispatchEvent(
+            new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+          ),
+          drag: main.dispatchEvent(
+            new Event("dragstart", { bubbles: true, cancelable: true }),
+          ),
+          inputContextMenu: topic.dispatchEvent(
+            new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+          ),
+        };
+      }),
+    ).toEqual({
+      appContextMenu: false,
+      drag: false,
+      inputContextMenu: true,
+    });
 
     const windows = await browser.tauri.listWindows();
     expect(windows).toContain("main");
@@ -171,6 +195,29 @@ describe("Flowent desktop", () => {
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("Ada used exec and patch. status=0 verify=0"),
     );
+    await expect($(".message-row--human .message-bubble")).toHaveText(
+      expect.stringContaining("E2E_REPOSITORY_TASK"),
+    );
+    await expect($(".message-row--agent .message-bubble")).toHaveText(
+      expect.stringContaining("Ada used exec and patch"),
+    );
+    expect(
+      await browser.execute(() => {
+        const body = document.querySelector(
+          ".message-row--agent .message-body",
+        );
+        if (!body) {
+          return null;
+        }
+        const selection = window.getSelection();
+        selection?.selectAllChildren(body);
+        const allowed = body.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        );
+        selection?.removeAllRanges();
+        return allowed;
+      }),
+    ).toBe(true);
     expect(await readFile(agentWorkFile, "utf8")).toBe("after\n");
 
     await $("#message-mention-2").click();

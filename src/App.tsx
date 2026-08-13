@@ -661,30 +661,27 @@ function DiscussionView({
           <ol className="m-0 list-none p-0">
             {discussion.messages.map((message) => {
               const sender = membersById.get(message.sender_id);
+              const isHuman = sender?.type === "human";
               return (
                 <li
-                  className="message-row border-border border-b py-4"
+                  className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}`}
                   key={message.id}
                 >
-                  <div>
-                    <p className="caption-text m-0 font-medium">
-                      {sender?.name ?? "Unknown"}
-                    </p>
-                    <p className="meta-text mt-1 mb-0 font-mono text-text-tertiary">
-                      MESSAGE {message.id}
-                    </p>
-                  </div>
-                  <div className="message-content">
-                    <p className="message-body m-0 whitespace-pre-wrap leading-6">
+                  <span className="message-avatar" aria-hidden="true">
+                    {(sender?.name ?? "Unknown").slice(0, 1).toUpperCase()}
+                  </span>
+                  <article className="message-bubble">
+                    <header className="message-meta">
+                      <strong>{sender?.name ?? "Unknown"}</strong>
+                      <span className="font-mono">MESSAGE {message.id}</span>
+                    </header>
+                    <p className="message-body m-0 whitespace-pre-wrap">
                       {message.body}
                     </p>
                     {message.mentions.length > 0 ? (
                       <ul className="mention-statuses" aria-label="Mentions">
                         {message.mentions.map((mention) => (
-                          <li
-                            className="meta-text font-mono text-text-secondary"
-                            key={mention.member_id}
-                          >
+                          <li className="font-mono" key={mention.member_id}>
                             @
                             {membersById.get(mention.member_id)?.name ??
                               mention.member_id}{" "}
@@ -693,7 +690,7 @@ function DiscussionView({
                         ))}
                       </ul>
                     ) : null}
-                  </div>
+                  </article>
                 </li>
               );
             })}

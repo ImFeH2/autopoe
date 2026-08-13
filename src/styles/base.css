@@ -360,17 +360,74 @@ body {
 }
 
 .message-row {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-block: 6px;
 }
 
-.message-content {
-  min-width: 0;
+.message-row--human {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-surface-selected);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.message-row--agent .message-avatar {
+  border-color: var(--color-text-primary);
+  background: var(--color-text-primary);
+  color: var(--color-text-inverse);
+}
+
+.message-bubble {
+  width: fit-content;
+  max-width: min(76%, 760px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-bubble);
+  padding: 9px 12px 10px;
+  background: var(--color-surface-subtle);
+}
+
+.message-row--human .message-bubble {
+  border-color: var(--color-text-primary);
+  background: var(--color-text-primary);
+  color: var(--color-text-inverse);
+}
+
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+
+.message-meta strong {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.message-meta span {
+  color: var(--color-text-tertiary);
+  font-size: 9px;
+}
+
+.message-row--human .message-meta span {
+  color: var(--color-text-inverse);
 }
 
 .message-body {
-  max-width: 760px;
   font-size: 14px;
+  line-height: 1.5;
 }
 
 .mention-statuses {
@@ -379,7 +436,13 @@ body {
   gap: 4px 12px;
   margin: 6px 0 0;
   padding: 0;
+  color: var(--color-text-secondary);
+  font-size: 9px;
   list-style: none;
+}
+
+.message-row--human .mention-statuses {
+  color: var(--color-text-inverse);
 }
 
 .mention-picker {
@@ -565,10 +628,6 @@ textarea:focus-visible {
   .entity-list,
   .discussion-start {
     padding-inline: 22px;
-  }
-
-  .message-row {
-    grid-template-columns: 104px minmax(0, 1fr);
   }
 
   .message-log {

@@ -20,6 +20,7 @@
     ui-monospace, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono",
     monospace;
   --radius-control: 6px;
+  --radius-bubble: 14px;
   --focus-ring:
     0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-text-primary);
 }
