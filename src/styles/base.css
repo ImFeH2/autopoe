@@ -150,34 +150,7 @@ body {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 48px minmax(0, 1fr);
-}
-
-.workspace-topbar {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 16px 0 20px;
-}
-
-.workspace-breadcrumbs {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-  overflow: hidden;
-  color: var(--color-text-tertiary);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.workspace-breadcrumbs strong {
-  overflow: hidden;
-  color: var(--color-text-primary);
-  font-weight: 600;
-  text-overflow: ellipsis;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .discussions-workspace {
@@ -212,7 +185,13 @@ body {
   font-weight: 650;
 }
 
-.discussion-list-pane header > span {
+.discussion-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.discussion-list-actions > span {
   color: var(--color-text-tertiary);
   font-size: 10px;
 }

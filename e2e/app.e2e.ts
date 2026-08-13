@@ -58,14 +58,12 @@ async function expectSelectedDiscussion(topic: string) {
   expect(
     await $(`button[aria-label='Open ${topic}']`).getAttribute("aria-current"),
   ).toBe("page");
-  await expect($(".workspace-breadcrumbs strong")).toHaveText(topic);
+  await expect($(`h2=${topic}`)).toExist();
 }
 
 async function createDiscussion(topic: string) {
-  await $("button=New").click();
-  await expect($(".workspace-breadcrumbs")).toHaveText(
-    expect.stringContaining("New discussion"),
-  );
+  await $("button[aria-label='New discussion']").click();
+  await expect($("h2=New discussion")).toExist();
   await expect($(".discussion-list-button[aria-current='page']")).not.toExist();
   await expectCurrentDestination("Discussions");
   await $("#topic").setValue(topic);
@@ -126,9 +124,13 @@ describe("Flowent desktop", () => {
     }
     await expect($("button[aria-label='Overview']")).not.toExist();
     await expect($(".organization-switcher")).not.toExist();
+    await expect($(".workspace-topbar")).not.toExist();
+    await expect($(".workspace-breadcrumbs")).not.toExist();
     expect(
       await browser.execute(() => getComputedStyle(document.body).fontFamily),
-    ).toMatch(/^system-ui,/);
+    ).toBe(
+      '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif',
+    );
     expect(
       await browser.execute(() => {
         const main = document.querySelector("main");
@@ -272,9 +274,7 @@ describe("Flowent desktop", () => {
         "aria-current",
       ),
     ).toBe("page");
-    await expect($(".workspace-breadcrumbs")).toHaveText(
-      expect.stringContaining("Repository work"),
-    );
+    await expect($("h2=Repository work")).toExist();
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("Ada completed the retried work."),
     );

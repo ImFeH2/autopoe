@@ -223,18 +223,6 @@ function App() {
   const agents = snapshot.members.filter(
     (member): member is AgentMember => member.type === "agent",
   );
-  const viewTitle =
-    workspaceView === "discussions" && isCreatingDiscussion
-      ? "New discussion"
-      : workspaceView === "discussions" && selectedDiscussion
-        ? selectedDiscussion.topic
-        : {
-            discussions: "Discussions",
-            members: "Members",
-            agents: "Agents",
-            settings: "Settings",
-          }[workspaceView];
-
   return (
     <main className="app-shell bg-canvas text-text-primary">
       <AppSidebar
@@ -247,25 +235,6 @@ function App() {
       />
 
       <section className="workspace-main bg-surface">
-        <header className="workspace-topbar border-border border-b">
-          <div className="workspace-breadcrumbs">
-            <span>Organization 1</span>
-            <span aria-hidden="true">/</span>
-            <strong>{viewTitle}</strong>
-          </div>
-          {workspaceView === "discussions" ? (
-            <Button
-              disabled={agents.length === 0 || isSaving}
-              onClick={() => setIsCreatingDiscussion(true)}
-              size="compact"
-              variant="primary"
-            >
-              <Plus aria-hidden="true" size={14} />
-              New
-            </Button>
-          ) : null}
-        </header>
-
         {workspaceView === "members" ? (
           <MembersPage members={snapshot.members} />
         ) : null}
@@ -295,6 +264,7 @@ function App() {
             onMessageChange={setMessageBody}
             onMentionToggle={toggleMessageMention}
             onSelectDiscussion={selectDiscussion}
+            onStartCreate={() => setIsCreatingDiscussion(true)}
             onSend={handleSendMessage}
             onToggleMember={toggleMember}
             selectedDiscussion={selectedDiscussion}
@@ -616,6 +586,7 @@ type DiscussionsPageProps = {
   onMessageChange: (body: string) => void;
   onMentionToggle: (memberId: number) => void;
   onSelectDiscussion: (discussionId: number) => void;
+  onStartCreate: () => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
   selectedDiscussion?: Discussion;
@@ -637,6 +608,7 @@ function DiscussionsPage({
   onMessageChange,
   onMentionToggle,
   onSelectDiscussion,
+  onStartCreate,
   onSend,
   onToggleMember,
   selectedDiscussion,
@@ -649,7 +621,19 @@ function DiscussionsPage({
       <aside className="discussion-list-pane" aria-label="Discussion list">
         <header>
           <h2>Discussions</h2>
-          <span className="font-mono">{discussions.length}</span>
+          <div className="discussion-list-actions">
+            <span className="font-mono">{discussions.length}</span>
+            <Button
+              aria-label="New discussion"
+              disabled={agents.length === 0 || disabled}
+              onClick={onStartCreate}
+              size="compact"
+              variant="primary"
+            >
+              <Plus aria-hidden="true" size={14} />
+              New
+            </Button>
+          </div>
         </header>
         {discussions.length === 0 ? (
           <p className="discussion-list-empty">No discussions</p>
