@@ -7,7 +7,15 @@ import {
   useState,
 } from "react";
 import { AppSidebar, type WorkspaceView } from "@/components/layout";
-import { Button, Checkbox, Input, Plus, Textarea } from "@/components/ui";
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  Input,
+  Plus,
+  Search,
+  Textarea,
+} from "@/components/ui";
 import {
   type AgentMember,
   backend,
@@ -31,6 +39,19 @@ function toggleId(ids: number[], id: number) {
   return ids.includes(id)
     ? ids.filter((current) => current !== id)
     : [...ids, id];
+}
+
+export function filterDiscussions(
+  discussions: Discussion[],
+  query: string,
+): Discussion[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) {
+    return discussions;
+  }
+  return discussions.filter((discussion) =>
+    discussion.topic.toLocaleLowerCase().includes(normalizedQuery),
+  );
 }
 
 export function shouldSubmitMessage({
@@ -66,6 +87,7 @@ function App() {
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const restoreAgentFocusRef = useRef(false);
   const restoreMessageFocusRef = useRef(false);
+  const focusMessageAfterDialogRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -120,10 +142,9 @@ function App() {
   }
 
   const { snapshot } = requestState;
-  const selectedDiscussion =
-    snapshot.discussions.find(
-      (discussion) => discussion.id === selectedDiscussionId,
-    ) ?? snapshot.discussions[0];
+  const selectedDiscussion = snapshot.discussions.find(
+    (discussion) => discussion.id === selectedDiscussionId,
+  );
 
   function commit(nextSnapshot: OrganizationSnapshot) {
     startTransition(() => {
@@ -173,6 +194,7 @@ function App() {
       setSelectedMemberIds([]);
       setMessageBody("");
       setMessageMentionIds([]);
+      focusMessageAfterDialogRef.current = true;
       setSelectedDiscussionId(created?.id ?? null);
       setWorkspaceView("discussions");
       setIsCreatingDiscussion(false);
@@ -202,6 +224,25 @@ function App() {
     setSelectedMemberIds((current) => toggleId(current, memberId));
   }
 
+  function changeDiscussionDialog(open: boolean) {
+    if (isSaving) {
+      return;
+    }
+    setMutationError(null);
+    setTopic("");
+    setSelectedMemberIds([]);
+    setIsCreatingDiscussion(open);
+  }
+
+  function focusAfterDiscussionDialogClose() {
+    if (!focusMessageAfterDialogRef.current) {
+      return false;
+    }
+    focusMessageAfterDialogRef.current = false;
+    requestAnimationFrame(() => messageInputRef.current?.focus());
+    return true;
+  }
+
   function toggleMessageMention(memberId: number) {
     setMessageMentionIds((current) => toggleId(current, memberId));
   }
@@ -218,6 +259,8 @@ function App() {
   function selectWorkspaceView(view: WorkspaceView) {
     setWorkspaceView(view);
     setIsCreatingDiscussion(false);
+    setTopic("");
+    setSelectedMemberIds([]);
   }
 
   const agents = snapshot.members.filter(
@@ -255,16 +298,18 @@ function App() {
             agents={agents}
             disabled={isSaving}
             discussions={snapshot.discussions}
+            error={mutationError}
             isCreating={isCreatingDiscussion}
             members={snapshot.members}
             messageBody={messageBody}
             messageInputRef={messageInputRef}
             messageMentionIds={messageMentionIds}
             onCreateDiscussion={handleCreateDiscussion}
+            onDialogCloseAutoFocus={focusAfterDiscussionDialogClose}
+            onDialogOpenChange={changeDiscussionDialog}
             onMessageChange={setMessageBody}
             onMentionToggle={toggleMessageMention}
             onSelectDiscussion={selectDiscussion}
-            onStartCreate={() => setIsCreatingDiscussion(true)}
             onSend={handleSendMessage}
             onToggleMember={toggleMember}
             selectedDiscussion={selectedDiscussion}
@@ -274,7 +319,7 @@ function App() {
           />
         ) : null}
 
-        {mutationError ? (
+        {mutationError && !isCreatingDiscussion ? (
           <p
             className="caption-text mutation-error m-0 border border-danger bg-surface px-3 py-2 text-danger"
             role="alert"
@@ -577,16 +622,18 @@ type DiscussionsPageProps = {
   agents: AgentMember[];
   disabled: boolean;
   discussions: Discussion[];
+  error: string | null;
   isCreating: boolean;
   members: Member[];
   messageBody: string;
   messageInputRef: React.RefObject<HTMLTextAreaElement | null>;
   messageMentionIds: number[];
   onCreateDiscussion: (event: FormEvent<HTMLFormElement>) => void;
+  onDialogCloseAutoFocus: () => boolean;
+  onDialogOpenChange: (open: boolean) => void;
   onMessageChange: (body: string) => void;
   onMentionToggle: (memberId: number) => void;
   onSelectDiscussion: (discussionId: number) => void;
-  onStartCreate: () => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
   selectedDiscussion?: Discussion;
@@ -599,16 +646,18 @@ function DiscussionsPage({
   agents,
   disabled,
   discussions,
+  error,
   isCreating,
   members,
   messageBody,
   messageInputRef,
   messageMentionIds,
   onCreateDiscussion,
+  onDialogCloseAutoFocus,
+  onDialogOpenChange,
   onMessageChange,
   onMentionToggle,
   onSelectDiscussion,
-  onStartCreate,
   onSend,
   onToggleMember,
   selectedDiscussion,
@@ -616,32 +665,64 @@ function DiscussionsPage({
   setTopic,
   topic,
 }: DiscussionsPageProps) {
+  const [query, setQuery] = useState("");
+  const filteredDiscussions = filterDiscussions(discussions, query);
+
   return (
     <section className="discussions-workspace">
       <aside className="discussion-list-pane" aria-label="Discussion list">
-        <header>
-          <h2>Discussions</h2>
-          <div className="discussion-list-actions">
-            <span className="font-mono">{discussions.length}</span>
-            <Button
-              aria-label="New discussion"
-              disabled={agents.length === 0 || disabled}
-              onClick={onStartCreate}
-              size="compact"
-              variant="primary"
-            >
-              <Plus aria-hidden="true" size={14} />
-              New
-            </Button>
-          </div>
-        </header>
+        <div className="discussion-list-toolbar">
+          <label className="discussion-search" htmlFor="discussion-search">
+            <span className="sr-only">Search discussions</span>
+            <Search aria-hidden="true" size={14} />
+            <Input
+              aria-label="Search discussions"
+              autoComplete="off"
+              id="discussion-search"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search"
+              type="search"
+              value={query}
+            />
+          </label>
+          <Dialog
+            description="Enter a topic and choose the Agents who should join."
+            onCloseAutoFocus={onDialogCloseAutoFocus}
+            onOpenChange={onDialogOpenChange}
+            open={isCreating}
+            title="New discussion"
+            trigger={
+              <Button
+                aria-label="New discussion"
+                disabled={agents.length === 0 || disabled}
+                size="icon"
+                variant="primary"
+              >
+                <Plus aria-hidden="true" size={15} />
+              </Button>
+            }
+          >
+            <DiscussionForm
+              agents={agents}
+              disabled={disabled}
+              error={error}
+              onCancel={() => onDialogOpenChange(false)}
+              onSubmit={onCreateDiscussion}
+              onToggleMember={onToggleMember}
+              selectedMemberIds={selectedMemberIds}
+              setTopic={setTopic}
+              topic={topic}
+            />
+          </Dialog>
+        </div>
         {discussions.length === 0 ? (
           <p className="discussion-list-empty">No discussions</p>
+        ) : filteredDiscussions.length === 0 ? (
+          <p className="discussion-list-empty">No matches</p>
         ) : (
           <div className="discussion-list-items">
-            {discussions.map((discussion) => {
-              const selected =
-                !isCreating && selectedDiscussion?.id === discussion.id;
+            {filteredDiscussions.map((discussion) => {
+              const selected = selectedDiscussion?.id === discussion.id;
               return (
                 <Button
                   aria-current={selected ? "page" : undefined}
@@ -660,19 +741,7 @@ function DiscussionsPage({
         )}
       </aside>
       <div className="discussion-detail-pane">
-        {isCreating || !selectedDiscussion ? (
-          <DiscussionStart>
-            <DiscussionForm
-              agents={agents}
-              disabled={disabled}
-              onSubmit={onCreateDiscussion}
-              onToggleMember={onToggleMember}
-              selectedMemberIds={selectedMemberIds}
-              setTopic={setTopic}
-              topic={topic}
-            />
-          </DiscussionStart>
-        ) : (
+        {selectedDiscussion ? (
           <section className="discussion-pane">
             <DiscussionView
               discussion={selectedDiscussion}
@@ -687,17 +756,12 @@ function DiscussionsPage({
               onSend={onSend}
             />
           </section>
+        ) : (
+          <div className="discussion-empty">
+            <p>Select a discussion</p>
+          </div>
         )}
       </div>
-    </section>
-  );
-}
-
-function DiscussionStart({ children }: { children: React.ReactNode }) {
-  return (
-    <section className="page-pane">
-      <PageHeading title="New discussion" />
-      <div className="discussion-start">{children}</div>
     </section>
   );
 }
@@ -705,6 +769,8 @@ function DiscussionStart({ children }: { children: React.ReactNode }) {
 type DiscussionFormProps = {
   agents: Array<{ id: number; name: string }>;
   disabled: boolean;
+  error: string | null;
+  onCancel: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
   selectedMemberIds: number[];
@@ -715,6 +781,8 @@ type DiscussionFormProps = {
 function DiscussionForm({
   agents,
   disabled,
+  error,
+  onCancel,
   onSubmit,
   onToggleMember,
   selectedMemberIds,
@@ -727,59 +795,54 @@ function DiscussionForm({
       aria-label="Create Discussion"
       onSubmit={onSubmit}
     >
-      <label
-        className="section-label mb-2 block font-medium text-text-secondary"
-        htmlFor="topic"
-      >
-        Topic
+      <label className="discussion-form-field" htmlFor="discussion-topic">
+        <span>Topic</span>
+        <Input
+          autoFocus
+          disabled={disabled}
+          id="discussion-topic"
+          onChange={(event) => setTopic(event.target.value)}
+          placeholder="Topic"
+          required
+          value={topic}
+        />
       </label>
-      <Input
-        disabled={disabled}
-        id="topic"
-        onChange={(event) => setTopic(event.target.value)}
-        placeholder="Topic"
-        required
-        value={topic}
-      />
-      <fieldset className="my-2 border-0 p-0">
-        <legend className="sr-only">Members</legend>
-        {agents.length === 0 ? (
-          <p className="section-label m-0 text-text-tertiary">
-            Create an Agent first
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {agents.map((agent) => {
-              const checkboxId = `discussion-member-${agent.id}`;
-              return (
-                <label
-                  className="caption-text flex min-h-7 items-center gap-2 text-text-secondary"
-                  htmlFor={checkboxId}
-                  key={agent.id}
-                >
-                  <Checkbox
-                    checked={selectedMemberIds.includes(agent.id)}
-                    disabled={disabled}
-                    id={checkboxId}
-                    onChange={() => onToggleMember(agent.id)}
-                  />
-                  {agent.name}
-                </label>
-              );
-            })}
-          </div>
-        )}
+      <fieldset className="discussion-members">
+        <legend>Members</legend>
+        <div className="discussion-member-options">
+          {agents.map((agent) => {
+            const checkboxId = `discussion-member-${agent.id}`;
+            return (
+              <label htmlFor={checkboxId} key={agent.id}>
+                <Checkbox
+                  checked={selectedMemberIds.includes(agent.id)}
+                  disabled={disabled}
+                  id={checkboxId}
+                  onChange={() => onToggleMember(agent.id)}
+                />
+                {agent.name}
+              </label>
+            );
+          })}
+        </div>
       </fieldset>
-      <Button
-        className="w-full"
-        disabled={
-          disabled || agents.length === 0 || selectedMemberIds.length === 0
-        }
-        type="submit"
-        variant="primary"
-      >
-        Create
-      </Button>
+      {error ? (
+        <p className="caption-text m-0 text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="discussion-form-actions">
+        <Button disabled={disabled} onClick={onCancel} variant="secondary">
+          Cancel
+        </Button>
+        <Button
+          disabled={disabled || selectedMemberIds.length === 0}
+          type="submit"
+          variant="primary"
+        >
+          Create
+        </Button>
+      </div>
     </form>
   );
 }

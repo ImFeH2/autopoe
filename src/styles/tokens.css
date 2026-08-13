@@ -13,6 +13,7 @@
   --color-accent: #0a0a0a;
   --color-accent-hover: #292929;
   --color-danger: #b42318;
+  --color-overlay: rgb(10 10 10 / 28%);
   --font-sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
     sans-serif;
@@ -21,6 +22,9 @@
     monospace;
   --radius-control: 6px;
   --radius-bubble: 8px;
+  --radius-overlay: 10px;
+  --shadow-overlay: 0 18px 48px rgb(10 10 10 / 16%);
+  --z-overlay: 100;
   --focus-ring:
     0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-text-primary);
 }

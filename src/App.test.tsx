@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import App, { shouldSubmitMessage } from "@/App";
+import App, { filterDiscussions, shouldSubmitMessage } from "@/App";
 import { AppSidebar } from "@/components/layout";
 import { Button, Input, Textarea } from "@/components/ui";
 
@@ -25,6 +25,29 @@ describe("App", () => {
     expect(
       shouldSubmitMessage({ key: "Enter", shiftKey: false, isComposing: true }),
     ).toBe(false);
+  });
+
+  it("filters Discussions by topic without changing their order", () => {
+    const discussions = [
+      {
+        id: 1,
+        topic: "Repository work",
+        member_ids: [1, 2],
+        messages: [],
+      },
+      {
+        id: 2,
+        topic: "Review history",
+        member_ids: [1, 2],
+        messages: [],
+      },
+    ];
+
+    expect(filterDiscussions(discussions, "  REview ")).toEqual([
+      discussions[1],
+    ]);
+    expect(filterDiscussions(discussions, " ")).toEqual(discussions);
+    expect(filterDiscussions(discussions, "missing")).toEqual([]);
   });
 
   it("keeps the sidebar focused on global destinations", () => {

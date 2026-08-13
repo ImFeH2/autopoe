@@ -63,12 +63,12 @@ async function expectSelectedDiscussion(topic: string) {
 
 async function createDiscussion(topic: string) {
   await $("button[aria-label='New discussion']").click();
+  await expect($("[role='dialog']")).toExist();
   await expect($("h2=New discussion")).toExist();
-  await expect($(".discussion-list-button[aria-current='page']")).not.toExist();
   await expectCurrentDestination("Discussions");
-  await $("#topic").setValue(topic);
+  await $("#discussion-topic").setValue(topic);
   await $("#discussion-member-2").click();
-  await $("form[aria-label='Create Discussion'] button").click();
+  await $("form[aria-label='Create Discussion'] button[type='submit']").click();
   await expect($(`h2=${topic}`)).toExist();
   await expectSelectedDiscussion(topic);
   await browser.pause(550);
@@ -118,6 +118,10 @@ describe("Flowent desktop", () => {
     await expect($("[aria-label='Discussion list']")).toHaveText(
       expect.stringContaining("No discussions"),
     );
+    await expect($("p=Select a discussion")).toExist();
+    await expect($("form[aria-label='Create Discussion']")).not.toExist();
+    await expect($("[aria-label='Search discussions']")).toExist();
+    await expect($("button[aria-label='New discussion']")).toBeDisabled();
     await expect($("#recent-title")).not.toExist();
     for (const destination of destinations) {
       await expect($(`button[aria-label='${destination}']`)).toExist();
@@ -134,8 +138,10 @@ describe("Flowent desktop", () => {
     expect(
       await browser.execute(() => {
         const main = document.querySelector("main");
-        const topic = document.querySelector("#topic");
-        if (!main || !topic) {
+        const search = document.querySelector(
+          "[aria-label='Search discussions']",
+        );
+        if (!main || !search) {
           return null;
         }
         return {
@@ -145,7 +151,7 @@ describe("Flowent desktop", () => {
           drag: main.dispatchEvent(
             new Event("dragstart", { bubbles: true, cancelable: true }),
           ),
-          inputContextMenu: topic.dispatchEvent(
+          inputContextMenu: search.dispatchEvent(
             new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
           ),
         };
@@ -205,10 +211,40 @@ describe("Flowent desktop", () => {
 
     await $("button[aria-label='Discussions']").click();
     await expectCurrentDestination("Discussions");
-    await $("#topic").setValue("Repository work");
+    await expect($("p=Select a discussion")).toExist();
+    await $("button[aria-label='New discussion']").click();
+    await expect($("[role='dialog']")).toExist();
+    await expect($("#discussion-topic")).toBeFocused();
+    expect(
+      await browser.execute(() =>
+        Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[role='dialog'] button:not(:disabled), [role='dialog'] input:not(:disabled)",
+          ),
+        ).map(
+          (element) =>
+            element.getAttribute("aria-label") ||
+            element.id ||
+            element.textContent?.trim(),
+        ),
+      ),
+    ).toEqual([
+      "Close dialog",
+      "discussion-topic",
+      "discussion-member-2",
+      "discussion-member-3",
+      "Cancel",
+    ]);
+    await browser.keys(["Escape"]);
+    await expect($("[role='dialog']")).not.toExist();
+    await expect($("button[aria-label='New discussion']")).toBeFocused();
+    await $("button[aria-label='New discussion']").click();
+    await $("#discussion-topic").setValue("Repository work");
     await $("#discussion-member-2").click();
     await $("#discussion-member-3").click();
-    await $("form[aria-label='Create Discussion'] button").click();
+    await $(
+      "form[aria-label='Create Discussion'] button[type='submit']",
+    ).click();
     await expect($("h2=Repository work")).toExist();
     await expect($("p=You, Ada, Lin")).toExist();
     await expect($("[aria-label='Message']")).toBeFocused();
@@ -342,6 +378,10 @@ describe("Flowent desktop", () => {
 
     await createDiscussion("Review history");
     await sendMessage("Second Discussion message one.");
+    await $("[aria-label='Search discussions']").setValue("Review");
+    await expect($("button[aria-label='Open Review history']")).toExist();
+    await expect($("button[aria-label='Open Repository work']")).not.toExist();
+    await $("[aria-label='Search discussions']").setValue("");
     await $("button[aria-label='Open Repository work']").click();
     await expect($("[role='log']")).toHaveText(
       expect.stringContaining("Lin completed the Agent handoff."),
@@ -364,6 +404,12 @@ describe("Flowent desktop", () => {
         ).toBe(true);
       }
       expect(await isFullyVisible(".discussion-list-pane")).toBe(true);
+      expect(await isFullyVisible("[aria-label='Search discussions']")).toBe(
+        true,
+      );
+      expect(await isFullyVisible("button[aria-label='New discussion']")).toBe(
+        true,
+      );
       expect(await isFullyVisible(".discussion-list-button")).toBe(true);
       expect(await isFullyVisible(".sidebar-user")).toBe(true);
       expect(await isFullyVisible("form[aria-label='Send Message']")).toBe(

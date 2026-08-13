@@ -25,6 +25,7 @@
     "verify": "lefthook run pre-commit --force"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.23",
     "@tauri-apps/api": "^2.11.1",
     "lucide-react": "^1.31.0",
     "react": "^19.1.0",
