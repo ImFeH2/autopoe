@@ -30,7 +30,9 @@ def main(
     )
     model_runtime = create_model_runtime(
         stored_config=store.load_model_config(),
+        stored_observability_config=store.load_observability_config(),
         on_configure=store.save_model_config,
+        on_configure_observability=store.save_observability_config,
     )
     runtime = AgentRuntime(
         state,
@@ -48,6 +50,7 @@ def main(
         )
     finally:
         runtime.stop()
+        model_runtime.shutdown()
         watcher.close()
 
 

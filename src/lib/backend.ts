@@ -58,6 +58,24 @@ export type ModelSettingsUpdate = {
   model: string;
 };
 
+export type ObservabilitySettings = {
+  enabled: boolean;
+  base_url: string;
+  public_key: string;
+  environment: string;
+  capture_content: boolean;
+  has_secret_key: boolean;
+};
+
+export type ObservabilitySettingsUpdate = {
+  enabled: boolean;
+  base_url: string;
+  public_key: string;
+  secret_key: string;
+  environment: string;
+  capture_content: boolean;
+};
+
 function invalidSnapshot(message: string): never {
   throw new Error(`Invalid Organization snapshot: ${message}`);
 }
@@ -266,6 +284,35 @@ export function parseOrganizationSnapshot(
   };
 }
 
+export function parseObservabilitySettings(
+  value: unknown,
+): ObservabilitySettings {
+  const settings = record(value, "observability settings");
+  if (
+    typeof settings.enabled !== "boolean" ||
+    typeof settings.base_url !== "string" ||
+    typeof settings.public_key !== "string" ||
+    typeof settings.environment !== "string" ||
+    typeof settings.capture_content !== "boolean" ||
+    typeof settings.has_secret_key !== "boolean"
+  ) {
+    throw new Error("Invalid observability settings: fields are invalid");
+  }
+  if (Object.getOwnPropertyDescriptor(settings, "secret_key") !== undefined) {
+    throw new Error(
+      "Invalid observability settings: secret key must not be returned",
+    );
+  }
+  return {
+    enabled: settings.enabled,
+    base_url: settings.base_url,
+    public_key: settings.public_key,
+    environment: settings.environment,
+    capture_content: settings.capture_content,
+    has_secret_key: settings.has_secret_key,
+  };
+}
+
 export function parseModelSettings(value: unknown): ModelSettings {
   const settings = record(value, "model settings");
   if (
@@ -330,4 +377,10 @@ export const backend = {
     parseModelSettings(await request("settings.get_model")),
   updateModelSettings: async (settings: ModelSettingsUpdate) =>
     parseModelSettings(await request("settings.update_model", settings)),
+  getObservabilitySettings: async () =>
+    parseObservabilitySettings(await request("settings.get_observability")),
+  updateObservabilitySettings: async (settings: ObservabilitySettingsUpdate) =>
+    parseObservabilitySettings(
+      await request("settings.update_observability", settings),
+    ),
 };

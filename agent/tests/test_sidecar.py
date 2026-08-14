@@ -98,7 +98,15 @@ def test_sidecar_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> Non
             "model": "",
             "has_api_key": False,
         }
-        assert request(process, 2, "system.shutdown", {}) == {"stopped": True}
+        assert request(process, 2, "settings.get_observability", {}) == {
+            "enabled": False,
+            "base_url": "",
+            "public_key": "",
+            "environment": "development",
+            "capture_content": False,
+            "has_secret_key": False,
+        }
+        assert request(process, 3, "system.shutdown", {}) == {"stopped": True}
         assert process.wait(timeout=10) == 0
     finally:
         close_process(process)
@@ -144,7 +152,21 @@ def test_persists_state_and_model_settings_across_launch_directories(
             },
         )
         assert "restart-secret" not in str(settings)
-        assert request(first, 5, "system.shutdown", {}) == {"stopped": True}
+        tracing = request(
+            first,
+            5,
+            "settings.update_observability",
+            {
+                "enabled": True,
+                "base_url": "http://127.0.0.1:9",
+                "public_key": "restart-public",
+                "secret_key": "restart-trace-secret",
+                "environment": "test",
+                "capture_content": True,
+            },
+        )
+        assert "restart-trace-secret" not in str(tracing)
+        assert request(first, 6, "system.shutdown", {}) == {"stopped": True}
         assert first.wait(timeout=10) == 0
     finally:
         close_process(first)
@@ -153,6 +175,7 @@ def test_persists_state_and_model_settings_across_launch_directories(
     try:
         snapshot = request(second, 1, "organization.get", {})
         settings = request(second, 2, "settings.get_model", {})
+        tracing = request(second, 3, "settings.get_observability", {})
         assert snapshot["working_directory"] == str(second_directory)
         assert snapshot["members"][1]["name"] == "Ada"
         assert snapshot["discussions"][0]["topic"] == "Persistent work"
@@ -166,7 +189,16 @@ def test_persists_state_and_model_settings_across_launch_directories(
             "has_api_key": True,
         }
         assert "restart-secret" not in str(settings)
-        assert request(second, 3, "system.shutdown", {}) == {"stopped": True}
+        assert tracing == {
+            "enabled": True,
+            "base_url": "http://127.0.0.1:9",
+            "public_key": "restart-public",
+            "environment": "test",
+            "capture_content": True,
+            "has_secret_key": True,
+        }
+        assert "restart-trace-secret" not in str(tracing)
+        assert request(second, 4, "system.shutdown", {}) == {"stopped": True}
         assert second.wait(timeout=10) == 0
     finally:
         close_process(second)
@@ -181,6 +213,8 @@ def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
         "import sys\n"
         "import flowent.model_runner as model_runner\n"
         "class LongExecRunner:\n"
+        "    def shutdown(self):\n"
+        "        pass\n"
         "    def run(self, activation, context):\n"
         "        for item in activation.items:\n"
         "            context.discussion('read', discussion_id=item.discussion_id, "

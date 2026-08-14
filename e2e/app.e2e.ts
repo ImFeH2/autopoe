@@ -171,20 +171,51 @@ describe("Flowent desktop", () => {
     await expect($("[aria-label='Base URL']")).toHaveValue("");
     await expect($("[aria-label='API key']")).toHaveValue("");
     await expect($("[aria-label='Model']")).toHaveValue("");
+    await expect($("#tracing-enabled")).not.toBeChecked();
+    await expect($("[aria-label='Langfuse host']")).toHaveValue("");
+    await expect($("[aria-label='Langfuse public key']")).toHaveValue("");
+    await expect($("[aria-label='Langfuse secret key']")).toHaveValue("");
+    await expect($("[aria-label='Tracing environment']")).toHaveValue(
+      "development",
+    );
+    await expect($("#capture-content")).not.toBeChecked();
     await $("button=Anthropic").click();
     await $("[aria-label='Base URL']").setValue("https://example.invalid");
     await $("[aria-label='API key']").setValue("e2e-local-secret");
     await $("[aria-label='Model']").setValue("claude-test");
     await $("form[aria-label='Model settings'] button[type='submit']").click();
-    await expect($("[role='status']")).toHaveText("Saved");
+    await expect(
+      $("form[aria-label='Model settings'] [role='status']"),
+    ).toHaveText("Saved");
     await expect($("[aria-label='API key']")).toHaveValue("");
     await expect($("[aria-label='API key']")).toHaveAttribute(
       "placeholder",
       "Saved",
     );
-    expect(
-      await browser.execute(() => document.body.textContent),
-    ).not.toContain("e2e-local-secret");
+    await $("#tracing-enabled").click();
+    await $("[aria-label='Langfuse host']").setValue(
+      "https://cloud.langfuse.com",
+    );
+    await $("[aria-label='Langfuse public key']").setValue("pk-lf-e2e");
+    await $("[aria-label='Langfuse secret key']").setValue(
+      "e2e-tracing-secret",
+    );
+    await $("[aria-label='Tracing environment']").setValue("e2e");
+    await $("#capture-content").click();
+    await $(
+      "form[aria-label='Tracing settings'] button[type='submit']",
+    ).click();
+    await expect(
+      $("form[aria-label='Tracing settings'] [role='status']"),
+    ).toHaveText("Saved");
+    await expect($("[aria-label='Langfuse secret key']")).toHaveValue("");
+    await expect($("[aria-label='Langfuse secret key']")).toHaveAttribute(
+      "placeholder",
+      "Saved",
+    );
+    const settingsText = await browser.execute(() => document.body.textContent);
+    expect(settingsText).not.toContain("e2e-local-secret");
+    expect(settingsText).not.toContain("e2e-tracing-secret");
     await $("button[aria-label='Discussions']").click();
     await $("button[aria-label='Settings']").click();
     await expect($("button=Anthropic")).toHaveAttribute("aria-pressed", "true");
@@ -192,6 +223,20 @@ describe("Flowent desktop", () => {
       "https://example.invalid",
     );
     await expect($("[aria-label='Model']")).toHaveValue("claude-test");
+    await expect($("#tracing-enabled")).toBeChecked();
+    await expect($("[aria-label='Langfuse host']")).toHaveValue(
+      "https://cloud.langfuse.com",
+    );
+    await expect($("[aria-label='Langfuse public key']")).toHaveValue(
+      "pk-lf-e2e",
+    );
+    await expect($("[aria-label='Tracing environment']")).toHaveValue("e2e");
+    await expect($("#capture-content")).toBeChecked();
+    await expect($("[aria-label='Langfuse secret key']")).toHaveValue("");
+    await expect($("[aria-label='Langfuse secret key']")).toHaveAttribute(
+      "placeholder",
+      "Saved",
+    );
     await $("button[aria-label='Discussions']").click();
   });
 

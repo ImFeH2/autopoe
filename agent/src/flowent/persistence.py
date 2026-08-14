@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -30,6 +30,8 @@ class SQLiteStore:
                 self._create_schema(connection)
             elif version == 1:
                 self._migrate_version_one(connection)
+            elif version == 2:
+                self._migrate_version_two(connection)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"Unsupported Flowent database version: {version}")
         self.path.chmod(0o600)
@@ -127,6 +129,20 @@ class SQLiteStore:
                     ON DELETE CASCADE
             )
             """,
+            """
+            CREATE TABLE observability_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                base_url TEXT NOT NULL,
+                public_key TEXT NOT NULL,
+                secret_key TEXT NOT NULL,
+                environment TEXT NOT NULL,
+                capture_content INTEGER NOT NULL
+                    CHECK (capture_content IN (0, 1)),
+                FOREIGN KEY (id) REFERENCES application_state (id)
+                    ON DELETE CASCADE
+            )
+            """,
         )
         for statement in statements:
             connection.execute(statement)
@@ -189,6 +205,26 @@ class SQLiteStore:
                 self._write_organization(connection, organization)
             if model_config is not None:
                 self._write_model_config(connection, model_config)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _migrate_version_two(self, connection: sqlite3.Connection) -> None:
+        with connection:
+            connection.execute(
+                """
+                CREATE TABLE observability_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                    base_url TEXT NOT NULL,
+                    public_key TEXT NOT NULL,
+                    secret_key TEXT NOT NULL,
+                    environment TEXT NOT NULL,
+                    capture_content INTEGER NOT NULL
+                        CHECK (capture_content IN (0, 1)),
+                    FOREIGN KEY (id) REFERENCES application_state (id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -438,6 +474,53 @@ class SQLiteStore:
     def save_model_config(self, config: dict[str, str]) -> None:
         with self._connect() as connection, connection:
             self._write_model_config(connection, config)
+        self.path.chmod(0o600)
+
+    def load_observability_config(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT enabled, base_url, public_key, secret_key, environment,
+                    capture_content
+                FROM observability_settings WHERE id = 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "enabled": bool(row["enabled"]),
+                "base_url": row["base_url"],
+                "public_key": row["public_key"],
+                "secret_key": row["secret_key"],
+                "environment": row["environment"],
+                "capture_content": bool(row["capture_content"]),
+            }
+
+    def save_observability_config(self, config: dict[str, Any]) -> None:
+        with self._connect() as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO observability_settings
+                    (id, enabled, base_url, public_key, secret_key, environment,
+                        capture_content)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    base_url = excluded.base_url,
+                    public_key = excluded.public_key,
+                    secret_key = excluded.secret_key,
+                    environment = excluded.environment,
+                    capture_content = excluded.capture_content
+                """,
+                (
+                    int(config["enabled"]),
+                    config["base_url"],
+                    config["public_key"],
+                    config["secret_key"],
+                    config["environment"],
+                    int(config["capture_content"]),
+                ),
+            )
         self.path.chmod(0o600)
 
     @staticmethod

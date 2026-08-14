@@ -23,6 +23,7 @@ import {
   type Member,
   type ModelProvider,
   type ModelSettings,
+  type ObservabilitySettings,
   type OrganizationSnapshot,
 } from "@/lib/backend";
 
@@ -475,15 +476,29 @@ const providerOptions: Array<{ label: string; value: ModelProvider }> = [
 ];
 
 function SettingsPage() {
-  const [settings, setSettings] = useState<ModelSettings | null>(null);
+  const [modelSettings, setModelSettings] = useState<ModelSettings | null>(
+    null,
+  );
   const [provider, setProvider] = useState<ModelProvider>("openai");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
-  const [status, setStatus] = useState<
+  const [modelStatus, setModelStatus] = useState<
     "loading" | "ready" | "saving" | "saved"
   >("loading");
-  const [error, setError] = useState<string | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [tracingSettings, setTracingSettings] =
+    useState<ObservabilitySettings | null>(null);
+  const [tracingEnabled, setTracingEnabled] = useState(false);
+  const [tracingBaseUrl, setTracingBaseUrl] = useState("");
+  const [tracingPublicKey, setTracingPublicKey] = useState("");
+  const [tracingSecretKey, setTracingSecretKey] = useState("");
+  const [tracingEnvironment, setTracingEnvironment] = useState("development");
+  const [captureContent, setCaptureContent] = useState(false);
+  const [tracingStatus, setTracingStatus] = useState<
+    "loading" | "ready" | "saving" | "saved"
+  >("loading");
+  const [tracingError, setTracingError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -493,16 +508,36 @@ function SettingsPage() {
         if (!active) {
           return;
         }
-        setSettings(current);
+        setModelSettings(current);
         setProvider(current.provider);
         setBaseUrl(current.base_url);
         setModel(current.model);
-        setStatus("ready");
+        setModelStatus("ready");
       })
       .catch((reason) => {
         if (active) {
-          setError(errorMessage(reason));
-          setStatus("ready");
+          setModelError(errorMessage(reason));
+          setModelStatus("ready");
+        }
+      });
+    void backend
+      .getObservabilitySettings()
+      .then((current) => {
+        if (!active) {
+          return;
+        }
+        setTracingSettings(current);
+        setTracingEnabled(current.enabled);
+        setTracingBaseUrl(current.base_url);
+        setTracingPublicKey(current.public_key);
+        setTracingEnvironment(current.environment);
+        setCaptureContent(current.capture_content);
+        setTracingStatus("ready");
+      })
+      .catch((reason) => {
+        if (active) {
+          setTracingError(errorMessage(reason));
+          setTracingStatus("ready");
         }
       });
     return () => {
@@ -510,10 +545,10 @@ function SettingsPage() {
     };
   }, []);
 
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
+  async function handleSaveModel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setStatus("saving");
-    setError(null);
+    setModelStatus("saving");
+    setModelError(null);
     try {
       const current = await backend.updateModelSettings({
         provider,
@@ -521,99 +556,235 @@ function SettingsPage() {
         api_key: apiKey,
         model,
       });
-      setSettings(current);
+      setModelSettings(current);
       setProvider(current.provider);
       setBaseUrl(current.base_url);
       setApiKey("");
       setModel(current.model);
-      setStatus("saved");
+      setModelStatus("saved");
     } catch (reason) {
-      setError(errorMessage(reason));
-      setStatus("ready");
+      setModelError(errorMessage(reason));
+      setModelStatus("ready");
     }
   }
 
-  const disabled = status === "loading" || status === "saving";
-  const hasApiKey = settings?.has_api_key ?? false;
+  async function handleSaveTracing(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTracingStatus("saving");
+    setTracingError(null);
+    try {
+      const current = await backend.updateObservabilitySettings({
+        enabled: tracingEnabled,
+        base_url: tracingBaseUrl,
+        public_key: tracingPublicKey,
+        secret_key: tracingSecretKey,
+        environment: tracingEnvironment,
+        capture_content: captureContent,
+      });
+      setTracingSettings(current);
+      setTracingEnabled(current.enabled);
+      setTracingBaseUrl(current.base_url);
+      setTracingPublicKey(current.public_key);
+      setTracingSecretKey("");
+      setTracingEnvironment(current.environment);
+      setCaptureContent(current.capture_content);
+      setTracingStatus("saved");
+    } catch (reason) {
+      setTracingError(errorMessage(reason));
+      setTracingStatus("ready");
+    }
+  }
+
+  const modelDisabled = modelStatus === "loading" || modelStatus === "saving";
+  const tracingDisabled =
+    tracingStatus === "loading" || tracingStatus === "saving";
+  const hasApiKey = modelSettings?.has_api_key ?? false;
+  const hasTracingSecretKey = tracingSettings?.has_secret_key ?? false;
 
   return (
     <section className="page-pane page-pane--settings">
       <PageHeading title="Settings" />
-      <form
-        className="settings-form"
-        aria-label="Model settings"
-        onSubmit={handleSave}
-      >
-        <fieldset className="settings-provider">
-          <legend>Provider</legend>
-          <div>
-            {providerOptions.map((option) => (
-              <Button
-                aria-pressed={provider === option.value}
-                disabled={disabled}
-                key={option.value}
-                onClick={() => setProvider(option.value)}
-                size="compact"
-                variant={provider === option.value ? "secondary" : "quiet"}
-              >
-                {option.label}
+      <div className="settings-scroll">
+        <section className="settings-section">
+          <h3 className="settings-section-title">Model</h3>
+          <form
+            className="settings-form"
+            aria-label="Model settings"
+            onSubmit={handleSaveModel}
+          >
+            <fieldset className="settings-provider">
+              <legend>Provider</legend>
+              <div>
+                {providerOptions.map((option) => (
+                  <Button
+                    aria-pressed={provider === option.value}
+                    disabled={modelDisabled}
+                    key={option.value}
+                    onClick={() => setProvider(option.value)}
+                    size="compact"
+                    variant={provider === option.value ? "secondary" : "quiet"}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            </fieldset>
+            <label className="settings-field" htmlFor="model-base-url">
+              <span>Base URL</span>
+              <Input
+                aria-label="Base URL"
+                id="model-base-url"
+                autoComplete="url"
+                disabled={modelDisabled}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder="https://api.example.com"
+                required
+                type="url"
+                value={baseUrl}
+              />
+            </label>
+            <label className="settings-field" htmlFor="model-api-key">
+              <span>API key</span>
+              <Input
+                aria-label="API key"
+                id="model-api-key"
+                autoComplete="new-password"
+                disabled={modelDisabled}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder={hasApiKey ? "Saved" : "API key"}
+                required={!hasApiKey}
+                type="password"
+                value={apiKey}
+              />
+            </label>
+            <label className="settings-field" htmlFor="model-name">
+              <span>Model</span>
+              <Input
+                aria-label="Model"
+                id="model-name"
+                autoComplete="off"
+                disabled={modelDisabled}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder="Model"
+                required
+                value={model}
+              />
+            </label>
+            <div className="settings-actions">
+              <Button disabled={modelDisabled} type="submit" variant="primary">
+                {modelStatus === "saving" ? "Saving" : "Save model"}
               </Button>
-            ))}
-          </div>
-        </fieldset>
-        <label className="settings-field" htmlFor="model-base-url">
-          <span>Base URL</span>
-          <Input
-            aria-label="Base URL"
-            id="model-base-url"
-            autoComplete="url"
-            disabled={disabled}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            placeholder="https://api.example.com"
-            required
-            type="url"
-            value={baseUrl}
-          />
-        </label>
-        <label className="settings-field" htmlFor="model-api-key">
-          <span>API key</span>
-          <Input
-            aria-label="API key"
-            id="model-api-key"
-            autoComplete="new-password"
-            disabled={disabled}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={hasApiKey ? "Saved" : "API key"}
-            required={!hasApiKey}
-            type="password"
-            value={apiKey}
-          />
-        </label>
-        <label className="settings-field" htmlFor="model-name">
-          <span>Model</span>
-          <Input
-            aria-label="Model"
-            id="model-name"
-            autoComplete="off"
-            disabled={disabled}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder="Model"
-            required
-            value={model}
-          />
-        </label>
-        <div className="settings-actions">
-          <Button disabled={disabled} type="submit" variant="primary">
-            {status === "saving" ? "Saving" : "Save"}
-          </Button>
-          {status === "saved" ? <span role="status">Saved</span> : null}
-        </div>
-        {error ? (
-          <p className="caption-text m-0 text-danger" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </form>
+              {modelStatus === "saved" ? (
+                <span role="status">Saved</span>
+              ) : null}
+            </div>
+            {modelError ? (
+              <p className="caption-text m-0 text-danger" role="alert">
+                {modelError}
+              </p>
+            ) : null}
+          </form>
+        </section>
+
+        <section className="settings-section">
+          <h3 className="settings-section-title">Tracing</h3>
+          <form
+            className="settings-form"
+            aria-label="Tracing settings"
+            onSubmit={handleSaveTracing}
+          >
+            <label className="settings-toggle" htmlFor="tracing-enabled">
+              <Checkbox
+                checked={tracingEnabled}
+                disabled={tracingDisabled}
+                id="tracing-enabled"
+                onChange={(event) => setTracingEnabled(event.target.checked)}
+              />
+              Enable Langfuse
+            </label>
+            <label className="settings-field" htmlFor="tracing-base-url">
+              <span>Host</span>
+              <Input
+                aria-label="Langfuse host"
+                id="tracing-base-url"
+                autoComplete="url"
+                disabled={tracingDisabled}
+                onChange={(event) => setTracingBaseUrl(event.target.value)}
+                placeholder="https://cloud.langfuse.com"
+                required={tracingEnabled}
+                type="url"
+                value={tracingBaseUrl}
+              />
+            </label>
+            <label className="settings-field" htmlFor="tracing-public-key">
+              <span>Public key</span>
+              <Input
+                aria-label="Langfuse public key"
+                id="tracing-public-key"
+                autoComplete="off"
+                disabled={tracingDisabled}
+                onChange={(event) => setTracingPublicKey(event.target.value)}
+                placeholder="pk-lf-..."
+                required={tracingEnabled}
+                value={tracingPublicKey}
+              />
+            </label>
+            <label className="settings-field" htmlFor="tracing-secret-key">
+              <span>Secret key</span>
+              <Input
+                aria-label="Langfuse secret key"
+                id="tracing-secret-key"
+                autoComplete="new-password"
+                disabled={tracingDisabled}
+                onChange={(event) => setTracingSecretKey(event.target.value)}
+                placeholder={hasTracingSecretKey ? "Saved" : "sk-lf-..."}
+                required={tracingEnabled && !hasTracingSecretKey}
+                type="password"
+                value={tracingSecretKey}
+              />
+            </label>
+            <label className="settings-field" htmlFor="tracing-environment">
+              <span>Environment</span>
+              <Input
+                aria-label="Tracing environment"
+                id="tracing-environment"
+                autoComplete="off"
+                disabled={tracingDisabled}
+                onChange={(event) => setTracingEnvironment(event.target.value)}
+                placeholder="development"
+                required={tracingEnabled}
+                value={tracingEnvironment}
+              />
+            </label>
+            <label className="settings-toggle" htmlFor="capture-content">
+              <Checkbox
+                checked={captureContent}
+                disabled={tracingDisabled}
+                id="capture-content"
+                onChange={(event) => setCaptureContent(event.target.checked)}
+              />
+              Capture content
+            </label>
+            <div className="settings-actions">
+              <Button
+                disabled={tracingDisabled}
+                type="submit"
+                variant="primary"
+              >
+                {tracingStatus === "saving" ? "Saving" : "Save tracing"}
+              </Button>
+              {tracingStatus === "saved" ? (
+                <span role="status">Saved</span>
+              ) : null}
+            </div>
+            {tracingError ? (
+              <p className="caption-text m-0 text-danger" role="alert">
+                {tracingError}
+              </p>
+            ) : null}
+          </form>
+        </section>
+      </div>
     </section>
   );
 }

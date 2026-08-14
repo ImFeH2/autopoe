@@ -33,6 +33,8 @@ class Dispatcher:
             "discussion.send": self._send_message,
             "settings.get_model": self._get_model_settings,
             "settings.update_model": self._update_model_settings,
+            "settings.get_observability": self._get_observability_settings,
+            "settings.update_observability": self._update_observability_settings,
             "system.shutdown": self._shutdown,
         }
 
@@ -98,6 +100,27 @@ class Dispatcher:
             model=require_string(params, "model"),
         )
 
+    def _get_observability_settings(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        if params:
+            raise ProtocolError("settings.get_observability does not accept params")
+        return self._model_runtime.observability_settings()
+
+    def _update_observability_settings(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._model_runtime.configure_observability(
+            enabled=require_boolean(params, "enabled"),
+            base_url=require_string(params, "base_url"),
+            public_key=require_string(params, "public_key"),
+            secret_key=require_string(params, "secret_key"),
+            environment=require_string(params, "environment"),
+            capture_content=require_boolean(params, "capture_content"),
+        )
+
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
 
@@ -124,6 +147,13 @@ def require_string(params: dict[str, Any], key: str) -> str:
     value = params.get(key)
     if not isinstance(value, str):
         raise ProtocolError(f"{key} must be a string")
+    return value
+
+
+def require_boolean(params: dict[str, Any], key: str) -> bool:
+    value = params.get(key)
+    if type(value) is not bool:
+        raise ProtocolError(f"{key} must be a boolean")
     return value
 
 

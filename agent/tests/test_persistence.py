@@ -244,6 +244,57 @@ def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> No
     assert store.load_organization() is None
 
 
+def test_persists_observability_config_without_exposing_its_secret(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    secret = "langfuse-secret"
+
+    store.save_observability_config(
+        {
+            "enabled": True,
+            "base_url": "https://langfuse.invalid",
+            "public_key": "langfuse-public",
+            "secret_key": secret,
+            "environment": "development",
+            "capture_content": True,
+        }
+    )
+
+    config = store.load_observability_config()
+    assert config == {
+        "enabled": True,
+        "base_url": "https://langfuse.invalid",
+        "public_key": "langfuse-public",
+        "secret_key": secret,
+        "environment": "development",
+        "capture_content": True,
+    }
+
+
+def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    connection = sqlite3.connect(store.path)
+    connection.execute("DROP TABLE observability_settings")
+    connection.execute("PRAGMA user_version = 2")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+
+    assert migrated.load_organization()["members"][1]["name"] == "Ada"
+    assert migrated.load_observability_config() is None
+    connection = sqlite3.connect(migrated.path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'observability_settings'"
+    ).fetchone() == ("observability_settings",)
+    connection.close()
+
+
 def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> None:
     data = tmp_path / "data"
     path = create_version_one_database(data)
@@ -267,7 +318,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
         "model": "legacy-model",
     }
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
     for table in ("members", "discussions", "model_settings"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         assert "working_directory" not in columns

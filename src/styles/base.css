@@ -344,13 +344,31 @@ body {
   place-items: center;
 }
 
-.settings-form {
+.settings-scroll {
   display: grid;
   width: min(100%, 620px);
   align-content: start;
-  gap: 16px;
+  gap: 28px;
   padding: 24px 28px;
   overflow-y: auto;
+}
+
+.settings-section {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-section-title {
+  margin: 0;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-form {
+  display: grid;
+  gap: 16px;
 }
 
 .settings-provider {
@@ -376,6 +394,15 @@ body {
 .settings-field {
   display: grid;
   gap: 7px;
+}
+
+.settings-toggle {
+  display: flex;
+  width: max-content;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .settings-actions {
@@ -784,7 +811,7 @@ textarea:focus-visible {
 
   .entity-create-form,
   .entity-list,
-  .settings-form {
+  .settings-scroll {
     padding-inline: 22px;
   }
 

@@ -2,7 +2,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+from pydantic_ai import InstrumentationSettings
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.models.test import TestModel
 
 from e2e_support.runner import DeterministicRunner
 from flowent.domain import Activation, ActivationItem, OrganizationState
@@ -10,8 +16,11 @@ from flowent.host_tools import HostTools
 from flowent.model_runner import (
     ModelConfig,
     ModelRuntime,
+    ObservabilityConfig,
+    ObservabilitySession,
     ProviderType,
     PydanticAgentRunner,
+    create_observability_session,
     create_runner,
 )
 from flowent.runtime import AgentRunContext, AgentRunFailure
@@ -222,6 +231,7 @@ def test_all_agents_use_the_latest_shared_runner(
     def create_recording_runner(
         _runtime: ModelRuntime,
         config: ModelConfig | None,
+        _instrumentation: object,
     ) -> RecordingRunner:
         return RecordingRunner(config.model if config else "unavailable")
 
@@ -245,6 +255,120 @@ def test_all_agents_use_the_latest_shared_runner(
     assert calls == [("shared-model", 2), ("shared-model", 3)]
 
 
+def test_observability_settings_never_return_the_secret_key() -> None:
+    secret = "langfuse-secret"
+    runtime = ModelRuntime(observability_session_factory=lambda _config: None)
+
+    settings = runtime.configure_observability(
+        enabled=True,
+        base_url="https://langfuse.invalid",
+        public_key="langfuse-public",
+        secret_key=secret,
+        environment="development",
+        capture_content=True,
+    )
+
+    assert settings == {
+        "enabled": True,
+        "base_url": "https://langfuse.invalid",
+        "public_key": "langfuse-public",
+        "environment": "development",
+        "capture_content": True,
+        "has_secret_key": True,
+    }
+    assert secret not in repr(settings)
+    assert (
+        runtime.configure_observability(
+            enabled=False,
+            base_url="",
+            public_key="",
+            secret_key="",
+            environment="",
+            capture_content=False,
+        )["has_secret_key"]
+        is True
+    )
+
+
+def test_observability_reconfiguration_shuts_down_idle_exporters() -> None:
+    shutdown_calls: list[int] = []
+    providers: list[object] = []
+
+    class RecordingProvider:
+        def shutdown(self) -> None:
+            shutdown_calls.append(id(self))
+
+    def create_session(_config: ObservabilityConfig) -> ObservabilitySession:
+        provider = RecordingProvider()
+        providers.append(provider)
+        instrumentation = InstrumentationSettings(
+            tracer_provider=TracerProvider(),
+            include_content=False,
+        )
+        return ObservabilitySession(provider, instrumentation)
+
+    runtime = ModelRuntime(observability_session_factory=create_session)
+    for public_key in ("first-public", "second-public"):
+        runtime.configure_observability(
+            enabled=True,
+            base_url="https://langfuse.invalid",
+            public_key=public_key,
+            secret_key="test-secret",
+            environment="test",
+            capture_content=False,
+        )
+
+    assert shutdown_calls == [id(providers[0])]
+    runtime.shutdown()
+    assert shutdown_calls == [id(providers[0]), id(providers[1])]
+
+
+def test_pydantic_runner_exports_content_only_when_enabled(tmp_path: Path) -> None:
+    def exported_attributes(capture_content: bool) -> list[dict[str, Any]]:
+        exporter = InMemorySpanExporter()
+        session = create_observability_session(
+            ObservabilityConfig(
+                enabled=True,
+                base_url="https://langfuse.invalid",
+                public_key="test-public",
+                secret_key="test-secret",
+                environment="test",
+                capture_content=capture_content,
+            ),
+            span_exporter=exporter,
+        )
+        runner = PydanticAgentRunner(
+            ModelConfig(
+                provider="openai",
+                base_url="https://example.invalid/v1",
+                api_key="test-key",
+                model="test-model",
+            ),
+            session.instrumentation,
+        )
+        activation, context = activation_context(tmp_path)
+        with runner._agent.override(
+            model=TestModel(call_tools=[], custom_output_text="TRACE_RESPONSE")
+        ):
+            runner.run(activation, context)
+        session.shutdown()
+        return [dict(span.attributes or {}) for span in exporter.get_finished_spans()]
+
+    hidden_attributes = exported_attributes(False)
+    visible_attributes = exported_attributes(True)
+
+    assert hidden_attributes
+    assert all("Process this Activation" not in str(item) for item in hidden_attributes)
+    assert any("Process this Activation" in str(item) for item in visible_attributes)
+    assert any("TRACE_RESPONSE" in str(item) for item in visible_attributes)
+    assert any(
+        item.get("langfuse.trace.metadata.agent_id") == 2
+        and item.get("langfuse.session.id") == "flowent-discussion-1"
+        for item in visible_attributes
+    )
+    assert any("gen_ai.usage.output_tokens" in item for item in visible_attributes)
+
+
 def test_missing_model_config_returns_runner_that_fails_on_activation(
     tmp_path: Path,
 ) -> None:
@@ -257,11 +381,17 @@ def test_missing_model_config_returns_runner_that_fails_on_activation(
 
 def test_pydantic_model_errors_are_mapped_to_safe_message(tmp_path: Path) -> None:
     class FailingAgent:
-        def run_sync(self, prompt: str, deps: AgentRunContext) -> Any:
-            del prompt, deps
+        def run_sync(
+            self,
+            prompt: str,
+            deps: AgentRunContext,
+            metadata: dict[str, Any],
+        ) -> Any:
+            del prompt, deps, metadata
             raise ModelHTTPError(401, "secret upstream detail", "test-model")
 
     runner = object.__new__(PydanticAgentRunner)
+    runner._instrumentation = None  # type: ignore[attr-defined]
     runner._agent = FailingAgent()  # type: ignore[attr-defined]
     activation, context = activation_context(tmp_path)
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseModelSettings, parseOrganizationSnapshot } from "@/lib/backend";
+import {
+  parseModelSettings,
+  parseObservabilitySettings,
+  parseOrganizationSnapshot,
+} from "@/lib/backend";
 
 const validSnapshot = {
   organization: { id: 1 },
@@ -52,6 +56,42 @@ describe("parseModelSettings", () => {
         api_key: "secret",
       }),
     ).toThrow("API key must not be returned");
+  });
+});
+
+describe("parseObservabilitySettings", () => {
+  it("accepts safe Langfuse settings", () => {
+    expect(
+      parseObservabilitySettings({
+        enabled: true,
+        base_url: "https://cloud.langfuse.com",
+        public_key: "pk-lf-test",
+        environment: "development",
+        capture_content: true,
+        has_secret_key: true,
+      }),
+    ).toEqual({
+      enabled: true,
+      base_url: "https://cloud.langfuse.com",
+      public_key: "pk-lf-test",
+      environment: "development",
+      capture_content: true,
+      has_secret_key: true,
+    });
+  });
+
+  it("rejects secret keys returned by the Sidecar", () => {
+    expect(() =>
+      parseObservabilitySettings({
+        enabled: true,
+        base_url: "https://cloud.langfuse.com",
+        public_key: "pk-lf-test",
+        environment: "development",
+        capture_content: true,
+        has_secret_key: true,
+        secret_key: "secret",
+      }),
+    ).toThrow("secret key must not be returned");
   });
 });
 

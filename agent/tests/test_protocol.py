@@ -148,6 +148,86 @@ def test_model_settings_are_shared_without_returning_the_api_key() -> None:
     assert secret not in output
 
 
+def test_observability_settings_never_return_the_secret_key() -> None:
+    secret = "must-not-be-returned"
+    runtime = ModelRuntime(observability_session_factory=lambda _config: None)
+    input_stream = io.StringIO(
+        "".join(
+            json.dumps(request) + "\n"
+            for request in [
+                {"id": 1, "method": "settings.get_observability", "params": {}},
+                {
+                    "id": 2,
+                    "method": "settings.update_observability",
+                    "params": {
+                        "enabled": True,
+                        "base_url": "https://langfuse.invalid",
+                        "public_key": "test-public",
+                        "secret_key": secret,
+                        "environment": "development",
+                        "capture_content": True,
+                    },
+                },
+                {"id": 3, "method": "settings.get_observability", "params": {}},
+            ]
+        )
+    )
+    output_stream = io.StringIO()
+
+    serve(
+        input_stream,
+        output_stream,
+        OrganizationState(),
+        model_runtime=runtime,
+    )
+
+    output = output_stream.getvalue()
+    responses = [json.loads(line) for line in output.splitlines()]
+    assert responses[0]["result"] == {
+        "enabled": False,
+        "base_url": "",
+        "public_key": "",
+        "environment": "development",
+        "capture_content": False,
+        "has_secret_key": False,
+    }
+    assert (
+        responses[1]["result"]
+        == responses[2]["result"]
+        == {
+            "enabled": True,
+            "base_url": "https://langfuse.invalid",
+            "public_key": "test-public",
+            "environment": "development",
+            "capture_content": True,
+            "has_secret_key": True,
+        }
+    )
+    assert secret not in output
+
+
+def test_observability_settings_reject_non_boolean_flags() -> None:
+    response = Dispatcher(OrganizationState()).dispatch(
+        {
+            "id": 1,
+            "method": "settings.update_observability",
+            "params": {
+                "enabled": 1,
+                "base_url": "",
+                "public_key": "",
+                "secret_key": "",
+                "environment": "",
+                "capture_content": False,
+            },
+        }
+    )
+
+    assert response["error"] == {
+        "code": "invalid_request",
+        "message": "enabled must be a boolean",
+    }
+
+
 def test_persistence_error_does_not_stop_or_expose_request_data(capsys) -> None:
     secret = "must-not-leak-from-internal-error"
 
