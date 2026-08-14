@@ -5,7 +5,8 @@ from typing import Any
 
 from e2e_support.runner import DeterministicRunner
 from flowent.__main__ import main
-from flowent.model_runner import ModelConfig, ModelRuntime, ObservabilityConfig
+from flowent.model_runner import ModelConfig, ModelRuntime
+from flowent.observability import ObservabilityConfig, PydanticAIObservability
 from flowent.runtime import AgentRunner
 
 
@@ -23,7 +24,8 @@ def create_e2e_runtime(
     )
 
     def create_runner(
-        _config: ModelConfig | None, _instrumentation: Any
+        _config: ModelConfig | None,
+        _observability: PydanticAIObservability | None,
     ) -> AgentRunner:
         return DeterministicRunner()
 

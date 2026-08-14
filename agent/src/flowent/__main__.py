@@ -2,22 +2,32 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from flowent.domain import OrganizationState
-from flowent.host_tools import HostTools, ProcessWatcher, watch_processes
-from flowent.model_runner import ModelRuntime, create_runner
-from flowent.persistence import SQLiteStore, data_directory
-from flowent.protocol import serve
-from flowent.runtime import AgentRuntime
+if TYPE_CHECKING:
+    from flowent.model_runner import ModelRuntime
 
 
 def main(
-    create_model_runtime: Callable[..., ModelRuntime] = create_runner,
+    create_model_runtime: Callable[..., ModelRuntime] | None = None,
 ) -> None:
     if len(sys.argv) == 3 and sys.argv[1] == "--process-watch":
+        from flowent.host_tools import watch_processes
+
         watch_processes(sys.argv[2], sys.stdin.buffer)
         return
+
+    from pathlib import Path
+
+    from flowent.domain import OrganizationState
+    from flowent.host_tools import HostTools, ProcessWatcher
+    from flowent.model_runner import create_runner
+    from flowent.persistence import SQLiteStore, data_directory
+    from flowent.protocol import serve
+    from flowent.runtime import AgentRuntime
+
+    if create_model_runtime is None:
+        create_model_runtime = create_runner
 
     working_directory = Path.cwd().resolve()
     store = SQLiteStore(data_directory())

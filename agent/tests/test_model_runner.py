@@ -16,12 +16,14 @@ from flowent.host_tools import HostTools
 from flowent.model_runner import (
     ModelConfig,
     ModelRuntime,
-    ObservabilityConfig,
-    ObservabilitySession,
     ProviderType,
     PydanticAgentRunner,
-    create_observability_session,
     create_runner,
+)
+from flowent.observability import (
+    ObservabilityConfig,
+    PydanticAIObservability,
+    create_pydantic_ai_observability,
 )
 from flowent.runtime import AgentRunContext, AgentRunFailure
 
@@ -231,7 +233,7 @@ def test_all_agents_use_the_latest_shared_runner(
     def create_recording_runner(
         _runtime: ModelRuntime,
         config: ModelConfig | None,
-        _instrumentation: object,
+        _observability: object,
     ) -> RecordingRunner:
         return RecordingRunner(config.model if config else "unavailable")
 
@@ -298,14 +300,14 @@ def test_observability_reconfiguration_shuts_down_idle_exporters() -> None:
         def shutdown(self) -> None:
             shutdown_calls.append(id(self))
 
-    def create_session(_config: ObservabilityConfig) -> ObservabilitySession:
+    def create_session(_config: ObservabilityConfig) -> PydanticAIObservability:
         provider = RecordingProvider()
         providers.append(provider)
         instrumentation = InstrumentationSettings(
             tracer_provider=TracerProvider(),
             include_content=False,
         )
-        return ObservabilitySession(provider, instrumentation)
+        return PydanticAIObservability(provider, instrumentation)
 
     runtime = ModelRuntime(observability_session_factory=create_session)
     for public_key in ("first-public", "second-public"):
@@ -323,10 +325,10 @@ def test_observability_reconfiguration_shuts_down_idle_exporters() -> None:
     assert shutdown_calls == [id(providers[0]), id(providers[1])]
 
 
-def test_pydantic_runner_exports_content_only_when_enabled(tmp_path: Path) -> None:
-    def exported_attributes(capture_content: bool) -> list[dict[str, Any]]:
+def test_pydantic_runner_exports_only_pydantic_ai_spans(tmp_path: Path) -> None:
+    def exported_spans(capture_content: bool) -> list[Any]:
         exporter = InMemorySpanExporter()
-        session = create_observability_session(
+        observability = create_pydantic_ai_observability(
             ObservabilityConfig(
                 enabled=True,
                 base_url="https://langfuse.invalid",
@@ -344,24 +346,31 @@ def test_pydantic_runner_exports_content_only_when_enabled(tmp_path: Path) -> No
                 api_key="test-key",
                 model="test-model",
             ),
-            session.instrumentation,
+            observability,
         )
         activation, context = activation_context(tmp_path)
         with runner._agent.override(
             model=TestModel(call_tools=[], custom_output_text="TRACE_RESPONSE")
         ):
             runner.run(activation, context)
-        session.shutdown()
-        return [dict(span.attributes or {}) for span in exporter.get_finished_spans()]
+        observability.shutdown()
+        return list(exporter.get_finished_spans())
 
-    hidden_attributes = exported_attributes(False)
-    visible_attributes = exported_attributes(True)
+    hidden_spans = exported_spans(False)
+    visible_spans = exported_spans(True)
+    hidden_attributes = [dict(span.attributes or {}) for span in hidden_spans]
+    visible_attributes = [dict(span.attributes or {}) for span in visible_spans]
 
-    assert hidden_attributes
+    assert hidden_spans
+    assert all(
+        span.instrumentation_scope.name == "pydantic-ai" for span in visible_spans
+    )
+    assert all(span.name != "Flowent activation" for span in visible_spans)
+    assert len({span.context.trace_id for span in visible_spans}) == 1
     assert all("Process this Activation" not in str(item) for item in hidden_attributes)
     assert any("Process this Activation" in str(item) for item in visible_attributes)
     assert any("TRACE_RESPONSE" in str(item) for item in visible_attributes)
-    assert any(
+    assert all(
         item.get("langfuse.trace.metadata.agent_id") == 2
         and item.get("langfuse.session.id") == "flowent-discussion-1"
         for item in visible_attributes
@@ -391,7 +400,7 @@ def test_pydantic_model_errors_are_mapped_to_safe_message(tmp_path: Path) -> Non
             raise ModelHTTPError(401, "secret upstream detail", "test-model")
 
     runner = object.__new__(PydanticAgentRunner)
-    runner._instrumentation = None  # type: ignore[attr-defined]
+    runner._observability = None  # type: ignore[attr-defined]
     runner._agent = FailingAgent()  # type: ignore[attr-defined]
     activation, context = activation_context(tmp_path)
 

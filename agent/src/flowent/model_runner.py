@@ -1,19 +1,12 @@
 from __future__ import annotations
 
-from base64 import b64encode
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Literal, Protocol, cast
-from urllib.parse import urlparse
+from typing import Any, Literal, cast
 
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
-from pydantic_ai import Agent, InstrumentationSettings, ModelRetry, RunContext
-from pydantic_ai.capabilities import Instrumentation
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
 from pydantic_ai.models.google import GoogleModel, GoogleModelName
@@ -24,6 +17,11 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from flowent.domain import Activation, DomainError
 from flowent.host_tools import HostToolError
+from flowent.observability import (
+    ObservabilityConfig,
+    PydanticAIObservability,
+    create_pydantic_ai_observability,
+)
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRunner
 
 ProviderType = Literal["openai", "anthropic", "google"]
@@ -60,103 +58,6 @@ class ModelConfig:
         }
 
 
-@dataclass(frozen=True)
-class ObservabilityConfig:
-    enabled: bool
-    base_url: str
-    public_key: str
-    secret_key: str = field(repr=False)
-    environment: str = "development"
-    capture_content: bool = False
-
-    @classmethod
-    def restore(cls, values: dict[str, Any]) -> ObservabilityConfig:
-        config = cls(
-            enabled=values["enabled"],
-            base_url=values["base_url"],
-            public_key=values["public_key"],
-            secret_key=values["secret_key"],
-            environment=values["environment"],
-            capture_content=values["capture_content"],
-        )
-        config.validate()
-        return config
-
-    def validate(self) -> None:
-        if type(self.enabled) is not bool or type(self.capture_content) is not bool:
-            raise RuntimeError("Persisted observability configuration is invalid")
-        if not self.enabled:
-            return
-        parsed_url = urlparse(self.base_url)
-        if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
-            raise ValueError("base_url must be an HTTP or HTTPS URL")
-        if not self.public_key:
-            raise ValueError("public_key must not be empty")
-        if not self.secret_key:
-            raise ValueError("secret_key must not be empty")
-        if not self.environment:
-            raise ValueError("environment must not be empty")
-
-    def persistence_data(self) -> dict[str, Any]:
-        return {
-            "enabled": self.enabled,
-            "base_url": self.base_url,
-            "public_key": self.public_key,
-            "secret_key": self.secret_key,
-            "environment": self.environment,
-            "capture_content": self.capture_content,
-        }
-
-
-class TraceProvider(Protocol):
-    def shutdown(self) -> None: ...
-
-
-@dataclass(frozen=True)
-class ObservabilitySession:
-    provider: TraceProvider
-    instrumentation: InstrumentationSettings
-
-    def shutdown(self) -> None:
-        self.provider.shutdown()
-
-
-def create_observability_session(
-    config: ObservabilityConfig,
-    span_exporter: SpanExporter | None = None,
-) -> ObservabilitySession:
-    config.validate()
-    tracer_provider = TracerProvider(
-        resource=Resource.create(
-            {
-                "service.name": "flowent-agent",
-                "deployment.environment.name": config.environment,
-            }
-        )
-    )
-    if span_exporter is None:
-        credentials = b64encode(
-            f"{config.public_key}:{config.secret_key}".encode()
-        ).decode()
-        span_exporter = OTLPSpanExporter(
-            endpoint=(f"{config.base_url.rstrip('/')}/api/public/otel/v1/traces"),
-            headers={
-                "Authorization": f"Basic {credentials}",
-                "x-langfuse-ingestion-version": "4",
-            },
-        )
-    tracer_provider.add_span_processor(
-        BatchSpanProcessor(span_exporter, schedule_delay_millis=500)
-    )
-    instrumentation = InstrumentationSettings(
-        tracer_provider=tracer_provider,
-        include_content=config.capture_content,
-        include_binary_content=False,
-        include_model_request_parameters=False,
-    )
-    return ObservabilitySession(tracer_provider, instrumentation)
-
-
 class UnavailableRunner:
     def __init__(self, message: str) -> None:
         self._message = message
@@ -170,7 +71,7 @@ class PydanticAgentRunner:
     def __init__(
         self,
         config: ModelConfig,
-        instrumentation: InstrumentationSettings | None = None,
+        observability: PydanticAIObservability | None = None,
     ) -> None:
         if config.provider == "anthropic":
             model = AnthropicModel(
@@ -196,10 +97,8 @@ class PydanticAgentRunner:
                     api_key=config.api_key,
                 ),
             )
-        capabilities = (
-            [Instrumentation(settings=instrumentation)] if instrumentation else None
-        )
-        self._instrumentation = instrumentation
+        capabilities = [observability.capability()] if observability else None
+        self._observability = observability
         self._agent = Agent(
             model,
             deps_type=AgentRunContext,
@@ -335,46 +234,19 @@ class PydanticAgentRunner:
             "Read the listed Messages, do the requested work using available tools, communicate "
             "through Discussions, then acknowledge completed triggering Messages."
         )
-        discussion_ids = ",".join(str(item.discussion_id) for item in activation.items)
-        message_count = sum(len(item.message_ids) for item in activation.items)
-        trace_context = nullcontext()
-        if self._instrumentation is not None:
-            trace_context = self._instrumentation.tracer.start_as_current_span(
-                "Flowent activation"
-            )
+        run_observability = (
+            self._observability.bind(activation) if self._observability else None
+        )
+        trace_context = (
+            run_observability.activate() if run_observability else nullcontext()
+        )
+        run_metadata = run_observability.metadata() if run_observability else None
         try:
-            with trace_context as span:
-                if span is not None:
-                    span.set_attribute(
-                        "langfuse.trace.name",
-                        "Agent activation",
-                    )
-                    span.set_attribute("langfuse.trace.tags", ["flowent", "agent"])
-                    span.set_attribute(
-                        "langfuse.trace.metadata.agent_id",
-                        activation.agent_id,
-                    )
-                    span.set_attribute(
-                        "langfuse.trace.metadata.discussion_ids",
-                        discussion_ids,
-                    )
-                    span.set_attribute(
-                        "langfuse.trace.metadata.message_count",
-                        message_count,
-                    )
-                    if len(activation.items) == 1:
-                        span.set_attribute(
-                            "langfuse.session.id",
-                            f"flowent-discussion-{activation.items[0].discussion_id}",
-                        )
+            with trace_context:
                 self._agent.run_sync(
                     prompt,
                     deps=context,
-                    metadata={
-                        "flowent.agent.id": activation.agent_id,
-                        "flowent.discussion.ids": discussion_ids,
-                        "flowent.message.count": message_count,
-                    },
+                    metadata=run_metadata,
                 )
         except AgentRunError as error:
             raise AgentRunFailure("Model request failed") from error
@@ -388,12 +260,12 @@ class ModelRuntime:
         on_configure: Callable[[dict[str, str]], None] | None = None,
         on_configure_observability: Callable[[dict[str, Any]], None] | None = None,
         runner_factory: Callable[
-            [ModelConfig | None, InstrumentationSettings | None], AgentRunner
+            [ModelConfig | None, PydanticAIObservability | None], AgentRunner
         ]
         | None = None,
         observability_session_factory: Callable[
-            [ObservabilityConfig], ObservabilitySession | None
-        ] = create_observability_session,
+            [ObservabilityConfig], PydanticAIObservability | None
+        ] = create_pydantic_ai_observability,
     ) -> None:
         self._lock = Lock()
         self._config = config
@@ -402,17 +274,16 @@ class ModelRuntime:
         self._on_configure_observability = on_configure_observability
         self._runner_factory = runner_factory or self._create_runner
         self._observability_session_factory = observability_session_factory
-        self._observability_sessions: list[ObservabilitySession] = []
+        self._observability_sessions: list[PydanticAIObservability] = []
         self._active_session_runs: dict[int, int] = {}
         session = self._create_observability_session(observability_config)
         self._current_observability_session = session
-        self._instrumentation = session.instrumentation if session else None
-        self._runner = self._runner_factory(config, self._instrumentation)
+        self._runner = self._runner_factory(config, session)
 
     def _create_observability_session(
         self,
         config: ObservabilityConfig | None,
-    ) -> ObservabilitySession | None:
+    ) -> PydanticAIObservability | None:
         if config is None or not config.enabled:
             return None
         session = self._observability_session_factory(config)
@@ -423,11 +294,11 @@ class ModelRuntime:
     def _create_runner(
         self,
         config: ModelConfig | None,
-        instrumentation: InstrumentationSettings | None,
+        observability: PydanticAIObservability | None,
     ) -> AgentRunner:
         if config is None:
             return UnavailableRunner("Model configuration is incomplete")
-        return PydanticAgentRunner(config, instrumentation)
+        return PydanticAgentRunner(config, observability)
 
     def settings(self) -> dict[str, Any]:
         with self._lock:
@@ -495,7 +366,10 @@ class ModelRuntime:
                 api_key=api_key,
                 model=model,
             )
-            runner = self._runner_factory(config, self._instrumentation)
+            runner = self._runner_factory(
+                config,
+                self._current_observability_session,
+            )
             if self._on_configure is not None:
                 self._on_configure(config.persistence_data())
             self._config = config
@@ -529,10 +403,7 @@ class ModelRuntime:
             config.validate()
             session = self._create_observability_session(config)
             try:
-                runner = self._runner_factory(
-                    self._config,
-                    session.instrumentation if session else None,
-                )
+                runner = self._runner_factory(self._config, session)
                 if self._on_configure_observability is not None:
                     self._on_configure_observability(config.persistence_data())
             except Exception:
@@ -543,7 +414,6 @@ class ModelRuntime:
             previous_session = self._current_observability_session
             self._observability_config = config
             self._current_observability_session = session
-            self._instrumentation = session.instrumentation if session else None
             self._runner = runner
             session_to_shutdown = self._remove_session_if_idle(previous_session)
         if session_to_shutdown is not None:
@@ -552,8 +422,8 @@ class ModelRuntime:
 
     def _remove_session_if_idle(
         self,
-        session: ObservabilitySession | None,
-    ) -> ObservabilitySession | None:
+        session: PydanticAIObservability | None,
+    ) -> PydanticAIObservability | None:
         if session is None or self._active_session_runs.get(id(session), 0) > 0:
             return None
         if session not in self._observability_sessions:
