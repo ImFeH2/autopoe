@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from flowent.domain import OrganizationState
 from flowent.host_tools import HostTools, ProcessWatcher, watch_processes
-from flowent.model_runner import create_runner
+from flowent.model_runner import ModelRuntime, create_runner
 from flowent.persistence import SQLiteStore, data_directory
 from flowent.protocol import serve
 from flowent.runtime import AgentRuntime
 
 
-def main() -> None:
+def main(
+    create_model_runtime: Callable[..., ModelRuntime] = create_runner,
+) -> None:
     if len(sys.argv) == 3 and sys.argv[1] == "--process-watch":
         watch_processes(sys.argv[2], sys.stdin.buffer)
         return
@@ -25,7 +28,7 @@ def main() -> None:
         persisted=store.load_organization(),
         on_persist=store.save_organization,
     )
-    model_runtime = create_runner(
+    model_runtime = create_model_runtime(
         stored_config=store.load_model_config(),
         on_configure=store.save_model_config,
     )

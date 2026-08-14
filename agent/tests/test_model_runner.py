@@ -4,10 +4,10 @@ from typing import Any
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 
+from e2e_support.runner import DeterministicRunner
 from flowent.domain import Activation, ActivationItem, OrganizationState
 from flowent.host_tools import HostTools
 from flowent.model_runner import (
-    DeterministicRunner,
     ModelConfig,
     ModelRuntime,
     ProviderType,
@@ -164,7 +164,7 @@ def test_model_config_repr_does_not_reveal_api_key() -> None:
 
 def test_shared_model_settings_never_return_the_api_key() -> None:
     secret = "shared-secret"
-    runtime = ModelRuntime(deterministic=True)
+    runtime = ModelRuntime()
 
     settings = runtime.configure(
         provider="anthropic",

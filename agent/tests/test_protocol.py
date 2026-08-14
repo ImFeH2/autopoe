@@ -129,7 +129,7 @@ def test_model_settings_are_shared_without_returning_the_api_key() -> None:
         input_stream,
         output_stream,
         OrganizationState(),
-        model_runtime=ModelRuntime(deterministic=True),
+        model_runtime=ModelRuntime(),
     )
 
     output = output_stream.getvalue()
@@ -186,7 +186,7 @@ def test_persistence_error_does_not_stop_or_expose_request_data(capsys) -> None:
         input_stream,
         output_stream,
         state,
-        model_runtime=FailingModelRuntime(deterministic=True),
+        model_runtime=FailingModelRuntime(),
     )
 
     output = output_stream.getvalue()

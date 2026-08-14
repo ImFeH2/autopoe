@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Lock
@@ -60,94 +59,6 @@ class UnavailableRunner:
     def run(self, activation: Activation, context: AgentRunContext) -> None:
         del activation, context
         raise AgentRunFailure(self._message)
-
-
-class DeterministicRunner:
-    def __init__(self) -> None:
-        self._failed_messages: set[tuple[int, int, int]] = set()
-
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
-        agent = context.state.member(activation.agent_id)
-        for item in activation.items:
-            discussion = context.discussion(
-                "read",
-                discussion_id=item.discussion_id,
-                message_ids=list(item.message_ids),
-            )
-            requested = [
-                message
-                for message in discussion["messages"]
-                if message["id"] in item.message_ids
-            ]
-            bodies = " | ".join(message["body"] for message in requested)
-            retry_key = (
-                activation.agent_id,
-                item.discussion_id,
-                requested[0]["id"],
-            )
-            mention_ids: list[int] = []
-            if (
-                bodies.startswith("E2E_RETRY_TASK:")
-                and retry_key not in self._failed_messages
-            ):
-                self._failed_messages.add(retry_key)
-                raise AgentRunFailure("Model request failed")
-            if bodies.startswith("E2E_RETRY_TASK:"):
-                body = f"{agent['name']} completed the retried work."
-            elif bodies.startswith("E2E_AGENT_HANDOFF:"):
-                members = context.organization("list_members")
-                discussion_member_ids = set(discussion["member_ids"])
-                target = next(
-                    (
-                        member
-                        for member in members
-                        if member["type"] == "agent"
-                        and member["id"] != activation.agent_id
-                        and member["id"] in discussion_member_ids
-                    ),
-                    None,
-                )
-                if target is None:
-                    raise AgentRunFailure("Agent handoff requires another Agent")
-                body = (
-                    f"E2E_AGENT_FOLLOWUP: {agent['name']} asked "
-                    f"{target['name']} to continue."
-                )
-                mention_ids = [target["id"]]
-            elif bodies.startswith("E2E_AGENT_FOLLOWUP:"):
-                body = f"{agent['name']} completed the Agent handoff."
-            elif bodies.startswith("E2E_REPOSITORY_TASK:"):
-                directory = "artifacts/desktop/e2e-agent-work"
-                inspected = context.exec(["git", "status", "--short"], ".", 10)
-                context.patch(
-                    """diff --git a/artifacts/desktop/e2e-agent-work/input.txt b/artifacts/desktop/e2e-agent-work/input.txt
---- a/artifacts/desktop/e2e-agent-work/input.txt
-+++ b/artifacts/desktop/e2e-agent-work/input.txt
-@@ -1 +1 @@
--before
-+after
-"""
-                )
-                verified = context.exec(
-                    ["git", "diff", "--", "input.txt"], directory, 10
-                )
-                body = (
-                    f"{agent['name']} used exec and patch. "
-                    f"status={inspected['exit_code']} verify={verified['exit_code']}"
-                )
-            else:
-                body = f"{agent['name']} received: {bodies}"
-            context.discussion(
-                "send",
-                discussion_id=item.discussion_id,
-                body=body,
-                mention_ids=mention_ids,
-            )
-            context.discussion(
-                "ack",
-                discussion_id=item.discussion_id,
-                message_ids=list(item.message_ids),
-            )
 
 
 class PydanticAgentRunner:
@@ -319,18 +230,16 @@ class ModelRuntime:
     def __init__(
         self,
         config: ModelConfig | None = None,
-        deterministic: bool = False,
         on_configure: Callable[[dict[str, str]], None] | None = None,
+        runner_factory: Callable[[ModelConfig | None], AgentRunner] | None = None,
     ) -> None:
         self._lock = Lock()
         self._config = config
-        self._deterministic = deterministic
         self._on_configure = on_configure
-        self._runner = self._create_runner(config)
+        self._runner_factory = runner_factory or self._create_runner
+        self._runner = self._runner_factory(config)
 
     def _create_runner(self, config: ModelConfig | None) -> AgentRunner:
-        if self._deterministic:
-            return DeterministicRunner()
         if config is None:
             return UnavailableRunner("Model configuration is incomplete")
         return PydanticAgentRunner(config)
@@ -380,7 +289,7 @@ class ModelRuntime:
                 api_key=api_key,
                 model=model,
             )
-            runner = self._create_runner(config)
+            runner = self._runner_factory(config)
             if self._on_configure is not None:
                 self._on_configure(config.persistence_data())
             self._config = config
@@ -397,10 +306,5 @@ def create_runner(
     stored_config: dict[str, str] | None = None,
     on_configure: Callable[[dict[str, str]], None] | None = None,
 ) -> ModelRuntime:
-    deterministic = os.environ.get("FLOWENT_TEST_RUNNER") == "deterministic"
     config = ModelConfig.restore(stored_config) if stored_config is not None else None
-    return ModelRuntime(
-        config,
-        deterministic=deterministic,
-        on_configure=on_configure,
-    )
+    return ModelRuntime(config, on_configure=on_configure)

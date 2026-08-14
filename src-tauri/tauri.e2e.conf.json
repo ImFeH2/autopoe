@@ -5,6 +5,9 @@
     "beforeBuildCommand": "pnpm build:desktop:e2e:frontend",
     "frontendDist": "../dist-e2e"
   },
+  "bundle": {
+    "externalBin": ["binaries/flowent-agent-e2e"]
+  },
   "app": {
     "withGlobalTauri": true,
     "security": {

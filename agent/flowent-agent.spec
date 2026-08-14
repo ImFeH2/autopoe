@@ -1,9 +1,14 @@
+import os
+
 from PyInstaller.utils.hooks import copy_metadata
 
 
+is_e2e = os.environ.get("FLOWENT_SIDECAR_BUILD") == "e2e"
+entrypoint = "e2e_support/entrypoint.py" if is_e2e else "src/flowent/__main__.py"
+
 a = Analysis(
-    ["src/flowent/__main__.py"],
-    pathex=[],
+    [entrypoint],
+    pathex=["."],
     binaries=[],
     datas=copy_metadata("pydantic-ai-slim", recursive=True),
     hiddenimports=[],

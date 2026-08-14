@@ -219,10 +219,7 @@ def test_shares_state_across_launch_directories(tmp_path: Path) -> None:
 
 def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
-    runtime = ModelRuntime(
-        deterministic=True,
-        on_configure=store.save_model_config,
-    )
+    runtime = ModelRuntime(on_configure=store.save_model_config)
 
     settings = runtime.configure(
         provider="anthropic",

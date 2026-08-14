@@ -1,5 +1,4 @@
 use std::{
-    ffi::OsString,
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
@@ -14,9 +13,12 @@ use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
 };
 
-const TEST_RUNNER_ENV: &str = "FLOWENT_TEST_RUNNER";
 #[cfg(feature = "desktop-e2e")]
 const DATA_DIRECTORY_ENV: &str = "FLOWENT_DATA_DIR";
+#[cfg(not(feature = "desktop-e2e"))]
+const SIDECAR_NAME: &str = "flowent-agent";
+#[cfg(feature = "desktop-e2e")]
+const SIDECAR_NAME: &str = "flowent-agent-e2e";
 const SHUTDOWN_ID: u64 = u64::MAX;
 
 type SharedChild = Arc<Mutex<Option<CommandChild>>>;
@@ -42,13 +44,13 @@ impl Sidecar {
     pub fn start(&self, app: &AppHandle) -> Result<()> {
         let command = app
             .shell()
-            .sidecar("flowent-agent")
+            .sidecar(SIDECAR_NAME)
             .context("create sidecar command")?
             .env_clear()
-            .envs(filtered_environment(std::env::vars_os()))
+            .envs(std::env::vars_os())
             .current_dir(&self.working_directory);
         #[cfg(feature = "desktop-e2e")]
-        let command = command.env(TEST_RUNNER_ENV, "deterministic").env(
+        let command = command.env(
             DATA_DIRECTORY_ENV,
             self.working_directory.join("artifacts/desktop/e2e-state"),
         );
@@ -147,15 +149,6 @@ impl Sidecar {
     }
 }
 
-fn filtered_environment(
-    environment: impl IntoIterator<Item = (OsString, OsString)>,
-) -> Vec<(OsString, OsString)> {
-    environment
-        .into_iter()
-        .filter(|(key, _)| !key.eq_ignore_ascii_case(TEST_RUNNER_ENV))
-        .collect()
-}
-
 fn encode_message(message: &Value) -> Result<Vec<u8>, String> {
     let mut encoded =
         serde_json::to_vec(message).map_err(|error| format!("Encode Sidecar message: {error}"))?;
@@ -187,26 +180,6 @@ fn disconnect(child: &SharedChild, subscriber: &SharedSubscriber, kill: bool) {
 mod tests {
     use super::*;
     use tauri::ipc::InvokeResponseBody;
-
-    #[test]
-    fn removes_test_runner_from_inherited_environment() {
-        let environment = filtered_environment([
-            (OsString::from("PATH"), OsString::from("/bin")),
-            (
-                OsString::from(TEST_RUNNER_ENV),
-                OsString::from("deterministic"),
-            ),
-            (
-                OsString::from("flowent_test_runner"),
-                OsString::from("deterministic"),
-            ),
-        ]);
-
-        assert_eq!(
-            environment,
-            vec![(OsString::from("PATH"), OsString::from("/bin"))]
-        );
-    }
 
     #[test]
     fn forwards_json_to_the_subscriber() {
