@@ -104,13 +104,15 @@ def test_sidecar_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> Non
         close_process(process)
 
 
-def test_persists_state_and_model_settings_across_sidecar_restarts(
+def test_persists_state_and_model_settings_across_launch_directories(
     tmp_path: Path,
 ) -> None:
-    working_directory = tmp_path / "project"
-    working_directory.mkdir()
+    first_directory = tmp_path / "first"
+    second_directory = tmp_path / "second"
+    first_directory.mkdir()
+    second_directory.mkdir()
     data = tmp_path / "data"
-    first = start_sidecar(data, working_directory)
+    first = start_sidecar(data, first_directory)
 
     try:
         request(first, 1, "organization.create_agent", {"name": "Ada"})
@@ -147,10 +149,11 @@ def test_persists_state_and_model_settings_across_sidecar_restarts(
     finally:
         close_process(first)
 
-    second = start_sidecar(data, working_directory)
+    second = start_sidecar(data, second_directory)
     try:
         snapshot = request(second, 1, "organization.get", {})
         settings = request(second, 2, "settings.get_model", {})
+        assert snapshot["working_directory"] == str(second_directory)
         assert snapshot["members"][1]["name"] == "Ada"
         assert snapshot["discussions"][0]["topic"] == "Persistent work"
         assert snapshot["discussions"][0]["messages"][0]["body"] == (

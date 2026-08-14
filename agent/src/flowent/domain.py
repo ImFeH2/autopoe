@@ -68,7 +68,7 @@ class OrganizationState:
         self,
         working_directory: Path | None = None,
         persisted: dict[str, Any] | None = None,
-        on_persist: Callable[[Path, dict[str, Any]], None] | None = None,
+        on_persist: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._working_directory = (working_directory or Path.cwd()).resolve()
         self._on_persist = on_persist
@@ -528,6 +528,6 @@ class OrganizationState:
 
     def _changed(self, persist: bool = False) -> None:
         if persist and self._on_persist is not None:
-            self._on_persist(self._working_directory, self._persistence_data())
+            self._on_persist(self._persistence_data())
         self._revision += 1
         self._condition.notify_all()

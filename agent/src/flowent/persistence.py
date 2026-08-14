@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -28,6 +28,8 @@ class SQLiteStore:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
                 self._create_schema(connection)
+            elif version == 1:
+                self._migrate_version_one(connection)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"Unsupported Flowent database version: {version}")
         self.path.chmod(0o600)
@@ -44,94 +46,259 @@ class SQLiteStore:
             connection.close()
 
     def _create_schema(self, connection: sqlite3.Connection) -> None:
-        connection.executescript(
+        with connection:
+            self._create_tables(connection)
+            connection.execute(
+                "INSERT INTO application_state (id, organization_saved) VALUES (1, 0)"
+            )
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _create_tables(connection: sqlite3.Connection) -> None:
+        statements = (
             """
-            BEGIN;
-            CREATE TABLE instances (
-                working_directory TEXT PRIMARY KEY,
-                organization_saved INTEGER NOT NULL DEFAULT 0 CHECK (organization_saved IN (0, 1))
-            );
+            CREATE TABLE application_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                organization_saved INTEGER NOT NULL DEFAULT 0
+                    CHECK (organization_saved IN (0, 1))
+            )
+            """,
+            """
             CREATE TABLE members (
-                working_directory TEXT NOT NULL,
-                id INTEGER NOT NULL,
+                id INTEGER PRIMARY KEY,
                 type TEXT NOT NULL CHECK (type IN ('human', 'agent')),
-                name TEXT NOT NULL,
-                PRIMARY KEY (working_directory, id),
-                FOREIGN KEY (working_directory) REFERENCES instances (working_directory) ON DELETE CASCADE
-            );
+                name TEXT NOT NULL
+            )
+            """,
+            """
             CREATE TABLE discussions (
-                working_directory TEXT NOT NULL,
-                id INTEGER NOT NULL,
-                topic TEXT NOT NULL,
-                PRIMARY KEY (working_directory, id),
-                FOREIGN KEY (working_directory) REFERENCES instances (working_directory) ON DELETE CASCADE
-            );
+                id INTEGER PRIMARY KEY,
+                topic TEXT NOT NULL
+            )
+            """,
+            """
             CREATE TABLE discussion_members (
-                working_directory TEXT NOT NULL,
                 discussion_id INTEGER NOT NULL,
                 position INTEGER NOT NULL,
                 member_id INTEGER NOT NULL,
-                PRIMARY KEY (working_directory, discussion_id, position),
-                UNIQUE (working_directory, discussion_id, member_id),
-                FOREIGN KEY (working_directory, discussion_id) REFERENCES discussions (working_directory, id) ON DELETE CASCADE,
-                FOREIGN KEY (working_directory, member_id) REFERENCES members (working_directory, id)
-            );
+                PRIMARY KEY (discussion_id, position),
+                UNIQUE (discussion_id, member_id),
+                FOREIGN KEY (discussion_id) REFERENCES discussions (id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (member_id) REFERENCES members (id)
+            )
+            """,
+            """
             CREATE TABLE messages (
-                working_directory TEXT NOT NULL,
                 discussion_id INTEGER NOT NULL,
                 id INTEGER NOT NULL,
                 sender_id INTEGER NOT NULL,
                 body TEXT NOT NULL,
-                PRIMARY KEY (working_directory, discussion_id, id),
-                FOREIGN KEY (working_directory, discussion_id) REFERENCES discussions (working_directory, id) ON DELETE CASCADE,
-                FOREIGN KEY (working_directory, sender_id) REFERENCES members (working_directory, id)
-            );
+                PRIMARY KEY (discussion_id, id),
+                FOREIGN KEY (discussion_id) REFERENCES discussions (id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (sender_id) REFERENCES members (id)
+            )
+            """,
+            """
             CREATE TABLE mentions (
-                working_directory TEXT NOT NULL,
                 discussion_id INTEGER NOT NULL,
                 message_id INTEGER NOT NULL,
                 position INTEGER NOT NULL,
                 member_id INTEGER NOT NULL,
                 read INTEGER NOT NULL CHECK (read IN (0, 1)),
                 acked INTEGER NOT NULL CHECK (acked IN (0, 1)),
-                PRIMARY KEY (working_directory, discussion_id, message_id, position),
-                UNIQUE (working_directory, discussion_id, message_id, member_id),
-                FOREIGN KEY (working_directory, discussion_id, message_id) REFERENCES messages (working_directory, discussion_id, id) ON DELETE CASCADE,
-                FOREIGN KEY (working_directory, member_id) REFERENCES members (working_directory, id)
-            );
+                PRIMARY KEY (discussion_id, message_id, position),
+                UNIQUE (discussion_id, message_id, member_id),
+                FOREIGN KEY (discussion_id, message_id)
+                    REFERENCES messages (discussion_id, id) ON DELETE CASCADE,
+                FOREIGN KEY (member_id) REFERENCES members (id)
+            )
+            """,
+            """
             CREATE TABLE model_settings (
-                working_directory TEXT PRIMARY KEY,
-                provider TEXT NOT NULL CHECK (provider IN ('openai', 'anthropic', 'google')),
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                provider TEXT NOT NULL
+                    CHECK (provider IN ('openai', 'anthropic', 'google')),
                 base_url TEXT NOT NULL,
                 api_key TEXT NOT NULL,
                 model TEXT NOT NULL,
-                FOREIGN KEY (working_directory) REFERENCES instances (working_directory) ON DELETE CASCADE
-            );
-            PRAGMA user_version = 1;
-            COMMIT;
-            """
+                FOREIGN KEY (id) REFERENCES application_state (id)
+                    ON DELETE CASCADE
+            )
+            """,
+        )
+        for statement in statements:
+            connection.execute(statement)
+
+    def _migrate_version_one(self, connection: sqlite3.Connection) -> None:
+        organization_keys = [
+            row["working_directory"]
+            for row in connection.execute(
+                """
+                SELECT working_directory FROM instances
+                WHERE organization_saved = 1
+                ORDER BY working_directory
+                """
+            )
+        ]
+        organizations = [
+            self._load_version_one_organization(connection, key)
+            for key in organization_keys
+        ]
+        organization = self._unique_migration_value(
+            organizations,
+            "Organization",
+        )
+        model_configs = [
+            {
+                "provider": row["provider"],
+                "base_url": row["base_url"],
+                "api_key": row["api_key"],
+                "model": row["model"],
+            }
+            for row in connection.execute(
+                """
+                SELECT provider, base_url, api_key, model FROM model_settings
+                ORDER BY working_directory
+                """
+            )
+        ]
+        model_config = self._unique_migration_value(
+            model_configs,
+            "model settings",
         )
 
-    def load_organization(self, working_directory: Path) -> dict[str, Any] | None:
-        key = str(working_directory.resolve())
+        with connection:
+            for table in (
+                "model_settings",
+                "mentions",
+                "messages",
+                "discussion_members",
+                "discussions",
+                "members",
+                "instances",
+            ):
+                connection.execute(f"DROP TABLE {table}")
+            self._create_tables(connection)
+            connection.execute(
+                "INSERT INTO application_state (id, organization_saved) VALUES (1, ?)",
+                (int(organization is not None),),
+            )
+            if organization is not None:
+                self._write_organization(connection, organization)
+            if model_config is not None:
+                self._write_model_config(connection, model_config)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _unique_migration_value(
+        values: list[dict[str, Any]],
+        label: str,
+    ) -> dict[str, Any] | None:
+        if not values:
+            return None
+        first = values[0]
+        if any(value != first for value in values[1:]):
+            raise RuntimeError(
+                f"Cannot migrate database with conflicting {label} partitions"
+            )
+        return first
+
+    @staticmethod
+    def _load_version_one_organization(
+        connection: sqlite3.Connection,
+        key: str,
+    ) -> dict[str, Any]:
+        members = [
+            {"id": row["id"], "type": row["type"], "name": row["name"]}
+            for row in connection.execute(
+                """
+                SELECT id, type, name FROM members
+                WHERE working_directory = ? ORDER BY id
+                """,
+                (key,),
+            )
+        ]
+        discussions: list[dict[str, Any]] = []
+        for row in connection.execute(
+            """
+            SELECT id, topic FROM discussions
+            WHERE working_directory = ? ORDER BY id
+            """,
+            (key,),
+        ):
+            discussion_id = row["id"]
+            member_ids = [
+                member["member_id"]
+                for member in connection.execute(
+                    """
+                    SELECT member_id FROM discussion_members
+                    WHERE working_directory = ? AND discussion_id = ?
+                    ORDER BY position
+                    """,
+                    (key, discussion_id),
+                )
+            ]
+            messages: list[dict[str, Any]] = []
+            for message in connection.execute(
+                """
+                SELECT id, sender_id, body FROM messages
+                WHERE working_directory = ? AND discussion_id = ?
+                ORDER BY id
+                """,
+                (key, discussion_id),
+            ):
+                mentions = [
+                    {
+                        "member_id": mention["member_id"],
+                        "read": bool(mention["read"]),
+                        "acked": bool(mention["acked"]),
+                    }
+                    for mention in connection.execute(
+                        """
+                        SELECT member_id, read, acked FROM mentions
+                        WHERE working_directory = ?
+                            AND discussion_id = ? AND message_id = ?
+                        ORDER BY position
+                        """,
+                        (key, discussion_id, message["id"]),
+                    )
+                ]
+                messages.append(
+                    {
+                        "id": message["id"],
+                        "sender_id": message["sender_id"],
+                        "body": message["body"],
+                        "mentions": mentions,
+                    }
+                )
+            discussions.append(
+                {
+                    "id": discussion_id,
+                    "topic": row["topic"],
+                    "member_ids": member_ids,
+                    "messages": messages,
+                }
+            )
+        return {"members": members, "discussions": discussions}
+
+    def load_organization(self) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT organization_saved FROM instances WHERE working_directory = ?",
-                (key,),
+                "SELECT organization_saved FROM application_state WHERE id = 1"
             ).fetchone()
             if row is None or not row["organization_saved"]:
                 return None
             members = [
                 {"id": row["id"], "type": row["type"], "name": row["name"]}
                 for row in connection.execute(
-                    "SELECT id, type, name FROM members WHERE working_directory = ? ORDER BY id",
-                    (key,),
+                    "SELECT id, type, name FROM members ORDER BY id"
                 )
             ]
             discussions: list[dict[str, Any]] = []
             for row in connection.execute(
-                "SELECT id, topic FROM discussions WHERE working_directory = ? ORDER BY id",
-                (key,),
+                "SELECT id, topic FROM discussions ORDER BY id"
             ):
                 discussion_id = row["id"]
                 member_ids = [
@@ -139,20 +306,18 @@ class SQLiteStore:
                     for member in connection.execute(
                         """
                         SELECT member_id FROM discussion_members
-                        WHERE working_directory = ? AND discussion_id = ?
-                        ORDER BY position
+                        WHERE discussion_id = ? ORDER BY position
                         """,
-                        (key, discussion_id),
+                        (discussion_id,),
                     )
                 ]
                 messages: list[dict[str, Any]] = []
                 for message in connection.execute(
                     """
                     SELECT id, sender_id, body FROM messages
-                    WHERE working_directory = ? AND discussion_id = ?
-                    ORDER BY id
+                    WHERE discussion_id = ? ORDER BY id
                     """,
-                    (key, discussion_id),
+                    (discussion_id,),
                 ):
                     mentions = [
                         {
@@ -163,10 +328,10 @@ class SQLiteStore:
                         for mention in connection.execute(
                             """
                             SELECT member_id, read, acked FROM mentions
-                            WHERE working_directory = ? AND discussion_id = ? AND message_id = ?
+                            WHERE discussion_id = ? AND message_id = ?
                             ORDER BY position
                             """,
-                            (key, discussion_id, message["id"]),
+                            (discussion_id, message["id"]),
                         )
                     ]
                     messages.append(
@@ -187,90 +352,79 @@ class SQLiteStore:
                 )
             return {"members": members, "discussions": discussions}
 
-    def save_organization(
-        self,
-        working_directory: Path,
-        organization: dict[str, Any],
-    ) -> None:
-        key = str(working_directory.resolve())
+    def save_organization(self, organization: dict[str, Any]) -> None:
         with self._connect() as connection, connection:
             connection.execute(
-                "INSERT OR IGNORE INTO instances (working_directory) VALUES (?)",
-                (key,),
+                "UPDATE application_state SET organization_saved = 1 WHERE id = 1"
             )
-            connection.execute(
-                "UPDATE instances SET organization_saved = 1 WHERE working_directory = ?",
-                (key,),
-            )
-            connection.execute(
-                "DELETE FROM discussions WHERE working_directory = ?", (key,)
-            )
-            connection.execute(
-                "DELETE FROM members WHERE working_directory = ?", (key,)
-            )
-            for member in organization["members"]:
-                connection.execute(
-                    "INSERT INTO members (working_directory, id, type, name) VALUES (?, ?, ?, ?)",
-                    (key, member["id"], member["type"], member["name"]),
-                )
-            for discussion in organization["discussions"]:
-                discussion_id = discussion["id"]
-                connection.execute(
-                    "INSERT INTO discussions (working_directory, id, topic) VALUES (?, ?, ?)",
-                    (key, discussion_id, discussion["topic"]),
-                )
-                for position, member_id in enumerate(discussion["member_ids"]):
-                    connection.execute(
-                        """
-                        INSERT INTO discussion_members
-                            (working_directory, discussion_id, position, member_id)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (key, discussion_id, position, member_id),
-                    )
-                for message in discussion["messages"]:
-                    connection.execute(
-                        """
-                        INSERT INTO messages
-                            (working_directory, discussion_id, id, sender_id, body)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (
-                            key,
-                            discussion_id,
-                            message["id"],
-                            message["sender_id"],
-                            message["body"],
-                        ),
-                    )
-                    for position, mention in enumerate(message["mentions"]):
-                        connection.execute(
-                            """
-                            INSERT INTO mentions
-                                (working_directory, discussion_id, message_id, position, member_id, read, acked)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                key,
-                                discussion_id,
-                                message["id"],
-                                position,
-                                mention["member_id"],
-                                int(mention["read"]),
-                                int(mention["acked"]),
-                            ),
-                        )
+            connection.execute("DELETE FROM discussions")
+            connection.execute("DELETE FROM members")
+            self._write_organization(connection, organization)
         self.path.chmod(0o600)
 
-    def load_model_config(self, working_directory: Path) -> dict[str, str] | None:
-        key = str(working_directory.resolve())
+    @staticmethod
+    def _write_organization(
+        connection: sqlite3.Connection,
+        organization: dict[str, Any],
+    ) -> None:
+        for member in organization["members"]:
+            connection.execute(
+                "INSERT INTO members (id, type, name) VALUES (?, ?, ?)",
+                (member["id"], member["type"], member["name"]),
+            )
+        for discussion in organization["discussions"]:
+            discussion_id = discussion["id"]
+            connection.execute(
+                "INSERT INTO discussions (id, topic) VALUES (?, ?)",
+                (discussion_id, discussion["topic"]),
+            )
+            for position, member_id in enumerate(discussion["member_ids"]):
+                connection.execute(
+                    """
+                    INSERT INTO discussion_members
+                        (discussion_id, position, member_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    (discussion_id, position, member_id),
+                )
+            for message in discussion["messages"]:
+                connection.execute(
+                    """
+                    INSERT INTO messages
+                        (discussion_id, id, sender_id, body)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        discussion_id,
+                        message["id"],
+                        message["sender_id"],
+                        message["body"],
+                    ),
+                )
+                for position, mention in enumerate(message["mentions"]):
+                    connection.execute(
+                        """
+                        INSERT INTO mentions
+                            (discussion_id, message_id, position, member_id, read, acked)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            discussion_id,
+                            message["id"],
+                            position,
+                            mention["member_id"],
+                            int(mention["read"]),
+                            int(mention["acked"]),
+                        ),
+                    )
+
+    def load_model_config(self) -> dict[str, str] | None:
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT provider, base_url, api_key, model FROM model_settings
-                WHERE working_directory = ?
-                """,
-                (key,),
+                WHERE id = 1
+                """
             ).fetchone()
             if row is None:
                 return None
@@ -281,34 +435,31 @@ class SQLiteStore:
                 "model": row["model"],
             }
 
-    def save_model_config(
-        self,
-        working_directory: Path,
+    def save_model_config(self, config: dict[str, str]) -> None:
+        with self._connect() as connection, connection:
+            self._write_model_config(connection, config)
+        self.path.chmod(0o600)
+
+    @staticmethod
+    def _write_model_config(
+        connection: sqlite3.Connection,
         config: dict[str, str],
     ) -> None:
-        key = str(working_directory.resolve())
-        with self._connect() as connection, connection:
-            connection.execute(
-                "INSERT OR IGNORE INTO instances (working_directory) VALUES (?)",
-                (key,),
-            )
-            connection.execute(
-                """
-                INSERT INTO model_settings
-                    (working_directory, provider, base_url, api_key, model)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (working_directory) DO UPDATE SET
-                    provider = excluded.provider,
-                    base_url = excluded.base_url,
-                    api_key = excluded.api_key,
-                    model = excluded.model
-                """,
-                (
-                    key,
-                    config["provider"],
-                    config["base_url"],
-                    config["api_key"],
-                    config["model"],
-                ),
-            )
-        self.path.chmod(0o600)
+        connection.execute(
+            """
+            INSERT INTO model_settings
+                (id, provider, base_url, api_key, model)
+            VALUES (1, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                provider = excluded.provider,
+                base_url = excluded.base_url,
+                api_key = excluded.api_key,
+                model = excluded.model
+            """,
+            (
+                config["provider"],
+                config["base_url"],
+                config["api_key"],
+                config["model"],
+            ),
+        )

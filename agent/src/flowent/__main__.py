@@ -22,15 +22,12 @@ def main() -> None:
     watcher = ProcessWatcher(host_tools.process_owner)
     state = OrganizationState(
         working_directory,
-        persisted=store.load_organization(working_directory),
+        persisted=store.load_organization(),
         on_persist=store.save_organization,
     )
     model_runtime = create_runner(
-        stored_config=store.load_model_config(working_directory),
-        on_configure=lambda config: store.save_model_config(
-            working_directory,
-            config,
-        ),
+        stored_config=store.load_model_config(),
+        on_configure=store.save_model_config,
     )
     runtime = AgentRuntime(
         state,

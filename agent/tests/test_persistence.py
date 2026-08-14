@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
 import stat
 from pathlib import Path
+
+import pytest
 
 from flowent.domain import OrganizationState
 from flowent.model_runner import ModelRuntime
@@ -11,9 +14,148 @@ from flowent.persistence import DATA_DIRECTORY_ENV, SQLiteStore, data_directory
 def persisted_state(store: SQLiteStore, working_directory: Path) -> OrganizationState:
     return OrganizationState(
         working_directory,
-        persisted=store.load_organization(working_directory),
+        persisted=store.load_organization(),
         on_persist=store.save_organization,
     )
+
+
+def create_version_one_database(
+    data: Path,
+    *,
+    conflicting_model: bool = False,
+) -> Path:
+    data.mkdir()
+    path = data / "flowent.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE instances (
+            working_directory TEXT PRIMARY KEY,
+            organization_saved INTEGER NOT NULL
+        );
+        CREATE TABLE members (
+            working_directory TEXT NOT NULL,
+            id INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            name TEXT NOT NULL
+        );
+        CREATE TABLE discussions (
+            working_directory TEXT NOT NULL,
+            id INTEGER NOT NULL,
+            topic TEXT NOT NULL
+        );
+        CREATE TABLE discussion_members (
+            working_directory TEXT NOT NULL,
+            discussion_id INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            member_id INTEGER NOT NULL
+        );
+        CREATE TABLE messages (
+            working_directory TEXT NOT NULL,
+            discussion_id INTEGER NOT NULL,
+            id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            body TEXT NOT NULL
+        );
+        CREATE TABLE mentions (
+            working_directory TEXT NOT NULL,
+            discussion_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            member_id INTEGER NOT NULL,
+            read INTEGER NOT NULL,
+            acked INTEGER NOT NULL
+        );
+        CREATE TABLE model_settings (
+            working_directory TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            model TEXT NOT NULL
+        );
+        PRAGMA user_version = 1;
+        """
+    )
+    organization_key = "/legacy/organization"
+    settings_key = "/legacy/settings"
+    connection.executemany(
+        "INSERT INTO instances (working_directory, organization_saved) VALUES (?, ?)",
+        [(organization_key, 1), (settings_key, 0)],
+    )
+    connection.executemany(
+        "INSERT INTO members (working_directory, id, type, name) VALUES (?, ?, ?, ?)",
+        [
+            (organization_key, 1, "human", "You"),
+            (organization_key, 2, "agent", "Ada"),
+        ],
+    )
+    connection.execute(
+        "INSERT INTO discussions (working_directory, id, topic) VALUES (?, ?, ?)",
+        (organization_key, 1, "Migrated work"),
+    )
+    connection.executemany(
+        """
+        INSERT INTO discussion_members
+            (working_directory, discussion_id, position, member_id)
+        VALUES (?, ?, ?, ?)
+        """,
+        [
+            (organization_key, 1, 0, 1),
+            (organization_key, 1, 1, 2),
+        ],
+    )
+    connection.execute(
+        """
+        INSERT INTO messages
+            (working_directory, discussion_id, id, sender_id, body)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (organization_key, 1, 1, 1, "Continue globally"),
+    )
+    connection.execute(
+        """
+        INSERT INTO mentions
+            (working_directory, discussion_id, message_id, position, member_id, read, acked)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (organization_key, 1, 1, 0, 2, 1, 0),
+    )
+    connection.execute(
+        """
+        INSERT INTO model_settings
+            (working_directory, provider, base_url, api_key, model)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            settings_key,
+            "anthropic",
+            "https://example.invalid",
+            "legacy-secret",
+            "legacy-model",
+        ),
+    )
+    if conflicting_model:
+        connection.execute(
+            "INSERT INTO instances (working_directory, organization_saved) VALUES (?, 0)",
+            ("/legacy/conflict",),
+        )
+        connection.execute(
+            """
+            INSERT INTO model_settings
+                (working_directory, provider, base_url, api_key, model)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "/legacy/conflict",
+                "openai",
+                "https://other.invalid",
+                "other-secret",
+                "other-model",
+            ),
+        )
+    connection.commit()
+    connection.close()
+    return path
 
 
 def test_uses_flowent_directory_under_home(monkeypatch, tmp_path: Path) -> None:
@@ -57,7 +199,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
     assert restored.create_discussion("Next", 1, [3])["discussions"][-1]["id"] == 2
 
 
-def test_keeps_launch_directories_isolated(tmp_path: Path) -> None:
+def test_shares_state_across_launch_directories(tmp_path: Path) -> None:
     first_directory = tmp_path / "first"
     second_directory = tmp_path / "second"
     first_directory.mkdir()
@@ -67,21 +209,19 @@ def test_keeps_launch_directories_isolated(tmp_path: Path) -> None:
     persisted_state(store, first_directory).create_agent("Ada")
     second = persisted_state(store, second_directory)
 
-    assert second.snapshot()["members"] == [{"id": 1, "type": "human", "name": "You"}]
-    assert store.load_organization(first_directory) is not None
-    assert store.load_organization(second_directory) is None
+    assert second.snapshot()["working_directory"] == str(second_directory)
+    assert second.snapshot()["members"] == [
+        {"id": 1, "type": "human", "name": "You"},
+        {"id": 2, "type": "agent", "name": "Ada", "status": "idle"},
+    ]
+    assert store.load_organization() is not None
 
 
 def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> None:
-    working_directory = tmp_path / "project"
-    working_directory.mkdir()
     store = SQLiteStore(tmp_path / "data")
     runtime = ModelRuntime(
         deterministic=True,
-        on_configure=lambda config: store.save_model_config(
-            working_directory,
-            config,
-        ),
+        on_configure=store.save_model_config,
     )
 
     settings = runtime.configure(
@@ -98,13 +238,56 @@ def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> No
         "has_api_key": True,
     }
     assert "local-secret" not in str(settings)
-    assert store.load_model_config(working_directory) == {
+    assert store.load_model_config() == {
         "provider": "anthropic",
         "base_url": "https://example.invalid",
         "api_key": "local-secret",
         "model": "test-model",
     }
-    assert store.load_organization(working_directory) is None
+    assert store.load_organization() is None
+
+
+def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    path = create_version_one_database(data)
+
+    store = SQLiteStore(data)
+    restored = persisted_state(store, tmp_path / "new-launch-root")
+
+    assert restored.snapshot()["members"][1]["name"] == "Ada"
+    assert restored.snapshot()["discussions"][0]["messages"] == [
+        {
+            "id": 1,
+            "sender_id": 1,
+            "body": "Continue globally",
+            "mentions": [{"member_id": 2, "status": "read"}],
+        }
+    ]
+    assert store.load_model_config() == {
+        "provider": "anthropic",
+        "base_url": "https://example.invalid",
+        "api_key": "legacy-secret",
+        "model": "legacy-model",
+    }
+    connection = sqlite3.connect(path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    for table in ("members", "discussions", "model_settings"):
+        columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        assert "working_directory" not in columns
+    connection.close()
+
+
+def test_rejects_conflicting_version_one_model_partitions(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    path = create_version_one_database(data, conflicting_model=True)
+
+    with pytest.raises(RuntimeError, match="conflicting model settings"):
+        SQLiteStore(data)
+
+    connection = sqlite3.connect(path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert connection.execute("SELECT COUNT(*) FROM model_settings").fetchone()[0] == 2
+    connection.close()
 
 
 def test_restricts_data_directory_and_database_permissions(tmp_path: Path) -> None:
