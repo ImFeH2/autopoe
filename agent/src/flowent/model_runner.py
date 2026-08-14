@@ -3,11 +3,9 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, cast
 
-from dotenv import dotenv_values
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
@@ -30,22 +28,6 @@ class ModelConfig:
     base_url: str
     api_key: str = field(repr=False)
     model: str
-
-    @classmethod
-    def load(cls, directory: Path) -> ModelConfig:
-        values = dotenv_values(directory / ".env")
-        provider = (values.get("provider") or "openai").strip()
-        if provider not in ("openai", "anthropic", "google"):
-            raise RuntimeError("Model provider is invalid")
-        config = cls(
-            provider=cast(ProviderType, provider),
-            base_url=(values.get("base_url") or "").strip(),
-            api_key=(values.get("api_key") or "").strip(),
-            model=(values.get("model") or "").strip(),
-        )
-        if not config.base_url or not config.api_key or not config.model:
-            raise RuntimeError("Model configuration is incomplete")
-        return config
 
     @classmethod
     def restore(cls, values: dict[str, str]) -> ModelConfig:
@@ -412,20 +394,11 @@ class ModelRuntime:
 
 
 def create_runner(
-    directory: Path,
     stored_config: dict[str, str] | None = None,
     on_configure: Callable[[dict[str, str]], None] | None = None,
 ) -> ModelRuntime:
     deterministic = os.environ.get("FLOWENT_TEST_RUNNER") == "deterministic"
-    if stored_config is not None:
-        config = ModelConfig.restore(stored_config)
-    elif deterministic:
-        config = None
-    else:
-        try:
-            config = ModelConfig.load(directory)
-        except RuntimeError:
-            config = None
+    config = ModelConfig.restore(stored_config) if stored_config is not None else None
     return ModelRuntime(
         config,
         deterministic=deterministic,

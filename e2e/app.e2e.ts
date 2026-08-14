@@ -167,6 +167,10 @@ describe("Flowent desktop", () => {
 
     await $("button[aria-label='Settings']").click();
     await expect($("h2=Settings")).toExist();
+    await expect($("button=OpenAI")).toHaveAttribute("aria-pressed", "true");
+    await expect($("[aria-label='Base URL']")).toHaveValue("");
+    await expect($("[aria-label='API key']")).toHaveValue("");
+    await expect($("[aria-label='Model']")).toHaveValue("");
     await $("button=Anthropic").click();
     await $("[aria-label='Base URL']").setValue("https://example.invalid");
     await $("[aria-label='API key']").setValue("e2e-local-secret");

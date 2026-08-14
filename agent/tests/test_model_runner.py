@@ -149,16 +149,16 @@ def test_deterministic_handoff_requires_another_discussion_agent(
     ]
 
 
-def test_model_config_loads_lowercase_env_without_revealing_key(tmp_path: Path) -> None:
+def test_model_config_repr_does_not_reveal_api_key() -> None:
     secret = "not-for-repr"
-    (tmp_path / ".env").write_text(
-        f"base_url=https://example.invalid/v1\napi_key={secret}\nmodel=test-model\n"
+
+    config = ModelConfig(
+        provider="openai",
+        base_url="https://example.invalid/v1",
+        api_key=secret,
+        model="test-model",
     )
 
-    config = ModelConfig.load(tmp_path)
-
-    assert config.provider == "openai"
-    assert config.api_key == secret
     assert secret not in repr(config)
 
 
@@ -248,7 +248,7 @@ def test_all_agents_use_the_latest_shared_runner(
 def test_missing_model_config_returns_runner_that_fails_on_activation(
     tmp_path: Path,
 ) -> None:
-    runner = create_runner(tmp_path)
+    runner = create_runner()
     activation, context = activation_context(tmp_path)
 
     with pytest.raises(AgentRunFailure, match="configuration is incomplete"):

@@ -26,7 +26,6 @@ def main() -> None:
         on_persist=store.save_organization,
     )
     model_runtime = create_runner(
-        working_directory,
         stored_config=store.load_model_config(working_directory),
         on_configure=lambda config: store.save_model_config(
             working_directory,

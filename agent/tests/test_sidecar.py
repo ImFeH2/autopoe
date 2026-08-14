@@ -80,6 +80,30 @@ def test_sidecar_shutdown_request_stops_the_process(tmp_path: Path) -> None:
         close_process(process)
 
 
+def test_sidecar_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> None:
+    working_directory = tmp_path / "project"
+    working_directory.mkdir()
+    (working_directory / ".env").write_text(
+        "provider=openai\n"
+        "base_url=https://example.invalid/v1\n"
+        "api_key=ignored-secret\n"
+        "model=ignored-model\n"
+    )
+    process = start_sidecar(tmp_path / "data", working_directory)
+
+    try:
+        assert request(process, 1, "settings.get_model", {}) == {
+            "provider": "openai",
+            "base_url": "",
+            "model": "",
+            "has_api_key": False,
+        }
+        assert request(process, 2, "system.shutdown", {}) == {"stopped": True}
+        assert process.wait(timeout=10) == 0
+    finally:
+        close_process(process)
+
+
 def test_persists_state_and_model_settings_across_sidecar_restarts(
     tmp_path: Path,
 ) -> None:
@@ -161,7 +185,7 @@ def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
         "        context.exec([sys.executable, '-c', \"import os,pathlib,time; "
         "pathlib.Path('long.pid').write_text(str(os.getpid())); time.sleep(60)\"], "
         "'artifacts/desktop/e2e-agent-work', 60)\n"
-        "model_runner.create_runner = lambda directory, **kwargs: LongExecRunner()\n"
+        "model_runner.create_runner = lambda **kwargs: LongExecRunner()\n"
     )
     environment = os.environ.copy()
     python_path = environment.get("PYTHONPATH")
