@@ -30,7 +30,7 @@ def test_read_then_ack_stops_future_activation() -> None:
     activation, _ = state.claim_next_activation()
     assert activation is not None
 
-    discussion = state.read_discussion(2, 1, [1])
+    discussion = state.read_discussion(2, 1, end_message_id=1)
     assert discussion["messages"][0]["mentions"] == [{"member_id": 2, "status": "read"}]
     state.ack_messages(2, 1, [1])
     state.complete_activation(2)
@@ -53,29 +53,33 @@ def test_unacked_message_reactivates_immediately_after_idle() -> None:
     assert second.items == first.items
 
 
-def test_invalid_batch_read_does_not_partially_mark_mentions_read() -> None:
+def test_invalid_read_range_does_not_mark_mentions_read() -> None:
     state = make_state()
     state.send_message(1, 1, "Original", [2])
 
-    with pytest.raises(DomainError, match="Message not found"):
-        state.read_discussion(2, 1, [1, 999])
+    with pytest.raises(DomainError, match="cannot exceed"):
+        state.read_discussion(
+            2,
+            1,
+            start_message_id=2,
+            end_message_id=1,
+        )
 
     assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
         {"member_id": 2, "status": "pending"}
     ]
 
 
-def test_read_returns_only_requested_messages() -> None:
+def test_read_range_includes_messages_that_do_not_mention_agent() -> None:
     state = make_state()
-    state.send_message(1, 1, "First", [2])
-    state.send_message(1, 1, "Second", [2])
+    state.send_message(1, 1, "Context for everyone")
+    state.send_message(1, 1, "Please handle this", [2])
 
-    discussion = state.read_discussion(2, 1, [2])
+    discussion = state.read_discussion(2, 1, end_message_id=2)
 
-    assert [message["id"] for message in discussion["messages"]] == [2]
-    assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
-        {"member_id": 2, "status": "pending"}
-    ]
+    assert [message["id"] for message in discussion["messages"]] == [1, 2]
+    assert discussion["messages"][0]["mentions"] == []
+    assert discussion["messages"][1]["mentions"] == [{"member_id": 2, "status": "read"}]
 
 
 def test_new_message_during_run_is_visible_and_enters_next_activation() -> None:
@@ -86,7 +90,7 @@ def test_new_message_during_run_is_visible_and_enters_next_activation() -> None:
     assert first.items[0].message_ids == (1,)
 
     state.send_message(1, 1, "Arrived while running", [2])
-    current = state.read_discussion(2, 1, [1, 2])
+    current = state.read_discussion(2, 1, start_message_id=1, end_message_id=2)
     assert [message["body"] for message in current["messages"]] == [
         "Original",
         "Arrived while running",
@@ -104,7 +108,7 @@ def test_acked_work_stays_idle_after_a_late_failure() -> None:
     state.send_message(1, 1, "Completed", [2])
     activation, _ = state.claim_next_activation()
     assert activation is not None
-    state.read_discussion(2, 1, [1])
+    state.read_discussion(2, 1, end_message_id=1)
     state.ack_messages(2, 1, [1])
 
     state.complete_activation(2, "Late model failure")
@@ -125,7 +129,7 @@ def test_read_unacked_work_can_be_retried_after_failure() -> None:
     state.send_message(1, 1, "Retry me", [2])
     activation, _ = state.claim_next_activation()
     assert activation is not None
-    state.read_discussion(2, 1, [1])
+    state.read_discussion(2, 1, end_message_id=1)
 
     state.complete_activation(2, "Model request failed")
 
@@ -190,7 +194,7 @@ def test_late_failure_after_old_ack_schedules_only_new_work() -> None:
     state.send_message(1, 1, "Original", [2])
     first, _ = state.claim_next_activation()
     assert first is not None
-    state.read_discussion(2, 1, [1])
+    state.read_discussion(2, 1, end_message_id=1)
     state.ack_messages(2, 1, [1])
     state.send_message(1, 1, "Arrived while running", [2])
 

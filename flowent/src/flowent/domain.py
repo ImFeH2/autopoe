@@ -196,30 +196,68 @@ class OrganizationState:
         with self._condition:
             return [self._member_data(member) for member in self._members.values()]
 
-    def list_discussions(self) -> list[dict[str, Any]]:
+    def list_discussions(self, member_id: int | None = None) -> list[dict[str, Any]]:
         with self._condition:
+            if member_id is not None:
+                self._require_member(member_id)
             return [
                 self._discussion_data(discussion)
                 for discussion in self._discussions.values()
+                if member_id is None or member_id in discussion.member_ids
             ]
+
+    def discussion_info(
+        self,
+        member_id: int,
+        discussion_id: int,
+    ) -> dict[str, Any]:
+        with self._condition:
+            self._require_member(member_id)
+            discussion = self._require_discussion_member(member_id, discussion_id)
+            return self._discussion_info_data(discussion)
 
     def read_discussion(
         self,
         agent_id: int,
         discussion_id: int,
-        message_ids: Iterable[int] = (),
+        start_message_id: int | None = None,
+        end_message_id: int | None = None,
+        limit: int = 100,
     ) -> dict[str, Any]:
+        if start_message_id is not None and start_message_id < 1:
+            raise DomainError("invalid_range", "start_message_id must be positive")
+        if end_message_id is not None and end_message_id < 1:
+            raise DomainError("invalid_range", "end_message_id must be positive")
+        if (
+            start_message_id is not None
+            and end_message_id is not None
+            and start_message_id > end_message_id
+        ):
+            raise DomainError(
+                "invalid_range", "start_message_id cannot exceed end_message_id"
+            )
+        if limit < 1 or limit > 200:
+            raise DomainError("invalid_limit", "limit must be between 1 and 200")
+
         with self._condition:
             self._require_agent(agent_id)
-            discussion = self._require_discussion(discussion_id)
-            target_ids = tuple(dict.fromkeys(message_ids))
-            messages_by_id = {message.id: message for message in discussion.messages}
-            selected_messages: list[Message] = []
-            for message_id in target_ids:
-                message = messages_by_id.get(message_id)
-                if message is None:
-                    raise DomainError("message_not_found", "Message not found")
-                selected_messages.append(message)
+            discussion = self._require_discussion_member(agent_id, discussion_id)
+            messages = discussion.messages
+            if start_message_id is None:
+                candidates = [
+                    message
+                    for message in messages
+                    if end_message_id is None or message.id <= end_message_id
+                ]
+                selected_messages = candidates[-limit:]
+            else:
+                candidates = [
+                    message
+                    for message in messages
+                    if message.id >= start_message_id
+                    and (end_message_id is None or message.id <= end_message_id)
+                ]
+                selected_messages = candidates[:limit]
 
             changed = False
             for message in selected_messages:
@@ -243,7 +281,7 @@ class OrganizationState:
 
         with self._condition:
             self._require_agent(agent_id)
-            discussion = self._require_discussion(discussion_id)
+            discussion = self._require_discussion_member(agent_id, discussion_id)
             messages_by_id = {message.id: message for message in discussion.messages}
             for message_id in target_ids:
                 message = messages_by_id.get(message_id)
@@ -266,16 +304,29 @@ class OrganizationState:
         query: str,
         discussion_id: int | None = None,
         sender_id: int | None = None,
+        member_id: int | None = None,
     ) -> list[dict[str, Any]]:
         normalized_query = query.strip().casefold()
         if not normalized_query:
             raise DomainError("invalid_query", "Search query is required")
 
         with self._condition:
+            if member_id is not None:
+                self._require_member(member_id)
             if discussion_id is not None:
-                discussions = [self._require_discussion(discussion_id)]
+                discussion = self._require_discussion(discussion_id)
+                if member_id is not None and member_id not in discussion.member_ids:
+                    raise DomainError(
+                        "not_a_member",
+                        "Only Discussion Members can search Messages",
+                    )
+                discussions = [discussion]
             else:
-                discussions = list(self._discussions.values())
+                discussions = [
+                    discussion
+                    for discussion in self._discussions.values()
+                    if member_id is None or member_id in discussion.member_ids
+                ]
             if sender_id is not None:
                 self._require_member(sender_id)
 
@@ -412,11 +463,40 @@ class OrganizationState:
         discussion: Discussion,
         messages: Iterable[Message],
     ) -> dict[str, Any]:
+        selected_messages = list(messages)
+        first_message_id = selected_messages[0].id if selected_messages else None
+        last_message_id = selected_messages[-1].id if selected_messages else None
+        latest_message_id = discussion.messages[-1].id if discussion.messages else None
+        return {
+            "discussion_id": discussion.id,
+            "messages": [self._message_data(message) for message in selected_messages],
+            "first_message_id": first_message_id,
+            "last_message_id": last_message_id,
+            "latest_message_id": latest_message_id,
+            "has_earlier": first_message_id is not None and first_message_id > 1,
+            "has_later": (
+                last_message_id is not None
+                and latest_message_id is not None
+                and last_message_id < latest_message_id
+            ),
+        }
+
+    def _discussion_info_data(self, discussion: Discussion) -> dict[str, Any]:
         return {
             "id": discussion.id,
             "topic": discussion.topic,
-            "member_ids": list(discussion.member_ids),
-            "messages": [self._message_data(message) for message in messages],
+            "members": [
+                {
+                    "id": self._members[member_id].id,
+                    "type": self._members[member_id].type,
+                    "name": self._members[member_id].name,
+                }
+                for member_id in discussion.member_ids
+            ],
+            "message_count": len(discussion.messages),
+            "latest_message_id": (
+                discussion.messages[-1].id if discussion.messages else None
+            ),
         }
 
     def _message_data(self, message: Message) -> dict[str, Any]:
@@ -524,6 +604,19 @@ class OrganizationState:
         discussion = self._discussions.get(discussion_id)
         if discussion is None:
             raise DomainError("discussion_not_found", "Discussion not found")
+        return discussion
+
+    def _require_discussion_member(
+        self,
+        member_id: int,
+        discussion_id: int,
+    ) -> Discussion:
+        discussion = self._require_discussion(discussion_id)
+        if member_id not in discussion.member_ids:
+            raise DomainError(
+                "not_a_member",
+                "Only Discussion Members can access Messages",
+            )
         return discussion
 
     def _changed(self, persist: bool = False) -> None:

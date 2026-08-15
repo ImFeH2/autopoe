@@ -53,7 +53,7 @@ class AgentRunContext:
                 creator_id=self.agent_id,
                 member_ids=arguments["member_ids"],
             )
-            return discussion_summary(snapshot["discussions"][-1])
+            return {"discussion_id": snapshot["discussions"][-1]["id"]}
         if action == "send":
             discussion_id = arguments["discussion_id"]
             snapshot = self.state.send_message(
@@ -76,13 +76,20 @@ class AgentRunContext:
         if action == "list":
             return [
                 discussion_summary(discussion)
-                for discussion in self.state.list_discussions()
+                for discussion in self.state.list_discussions(self.agent_id)
             ]
+        if action == "info":
+            return self.state.discussion_info(
+                member_id=self.agent_id,
+                discussion_id=arguments["discussion_id"],
+            )
         if action == "read":
             return self.state.read_discussion(
                 agent_id=self.agent_id,
                 discussion_id=arguments["discussion_id"],
-                message_ids=arguments.get("message_ids", ()),
+                start_message_id=arguments.get("start_message_id"),
+                end_message_id=arguments.get("end_message_id"),
+                limit=arguments.get("limit", 100),
             )
         if action == "ack":
             return self.state.ack_messages(
@@ -101,6 +108,7 @@ class AgentRunContext:
                     query=arguments["query"],
                     discussion_id=arguments.get("discussion_id"),
                     sender_id=arguments.get("sender_id"),
+                    member_id=self.agent_id,
                 )
             ]
         raise ValueError(f"Unknown discussion action: {action}")
@@ -110,8 +118,6 @@ def discussion_summary(discussion: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": discussion["id"],
         "topic": discussion["topic"],
-        "member_ids": discussion["member_ids"],
-        "message_count": len(discussion["messages"]),
     }
 
 

@@ -202,7 +202,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
     state.create_agent("Ada")
     state.create_discussion("Persistent work", 1, [2])
     state.send_message(1, 1, "Continue after restart", [2])
-    state.read_discussion(2, 1, [1])
+    state.read_discussion(2, 1, end_message_id=1)
 
     restored = persisted_state(store, working_directory)
 

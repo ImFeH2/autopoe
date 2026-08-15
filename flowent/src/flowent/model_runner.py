@@ -141,7 +141,9 @@ class PydanticAgentRunner:
             instructions=(
                 "You are an Agent in Flowent. All Agents are equal and use the same tools. "
                 "An Activation only identifies Messages waiting for you; it never contains their body. "
-                "Use discussion action=read for every listed Message before deciding what to do. "
+                "Use discussion action=read to inspect enough of each listed Discussion around "
+                "its Message IDs before deciding what to do. You can read every Message in "
+                "Discussions you belong to, including Messages that do not mention you. "
                 "Communicate only with discussion action=send. Use organization and discussion tools "
                 "to discover Members, create Agents, or open a new Discussion when useful. "
                 "Use exec with an argv list to inspect the launch directory and run commands. "
@@ -196,17 +198,20 @@ class PydanticAgentRunner:
         @self._agent.tool
         def discussion(
             ctx: RunContext[AgentRunContext],
-            action: Literal["create", "send", "list", "read", "ack", "search"],
+            action: Literal["create", "send", "list", "info", "read", "ack", "search"],
             discussion_id: int | None = None,
             topic: str | None = None,
             member_ids: list[int] | None = None,
             body: str | None = None,
             mention_ids: list[int] | None = None,
             message_ids: list[int] | None = None,
+            start_message_id: int | None = None,
+            end_message_id: int | None = None,
+            limit: int | None = None,
             query: str | None = None,
             sender_id: int | None = None,
         ) -> Any:
-            """Create, send, list, read, acknowledge, or search Discussions and Messages."""
+            """Create, send, list, inspect, read, acknowledge, or search Discussions and Messages."""
             try:
                 if action == "create":
                     if not topic or not member_ids:
@@ -227,13 +232,19 @@ class PydanticAgentRunner:
                     )
                 if action == "list":
                     return ctx.deps.discussion(action)
+                if action == "info":
+                    if discussion_id is None:
+                        raise ModelRetry("discussion_id is required for info")
+                    return ctx.deps.discussion(action, discussion_id=discussion_id)
                 if action == "read":
                     if discussion_id is None:
                         raise ModelRetry("discussion_id is required for read")
                     return ctx.deps.discussion(
                         action,
                         discussion_id=discussion_id,
-                        message_ids=message_ids or [],
+                        start_message_id=start_message_id,
+                        end_message_id=end_message_id,
+                        limit=100 if limit is None else limit,
                     )
                 if action == "ack":
                     if discussion_id is None or not message_ids:
@@ -270,8 +281,10 @@ class PydanticAgentRunner:
         ]
         prompt = (
             f"You are Member {activation.agent_id}. Process this Activation: {items}. "
-            "Read the listed Messages, do the requested work using available tools, communicate "
-            "through Discussions, then acknowledge completed triggering Messages."
+            "The Message IDs identify work that requires acknowledgement, not your visible "
+            "Message range. Read enough of each Discussion around those IDs to understand the "
+            "conversation, do the requested work using available tools, communicate through "
+            "Discussions, then acknowledge completed triggering Messages."
         )
         run_observability = (
             self._observability.bind(activation) if self._observability else None

@@ -93,6 +93,64 @@ def test_message_ids_are_scoped_to_each_discussion() -> None:
     assert [message["id"] for message in snapshot["discussions"][1]["messages"]] == [1]
 
 
+def test_discussion_read_ranges_are_paginated_and_ordered() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    for message_id in range(1, 6):
+        state.send_message(
+            1,
+            1,
+            f"Message {message_id}",
+            [2] if message_id == 4 else [],
+        )
+
+    latest = state.read_discussion(2, 1, limit=2)
+    ending_at_three = state.read_discussion(2, 1, end_message_id=3, limit=2)
+    forward = state.read_discussion(
+        2,
+        1,
+        start_message_id=2,
+        end_message_id=4,
+        limit=2,
+    )
+
+    assert [message["id"] for message in latest["messages"]] == [4, 5]
+    assert latest["has_earlier"] is True
+    assert latest["has_later"] is False
+    assert latest["latest_message_id"] == 5
+    assert [message["id"] for message in ending_at_three["messages"]] == [2, 3]
+    assert ending_at_three["has_earlier"] is True
+    assert ending_at_three["has_later"] is True
+    assert [message["id"] for message in forward["messages"]] == [2, 3]
+    assert forward["has_earlier"] is True
+    assert forward["has_later"] is True
+    assert state.snapshot()["discussions"][0]["messages"][3]["mentions"] == [
+        {"member_id": 2, "status": "read"}
+    ]
+
+
+def test_discussion_info_returns_member_metadata() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "First")
+
+    assert state.discussion_info(2, 1) == {
+        "id": 1,
+        "topic": "Work",
+        "members": [
+            {"id": 1, "type": "human", "name": "You"},
+            {"id": 2, "type": "agent", "name": "Ada"},
+        ],
+        "message_count": 1,
+        "latest_message_id": 1,
+    }
+    with pytest.raises(DomainError, match="Only Discussion Members"):
+        state.discussion_info(3, 1)
+
+
 def test_discussion_topic_and_members_are_snapshot_values() -> None:
     state = OrganizationState()
     state.create_agent("Ada")

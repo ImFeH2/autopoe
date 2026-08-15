@@ -7,8 +7,9 @@ from pathlib import Path
 from threading import Event
 
 import psutil
+import pytest
 
-from flowent.domain import Activation, OrganizationState
+from flowent.domain import Activation, DomainError, OrganizationState
 from flowent.host_tools import HostTools
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRuntime
 
@@ -27,6 +28,7 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
     projections = [
         context.organization("create_agent", name="Lin"),
         context.discussion("list"),
+        context.discussion("info", discussion_id=1),
         context.discussion("search", query="private"),
         context.discussion("send", discussion_id=1, body="response metadata"),
         context.discussion("create", topic="Another", member_ids=[1]),
@@ -38,15 +40,45 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
         {"member_id": 2, "status": "pending"}
     ]
 
-    read = context.discussion("read", discussion_id=1, message_ids=[1])
-    assert read["messages"] == [
-        {
-            "id": 1,
-            "sender_id": 1,
-            "body": "private request",
-            "mentions": [{"member_id": 2, "status": "read"}],
-        }
+    read = context.discussion("read", discussion_id=1, end_message_id=1)
+    assert read == {
+        "discussion_id": 1,
+        "messages": [
+            {
+                "id": 1,
+                "sender_id": 1,
+                "body": "private request",
+                "mentions": [{"member_id": 2, "status": "read"}],
+            }
+        ],
+        "first_message_id": 1,
+        "last_message_id": 1,
+        "latest_message_id": 2,
+        "has_earlier": False,
+        "has_later": True,
+    }
+
+
+def test_agent_discussion_tools_are_restricted_to_members(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Ada work", 1, [2])
+    state.create_discussion("Lin work", 1, [3])
+    state.send_message(1, 1, "Ada context")
+    state.send_message(2, 1, "Lin private context")
+    context = AgentRunContext(2, state, HostTools(tmp_path))
+
+    assert context.discussion("list") == [{"id": 1, "topic": "Ada work"}]
+    assert context.discussion("search", query="context") == [
+        {"discussion_id": 1, "message_id": 1, "sender_id": 1}
     ]
+    with pytest.raises(DomainError, match="Only Discussion Members"):
+        context.discussion("info", discussion_id=2)
+    with pytest.raises(DomainError, match="Only Discussion Members"):
+        context.discussion("read", discussion_id=2)
+    with pytest.raises(DomainError, match="Only Discussion Members"):
+        context.discussion("search", discussion_id=2, query="private")
 
 
 class RecordingRunner:
@@ -60,7 +92,7 @@ class RecordingRunner:
             context.discussion(
                 "read",
                 discussion_id=item.discussion_id,
-                message_ids=list(item.message_ids),
+                end_message_id=max(item.message_ids),
             )
             context.discussion(
                 "send",
@@ -117,7 +149,7 @@ class AckThenFailRunner:
             context.discussion(
                 "read",
                 discussion_id=item.discussion_id,
-                message_ids=list(item.message_ids),
+                end_message_id=max(item.message_ids),
             )
             context.discussion(
                 "ack",
