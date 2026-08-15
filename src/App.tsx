@@ -12,7 +12,6 @@ import {
   type WorkspaceView,
 } from "@/components/layout";
 import {
-  Badge,
   Button,
   Checkbox,
   Dialog,
@@ -28,7 +27,6 @@ import {
   backend,
   type Discussion,
   type Member,
-  type Mention,
   type ModelApiType,
   type ModelSettings,
   type ObservabilitySettings,
@@ -60,14 +58,8 @@ function agentStatusTone(status: AgentMember["status"]) {
   return "success" as const;
 }
 
-function mentionStatusTone(status: Mention["status"]) {
-  if (status === "acked") {
-    return "success" as const;
-  }
-  if (status === "read") {
-    return "accent" as const;
-  }
-  return "neutral" as const;
+export function formatMessageCount(count: number): string {
+  return `${count} ${count === 1 ? "message" : "messages"}`;
 }
 
 type ModelSettingsDraft = {
@@ -380,6 +372,10 @@ function App() {
             onDialogOpenChange={changeDiscussionDialog}
             onMessageChange={setMessageBody}
             onMentionToggle={toggleMessageMention}
+            onSelectAgents={() => {
+              selectWorkspaceView("agents");
+              requestAnimationFrame(() => agentNameInputRef.current?.focus());
+            }}
             onSelectDiscussion={selectDiscussion}
             onSend={handleSendMessage}
             onToggleMember={toggleMember}
@@ -887,6 +883,7 @@ type DiscussionsPageProps = {
   onDialogOpenChange: (open: boolean) => void;
   onMessageChange: (body: string) => void;
   onMentionToggle: (memberId: number) => void;
+  onSelectAgents: () => void;
   onSelectDiscussion: (discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
@@ -911,6 +908,7 @@ function DiscussionsPage({
   onDialogOpenChange,
   onMessageChange,
   onMentionToggle,
+  onSelectAgents,
   onSelectDiscussion,
   onSend,
   onToggleMember,
@@ -948,9 +946,15 @@ function DiscussionsPage({
             title="New discussion"
             trigger={
               <Button
+                aria-describedby={
+                  agents.length === 0 ? "new-discussion-requirement" : undefined
+                }
                 aria-label="New discussion"
                 disabled={agents.length === 0 || disabled}
                 size="icon"
+                title={
+                  agents.length === 0 ? "Create an Agent first" : undefined
+                }
                 variant="primary"
               >
                 <Plus aria-hidden="true" size={15} />
@@ -983,7 +987,7 @@ function DiscussionsPage({
                   active={selected}
                   aria-label={`Open ${discussion.topic}`}
                   key={discussion.id}
-                  meta={`${discussion.messages.length} messages`}
+                  meta={formatMessageCount(discussion.messages.length)}
                   onClick={() => onSelectDiscussion(discussion.id)}
                   title={discussion.topic}
                 />
@@ -1010,7 +1014,31 @@ function DiscussionsPage({
           </section>
         ) : (
           <div className="discussion-empty">
-            <p>Select a discussion</p>
+            {agents.length === 0 ? (
+              <div className="discussion-empty-content">
+                <h2>Create an Agent first</h2>
+                <p id="new-discussion-requirement">
+                  Discussions need at least one Agent.
+                </p>
+                <Button onClick={onSelectAgents} variant="secondary">
+                  New Agent
+                </Button>
+              </div>
+            ) : discussions.length === 0 ? (
+              <div className="discussion-empty-content">
+                <h2>Create a discussion</h2>
+                <p>Start collaborating with your Agents.</p>
+                <Button
+                  disabled={disabled}
+                  onClick={() => onDialogOpenChange(true)}
+                  variant="primary"
+                >
+                  New discussion
+                </Button>
+              </div>
+            ) : (
+              <p>Select a discussion</p>
+            )}
           </div>
         )}
       </div>
@@ -1173,6 +1201,20 @@ function DiscussionView({
     onSend(event);
   }
 
+  function handleMessageChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
+    const input = event.currentTarget;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+    onMessageChange(input.value);
+  }
+
+  useEffect(() => {
+    const input = messageInputRef.current;
+    if (input && messageBody.length === 0) {
+      input.style.height = "";
+    }
+  }, [messageBody, messageInputRef]);
+
   return (
     <>
       <header className="border-border border-b px-6 py-4">
@@ -1225,16 +1267,14 @@ function DiscussionView({
                     {message.mentions.length > 0 ? (
                       <ul className="mention-statuses" aria-label="Mentions">
                         {message.mentions.map((mention) => (
-                          <li key={mention.member_id}>
-                            <Badge
-                              size="small"
-                              tone={mentionStatusTone(mention.status)}
-                            >
-                              @
-                              {membersById.get(mention.member_id)?.name ??
-                                mention.member_id}{" "}
-                              · {mention.status.toUpperCase()}
-                            </Badge>
+                          <li
+                            className={`mention-status mention-status--${mention.status}`}
+                            key={mention.member_id}
+                          >
+                            @
+                            {membersById.get(mention.member_id)?.name ??
+                              mention.member_id}{" "}
+                            · {mention.status.toUpperCase()}
                           </li>
                         ))}
                       </ul>
@@ -1247,7 +1287,7 @@ function DiscussionView({
         )}
       </div>
       <form
-        className="border-border border-t bg-surface-subtle p-4"
+        className="message-composer"
         aria-label="Send Message"
         onSubmit={handleSend}
       >
@@ -1277,13 +1317,14 @@ function DiscussionView({
             aria-label="Message"
             autoFocus
             disabled={disabled}
-            onChange={(event) => onMessageChange(event.target.value)}
+            onChange={handleMessageChange}
             onKeyDown={handleMessageKeyDown}
             placeholder="Write a message"
             ref={messageInputRef}
             required
-            rows={3}
+            rows={1}
             value={messageBody}
+            variant="composer"
           />
           <Button disabled={disabled} type="submit" variant="primary">
             Send

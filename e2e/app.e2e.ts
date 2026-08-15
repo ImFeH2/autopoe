@@ -118,7 +118,8 @@ describe("Flowent desktop", () => {
     await expect($("[aria-label='Discussion list']")).toHaveText(
       expect.stringContaining("No discussions"),
     );
-    await expect($("p=Select a discussion")).toExist();
+    await expect($("h2=Create an Agent first")).toExist();
+    await expect($("button=New Agent")).toExist();
     await expect($("form[aria-label='Create Discussion']")).not.toExist();
     await expect($("[aria-label='Search discussions']")).toExist();
     await expect($("button[aria-label='New discussion']")).toBeDisabled();
@@ -299,7 +300,8 @@ describe("Flowent desktop", () => {
 
     await $("button[aria-label='Discussions']").click();
     await expectCurrentDestination("Discussions");
-    await expect($("p=Select a discussion")).toExist();
+    await expect($("h2=Create a discussion")).toExist();
+    await expect($("button=New discussion")).toExist();
     await $("button[aria-label='New discussion']").click();
     await expect($("[role='dialog']")).toExist();
     await expect($("#discussion-topic")).toBeFocused();
@@ -353,6 +355,25 @@ describe("Flowent desktop", () => {
     await expect($(".message-row--agent .message-bubble")).toHaveText(
       expect.stringContaining("Ada used exec and patch"),
     );
+    await expect($(".mention-status--acked")).toExist();
+    const discussionVisuals = await browser.execute(() => {
+      const humanBubble = document.querySelector(
+        ".message-row--human .message-bubble",
+      );
+      const listButton = document.querySelector(".ui-list-button");
+      const listTitle = document.querySelector(".ui-list-button__title");
+      if (!humanBubble || !listButton || !listTitle) {
+        return null;
+      }
+      return {
+        background: getComputedStyle(humanBubble).backgroundColor,
+        titleOffset:
+          listTitle.getBoundingClientRect().left -
+          listButton.getBoundingClientRect().left,
+      };
+    });
+    expect(discussionVisuals?.background).toBe("rgba(63, 93, 179, 0.3)");
+    expect(discussionVisuals?.titleOffset).toBeLessThanOrEqual(12);
     expect(
       await browser.execute(() => {
         const body = document.querySelector(
@@ -466,6 +487,9 @@ describe("Flowent desktop", () => {
 
     await createDiscussion("Review history");
     await sendMessage("Second Discussion message one.");
+    await expect($("button[aria-label='Open Review history']")).toHaveText(
+      expect.stringContaining("1 message"),
+    );
     await $("[aria-label='Search discussions']").setValue("Review");
     await expect($("button[aria-label='Open Review history']")).toExist();
     await expect($("button[aria-label='Open Repository work']")).not.toExist();
@@ -504,6 +528,32 @@ describe("Flowent desktop", () => {
         true,
       );
       expect(await isFullyVisible("[aria-label='Message']")).toBe(true);
+      expect(
+        await browser.execute(() => {
+          const composer = document.querySelector(".message-composer");
+          const sidebar = document.querySelector(".app-sidebar");
+          const sidebarCopy = document.querySelector(".sidebar-user-copy");
+          if (!composer || !sidebar || !sidebarCopy) {
+            return null;
+          }
+          return {
+            composerHeight: composer.getBoundingClientRect().height,
+            sidebarCopyDisplay: getComputedStyle(sidebarCopy).display,
+            sidebarWidth: sidebar.getBoundingClientRect().width,
+          };
+        }),
+      ).toEqual({
+        composerHeight: expect.any(Number),
+        sidebarCopyDisplay: width === 1024 ? "none" : "grid",
+        sidebarWidth: width === 1024 ? 64 : 220,
+      });
+      expect(
+        await browser.execute(
+          () =>
+            document.querySelector(".message-composer")?.getBoundingClientRect()
+              .height ?? Number.POSITIVE_INFINITY,
+        ),
+      ).toBeLessThan(120);
     }
   });
 

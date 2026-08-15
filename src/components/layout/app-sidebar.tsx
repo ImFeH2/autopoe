@@ -57,6 +57,7 @@ export function AppSidebar({
               className="sidebar-nav-button"
               key={item.view}
               onClick={() => onSelectView(item.view)}
+              title={item.label}
               variant={view === item.view ? "secondary" : "quiet"}
             >
               <Icon aria-hidden="true" size={15} />
@@ -75,6 +76,7 @@ export function AppSidebar({
           aria-label="Settings"
           className="sidebar-settings-button"
           onClick={() => onSelectView("settings")}
+          title="Settings"
           variant={view === "settings" ? "secondary" : "quiet"}
         >
           <Settings2 aria-hidden="true" size={15} />

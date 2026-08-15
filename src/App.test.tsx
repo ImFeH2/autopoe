@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import App, {
   filterDiscussions,
+  formatMessageCount,
   isModelSettingsDirty,
   isObservabilitySettingsDirty,
   shouldSubmitMessage,
@@ -98,6 +99,12 @@ describe("App", () => {
     ).toBe(true);
   });
 
+  it("formats Discussion message counts with correct grammar", () => {
+    expect(formatMessageCount(0)).toBe("0 messages");
+    expect(formatMessageCount(1)).toBe("1 message");
+    expect(formatMessageCount(2)).toBe("2 messages");
+  });
+
   it("filters Discussions by topic without changing their order", () => {
     const discussions = [
       {
@@ -149,13 +156,14 @@ describe("App", () => {
     const markup = renderToStaticMarkup(
       <form>
         <Input aria-label="Agent name" />
-        <Textarea aria-label="Message" />
+        <Textarea aria-label="Message" variant="composer" />
         <Button type="submit">Send</Button>
       </form>,
     );
 
     expect(markup).toContain('aria-label="Agent name"');
     expect(markup).toContain('aria-label="Message"');
+    expect(markup).toContain("ui-textarea--composer");
     expect(markup).toContain('type="submit"');
     expect(markup).toContain(">Send</button>");
   });

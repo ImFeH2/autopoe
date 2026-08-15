@@ -227,6 +227,21 @@ body {
   margin: 0;
 }
 
+.discussion-empty-content {
+  display: grid;
+  max-width: 280px;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.discussion-empty-content h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .discussion-pane {
   display: grid;
   min-width: 0;
@@ -532,9 +547,9 @@ body {
 }
 
 .message-row--human .message-bubble {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
 }
 
 .message-meta {
@@ -555,7 +570,7 @@ body {
 }
 
 .message-row--human .message-meta span {
-  color: var(--color-text-inverse-muted);
+  color: var(--color-text-tertiary);
 }
 
 .message-body {
@@ -566,18 +581,58 @@ body {
 .mention-statuses {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  margin: 8px 0 0;
+  gap: 5px 12px;
+  margin: 7px 0 0;
   padding: 0;
   list-style: none;
 }
 
+.mention-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.mention-status::before {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  content: "";
+}
+
+.mention-status--read {
+  color: var(--color-accent-text);
+}
+
+.mention-status--read::before {
+  background: var(--color-accent-hover);
+}
+
+.mention-status--acked {
+  color: var(--color-success-text);
+}
+
+.mention-status--acked::before {
+  background: var(--color-success);
+}
+
+.message-composer {
+  border-top: 1px solid var(--color-border);
+  padding: 10px 16px 12px;
+  background: var(--color-surface-subtle);
+}
+
 .mention-picker {
   display: flex;
-  min-height: 28px;
+  min-height: 24px;
   align-items: center;
   gap: 14px;
-  margin: 0 0 9px;
+  margin: 0 0 6px;
   border: 0;
   padding: 0;
 }
@@ -625,6 +680,12 @@ textarea {
   padding: 9px 11px;
   line-height: 21px;
   resize: vertical;
+}
+
+.ui-textarea--composer {
+  min-height: 40px;
+  max-height: 120px;
+  resize: none;
 }
 
 .ui-input::placeholder,
@@ -723,6 +784,7 @@ textarea {
   width: 100%;
   min-height: 58px;
   align-content: center;
+  justify-content: stretch;
   justify-items: start;
   gap: 3px;
   padding: 8px 10px;
@@ -953,7 +1015,37 @@ textarea:focus-visible {
 
 @media (max-width: 1100px) {
   .app-shell {
-    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .app-sidebar {
+    padding-inline: 8px;
+  }
+
+  .sidebar-brand {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .app-brand,
+  .sidebar-nav-button > span,
+  .sidebar-settings-button > span,
+  .sidebar-user-copy {
+    display: none;
+  }
+
+  .sidebar-nav-button,
+  .sidebar-settings-button {
+    width: 36px;
+    align-self: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sidebar-user {
+    grid-template-columns: auto;
+    justify-items: center;
+    padding-inline: 0;
   }
 
   .page-heading {
