@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,9 +10,10 @@ if (action !== "dev" && action !== "build") {
   throw new Error("Expected app action: dev or build");
 }
 
-const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const child = spawn(packageManager, ["--dir", app, "tauri", action], {
-  cwd: root,
+const require = createRequire(resolve(app, "package.json"));
+const tauriCli = require.resolve("@tauri-apps/cli/tauri.js");
+const child = spawn(process.execPath, [tauriCli, action], {
+  cwd: app,
   env: {
     ...process.env,
     FLOWENT_WORKING_DIRECTORY: process.cwd(),
