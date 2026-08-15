@@ -15,7 +15,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.models.test import TestModel
 
-from flowent.domain import Activation, ActivationItem, OrganizationState
+from flowent.domain import Activation, OrganizationState
 from flowent.host_tools import HostTools
 from flowent.model_runner import (
     ApiType,
@@ -36,10 +36,7 @@ def activation_context(tmp_path: Path) -> tuple[Activation, AgentRunContext]:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    activation = Activation(
-        agent_id=2,
-        items=(ActivationItem(discussion_id=1, message_ids=(1,)),),
-    )
+    activation = Activation(agent_id=2, discussion_id=1, message_id=1)
     return activation, AgentRunContext(
         agent_id=2,
         state=state,
@@ -148,7 +145,7 @@ def test_all_agents_use_the_latest_shared_runner(
 
     for agent_id in (2, 3):
         runtime.run(
-            Activation(agent_id=agent_id, items=()),
+            Activation(agent_id=agent_id, discussion_id=1, message_id=1),
             AgentRunContext(agent_id, state, host_tools),
         )
 

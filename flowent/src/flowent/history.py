@@ -23,7 +23,7 @@ class AgentHistoryRepository(Protocol):
         agent_id: int,
         run_id: str,
         started_at: str,
-        activation: list[dict[str, Any]],
+        activation: dict[str, int],
     ) -> int: ...
 
     def complete_agent_run(
@@ -82,13 +82,10 @@ class AgentHistory:
         message_history = tuple(self._load_messages(activation.agent_id))
         run_id = str(uuid4())
         started_at = _timestamp()
-        activation_data = [
-            {
-                "discussion_id": item.discussion_id,
-                "message_ids": list(item.message_ids),
-            }
-            for item in activation.items
-        ]
+        activation_data = {
+            "discussion_id": activation.discussion_id,
+            "message_id": activation.message_id,
+        }
         sequence = self._repository.begin_agent_run(
             activation.agent_id,
             run_id,
@@ -254,7 +251,7 @@ class AgentHistory:
                 "id": f"{run['run_id']}-activation",
                 "type": "activation",
                 "timestamp": run["started_at"],
-                "items": run["activation"],
+                "activation": _activation_data(run["activation"]),
                 "state": "complete",
             }
         ]
@@ -336,6 +333,28 @@ class AgentHistory:
             "event_sequence": 0,
             "entries": entries,
         }
+
+
+def _activation_data(value: Any) -> dict[str, int]:
+    if isinstance(value, dict):
+        return {
+            "discussion_id": int(value["discussion_id"]),
+            "message_id": int(value["message_id"]),
+        }
+    if (
+        isinstance(value, list)
+        and len(value) == 1
+        and isinstance(value[0], dict)
+        and isinstance(value[0].get("discussion_id"), int)
+        and isinstance(value[0].get("message_ids"), list)
+        and len(value[0]["message_ids"]) == 1
+        and isinstance(value[0]["message_ids"][0], int)
+    ):
+        return {
+            "discussion_id": value[0]["discussion_id"],
+            "message_id": value[0]["message_ids"][0],
+        }
+    raise RuntimeError("Persisted Activation is invalid")
 
 
 def _timestamp() -> str:

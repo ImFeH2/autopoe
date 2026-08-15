@@ -76,17 +76,11 @@ class ActivationTrace:
 
     @classmethod
     def create(cls, activation: Activation) -> ActivationTrace:
-        discussion_ids = ",".join(str(item.discussion_id) for item in activation.items)
-        session_id = (
-            f"flowent-discussion-{activation.items[0].discussion_id}"
-            if len(activation.items) == 1
-            else None
-        )
         return cls(
             agent_id=activation.agent_id,
-            discussion_ids=discussion_ids,
-            message_count=sum(len(item.message_ids) for item in activation.items),
-            session_id=session_id,
+            discussion_ids=str(activation.discussion_id),
+            message_count=1,
+            session_id=f"flowent-discussion-{activation.discussion_id}",
         )
 
     def run_metadata(self) -> dict[str, str | int]:

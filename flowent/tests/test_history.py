@@ -10,16 +10,13 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from flowent.domain import Activation, ActivationItem
+from flowent.domain import Activation
 from flowent.history import AgentHistory
 from flowent.persistence import SQLiteStore
 
 
 def activation() -> Activation:
-    return Activation(
-        agent_id=2,
-        items=(ActivationItem(discussion_id=1, message_ids=(3, 4)),),
-    )
+    return Activation(agent_id=2, discussion_id=1, message_id=3)
 
 
 def test_persists_complete_agent_history_and_restores_model_messages(

@@ -221,7 +221,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
     activation, _ = restored.claim_next_activation()
     assert activation is not None
     assert activation.agent_id == 2
-    assert activation.items[0].message_ids == (1,)
+    assert activation.message_id == 1
     restored.complete_activation(2, "Stopped for test")
     assert restored.create_agent("Lin")["members"][-1]["id"] == 3
     assert restored.create_discussion("Next", 1, [3])["discussions"][-1]["id"] == 2

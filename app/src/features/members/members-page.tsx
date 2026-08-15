@@ -233,12 +233,10 @@ function formatHistoryTime(value: string) {
 }
 
 function activationLabel(entry: AgentHistoryEntry) {
-  return (entry.items ?? [])
-    .map((item) => {
-      const messages = item.message_ids.join(", ");
-      return `Discussion ${item.discussion_id} · Message${item.message_ids.length === 1 ? "" : "s"} ${messages}`;
-    })
-    .join("\n");
+  const activation = entry.activation;
+  return activation
+    ? `Discussion ${activation.discussion_id} · Message ${activation.message_id}`
+    : "";
 }
 
 function usageLabel(run: AgentHistoryRun) {

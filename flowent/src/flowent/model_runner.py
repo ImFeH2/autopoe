@@ -272,19 +272,16 @@ class PydanticAgentRunner:
         activation: Activation,
         context: AgentRunContext,
     ) -> AgentRunOutcome:
-        items = [
-            {
-                "discussion_id": item.discussion_id,
-                "message_ids": list(item.message_ids),
-            }
-            for item in activation.items
-        ]
+        activation_data = {
+            "discussion_id": activation.discussion_id,
+            "message_id": activation.message_id,
+        }
         prompt = (
-            f"You are Member {activation.agent_id}. Process this Activation: {items}. "
-            "The Message IDs identify work that requires acknowledgement, not your visible "
-            "Message range. Read enough of each Discussion around those IDs to understand the "
-            "conversation, do the requested work using available tools, communicate through "
-            "Discussions, then acknowledge completed triggering Messages."
+            f"You are Member {activation.agent_id}. Process this Activation: {activation_data}. "
+            "This Activation identifies the one Message that requires acknowledgement, not your "
+            "visible Message range. Read enough of its Discussion around that Message to understand "
+            "the conversation, do the requested work using available tools, communicate through "
+            "Discussions, then acknowledge the triggering Message when complete."
         )
         run_observability = (
             self._observability.bind(activation) if self._observability else None

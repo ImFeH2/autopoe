@@ -50,7 +50,7 @@ describe("Agent history", () => {
               type: "activation",
               timestamp: "2026-08-15T00:00:00+00:00",
               state: "complete",
-              items: [{ discussion_id: 1, message_ids: [3] }],
+              activation: { discussion_id: 1, message_id: 3 },
             },
             {
               id: "thinking",
@@ -86,7 +86,7 @@ describe("Agent history", () => {
       sequence: 1,
       timestamp: "2026-08-15T00:00:00+00:00",
       type: "run_started",
-      activation: [{ discussion_id: 1, message_ids: [3] }],
+      activation: { discussion_id: 1, message_id: 3 },
     });
     const first = parseAgentHistoryEvent({
       agent_id: 2,

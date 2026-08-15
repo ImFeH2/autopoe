@@ -111,7 +111,7 @@ def test_retries_a_failed_agent_and_returns_complete_snapshot() -> None:
     }
     retried, _ = state.claim_next_activation()
     assert retried is not None
-    assert retried.items[0].message_ids == (1,)
+    assert retried.message_id == 1
 
 
 def test_returns_structured_errors_without_stopping_the_stream() -> None:

@@ -565,7 +565,7 @@ class SQLiteStore:
         agent_id: int,
         run_id: str,
         started_at: str,
-        activation: list[dict[str, Any]],
+        activation: dict[str, int],
     ) -> int:
         with self._connect() as connection, connection:
             row = connection.execute(

@@ -88,23 +88,68 @@ class RecordingRunner:
 
     def run(self, activation: Activation, context: AgentRunContext) -> None:
         self.activations.append(activation)
-        for item in activation.items:
-            context.discussion(
-                "read",
-                discussion_id=item.discussion_id,
-                end_message_id=max(item.message_ids),
-            )
-            context.discussion(
-                "send",
-                discussion_id=item.discussion_id,
-                body="Handled immediately",
-            )
-            context.discussion(
-                "ack",
-                discussion_id=item.discussion_id,
-                message_ids=list(item.message_ids),
-            )
+        context.discussion(
+            "read",
+            discussion_id=activation.discussion_id,
+            end_message_id=activation.message_id,
+        )
+        context.discussion(
+            "send",
+            discussion_id=activation.discussion_id,
+            body="Handled immediately",
+        )
+        context.discussion(
+            "ack",
+            discussion_id=activation.discussion_id,
+            message_ids=[activation.message_id],
+        )
         self.completed.set()
+
+
+class FollowUpRunner:
+    def __init__(self) -> None:
+        self.activations: list[Activation] = []
+        self.started = Event()
+        self.release = Event()
+        self.followed_up = Event()
+
+    def run(self, activation: Activation, context: AgentRunContext) -> None:
+        self.activations.append(activation)
+        if len(self.activations) == 1:
+            self.started.set()
+            self.release.wait(timeout=1)
+        context.discussion(
+            "read",
+            discussion_id=activation.discussion_id,
+            end_message_id=activation.message_id,
+        )
+        context.discussion(
+            "ack",
+            discussion_id=activation.discussion_id,
+            message_ids=[activation.message_id],
+        )
+        if len(self.activations) == 2:
+            self.followed_up.set()
+
+
+def test_runtime_starts_a_follow_up_turn_for_a_new_mention(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    runner = FollowUpRunner()
+    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime.start()
+
+    try:
+        state.send_message(1, 1, "First", [2])
+        assert runner.started.wait(timeout=1)
+        state.send_message(1, 1, "Second", [2])
+        runner.release.set()
+
+        assert runner.followed_up.wait(timeout=1)
+        assert [activation.message_id for activation in runner.activations] == [1, 2]
+    finally:
+        runtime.stop()
 
 
 class ObservableState(OrganizationState):
@@ -145,17 +190,16 @@ class AckThenFailRunner:
         self.completed = Event()
 
     def run(self, activation: Activation, context: AgentRunContext) -> None:
-        for item in activation.items:
-            context.discussion(
-                "read",
-                discussion_id=item.discussion_id,
-                end_message_id=max(item.message_ids),
-            )
-            context.discussion(
-                "ack",
-                discussion_id=item.discussion_id,
-                message_ids=list(item.message_ids),
-            )
+        context.discussion(
+            "read",
+            discussion_id=activation.discussion_id,
+            end_message_id=activation.message_id,
+        )
+        context.discussion(
+            "ack",
+            discussion_id=activation.discussion_id,
+            message_ids=[activation.message_id],
+        )
         self.completed.set()
         raise AgentRunFailure("Late model failure")
 
@@ -188,7 +232,7 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
         assert state.completed.wait(timeout=1)
 
         snapshot = state.snapshot()
-        assert runner.activations[0].items[0].message_ids == (1,)
+        assert runner.activations[0].message_id == 1
         assert snapshot["members"][1]["status"] == "idle"
         assert snapshot["discussions"][0]["messages"] == [
             {

@@ -16,9 +16,9 @@ export type AgentMember = {
 
 export type Member = HumanMember | AgentMember;
 
-export type AgentActivationItem = {
+export type AgentActivation = {
   discussion_id: number;
-  message_ids: number[];
+  message_id: number;
 };
 
 export type AgentHistoryEntryType =
@@ -37,7 +37,7 @@ export type AgentHistoryEntry = {
   state: "complete" | "interrupted" | "streaming";
   content?: string;
   tool_name?: string;
-  items?: AgentActivationItem[];
+  activation?: AgentActivation;
 };
 
 export type AgentHistoryRun = {
@@ -69,7 +69,7 @@ export type AgentHistoryEvent = {
     | "retry"
     | "run_completed"
     | "run_failed";
-  activation?: AgentActivationItem[];
+  activation?: AgentActivation;
   part_id?: string;
   content?: string;
   tool_name?: string;
@@ -356,27 +356,15 @@ function nonNegativeInteger(value: unknown, path: string): number {
   return value;
 }
 
-function parseActivationItems(
-  value: unknown,
-  path: string,
-): AgentActivationItem[] {
-  return array(value, path).map((item, index) => {
-    const itemPath = `${path}[${index}]`;
-    const activation = record(item, itemPath);
-    return {
-      discussion_id: positiveInteger(
-        activation.discussion_id,
-        `${itemPath}.discussion_id`,
-      ),
-      message_ids: array(activation.message_ids, `${itemPath}.message_ids`).map(
-        (messageId, messageIndex) =>
-          positiveInteger(
-            messageId,
-            `${itemPath}.message_ids[${messageIndex}]`,
-          ),
-      ),
-    };
-  });
+function parseActivation(value: unknown, path: string): AgentActivation {
+  const activation = record(value, path);
+  return {
+    discussion_id: positiveInteger(
+      activation.discussion_id,
+      `${path}.discussion_id`,
+    ),
+    message_id: positiveInteger(activation.message_id, `${path}.message_id`),
+  };
 }
 
 function historyEntryType(value: unknown, path: string): AgentHistoryEntryType {
@@ -423,7 +411,7 @@ function parseHistoryEntry(
     state: historyEntryState(item.state, `${path}.state`),
   };
   if (type === "activation") {
-    entry.items = parseActivationItems(item.items, `${path}.items`);
+    entry.activation = parseActivation(item.activation, `${path}.activation`);
     return entry;
   }
   if (type !== "thinking") {
@@ -500,7 +488,7 @@ export function parseAgentHistoryEvent(value: unknown): AgentHistoryEvent {
     return {
       ...base,
       type: event.type,
-      activation: parseActivationItems(event.activation, "activation"),
+      activation: parseActivation(event.activation, "activation"),
     };
   }
   if (event.type === "text_delta") {
@@ -586,7 +574,7 @@ export function applyAgentHistoryEvent(
               type: "activation",
               timestamp: event.timestamp,
               state: "complete",
-              items: event.activation ?? [],
+              activation: event.activation,
             },
           ],
         },

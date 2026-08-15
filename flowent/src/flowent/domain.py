@@ -48,19 +48,14 @@ class Discussion:
 class AgentExecution:
     status: Literal["idle", "running", "error"] = "idle"
     error: str | None = None
-    claimed_mentions: frozenset[tuple[int, int]] = frozenset()
-
-
-@dataclass(frozen=True)
-class ActivationItem:
-    discussion_id: int
-    message_ids: tuple[int, ...]
+    claimed_mention: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
 class Activation:
     agent_id: int
-    items: tuple[ActivationItem, ...]
+    discussion_id: int
+    message_id: int
 
 
 class OrganizationState:
@@ -353,30 +348,32 @@ class OrganizationState:
                 execution = self._agent_execution[member.id]
                 if execution.status != "idle":
                     continue
-                items = self._pending_items(member.id)
-                if not items:
+                activation = self._next_pending_activation(member.id)
+                if activation is None:
                     continue
                 execution.status = "running"
                 execution.error = None
-                execution.claimed_mentions = frozenset(
-                    (item.discussion_id, message_id)
-                    for item in items
-                    for message_id in item.message_ids
+                execution.claimed_mention = (
+                    activation.discussion_id,
+                    activation.message_id,
                 )
                 self._changed()
-                return Activation(agent_id=member.id, items=items), self._revision
+                return activation, self._revision
             return None, self._revision
 
     def complete_activation(self, agent_id: int, error: str | None = None) -> None:
         with self._condition:
             execution = self._agent_execution[agent_id]
             pending_mentions = self._pending_mentions(agent_id)
-            has_new_work = bool(pending_mentions - execution.claimed_mentions)
+            claimed_mention = execution.claimed_mention
+            has_new_work = bool(
+                pending_mentions - ({claimed_mention} if claimed_mention else set())
+            )
             execution.status = (
                 "error" if error and pending_mentions and not has_new_work else "idle"
             )
             execution.error = error if execution.status == "error" else None
-            execution.claimed_mentions = frozenset()
+            execution.claimed_mention = None
             self._changed()
 
     def wait_for_change(self, revision: int, stop_event: Event) -> None:
@@ -406,23 +403,17 @@ class OrganizationState:
             and not mention.acked
         )
 
-    def _pending_items(self, agent_id: int) -> tuple[ActivationItem, ...]:
-        items: list[ActivationItem] = []
+    def _next_pending_activation(self, agent_id: int) -> Activation | None:
         for discussion in self._discussions.values():
-            message_ids = tuple(
-                message.id
-                for message in discussion.messages
-                if (mention := message.mentions.get(agent_id)) is not None
-                and not mention.acked
-            )
-            if message_ids:
-                items.append(
-                    ActivationItem(
+            for message in discussion.messages:
+                mention = message.mentions.get(agent_id)
+                if mention is not None and not mention.acked:
+                    return Activation(
+                        agent_id=agent_id,
                         discussion_id=discussion.id,
-                        message_ids=message_ids,
+                        message_id=message.id,
                     )
-                )
-        return tuple(items)
+        return None
 
     def _snapshot(self) -> dict[str, Any]:
         return {

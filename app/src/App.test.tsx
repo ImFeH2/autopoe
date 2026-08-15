@@ -264,7 +264,7 @@ describe("App", () => {
                       type: "activation",
                       timestamp: "2026-08-15T00:00:00+00:00",
                       state: "complete",
-                      items: [{ discussion_id: 1, message_ids: [3] }],
+                      activation: { discussion_id: 1, message_id: 3 },
                     },
                     {
                       id: "tool",
