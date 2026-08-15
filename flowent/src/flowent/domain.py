@@ -56,6 +56,8 @@ class Activation:
     agent_id: int
     discussion_id: int
     message_id: int
+    sender_id: int = 0
+    body: str = ""
 
 
 class OrganizationState:
@@ -351,19 +353,31 @@ class OrganizationState:
                 activation = self._next_pending_activation(member.id)
                 if activation is None:
                     continue
+                mention = (
+                    self._discussions[activation.discussion_id]
+                    .messages[activation.message_id - 1]
+                    .mentions[member.id]
+                )
+                mention.read = True
                 execution.status = "running"
                 execution.error = None
                 execution.claimed_mention = (
                     activation.discussion_id,
                     activation.message_id,
                 )
-                self._changed()
+                self._changed(persist=True)
                 return activation, self._revision
             return None, self._revision
 
     def complete_activation(self, agent_id: int, error: str | None = None) -> None:
         with self._condition:
             execution = self._agent_execution[agent_id]
+            if error is None and execution.claimed_mention is not None:
+                discussion_id, message_id = execution.claimed_mention
+                self._discussions[discussion_id].messages[message_id - 1].mentions[
+                    agent_id
+                ].acked = True
+                self._changed(persist=True)
             pending_mentions = self._pending_mentions(agent_id)
             claimed_mention = execution.claimed_mention
             has_new_work = bool(
@@ -412,6 +426,8 @@ class OrganizationState:
                         agent_id=agent_id,
                         discussion_id=discussion.id,
                         message_id=message.id,
+                        sender_id=message.sender_id,
+                        body=message.body,
                     )
         return None
 

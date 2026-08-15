@@ -36,7 +36,9 @@ def activation_context(tmp_path: Path) -> tuple[Activation, AgentRunContext]:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    activation = Activation(agent_id=2, discussion_id=1, message_id=1)
+    state.send_message(1, 1, "Please inspect this", [2])
+    activation, _ = state.claim_next_activation()
+    assert activation is not None
     return activation, AgentRunContext(
         agent_id=2,
         state=state,
@@ -262,8 +264,12 @@ def test_pydantic_runner_exports_only_pydantic_ai_spans(tmp_path: Path) -> None:
     )
     assert all(span.name != "Flowent activation" for span in visible_spans)
     assert len({span.context.trace_id for span in visible_spans}) == 1
-    assert all("Process this Activation" not in str(item) for item in hidden_attributes)
-    assert any("Process this Activation" in str(item) for item in visible_attributes)
+    assert all(
+        "You received this user message" not in str(item) for item in hidden_attributes
+    )
+    assert any(
+        "You received this user message" in str(item) for item in visible_attributes
+    )
     assert any("TRACE_RESPONSE" in str(item) for item in visible_attributes)
     assert all(
         item.get("langfuse.trace.metadata.agent_id") == 2
@@ -319,6 +325,7 @@ def test_pydantic_runner_continues_the_same_agent_message_history(
 
     assert len(seen_messages) == 2
     assert len(seen_messages[0]) == 1
+    assert "Please inspect this" in str(seen_messages[0])
     assert len(seen_messages[1]) == 3
     assert seen_messages[1][0:2] == list(first.messages)
     assert len(first.messages) == 2

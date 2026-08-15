@@ -21,6 +21,8 @@ def test_activation_is_computed_from_current_unacked_mentions() -> None:
     assert activation.agent_id == 2
     assert activation.discussion_id == 1
     assert activation.message_id == 1
+    assert activation.sender_id == 1
+    assert activation.body == "First"
     assert state.snapshot()["members"][1]["status"] == "running"
 
 
@@ -56,7 +58,7 @@ def test_each_pending_mention_claims_its_own_activation() -> None:
     assert state.snapshot()["members"][1]["status"] == "idle"
 
 
-def test_unacked_message_reactivates_immediately_after_idle() -> None:
+def test_completed_turn_consumes_its_delivered_message() -> None:
     state = make_state()
     state.send_message(1, 1, "Still pending", [2])
     first, _ = state.claim_next_activation()
@@ -65,8 +67,7 @@ def test_unacked_message_reactivates_immediately_after_idle() -> None:
     state.complete_activation(2)
     second, _ = state.claim_next_activation()
 
-    assert second is not None
-    assert second == first
+    assert second is None
 
 
 def test_invalid_read_range_does_not_mark_mentions_read() -> None:

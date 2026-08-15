@@ -47,7 +47,7 @@ class AgentHistoryRun:
     run_id: str
     sequence: int
     started_at: str
-    activation: list[dict[str, Any]]
+    activation: dict[str, int]
     message_history: tuple[ModelMessage, ...]
     _event_sequence: int = 0
     _live_entries: list[dict[str, Any]] = field(default_factory=list)

@@ -140,17 +140,16 @@ class PydanticAgentRunner:
             name="flowent_agent",
             instructions=(
                 "You are an Agent in Flowent. All Agents are equal and use the same tools. "
-                "An Activation only identifies Messages waiting for you; it never contains their body. "
-                "Use discussion action=read to inspect enough of each listed Discussion around "
-                "its Message IDs before deciding what to do. You can read every Message in "
-                "Discussions you belong to, including Messages that do not mention you. "
+                "You receive an Activation when a Discussion Message mentions you. "
+                "It is one user message delivered to you, not a batch or a message range. "
+                "Use discussion action=read when you need surrounding context. "
                 "Communicate only with discussion action=send. Use organization and discussion tools "
                 "to discover Members, create Agents, or open a new Discussion when useful. "
                 "Use exec with an argv list to inspect the launch directory and run commands. "
                 "Use patch with a unified diff to create, modify, delete, or rename text files. "
                 "Never read or expose .env files, environment variables, credentials, tokens, or secrets. "
-                "Acknowledge each triggering Message with discussion action=ack only after you have "
-                "finished handling it. Do not claim you used tools that are not available."
+                "The triggering Message is already delivered; do not wait for an acknowledgement "
+                "before completing your Turn."
             ),
             retries=2,
             capabilities=capabilities,
@@ -272,16 +271,13 @@ class PydanticAgentRunner:
         activation: Activation,
         context: AgentRunContext,
     ) -> AgentRunOutcome:
-        activation_data = {
-            "discussion_id": activation.discussion_id,
-            "message_id": activation.message_id,
-        }
         prompt = (
-            f"You are Member {activation.agent_id}. Process this Activation: {activation_data}. "
-            "This Activation identifies the one Message that requires acknowledgement, not your "
-            "visible Message range. Read enough of its Discussion around that Message to understand "
-            "the conversation, do the requested work using available tools, communicate through "
-            "Discussions, then acknowledge the triggering Message when complete."
+            f"You are Member {activation.agent_id}. You received this user message in "
+            f"Discussion {activation.discussion_id} from Member {activation.sender_id} "
+            f"(Message {activation.message_id}):\n\n{activation.body}\n\n"
+            "Handle the request using available tools. Read the Discussion only when you need "
+            "surrounding context, communicate through Discussions, then finish with a concise "
+            "text response once the work is complete."
         )
         run_observability = (
             self._observability.bind(activation) if self._observability else None
