@@ -13,6 +13,7 @@ export {
 } from "./icons";
 export { Input } from "./input";
 export { ListButton } from "./list-button";
+export { MenuOption } from "./menu-option";
 export { SegmentedControl } from "./segmented-control";
 export { StatusIndicator } from "./status-indicator";
 export { Textarea } from "./textarea";

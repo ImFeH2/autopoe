@@ -24,6 +24,7 @@ describe("ComponentLab", () => {
     expect(markup).toContain("ui-button--primary");
     expect(markup).toContain("ui-segmented-control");
     expect(markup).toContain("ui-list-button");
+    expect(markup).toContain("ui-menu-option");
     expect(markup).toContain("app-sidebar");
     expect(markup).toContain("disabled");
   });

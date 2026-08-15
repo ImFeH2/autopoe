@@ -6,7 +6,11 @@ import {
   useState,
 } from "react";
 import { AppSidebar, type WorkspaceView } from "@/components/layout";
-import { DiscussionsPage } from "@/features/discussions";
+import {
+  DiscussionsPage,
+  type DraftMention,
+  getDraftMentionIds,
+} from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
 import {
@@ -46,7 +50,7 @@ function App() {
   const [topic, setTopic] = useState("");
   const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
   const [messageBody, setMessageBody] = useState("");
-  const [messageMentionIds, setMessageMentionIds] = useState<number[]>([]);
+  const [messageMentions, setMessageMentions] = useState<DraftMention[]>([]);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -156,7 +160,7 @@ function App() {
       setTopic("");
       setSelectedMemberIds([]);
       setMessageBody("");
-      setMessageMentionIds([]);
+      setMessageMentions([]);
       focusMessageAfterDialogRef.current = true;
       setSelectedDiscussionId(created?.id ?? null);
       setWorkspaceView("discussions");
@@ -173,13 +177,13 @@ function App() {
       backend.sendMessage(
         selectedDiscussion.id,
         messageBody,
-        messageMentionIds,
+        getDraftMentionIds(messageMentions),
       ),
     );
     if (nextSnapshot) {
       restoreMessageFocusRef.current = true;
       setMessageBody("");
-      setMessageMentionIds([]);
+      setMessageMentions([]);
     }
   }
 
@@ -215,8 +219,9 @@ function App() {
     return true;
   }
 
-  function toggleMessageMention(memberId: number) {
-    setMessageMentionIds((current) => toggleId(current, memberId));
+  function changeMessageDraft(body: string, mentions: DraftMention[]) {
+    setMessageBody(body);
+    setMessageMentions(mentions);
   }
 
   function selectDiscussion(discussionId: number) {
@@ -224,7 +229,7 @@ function App() {
     setWorkspaceView("discussions");
     setIsCreatingDiscussion(false);
     setMessageBody("");
-    setMessageMentionIds([]);
+    setMessageMentions([]);
     requestAnimationFrame(() => messageInputRef.current?.focus());
   }
 
@@ -276,12 +281,11 @@ function App() {
             members={snapshot.members}
             messageBody={messageBody}
             messageInputRef={messageInputRef}
-            messageMentionIds={messageMentionIds}
+            messageMentions={messageMentions}
             onCreateDiscussion={handleCreateDiscussion}
             onDialogCloseAutoFocus={focusAfterDiscussionDialogClose}
             onDialogOpenChange={changeDiscussionDialog}
-            onMessageChange={setMessageBody}
-            onMentionToggle={toggleMessageMention}
+            onMessageChange={changeMessageDraft}
             onCreateAgent={() => {
               selectWorkspaceView("members");
               setIsCreatingAgent(true);

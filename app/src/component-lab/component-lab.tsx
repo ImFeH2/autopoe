@@ -7,6 +7,7 @@ import {
   Dialog,
   Input,
   ListButton,
+  MenuOption,
   Plus,
   SegmentedControl,
   StatusIndicator,
@@ -114,6 +115,9 @@ export function ComponentLab() {
         <div className="component-lab-list">
           <ListButton active meta="2 messages" title="Repository work" />
           <ListButton meta="1 message" title="Review history" />
+          <div aria-label="Menu options" role="listbox">
+            <MenuOption label="@Ada" meta="Agent" selected />
+          </div>
         </div>
       </section>
 

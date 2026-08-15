@@ -14,9 +14,9 @@ import {
   TooltipProvider,
 } from "@/components/ui";
 import {
+  DiscussionsPage,
   filterDiscussions,
   formatMessageCount,
-  shouldSubmitMessage,
 } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import {
@@ -29,22 +29,6 @@ describe("App", () => {
     const markup = renderToStaticMarkup(<App />);
 
     expect(markup).toContain("Starting Flowent");
-  });
-
-  it("submits Enter but preserves Shift+Enter and IME composition", () => {
-    expect(
-      shouldSubmitMessage({
-        key: "Enter",
-        shiftKey: false,
-        isComposing: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldSubmitMessage({ key: "Enter", shiftKey: true, isComposing: false }),
-    ).toBe(false);
-    expect(
-      shouldSubmitMessage({ key: "Enter", shiftKey: false, isComposing: true }),
-    ).toBe(false);
   });
 
   it("marks model settings dirty only when the saved values change", () => {
@@ -133,6 +117,54 @@ describe("App", () => {
     ]);
     expect(filterDiscussions(discussions, " ")).toEqual(discussions);
     expect(filterDiscussions(discussions, "missing")).toEqual([]);
+  });
+
+  it("renders mention selection inside the Message combobox", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "idle" as const,
+    };
+    const discussion = {
+      id: 1,
+      topic: "Repository work",
+      member_ids: [1, 2],
+      messages: [],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('role="combobox"');
+    expect(markup).toContain('aria-autocomplete="list"');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).not.toContain("mention-picker");
+    expect(markup).not.toContain(">Mention<");
   });
 
   it("keeps the sidebar focused on global destinations", () => {

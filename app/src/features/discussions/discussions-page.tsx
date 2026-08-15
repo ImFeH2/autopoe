@@ -1,7 +1,5 @@
 import {
-  type ChangeEvent,
   type FormEvent,
-  type KeyboardEvent,
   type RefObject,
   useEffect,
   useRef,
@@ -15,9 +13,9 @@ import {
   ListButton,
   Plus,
   Search,
-  Textarea,
 } from "@/components/ui";
 import type { AgentMember, Discussion, Member } from "@/lib/backend";
+import { type DraftMention, MessageComposer } from "./message-composer";
 
 export function formatMessageCount(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
@@ -36,18 +34,6 @@ export function filterDiscussions(
   );
 }
 
-export function shouldSubmitMessage({
-  isComposing,
-  key,
-  shiftKey,
-}: {
-  isComposing: boolean;
-  key: string;
-  shiftKey: boolean;
-}) {
-  return key === "Enter" && !shiftKey && !isComposing;
-}
-
 type DiscussionsPageProps = {
   agents: AgentMember[];
   disabled: boolean;
@@ -57,13 +43,12 @@ type DiscussionsPageProps = {
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
-  messageMentionIds: number[];
+  messageMentions: DraftMention[];
   onCreateDiscussion: (event: FormEvent<HTMLFormElement>) => void;
   onDialogCloseAutoFocus: () => boolean;
   onDialogOpenChange: (open: boolean) => void;
   onCreateAgent: () => void;
-  onMessageChange: (body: string) => void;
-  onMentionToggle: (memberId: number) => void;
+  onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onSelectDiscussion: (discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
@@ -82,13 +67,12 @@ export function DiscussionsPage({
   members,
   messageBody,
   messageInputRef,
-  messageMentionIds,
+  messageMentions,
   onCreateAgent,
   onCreateDiscussion,
   onDialogCloseAutoFocus,
   onDialogOpenChange,
   onMessageChange,
-  onMentionToggle,
   onSelectDiscussion,
   onSend,
   onToggleMember,
@@ -186,9 +170,8 @@ export function DiscussionsPage({
               members={members}
               messageBody={messageBody}
               messageInputRef={messageInputRef}
-              messageMentionIds={messageMentionIds}
+              messageMentions={messageMentions}
               onMessageChange={onMessageChange}
-              onMentionToggle={onMentionToggle}
               onSend={onSend}
             />
           </section>
@@ -313,9 +296,8 @@ type DiscussionViewProps = {
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
-  messageMentionIds: number[];
-  onMessageChange: (body: string) => void;
-  onMentionToggle: (memberId: number) => void;
+  messageMentions: DraftMention[];
+  onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -325,9 +307,8 @@ function DiscussionView({
   members,
   messageBody,
   messageInputRef,
-  messageMentionIds,
+  messageMentions,
   onMessageChange,
-  onMentionToggle,
   onSend,
 }: DiscussionViewProps) {
   const messageLogRef = useRef<HTMLDivElement>(null);
@@ -339,7 +320,7 @@ function DiscussionView({
     .join(", ");
   const discussionAgents = discussion.member_ids
     .map((id) => membersById.get(id))
-    .filter((member) => member?.type === "agent");
+    .filter((member): member is AgentMember => member?.type === "agent");
 
   useEffect(() => {
     const log = messageLogRef.current;
@@ -361,39 +342,10 @@ function DiscussionView({
       log.scrollHeight - log.scrollTop - log.clientHeight <= 24;
   }
 
-  function handleMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (
-      !shouldSubmitMessage({
-        isComposing: event.nativeEvent.isComposing,
-        key: event.key,
-        shiftKey: event.shiftKey,
-      })
-    ) {
-      return;
-    }
-    event.preventDefault();
-    shouldFollowMessagesRef.current = true;
-    event.currentTarget.form?.requestSubmit();
-  }
-
   function handleSend(event: FormEvent<HTMLFormElement>) {
     shouldFollowMessagesRef.current = true;
     onSend(event);
   }
-
-  function handleMessageChange(event: ChangeEvent<HTMLTextAreaElement>) {
-    const input = event.currentTarget;
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
-    onMessageChange(input.value);
-  }
-
-  useEffect(() => {
-    const input = messageInputRef.current;
-    if (input && messageBody.length === 0) {
-      input.style.height = "";
-    }
-  }, [messageBody, messageInputRef]);
 
   return (
     <>
@@ -466,51 +418,16 @@ function DiscussionView({
           </ol>
         )}
       </div>
-      <form
-        className="message-composer"
-        aria-label="Send Message"
-        onSubmit={handleSend}
-      >
-        <fieldset className="mention-picker">
-          <legend className="section-label text-text-secondary">Mention</legend>
-          {discussionAgents.map((agent) => {
-            const mentionId = `message-mention-${agent.id}`;
-            return (
-              <label
-                className="caption-text mention-option text-text-secondary"
-                htmlFor={mentionId}
-                key={agent.id}
-              >
-                <Checkbox
-                  checked={messageMentionIds.includes(agent.id)}
-                  disabled={disabled}
-                  id={mentionId}
-                  onChange={() => onMentionToggle(agent.id)}
-                />
-                @{agent.name}
-              </label>
-            );
-          })}
-        </fieldset>
-        <div className="flex items-end gap-3">
-          <Textarea
-            aria-label="Message"
-            autoFocus
-            disabled={disabled}
-            onChange={handleMessageChange}
-            onKeyDown={handleMessageKeyDown}
-            placeholder="Write a message"
-            ref={messageInputRef}
-            required
-            rows={1}
-            value={messageBody}
-            variant="composer"
-          />
-          <Button disabled={disabled} type="submit" variant="primary">
-            Send
-          </Button>
-        </div>
-      </form>
+      <MessageComposer
+        agents={discussionAgents}
+        body={messageBody}
+        disabled={disabled}
+        discussionId={discussion.id}
+        inputRef={messageInputRef}
+        mentions={messageMentions}
+        onChange={onMessageChange}
+        onSend={handleSend}
+      />
     </>
   );
 }

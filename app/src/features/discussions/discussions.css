@@ -132,8 +132,7 @@
   font-size: 13px;
 }
 
-.discussion-member-options label:has(.ui-checkbox:disabled),
-.mention-option:has(.ui-checkbox:disabled) {
+.discussion-member-options label:has(.ui-checkbox:disabled) {
   cursor: not-allowed;
 }
 
@@ -272,26 +271,46 @@
   background: var(--color-surface-subtle);
 }
 
-.mention-picker {
+.message-composer-row {
   display: flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 14px;
-  margin: 0 0 6px;
-  border: 0;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.message-composer-input {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+
+.mention-suggestions {
+  position: absolute;
+  z-index: var(--z-overlay);
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: min(320px, 100%);
+  max-height: 232px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-overlay);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.mention-suggestions ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
   padding: 0;
+  list-style: none;
 }
 
-.mention-picker legend {
-  float: left;
-  margin-right: 4px;
-}
-
-.mention-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  cursor: pointer;
+.mention-suggestions-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
 }
 
 @media (max-width: 1100px) {
