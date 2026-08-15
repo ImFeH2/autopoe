@@ -9,7 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
-dist-e2e
+dist-desktop-debug
 dist-ssr
 /artifacts/
 /target

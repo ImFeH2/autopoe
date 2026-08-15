@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "identifier": "im.feh2.flowent.e2e",
+  "identifier": "im.feh2.flowent.desktop-debug",
   "build": {
-    "beforeBuildCommand": "pnpm build:desktop:e2e:frontend",
-    "frontendDist": "../dist-e2e"
+    "beforeBuildCommand": "pnpm build:desktop:debug:frontend",
+    "frontendDist": "../dist-desktop-debug"
   },
   "bundle": {
-    "externalBin": ["binaries/flowent-agent-e2e"]
+    "externalBin": ["binaries/flowent-agent"]
   },
   "app": {
     "withGlobalTauri": true,
@@ -14,8 +14,8 @@
       "capabilities": [
         "default",
         {
-          "identifier": "desktop-e2e",
-          "description": "Capability for desktop tests",
+          "identifier": "desktop-debug",
+          "description": "Capability for local desktop debugging",
           "windows": ["main"],
           "permissions": ["wdio:default", "core:window:allow-set-size"]
         }

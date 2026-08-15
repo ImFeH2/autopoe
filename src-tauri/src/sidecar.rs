@@ -13,12 +13,7 @@ use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
 };
 
-#[cfg(feature = "desktop-e2e")]
-const DATA_DIRECTORY_ENV: &str = "FLOWENT_DATA_DIR";
-#[cfg(not(feature = "desktop-e2e"))]
 const SIDECAR_NAME: &str = "flowent-agent";
-#[cfg(feature = "desktop-e2e")]
-const SIDECAR_NAME: &str = "flowent-agent-e2e";
 const SHUTDOWN_ID: u64 = u64::MAX;
 
 type SharedChild = Arc<Mutex<Option<CommandChild>>>;
@@ -49,11 +44,6 @@ impl Sidecar {
             .env_clear()
             .envs(std::env::vars_os())
             .current_dir(&self.working_directory);
-        #[cfg(feature = "desktop-e2e")]
-        let command = command.env(
-            DATA_DIRECTORY_ENV,
-            self.working_directory.join("artifacts/desktop/e2e-state"),
-        );
         let (mut events, child) = command.spawn().context("start sidecar")?;
         *self
             .child

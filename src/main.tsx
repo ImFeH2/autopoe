@@ -23,7 +23,7 @@ function installDesktopInteractionGuards() {
 }
 
 async function render() {
-  if (import.meta.env.MODE === "e2e") {
+  if (import.meta.env.MODE === "desktop-debug") {
     await import("@wdio/tauri-plugin");
   }
 

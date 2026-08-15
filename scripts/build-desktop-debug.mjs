@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
-const targetDir = resolve(rootDir, "src-tauri", "target", "desktop-e2e");
+const targetDir = resolve(rootDir, "src-tauri", "target", "desktop-debug");
 const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const child = spawn(
   packageManager,
@@ -13,9 +13,9 @@ const child = spawn(
     "--debug",
     "--no-bundle",
     "--features",
-    "desktop-e2e",
+    "desktop-debug",
     "--config",
-    "src-tauri/tauri.e2e.conf.json",
+    "src-tauri/tauri.desktop-debug.conf.json",
   ],
   {
     cwd: rootDir,
