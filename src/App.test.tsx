@@ -1,6 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import App, { filterDiscussions, shouldSubmitMessage } from "@/App";
+import App, {
+  filterDiscussions,
+  isModelSettingsDirty,
+  isObservabilitySettingsDirty,
+  shouldSubmitMessage,
+} from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
   Badge,
@@ -32,6 +37,65 @@ describe("App", () => {
     expect(
       shouldSubmitMessage({ key: "Enter", shiftKey: false, isComposing: true }),
     ).toBe(false);
+  });
+
+  it("marks model settings dirty only when the saved values change", () => {
+    const current = {
+      api_type: "openai-chat" as const,
+      base_url: "https://api.example.com",
+      model: "model-a",
+      has_api_key: true,
+    };
+    const unchanged = {
+      apiType: "openai-chat" as const,
+      baseUrl: "https://api.example.com",
+      apiKey: "",
+      model: "model-a",
+    };
+
+    expect(isModelSettingsDirty(current, unchanged)).toBe(false);
+    expect(
+      isModelSettingsDirty(current, { ...unchanged, apiKey: "replacement" }),
+    ).toBe(true);
+    expect(
+      isModelSettingsDirty(current, {
+        ...unchanged,
+        apiType: "openai-responses",
+      }),
+    ).toBe(true);
+  });
+
+  it("marks tracing settings dirty without requiring saved secrets", () => {
+    const current = {
+      enabled: true,
+      base_url: "https://cloud.langfuse.com",
+      public_key: "pk-lf-test",
+      environment: "development",
+      capture_content: false,
+      has_secret_key: true,
+    };
+    const unchanged = {
+      enabled: true,
+      baseUrl: "https://cloud.langfuse.com",
+      publicKey: "pk-lf-test",
+      secretKey: "",
+      environment: "development",
+      captureContent: false,
+    };
+
+    expect(isObservabilitySettingsDirty(current, unchanged)).toBe(false);
+    expect(
+      isObservabilitySettingsDirty(current, {
+        ...unchanged,
+        captureContent: true,
+      }),
+    ).toBe(true);
+    expect(
+      isObservabilitySettingsDirty(current, {
+        ...unchanged,
+        secretKey: "replacement",
+      }),
+    ).toBe(true);
   });
 
   it("filters Discussions by topic without changing their order", () => {

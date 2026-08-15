@@ -70,6 +70,48 @@ function mentionStatusTone(status: Mention["status"]) {
   return "neutral" as const;
 }
 
+type ModelSettingsDraft = {
+  apiType: ModelApiType;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+};
+
+type ObservabilitySettingsDraft = {
+  enabled: boolean;
+  baseUrl: string;
+  publicKey: string;
+  secretKey: string;
+  environment: string;
+  captureContent: boolean;
+};
+
+export function isModelSettingsDirty(
+  current: ModelSettings | null,
+  draft: ModelSettingsDraft,
+): boolean {
+  return (
+    draft.apiType !== (current?.api_type ?? "openai-chat") ||
+    draft.baseUrl !== (current?.base_url ?? "") ||
+    draft.apiKey.length > 0 ||
+    draft.model !== (current?.model ?? "")
+  );
+}
+
+export function isObservabilitySettingsDirty(
+  current: ObservabilitySettings | null,
+  draft: ObservabilitySettingsDraft,
+): boolean {
+  return (
+    draft.enabled !== (current?.enabled ?? false) ||
+    draft.baseUrl !== (current?.base_url ?? "") ||
+    draft.publicKey !== (current?.public_key ?? "") ||
+    draft.secretKey.length > 0 ||
+    draft.environment !== (current?.environment ?? "development") ||
+    draft.captureContent !== (current?.capture_content ?? false)
+  );
+}
+
 export function filterDiscussions(
   discussions: Discussion[],
   query: string,
@@ -619,9 +661,22 @@ function SettingsPage() {
     }
   }
 
-  const modelDisabled = modelStatus === "loading" || modelStatus === "saving";
-  const tracingDisabled =
-    tracingStatus === "loading" || tracingStatus === "saving";
+  const modelBusy = modelStatus === "loading" || modelStatus === "saving";
+  const tracingBusy = tracingStatus === "loading" || tracingStatus === "saving";
+  const modelDirty = isModelSettingsDirty(modelSettings, {
+    apiType,
+    baseUrl,
+    apiKey,
+    model,
+  });
+  const tracingDirty = isObservabilitySettingsDirty(tracingSettings, {
+    enabled: tracingEnabled,
+    baseUrl: tracingBaseUrl,
+    publicKey: tracingPublicKey,
+    secretKey: tracingSecretKey,
+    environment: tracingEnvironment,
+    captureContent,
+  });
   const hasApiKey = modelSettings?.has_api_key ?? false;
   const hasTracingSecretKey = tracingSettings?.has_secret_key ?? false;
 
@@ -642,7 +697,7 @@ function SettingsPage() {
                 {apiTypeOptions.map((option) => (
                   <Button
                     aria-pressed={apiType === option.value}
-                    disabled={modelDisabled}
+                    disabled={modelBusy}
                     key={option.value}
                     onClick={() => setApiType(option.value)}
                     size="compact"
@@ -659,7 +714,7 @@ function SettingsPage() {
                 aria-label="Base URL"
                 id="model-base-url"
                 autoComplete="url"
-                disabled={modelDisabled}
+                disabled={modelBusy}
                 onChange={(event) => setBaseUrl(event.target.value)}
                 placeholder="https://api.example.com"
                 required
@@ -673,7 +728,7 @@ function SettingsPage() {
                 aria-label="API key"
                 id="model-api-key"
                 autoComplete="new-password"
-                disabled={modelDisabled}
+                disabled={modelBusy}
                 onChange={(event) => setApiKey(event.target.value)}
                 placeholder={hasApiKey ? "Saved" : "API key"}
                 required={!hasApiKey}
@@ -687,7 +742,7 @@ function SettingsPage() {
                 aria-label="Model"
                 id="model-name"
                 autoComplete="off"
-                disabled={modelDisabled}
+                disabled={modelBusy}
                 onChange={(event) => setModel(event.target.value)}
                 placeholder="Model"
                 required
@@ -695,10 +750,14 @@ function SettingsPage() {
               />
             </label>
             <div className="settings-actions">
-              <Button disabled={modelDisabled} type="submit" variant="primary">
+              <Button
+                disabled={modelBusy || !modelDirty}
+                type="submit"
+                variant="primary"
+              >
                 {modelStatus === "saving" ? "Saving" : "Save model"}
               </Button>
-              {modelStatus === "saved" ? (
+              {modelStatus === "saved" && !modelDirty ? (
                 <span role="status">Saved</span>
               ) : null}
             </div>
@@ -720,7 +779,7 @@ function SettingsPage() {
             <label className="settings-toggle" htmlFor="tracing-enabled">
               <Checkbox
                 checked={tracingEnabled}
-                disabled={tracingDisabled}
+                disabled={tracingBusy}
                 id="tracing-enabled"
                 onChange={(event) => setTracingEnabled(event.target.checked)}
               />
@@ -732,7 +791,7 @@ function SettingsPage() {
                 aria-label="Langfuse host"
                 id="tracing-base-url"
                 autoComplete="url"
-                disabled={tracingDisabled}
+                disabled={tracingBusy}
                 onChange={(event) => setTracingBaseUrl(event.target.value)}
                 placeholder="https://cloud.langfuse.com"
                 required={tracingEnabled}
@@ -746,7 +805,7 @@ function SettingsPage() {
                 aria-label="Langfuse public key"
                 id="tracing-public-key"
                 autoComplete="off"
-                disabled={tracingDisabled}
+                disabled={tracingBusy}
                 onChange={(event) => setTracingPublicKey(event.target.value)}
                 placeholder="pk-lf-..."
                 required={tracingEnabled}
@@ -759,7 +818,7 @@ function SettingsPage() {
                 aria-label="Langfuse secret key"
                 id="tracing-secret-key"
                 autoComplete="new-password"
-                disabled={tracingDisabled}
+                disabled={tracingBusy}
                 onChange={(event) => setTracingSecretKey(event.target.value)}
                 placeholder={hasTracingSecretKey ? "Saved" : "sk-lf-..."}
                 required={tracingEnabled && !hasTracingSecretKey}
@@ -773,7 +832,7 @@ function SettingsPage() {
                 aria-label="Tracing environment"
                 id="tracing-environment"
                 autoComplete="off"
-                disabled={tracingDisabled}
+                disabled={tracingBusy}
                 onChange={(event) => setTracingEnvironment(event.target.value)}
                 placeholder="development"
                 required={tracingEnabled}
@@ -783,7 +842,7 @@ function SettingsPage() {
             <label className="settings-toggle" htmlFor="capture-content">
               <Checkbox
                 checked={captureContent}
-                disabled={tracingDisabled}
+                disabled={tracingBusy}
                 id="capture-content"
                 onChange={(event) => setCaptureContent(event.target.checked)}
               />
@@ -791,13 +850,13 @@ function SettingsPage() {
             </label>
             <div className="settings-actions">
               <Button
-                disabled={tracingDisabled}
+                disabled={tracingBusy || !tracingDirty}
                 type="submit"
                 variant="primary"
               >
                 {tracingStatus === "saving" ? "Saving" : "Save tracing"}
               </Button>
-              {tracingStatus === "saved" ? (
+              {tracingStatus === "saved" && !tracingDirty ? (
                 <span role="status">Saved</span>
               ) : null}
             </div>
