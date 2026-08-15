@@ -113,7 +113,7 @@ def test_model_settings_are_shared_without_returning_the_api_key() -> None:
                     "id": 2,
                     "method": "settings.update_model",
                     "params": {
-                        "provider": "openai",
+                        "api_type": "openai-responses",
                         "base_url": "https://example.invalid/v1",
                         "api_key": secret,
                         "model": "test-model",
@@ -139,7 +139,7 @@ def test_model_settings_are_shared_without_returning_the_api_key() -> None:
         responses[1]["result"]
         == responses[2]["result"]
         == {
-            "provider": "openai",
+            "api_type": "openai-responses",
             "base_url": "https://example.invalid/v1",
             "model": "test-model",
             "has_api_key": True,
@@ -234,12 +234,12 @@ def test_persistence_error_does_not_stop_or_expose_request_data(capsys) -> None:
     class FailingModelRuntime(ModelRuntime):
         def configure(
             self,
-            provider: str,
+            api_type: str,
             base_url: str,
             api_key: str,
             model: str,
         ) -> dict[str, object]:
-            del provider, base_url, api_key, model
+            del api_type, base_url, api_key, model
             raise sqlite3.OperationalError(secret)
 
     input_stream = io.StringIO(
@@ -248,7 +248,7 @@ def test_persistence_error_does_not_stop_or_expose_request_data(capsys) -> None:
                 "id": 1,
                 "method": "settings.update_model",
                 "params": {
-                    "provider": "openai",
+                    "api_type": "openai-chat",
                     "base_url": "https://example.invalid/v1",
                     "api_key": secret,
                     "model": "test-model",

@@ -84,7 +84,7 @@ def test_sidecar_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> Non
     working_directory = tmp_path / "project"
     working_directory.mkdir()
     (working_directory / ".env").write_text(
-        "provider=openai\n"
+        "api_type=openai-responses\n"
         "base_url=https://example.invalid/v1\n"
         "api_key=ignored-secret\n"
         "model=ignored-model\n"
@@ -93,7 +93,7 @@ def test_sidecar_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> Non
 
     try:
         assert request(process, 1, "settings.get_model", {}) == {
-            "provider": "openai",
+            "api_type": "openai-chat",
             "base_url": "",
             "model": "",
             "has_api_key": False,
@@ -145,7 +145,7 @@ def test_persists_state_and_model_settings_across_launch_directories(
             4,
             "settings.update_model",
             {
-                "provider": "openai",
+                "api_type": "openai-responses",
                 "base_url": "https://example.invalid/v1",
                 "api_key": "restart-secret",
                 "model": "test-model",
@@ -183,7 +183,7 @@ def test_persists_state_and_model_settings_across_launch_directories(
             "Still here after restart"
         )
         assert settings == {
-            "provider": "openai",
+            "api_type": "openai-responses",
             "base_url": "https://example.invalid/v1",
             "model": "test-model",
             "has_api_key": True,

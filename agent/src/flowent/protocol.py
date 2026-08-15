@@ -94,7 +94,7 @@ class Dispatcher:
 
     def _update_model_settings(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._model_runtime.configure(
-            provider=require_string(params, "provider"),
+            api_type=require_string(params, "api_type"),
             base_url=require_string(params, "base_url"),
             api_key=require_string(params, "api_key"),
             model=require_string(params, "model"),

@@ -8,15 +8,18 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from pydantic_ai import InstrumentationSettings
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.models.test import TestModel
 
 from e2e_support.runner import DeterministicRunner
 from flowent.domain import Activation, ActivationItem, OrganizationState
 from flowent.host_tools import HostTools
 from flowent.model_runner import (
+    ApiType,
     ModelConfig,
     ModelRuntime,
-    ProviderType,
     PydanticAgentRunner,
     create_runner,
 )
@@ -164,7 +167,7 @@ def test_model_config_repr_does_not_reveal_api_key() -> None:
     secret = "not-for-repr"
 
     config = ModelConfig(
-        provider="openai",
+        api_type="openai-chat",
         base_url="https://example.invalid/v1",
         api_key=secret,
         model="test-model",
@@ -178,14 +181,14 @@ def test_shared_model_settings_never_return_the_api_key() -> None:
     runtime = ModelRuntime()
 
     settings = runtime.configure(
-        provider="anthropic",
+        api_type="anthropic",
         base_url="https://example.invalid",
         api_key=secret,
         model="test-model",
     )
 
     assert settings == {
-        "provider": "anthropic",
+        "api_type": "anthropic",
         "base_url": "https://example.invalid",
         "model": "test-model",
         "has_api_key": True,
@@ -193,7 +196,7 @@ def test_shared_model_settings_never_return_the_api_key() -> None:
     assert secret not in repr(runtime.settings())
     assert (
         runtime.configure(
-            provider="google",
+            api_type="google",
             base_url="https://google.invalid",
             api_key="",
             model="gemini-test",
@@ -202,18 +205,29 @@ def test_shared_model_settings_never_return_the_api_key() -> None:
     )
 
 
-@pytest.mark.parametrize("provider", ["openai", "anthropic", "google"])
-def test_pydantic_runner_accepts_supported_provider_configs(
-    provider: ProviderType,
+@pytest.mark.parametrize(
+    ("api_type", "model_type"),
+    [
+        ("openai-chat", OpenAIChatModel),
+        ("openai-responses", OpenAIResponsesModel),
+        ("anthropic", AnthropicModel),
+        ("google", GoogleModel),
+    ],
+)
+def test_pydantic_runner_uses_the_selected_api_type(
+    api_type: ApiType,
+    model_type: type[Any],
 ) -> None:
-    PydanticAgentRunner(
+    runner = PydanticAgentRunner(
         ModelConfig(
-            provider=provider,
+            api_type=api_type,
             base_url="https://example.invalid",
             api_key="test-key",
             model="test-model",
         )
     )
+
+    assert isinstance(runner._agent.model, model_type)
 
 
 def test_all_agents_use_the_latest_shared_runner(
@@ -240,7 +254,7 @@ def test_all_agents_use_the_latest_shared_runner(
     monkeypatch.setattr(ModelRuntime, "_create_runner", create_recording_runner)
     runtime = ModelRuntime()
     runtime.configure(
-        provider="openai",
+        api_type="openai-chat",
         base_url="https://example.invalid",
         api_key="test-key",
         model="shared-model",
@@ -341,7 +355,7 @@ def test_pydantic_runner_exports_only_pydantic_ai_spans(tmp_path: Path) -> None:
         )
         runner = PydanticAgentRunner(
             ModelConfig(
-                provider="openai",
+                api_type="openai-chat",
                 base_url="https://example.invalid/v1",
                 api_key="test-key",
                 model="test-model",

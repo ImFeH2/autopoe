@@ -29,7 +29,7 @@ import {
   type Discussion,
   type Member,
   type Mention,
-  type ModelProvider,
+  type ModelApiType,
   type ModelSettings,
   type ObservabilitySettings,
   type OrganizationSnapshot,
@@ -492,8 +492,9 @@ function AgentsPage({
   );
 }
 
-const providerOptions: Array<{ label: string; value: ModelProvider }> = [
-  { label: "OpenAI", value: "openai" },
+const apiTypeOptions: Array<{ label: string; value: ModelApiType }> = [
+  { label: "Chat", value: "openai-chat" },
+  { label: "Responses", value: "openai-responses" },
   { label: "Anthropic", value: "anthropic" },
   { label: "Google", value: "google" },
 ];
@@ -502,7 +503,7 @@ function SettingsPage() {
   const [modelSettings, setModelSettings] = useState<ModelSettings | null>(
     null,
   );
-  const [provider, setProvider] = useState<ModelProvider>("openai");
+  const [apiType, setApiType] = useState<ModelApiType>("openai-chat");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
@@ -532,7 +533,7 @@ function SettingsPage() {
           return;
         }
         setModelSettings(current);
-        setProvider(current.provider);
+        setApiType(current.api_type);
         setBaseUrl(current.base_url);
         setModel(current.model);
         setModelStatus("ready");
@@ -574,13 +575,13 @@ function SettingsPage() {
     setModelError(null);
     try {
       const current = await backend.updateModelSettings({
-        provider,
+        api_type: apiType,
         base_url: baseUrl,
         api_key: apiKey,
         model,
       });
       setModelSettings(current);
-      setProvider(current.provider);
+      setApiType(current.api_type);
       setBaseUrl(current.base_url);
       setApiKey("");
       setModel(current.model);
@@ -635,17 +636,17 @@ function SettingsPage() {
             aria-label="Model settings"
             onSubmit={handleSaveModel}
           >
-            <fieldset className="settings-provider">
-              <legend>Provider</legend>
+            <fieldset className="settings-api-type">
+              <legend>API type</legend>
               <div>
-                {providerOptions.map((option) => (
+                {apiTypeOptions.map((option) => (
                   <Button
-                    aria-pressed={provider === option.value}
+                    aria-pressed={apiType === option.value}
                     disabled={modelDisabled}
                     key={option.value}
-                    onClick={() => setProvider(option.value)}
+                    onClick={() => setApiType(option.value)}
                     size="compact"
-                    variant={provider === option.value ? "secondary" : "quiet"}
+                    variant={apiType === option.value ? "secondary" : "quiet"}
                   >
                     {option.label}
                   </Button>

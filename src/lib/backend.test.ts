@@ -33,13 +33,13 @@ describe("parseModelSettings", () => {
   it("accepts safe shared model settings", () => {
     expect(
       parseModelSettings({
-        provider: "anthropic",
+        api_type: "anthropic",
         base_url: "https://example.invalid",
         model: "claude-test",
         has_api_key: true,
       }),
     ).toEqual({
-      provider: "anthropic",
+      api_type: "anthropic",
       base_url: "https://example.invalid",
       model: "claude-test",
       has_api_key: true,
@@ -49,7 +49,7 @@ describe("parseModelSettings", () => {
   it("rejects API keys returned by the Sidecar", () => {
     expect(() =>
       parseModelSettings({
-        provider: "openai",
+        api_type: "openai-responses",
         base_url: "https://example.invalid",
         model: "test-model",
         has_api_key: true,

@@ -199,7 +199,14 @@ describe("Flowent desktop", () => {
 
     await $("button[aria-label='Settings']").click();
     await expect($("h2=Settings")).toExist();
-    await expect($("button=OpenAI")).toHaveAttribute("aria-pressed", "true");
+    await expect($("legend=API type")).toExist();
+    await expect($("button=Chat")).toHaveAttribute("aria-pressed", "true");
+    await expect($("button=Responses")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await expect($("button=Anthropic")).toExist();
+    await expect($("button=Google")).toExist();
     await expect($("[aria-label='Base URL']")).toHaveValue("");
     await expect($("[aria-label='API key']")).toHaveValue("");
     await expect($("[aria-label='Model']")).toHaveValue("");
@@ -211,10 +218,10 @@ describe("Flowent desktop", () => {
       "development",
     );
     await expect($("#capture-content")).not.toBeChecked();
-    await $("button=Anthropic").click();
+    await $("button=Responses").click();
     await $("[aria-label='Base URL']").setValue("https://example.invalid");
     await $("[aria-label='API key']").setValue("e2e-local-secret");
-    await $("[aria-label='Model']").setValue("claude-test");
+    await $("[aria-label='Model']").setValue("gpt-test");
     await $("form[aria-label='Model settings'] button[type='submit']").click();
     await expect(
       $("form[aria-label='Model settings'] [role='status']"),
@@ -250,11 +257,11 @@ describe("Flowent desktop", () => {
     expect(settingsText).not.toContain("e2e-tracing-secret");
     await $("button[aria-label='Discussions']").click();
     await $("button[aria-label='Settings']").click();
-    await expect($("button=Anthropic")).toHaveAttribute("aria-pressed", "true");
+    await expect($("button=Responses")).toHaveAttribute("aria-pressed", "true");
     await expect($("[aria-label='Base URL']")).toHaveValue(
       "https://example.invalid",
     );
-    await expect($("[aria-label='Model']")).toHaveValue("claude-test");
+    await expect($("[aria-label='Model']")).toHaveValue("gpt-test");
     await expect($("#tracing-enabled")).toBeChecked();
     await expect($("[aria-label='Langfuse host']")).toHaveValue(
       "https://cloud.langfuse.com",

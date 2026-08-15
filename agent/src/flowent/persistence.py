@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -32,6 +32,8 @@ class SQLiteStore:
                 self._migrate_version_one(connection)
             elif version == 2:
                 self._migrate_version_two(connection)
+            elif version == 3:
+                self._migrate_version_three(connection)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"Unsupported Flowent database version: {version}")
         self.path.chmod(0o600)
@@ -118,18 +120,6 @@ class SQLiteStore:
             )
             """,
             """
-            CREATE TABLE model_settings (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                provider TEXT NOT NULL
-                    CHECK (provider IN ('openai', 'anthropic', 'google')),
-                base_url TEXT NOT NULL,
-                api_key TEXT NOT NULL,
-                model TEXT NOT NULL,
-                FOREIGN KEY (id) REFERENCES application_state (id)
-                    ON DELETE CASCADE
-            )
-            """,
-            """
             CREATE TABLE observability_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
@@ -146,6 +136,27 @@ class SQLiteStore:
         )
         for statement in statements:
             connection.execute(statement)
+        SQLiteStore._create_model_settings_table(connection)
+
+    @staticmethod
+    def _create_model_settings_table(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE model_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                api_type TEXT NOT NULL CHECK (
+                    api_type IN (
+                        'openai-chat', 'openai-responses', 'anthropic', 'google'
+                    )
+                ),
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                model TEXT NOT NULL,
+                FOREIGN KEY (id) REFERENCES application_state (id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
 
     def _migrate_version_one(self, connection: sqlite3.Connection) -> None:
         organization_keys = [
@@ -168,7 +179,9 @@ class SQLiteStore:
         )
         model_configs = [
             {
-                "provider": row["provider"],
+                "api_type": (
+                    "openai-chat" if row["provider"] == "openai" else row["provider"]
+                ),
                 "base_url": row["base_url"],
                 "api_key": row["api_key"],
                 "model": row["model"],
@@ -225,7 +238,28 @@ class SQLiteStore:
                 )
                 """
             )
+            self._migrate_model_api_type(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _migrate_version_three(self, connection: sqlite3.Connection) -> None:
+        with connection:
+            self._migrate_model_api_type(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_model_api_type(connection: sqlite3.Connection) -> None:
+        connection.execute("ALTER TABLE model_settings RENAME TO model_settings_legacy")
+        SQLiteStore._create_model_settings_table(connection)
+        connection.execute(
+            """
+            INSERT INTO model_settings (id, api_type, base_url, api_key, model)
+            SELECT id,
+                CASE provider WHEN 'openai' THEN 'openai-chat' ELSE provider END,
+                base_url, api_key, model
+            FROM model_settings_legacy
+            """
+        )
+        connection.execute("DROP TABLE model_settings_legacy")
 
     @staticmethod
     def _unique_migration_value(
@@ -458,14 +492,14 @@ class SQLiteStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT provider, base_url, api_key, model FROM model_settings
+                SELECT api_type, base_url, api_key, model FROM model_settings
                 WHERE id = 1
                 """
             ).fetchone()
             if row is None:
                 return None
             return {
-                "provider": row["provider"],
+                "api_type": row["api_type"],
                 "base_url": row["base_url"],
                 "api_key": row["api_key"],
                 "model": row["model"],
@@ -531,16 +565,16 @@ class SQLiteStore:
         connection.execute(
             """
             INSERT INTO model_settings
-                (id, provider, base_url, api_key, model)
+                (id, api_type, base_url, api_key, model)
             VALUES (1, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
-                provider = excluded.provider,
+                api_type = excluded.api_type,
                 base_url = excluded.base_url,
                 api_key = excluded.api_key,
                 model = excluded.model
             """,
             (
-                config["provider"],
+                config["api_type"],
                 config["base_url"],
                 config["api_key"],
                 config["model"],

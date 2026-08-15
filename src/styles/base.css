@@ -361,7 +361,7 @@ body {
   gap: 18px;
 }
 
-.settings-provider {
+.settings-api-type {
   display: grid;
   gap: 8px;
   margin: 0;
@@ -369,7 +369,7 @@ body {
   padding: 0;
 }
 
-.settings-provider legend,
+.settings-api-type legend,
 .settings-field > span,
 .discussion-form-field > span,
 .discussion-members legend {
@@ -378,7 +378,7 @@ body {
   font-weight: 550;
 }
 
-.settings-provider > div {
+.settings-api-type > div {
   display: flex;
   width: max-content;
   gap: 2px;

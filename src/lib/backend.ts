@@ -42,17 +42,21 @@ export type OrganizationSnapshot = {
   discussions: Discussion[];
 };
 
-export type ModelProvider = "openai" | "anthropic" | "google";
+export type ModelApiType =
+  | "openai-chat"
+  | "openai-responses"
+  | "anthropic"
+  | "google";
 
 export type ModelSettings = {
-  provider: ModelProvider;
+  api_type: ModelApiType;
   base_url: string;
   model: string;
   has_api_key: boolean;
 };
 
 export type ModelSettingsUpdate = {
-  provider: ModelProvider;
+  api_type: ModelApiType;
   base_url: string;
   api_key: string;
   model: string;
@@ -316,11 +320,12 @@ export function parseObservabilitySettings(
 export function parseModelSettings(value: unknown): ModelSettings {
   const settings = record(value, "model settings");
   if (
-    settings.provider !== "openai" &&
-    settings.provider !== "anthropic" &&
-    settings.provider !== "google"
+    settings.api_type !== "openai-chat" &&
+    settings.api_type !== "openai-responses" &&
+    settings.api_type !== "anthropic" &&
+    settings.api_type !== "google"
   ) {
-    throw new Error("Invalid model settings: provider is invalid");
+    throw new Error("Invalid model settings: API type is invalid");
   }
   if (
     typeof settings.base_url !== "string" ||
@@ -333,7 +338,7 @@ export function parseModelSettings(value: unknown): ModelSettings {
     throw new Error("Invalid model settings: API key must not be returned");
   }
   return {
-    provider: settings.provider,
+    api_type: settings.api_type,
     base_url: settings.base_url,
     model: settings.model,
     has_api_key: settings.has_api_key,

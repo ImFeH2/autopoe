@@ -158,6 +158,34 @@ def create_version_one_database(
     return path
 
 
+def downgrade_model_settings_schema(connection: sqlite3.Connection) -> None:
+    connection.execute("ALTER TABLE model_settings RENAME TO current_model_settings")
+    connection.execute(
+        """
+        CREATE TABLE model_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            provider TEXT NOT NULL
+                CHECK (provider IN ('openai', 'anthropic', 'google')),
+            base_url TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            model TEXT NOT NULL,
+            FOREIGN KEY (id) REFERENCES application_state (id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO model_settings (id, provider, base_url, api_key, model)
+        SELECT id,
+            CASE api_type WHEN 'openai-chat' THEN 'openai' ELSE api_type END,
+            base_url, api_key, model
+        FROM current_model_settings
+        """
+    )
+    connection.execute("DROP TABLE current_model_settings")
+
+
 def test_uses_flowent_directory_under_home(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
@@ -222,21 +250,21 @@ def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> No
     runtime = ModelRuntime(on_configure=store.save_model_config)
 
     settings = runtime.configure(
-        provider="anthropic",
+        api_type="anthropic",
         base_url="https://example.invalid",
         api_key="local-secret",
         model="test-model",
     )
 
     assert settings == {
-        "provider": "anthropic",
+        "api_type": "anthropic",
         "base_url": "https://example.invalid",
         "model": "test-model",
         "has_api_key": True,
     }
     assert "local-secret" not in str(settings)
     assert store.load_model_config() == {
-        "provider": "anthropic",
+        "api_type": "anthropic",
         "base_url": "https://example.invalid",
         "api_key": "local-secret",
         "model": "test-model",
@@ -277,8 +305,17 @@ def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> N
     store = SQLiteStore(data)
     state = persisted_state(store, tmp_path)
     state.create_agent("Ada")
+    store.save_model_config(
+        {
+            "api_type": "anthropic",
+            "base_url": "https://example.invalid",
+            "api_key": "legacy-secret",
+            "model": "legacy-model",
+        }
+    )
     connection = sqlite3.connect(store.path)
     connection.execute("DROP TABLE observability_settings")
+    downgrade_model_settings_schema(connection)
     connection.execute("PRAGMA user_version = 2")
     connection.commit()
     connection.close()
@@ -286,12 +323,68 @@ def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> N
     migrated = SQLiteStore(data)
 
     assert migrated.load_organization()["members"][1]["name"] == "Ada"
+    assert migrated.load_model_config() == {
+        "api_type": "anthropic",
+        "base_url": "https://example.invalid",
+        "api_key": "legacy-secret",
+        "model": "legacy-model",
+    }
     assert migrated.load_observability_config() is None
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'observability_settings'"
     ).fetchone() == ("observability_settings",)
+    connection.close()
+
+
+def test_migrates_version_three_openai_to_chat_without_losing_secrets(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    store.save_model_config(
+        {
+            "api_type": "openai-chat",
+            "base_url": "https://example.invalid/v1",
+            "api_key": "legacy-openai-secret",
+            "model": "legacy-model",
+        }
+    )
+    store.save_observability_config(
+        {
+            "enabled": True,
+            "base_url": "https://langfuse.invalid",
+            "public_key": "legacy-public",
+            "secret_key": "legacy-tracing-secret",
+            "environment": "migration",
+            "capture_content": False,
+        }
+    )
+    connection = sqlite3.connect(store.path)
+    downgrade_model_settings_schema(connection)
+    connection.execute("PRAGMA user_version = 3")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+
+    assert migrated.load_model_config() == {
+        "api_type": "openai-chat",
+        "base_url": "https://example.invalid/v1",
+        "api_key": "legacy-openai-secret",
+        "model": "legacy-model",
+    }
+    assert migrated.load_observability_config()["secret_key"] == (
+        "legacy-tracing-secret"
+    )
+    connection = sqlite3.connect(migrated.path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(model_settings)")
+    }
+    assert "api_type" in columns
+    assert "provider" not in columns
     connection.close()
 
 
@@ -312,13 +405,13 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
         }
     ]
     assert store.load_model_config() == {
-        "provider": "anthropic",
+        "api_type": "anthropic",
         "base_url": "https://example.invalid",
         "api_key": "legacy-secret",
         "model": "legacy-model",
     }
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
     for table in ("members", "discussions", "model_settings"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         assert "working_directory" not in columns

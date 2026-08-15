@@ -10,7 +10,11 @@ from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
 from pydantic_ai.models.google import GoogleModel, GoogleModelName
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIModelName
+from pydantic_ai.models.openai import (
+    OpenAIChatModel,
+    OpenAIModelName,
+    OpenAIResponsesModel,
+)
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -24,23 +28,28 @@ from flowent.observability import (
 )
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRunner
 
-ProviderType = Literal["openai", "anthropic", "google"]
+ApiType = Literal["openai-chat", "openai-responses", "anthropic", "google"]
 
 
 @dataclass(frozen=True)
 class ModelConfig:
-    provider: ProviderType
+    api_type: ApiType
     base_url: str
     api_key: str = field(repr=False)
     model: str
 
     @classmethod
     def restore(cls, values: dict[str, str]) -> ModelConfig:
-        provider = values["provider"]
-        if provider not in ("openai", "anthropic", "google"):
-            raise RuntimeError("Persisted model provider is invalid")
+        api_type = values["api_type"]
+        if api_type not in (
+            "openai-chat",
+            "openai-responses",
+            "anthropic",
+            "google",
+        ):
+            raise RuntimeError("Persisted model API type is invalid")
         config = cls(
-            provider=cast(ProviderType, provider),
+            api_type=cast(ApiType, api_type),
             base_url=values["base_url"],
             api_key=values["api_key"],
             model=values["model"],
@@ -51,7 +60,7 @@ class ModelConfig:
 
     def persistence_data(self) -> dict[str, str]:
         return {
-            "provider": self.provider,
+            "api_type": self.api_type,
             "base_url": self.base_url,
             "api_key": self.api_key,
             "model": self.model,
@@ -73,7 +82,7 @@ class PydanticAgentRunner:
         config: ModelConfig,
         observability: PydanticAIObservability | None = None,
     ) -> None:
-        if config.provider == "anthropic":
+        if config.api_type == "anthropic":
             model = AnthropicModel(
                 cast(AnthropicModelName, config.model),
                 provider=AnthropicProvider(
@@ -81,10 +90,18 @@ class PydanticAgentRunner:
                     api_key=config.api_key,
                 ),
             )
-        elif config.provider == "google":
+        elif config.api_type == "google":
             model = GoogleModel(
                 cast(GoogleModelName, config.model),
                 provider=GoogleProvider(
+                    base_url=config.base_url,
+                    api_key=config.api_key,
+                ),
+            )
+        elif config.api_type == "openai-responses":
+            model = OpenAIResponsesModel(
+                cast(OpenAIModelName, config.model),
+                provider=OpenAIProvider(
                     base_url=config.base_url,
                     api_key=config.api_key,
                 ),
@@ -305,13 +322,13 @@ class ModelRuntime:
             config = self._config
             if config is None:
                 return {
-                    "provider": "openai",
+                    "api_type": "openai-chat",
                     "base_url": "",
                     "model": "",
                     "has_api_key": False,
                 }
             return {
-                "provider": config.provider,
+                "api_type": config.api_type,
                 "base_url": config.base_url,
                 "model": config.model,
                 "has_api_key": True,
@@ -340,17 +357,24 @@ class ModelRuntime:
 
     def configure(
         self,
-        provider: str,
+        api_type: str,
         base_url: str,
         api_key: str,
         model: str,
     ) -> dict[str, Any]:
-        provider = provider.strip()
+        api_type = api_type.strip()
         base_url = base_url.strip()
         api_key = api_key.strip()
         model = model.strip()
-        if provider not in ("openai", "anthropic", "google"):
-            raise ValueError("provider must be openai, anthropic, or google")
+        if api_type not in (
+            "openai-chat",
+            "openai-responses",
+            "anthropic",
+            "google",
+        ):
+            raise ValueError(
+                "api_type must be openai-chat, openai-responses, anthropic, or google"
+            )
         with self._lock:
             if not api_key and self._config is not None:
                 api_key = self._config.api_key
@@ -361,7 +385,7 @@ class ModelRuntime:
             if not model:
                 raise ValueError("model must not be empty")
             config = ModelConfig(
-                provider=cast(ProviderType, provider),
+                api_type=cast(ApiType, api_type),
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
