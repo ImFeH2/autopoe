@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "node scripts/run-app.mjs dev",
     "dev:components": "pnpm --dir app dev:components",
+    "dev:release": "node scripts/run-app.mjs dev --release",
     "build": "pnpm build:app",
     "build:app": "node scripts/run-app.mjs build",
     "build:flowent": "node scripts/build-flowent.mjs",
