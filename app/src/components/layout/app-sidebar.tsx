@@ -1,6 +1,5 @@
 import {
   Badge,
-  Bot,
   Button,
   MessageSquare,
   Settings2,
@@ -8,10 +7,9 @@ import {
   Users,
 } from "@/components/ui";
 
-export type WorkspaceView = "discussions" | "members" | "agents" | "settings";
+export type WorkspaceView = "discussions" | "members" | "settings";
 
 type AppSidebarProps = {
-  agentCount: number;
   discussionCount: number;
   memberCount: number;
   onSelectView: (view: WorkspaceView) => void;
@@ -22,11 +20,9 @@ type AppSidebarProps = {
 const navigation = [
   { icon: MessageSquare, label: "Discussions", view: "discussions" },
   { icon: Users, label: "Members", view: "members" },
-  { icon: Bot, label: "Agents", view: "agents" },
 ] as const;
 
 export function AppSidebar({
-  agentCount,
   discussionCount,
   memberCount,
   onSelectView,
@@ -36,7 +32,6 @@ export function AppSidebar({
   const counts: Record<Exclude<WorkspaceView, "settings">, number> = {
     discussions: discussionCount,
     members: memberCount,
-    agents: agentCount,
   };
 
   return (

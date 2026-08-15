@@ -18,6 +18,7 @@ import {
   formatMessageCount,
   shouldSubmitMessage,
 } from "@/features/discussions";
+import { MembersPage } from "@/features/members";
 import {
   isModelSettingsDirty,
   isObservabilitySettingsDirty,
@@ -138,7 +139,6 @@ describe("App", () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>
         <AppSidebar
-          agentCount={2}
           discussionCount={1}
           memberCount={3}
           onSelectView={() => undefined}
@@ -153,11 +153,104 @@ describe("App", () => {
     expect(markup).not.toContain("Organization 1");
     expect(markup).toContain(">Discussions<");
     expect(markup).toContain(">Members<");
-    expect(markup).toContain(">Agents<");
+    expect(markup).not.toContain(">Agents<");
     expect(markup).toContain(">Settings<");
     expect(markup).not.toContain("Recent");
     expect(markup).not.toContain("Launch narrative");
     expect(markup).toContain("/project/flowent");
+  });
+
+  it("renders Members as a selectable list with Agent details", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "idle" as const,
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <MembersPage
+          agentName=""
+          disabled={false}
+          error={null}
+          isCreatingAgent={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          onAgentDialogOpenChange={() => undefined}
+          onAgentNameChange={() => undefined}
+          onCreateAgent={() => undefined}
+          onRetryAgent={() => undefined}
+          onSelectMember={() => undefined}
+          selectedMember={agent}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Member list"');
+    expect(markup).toContain('aria-label="New Agent"');
+    expect(markup).toContain('aria-label="Open You"');
+    expect(markup).toContain('aria-label="Open Ada"');
+    expect(markup).toContain('aria-current="page"');
+    expect(markup).toContain('aria-label="Ada details"');
+    expect(markup).toContain("Agent · IDLE");
+    expect(markup).toContain(">Member ID<");
+  });
+
+  it("shows Agent errors and Retry in Member details", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "error" as const,
+      error: "Model request failed",
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <MembersPage
+          agentName=""
+          disabled={false}
+          error={null}
+          isCreatingAgent={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          onAgentDialogOpenChange={() => undefined}
+          onAgentNameChange={() => undefined}
+          onCreateAgent={() => undefined}
+          onRetryAgent={() => undefined}
+          onSelectMember={() => undefined}
+          selectedMember={agent}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Agent error"');
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Model request failed");
+    expect(markup).toContain('aria-label="Retry Ada"');
+  });
+
+  it("keeps Human Member details empty", () => {
+    const human = { id: 1, type: "human" as const, name: "You" };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <MembersPage
+          agentName=""
+          disabled={false}
+          error={null}
+          isCreatingAgent={false}
+          members={[human]}
+          onAgentDialogOpenChange={() => undefined}
+          onAgentNameChange={() => undefined}
+          onCreateAgent={() => undefined}
+          onRetryAgent={() => undefined}
+          onSelectMember={() => undefined}
+          selectedMember={human}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Open You"');
+    expect(markup).not.toContain("Select a member");
+    expect(markup).not.toContain("member-agent-detail");
+    expect(markup).not.toContain(">Member ID<");
   });
 
   it("renders production controls with accessible native semantics", () => {

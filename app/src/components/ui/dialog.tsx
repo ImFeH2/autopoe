@@ -8,6 +8,7 @@ type DialogProps = {
   children: ReactNode;
   description: string;
   onCloseAutoFocus?: () => boolean;
+  onOpenAutoFocus?: () => boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   title: string;
@@ -19,6 +20,7 @@ export function Dialog({
   children,
   description,
   onCloseAutoFocus,
+  onOpenAutoFocus,
   onOpenChange,
   open,
   title,
@@ -48,6 +50,11 @@ export function Dialog({
           className="ui-dialog-content"
           onCloseAutoFocus={(event) => {
             if (onCloseAutoFocus?.()) {
+              event.preventDefault();
+            }
+          }}
+          onOpenAutoFocus={(event) => {
+            if (onOpenAutoFocus?.()) {
               event.preventDefault();
             }
           }}

@@ -143,7 +143,6 @@ export function ComponentLab() {
         <h2 id="lab-layout">Layout</h2>
         <div className="component-lab-layout-preview">
           <AppSidebar
-            agentCount={2}
             discussionCount={2}
             memberCount={3}
             onSelectView={() => undefined}
@@ -151,7 +150,7 @@ export function ComponentLab() {
             workingDirectory="/project/flowent"
           />
           <div className="component-lab-layout-main">
-            <PageHeader count={2} title="Agents" />
+            <PageHeader count={3} title="Members" />
             <p>Resize the window to inspect the compact Sidebar.</p>
           </div>
         </div>

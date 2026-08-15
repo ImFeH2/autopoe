@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 import { AppSidebar, type WorkspaceView } from "@/components/layout";
-import { AgentsPage } from "@/features/agents";
 import { DiscussionsPage } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
@@ -38,8 +37,10 @@ function App() {
   const [selectedDiscussionId, setSelectedDiscussionId] = useState<
     number | null
   >(null);
+  const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null);
   const [workspaceView, setWorkspaceView] =
     useState<WorkspaceView>("discussions");
+  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
   const [isCreatingDiscussion, setIsCreatingDiscussion] = useState(false);
   const [agentName, setAgentName] = useState("");
   const [topic, setTopic] = useState("");
@@ -48,9 +49,7 @@ function App() {
   const [messageMentionIds, setMessageMentionIds] = useState<number[]>([]);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const agentNameInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
-  const restoreAgentFocusRef = useRef(false);
   const restoreMessageFocusRef = useRef(false);
   const focusMessageAfterDialogRef = useRef(false);
 
@@ -88,10 +87,6 @@ function App() {
     if (isSaving) {
       return;
     }
-    if (restoreAgentFocusRef.current) {
-      restoreAgentFocusRef.current = false;
-      agentNameInputRef.current?.focus();
-    }
     if (restoreMessageFocusRef.current) {
       restoreMessageFocusRef.current = false;
       messageInputRef.current?.focus();
@@ -109,6 +104,9 @@ function App() {
   const { snapshot } = requestState;
   const selectedDiscussion = snapshot.discussions.find(
     (discussion) => discussion.id === selectedDiscussionId,
+  );
+  const selectedMember = snapshot.members.find(
+    (member) => member.id === selectedMemberId,
   );
 
   function commit(nextSnapshot: OrganizationSnapshot) {
@@ -136,15 +134,15 @@ function App() {
     event.preventDefault();
     const nextSnapshot = await mutate(() => backend.createAgent(agentName));
     if (nextSnapshot) {
+      const created = nextSnapshot.members[nextSnapshot.members.length - 1];
       setAgentName("");
+      setSelectedMemberId(created?.type === "agent" ? created.id : null);
+      setIsCreatingAgent(false);
     }
   }
 
   async function handleRetryAgent(agentId: number) {
-    const nextSnapshot = await mutate(() => backend.retryAgent(agentId));
-    if (nextSnapshot) {
-      restoreAgentFocusRef.current = true;
-    }
+    await mutate(() => backend.retryAgent(agentId));
   }
 
   async function handleCreateDiscussion(event: FormEvent<HTMLFormElement>) {
@@ -189,6 +187,15 @@ function App() {
     setSelectedMemberIds((current) => toggleId(current, memberId));
   }
 
+  function changeAgentDialog(open: boolean) {
+    if (isSaving) {
+      return;
+    }
+    setMutationError(null);
+    setAgentName("");
+    setIsCreatingAgent(open);
+  }
+
   function changeDiscussionDialog(open: boolean) {
     if (isSaving) {
       return;
@@ -223,6 +230,7 @@ function App() {
 
   function selectWorkspaceView(view: WorkspaceView) {
     setWorkspaceView(view);
+    setIsCreatingAgent(false);
     setIsCreatingDiscussion(false);
     setTopic("");
     setSelectedMemberIds([]);
@@ -234,7 +242,6 @@ function App() {
   return (
     <main className="app-shell bg-canvas text-text-primary">
       <AppSidebar
-        agentCount={agents.length}
         discussionCount={snapshot.discussions.length}
         memberCount={snapshot.members.length}
         onSelectView={selectWorkspaceView}
@@ -244,20 +251,21 @@ function App() {
 
       <section className="workspace-main bg-surface">
         {workspaceView === "members" ? (
-          <MembersPage members={snapshot.members} />
-        ) : null}
-        {workspaceView === "settings" ? <SettingsPage /> : null}
-        {workspaceView === "agents" ? (
-          <AgentsPage
+          <MembersPage
             agentName={agentName}
-            agentNameInputRef={agentNameInputRef}
-            agents={agents}
             disabled={isSaving}
+            error={isCreatingAgent ? mutationError : null}
+            isCreatingAgent={isCreatingAgent}
+            members={snapshot.members}
+            onAgentDialogOpenChange={changeAgentDialog}
             onAgentNameChange={setAgentName}
             onCreateAgent={handleCreateAgent}
             onRetryAgent={handleRetryAgent}
+            onSelectMember={setSelectedMemberId}
+            selectedMember={selectedMember}
           />
         ) : null}
+        {workspaceView === "settings" ? <SettingsPage /> : null}
         {workspaceView === "discussions" ? (
           <DiscussionsPage
             agents={agents}
@@ -274,9 +282,9 @@ function App() {
             onDialogOpenChange={changeDiscussionDialog}
             onMessageChange={setMessageBody}
             onMentionToggle={toggleMessageMention}
-            onSelectAgents={() => {
-              selectWorkspaceView("agents");
-              requestAnimationFrame(() => agentNameInputRef.current?.focus());
+            onCreateAgent={() => {
+              selectWorkspaceView("members");
+              setIsCreatingAgent(true);
             }}
             onSelectDiscussion={selectDiscussion}
             onSend={handleSendMessage}
@@ -288,7 +296,7 @@ function App() {
           />
         ) : null}
 
-        {mutationError && !isCreatingDiscussion ? (
+        {mutationError && !isCreatingAgent && !isCreatingDiscussion ? (
           <p
             className="caption-text mutation-error m-0 border border-danger bg-surface px-3 py-2 text-danger"
             role="alert"

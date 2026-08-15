@@ -61,9 +61,9 @@ type DiscussionsPageProps = {
   onCreateDiscussion: (event: FormEvent<HTMLFormElement>) => void;
   onDialogCloseAutoFocus: () => boolean;
   onDialogOpenChange: (open: boolean) => void;
+  onCreateAgent: () => void;
   onMessageChange: (body: string) => void;
   onMentionToggle: (memberId: number) => void;
-  onSelectAgents: () => void;
   onSelectDiscussion: (discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
@@ -83,12 +83,12 @@ export function DiscussionsPage({
   messageBody,
   messageInputRef,
   messageMentionIds,
+  onCreateAgent,
   onCreateDiscussion,
   onDialogCloseAutoFocus,
   onDialogOpenChange,
   onMessageChange,
   onMentionToggle,
-  onSelectAgents,
   onSelectDiscussion,
   onSend,
   onToggleMember,
@@ -200,7 +200,7 @@ export function DiscussionsPage({
                 <p id="new-discussion-requirement">
                   Discussions need at least one Agent.
                 </p>
-                <Button onClick={onSelectAgents} variant="secondary">
+                <Button onClick={onCreateAgent} variant="secondary">
                   New Agent
                 </Button>
               </div>

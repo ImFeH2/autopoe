@@ -3,9 +3,9 @@
 @import "./base.css";
 @import "../components/layout/layout.css";
 @import "../components/ui/ui.css";
-@import "../features/entities.css";
 @import "../features/settings/settings.css";
 @import "../features/discussions/discussions.css";
+@import "../features/members/members.css";
 @import "./motion.css";
 
 @theme inline {
