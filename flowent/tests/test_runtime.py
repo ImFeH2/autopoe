@@ -9,7 +9,7 @@ from threading import Event
 import psutil
 import pytest
 
-from flowent.domain import Activation, DomainError, OrganizationState
+from flowent.domain import DomainError, OrganizationState, Reminder
 from flowent.host_tools import HostTools
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRuntime
 
@@ -83,50 +83,50 @@ def test_agent_discussion_tools_are_restricted_to_members(tmp_path: Path) -> Non
 
 class RecordingRunner:
     def __init__(self) -> None:
-        self.activations: list[Activation] = []
+        self.activations: list[Reminder] = []
         self.completed = Event()
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
+    def run(self, activation: Reminder, context: AgentRunContext) -> None:
         self.activations.append(activation)
         context.discussion(
             "read",
-            discussion_id=activation.discussion_id,
-            end_message_id=activation.message_id,
+            discussion_id=activation.mentions[0].discussion_id,
+            end_message_id=activation.mentions[0].message_id,
         )
         context.discussion(
             "send",
-            discussion_id=activation.discussion_id,
+            discussion_id=activation.mentions[0].discussion_id,
             body="Handled immediately",
         )
         context.discussion(
             "ack",
-            discussion_id=activation.discussion_id,
-            message_ids=[activation.message_id],
+            discussion_id=activation.mentions[0].discussion_id,
+            message_ids=[activation.mentions[0].message_id],
         )
         self.completed.set()
 
 
 class FollowUpRunner:
     def __init__(self) -> None:
-        self.activations: list[Activation] = []
+        self.activations: list[Reminder] = []
         self.started = Event()
         self.release = Event()
         self.followed_up = Event()
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
+    def run(self, activation: Reminder, context: AgentRunContext) -> None:
         self.activations.append(activation)
         if len(self.activations) == 1:
             self.started.set()
             self.release.wait(timeout=1)
         context.discussion(
             "read",
-            discussion_id=activation.discussion_id,
-            end_message_id=activation.message_id,
+            discussion_id=activation.mentions[0].discussion_id,
+            end_message_id=activation.mentions[0].message_id,
         )
         context.discussion(
             "ack",
-            discussion_id=activation.discussion_id,
-            message_ids=[activation.message_id],
+            discussion_id=activation.mentions[0].discussion_id,
+            message_ids=[activation.mentions[0].message_id],
         )
         if len(self.activations) == 2:
             self.followed_up.set()
@@ -147,7 +147,38 @@ def test_runtime_starts_a_follow_up_turn_for_a_new_mention(tmp_path: Path) -> No
         runner.release.set()
 
         assert runner.followed_up.wait(timeout=1)
-        assert [activation.message_id for activation in runner.activations] == [1, 2]
+        assert [
+            activation.mentions[0].message_id for activation in runner.activations
+        ] == [1, 2]
+    finally:
+        runtime.stop()
+
+
+class UnproductiveRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.stopped = Event()
+
+    def run(self, reminder: Reminder, context: AgentRunContext) -> None:
+        del reminder, context
+        self.calls += 1
+        if self.calls == 3:
+            self.stopped.set()
+
+
+def test_runtime_stops_after_three_turns_without_ack(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    runner = UnproductiveRunner()
+    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime.start()
+
+    try:
+        state.send_message(1, 1, "Pending", [2])
+        assert runner.stopped.wait(timeout=1)
+        assert runner.calls == 3
+        assert state.member(2)["status"] == "error"
     finally:
         runtime.stop()
 
@@ -158,8 +189,8 @@ class ObservableState(OrganizationState):
         self.completed = Event()
         self.error_recorded = Event()
 
-    def complete_activation(self, agent_id: int, error: str | None = None) -> None:
-        super().complete_activation(agent_id, error)
+    def complete_turn(self, agent_id: int, error: str | None = None) -> None:
+        super().complete_turn(agent_id, error)
         self.completed.set()
         if error:
             self.error_recorded.set()
@@ -171,7 +202,7 @@ class ExecutingRunner:
         self.started = Event()
         self.finished = Event()
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
+    def run(self, activation: Reminder, context: AgentRunContext) -> None:
         del activation
         script = (
             "import os,pathlib,time; "
@@ -189,16 +220,16 @@ class AckThenFailRunner:
     def __init__(self) -> None:
         self.completed = Event()
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
+    def run(self, activation: Reminder, context: AgentRunContext) -> None:
         context.discussion(
             "read",
-            discussion_id=activation.discussion_id,
-            end_message_id=activation.message_id,
+            discussion_id=activation.mentions[0].discussion_id,
+            end_message_id=activation.mentions[0].message_id,
         )
         context.discussion(
             "ack",
-            discussion_id=activation.discussion_id,
-            message_ids=[activation.message_id],
+            discussion_id=activation.mentions[0].discussion_id,
+            message_ids=[activation.mentions[0].message_id],
         )
         self.completed.set()
         raise AgentRunFailure("Late model failure")
@@ -209,7 +240,7 @@ class FailingRunner:
         self.calls = 0
         self.completed = Event()
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
+    def run(self, activation: Reminder, context: AgentRunContext) -> None:
         del activation, context
         self.calls += 1
         self.completed.set()
@@ -232,7 +263,7 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
         assert state.completed.wait(timeout=1)
 
         snapshot = state.snapshot()
-        assert runner.activations[0].message_id == 1
+        assert runner.activations[0].mentions[0].message_id == 1
         assert snapshot["members"][1]["status"] == "idle"
         assert snapshot["discussions"][0]["messages"] == [
             {
@@ -286,7 +317,7 @@ def test_runtime_can_stop_immediately_after_start(tmp_path: Path) -> None:
         runtime.stop()
 
 
-def test_runtime_ignores_late_failure_after_ack(tmp_path: Path) -> None:
+def test_runtime_records_late_failure_after_ack(tmp_path: Path) -> None:
     state = ObservableState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
@@ -302,9 +333,10 @@ def test_runtime_ignores_late_failure_after_ack(tmp_path: Path) -> None:
             "id": 2,
             "type": "agent",
             "name": "Ada",
-            "status": "idle",
+            "status": "error",
+            "error": "Late model failure",
         }
-        assert state.claim_next_activation()[0] is None
+        assert state.claim_next_reminder()[0] is None
     finally:
         runtime.stop()
 

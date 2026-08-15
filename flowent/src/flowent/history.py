@@ -11,7 +11,7 @@ from uuid import uuid4
 from pydantic_ai import ModelMessagesTypeAdapter
 from pydantic_ai.messages import ModelMessage
 
-from flowent.domain import Activation
+from flowent.domain import Reminder
 
 RunStatus = Literal["running", "completed", "failed", "interrupted"]
 HistoryEventSink = Callable[[dict[str, Any]], None]
@@ -23,7 +23,7 @@ class AgentHistoryRepository(Protocol):
         agent_id: int,
         run_id: str,
         started_at: str,
-        activation: dict[str, int],
+        reminder: dict[str, Any],
     ) -> int: ...
 
     def complete_agent_run(
@@ -47,7 +47,7 @@ class AgentHistoryRun:
     run_id: str
     sequence: int
     started_at: str
-    activation: list[dict[str, Any]]
+    reminder: dict[str, Any]
     message_history: tuple[ModelMessage, ...]
     _event_sequence: int = 0
     _live_entries: list[dict[str, Any]] = field(default_factory=list)
@@ -78,32 +78,40 @@ class AgentHistory:
         self._lock = Lock()
         self._active_runs: dict[int, AgentHistoryRun] = {}
 
-    def start(self, activation: Activation) -> AgentHistoryRun:
-        message_history = tuple(self._load_messages(activation.agent_id))
+    def start(self, reminder: Reminder) -> AgentHistoryRun:
+        message_history = tuple(self._load_messages(reminder.agent_id))
         run_id = str(uuid4())
         started_at = _timestamp()
-        activation_data = {
-            "discussion_id": activation.discussion_id,
-            "message_id": activation.message_id,
+        reminder_data = {
+            "mentions": [
+                {
+                    "discussion_id": mention.discussion_id,
+                    "message_id": mention.message_id,
+                    "sender_id": mention.sender_id,
+                    "body": mention.body,
+                    "previously_reminded": mention.previously_reminded,
+                }
+                for mention in reminder.mentions
+            ]
         }
         sequence = self._repository.begin_agent_run(
-            activation.agent_id,
+            reminder.agent_id,
             run_id,
             started_at,
-            activation_data,
+            reminder_data,
         )
         run = AgentHistoryRun(
             self,
-            activation.agent_id,
+            reminder.agent_id,
             run_id,
             sequence,
             started_at,
-            activation_data,
+            reminder_data,
             message_history,
         )
         with self._lock:
-            self._active_runs[activation.agent_id] = run
-        self._publish(run, "run_started", activation=activation_data)
+            self._active_runs[reminder.agent_id] = run
+        self._publish(run, "run_started", reminder=reminder_data)
         return run
 
     def snapshot(self, agent_id: int) -> dict[str, Any]:
@@ -248,10 +256,10 @@ class AgentHistory:
     def _project_run(run: dict[str, Any]) -> dict[str, Any]:
         entries: list[dict[str, Any]] = [
             {
-                "id": f"{run['run_id']}-activation",
-                "type": "activation",
+                "id": f"{run['run_id']}-reminder",
+                "type": "reminder",
                 "timestamp": run["started_at"],
-                "activation": _activation_data(run["activation"]),
+                "reminder": _reminder_data(run["reminder"]),
                 "state": "complete",
             }
         ]
@@ -335,11 +343,20 @@ class AgentHistory:
         }
 
 
-def _activation_data(value: Any) -> dict[str, int]:
+def _reminder_data(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict) and isinstance(value.get("mentions"), list):
+        return value
     if isinstance(value, dict):
         return {
-            "discussion_id": int(value["discussion_id"]),
-            "message_id": int(value["message_id"]),
+            "mentions": [
+                {
+                    "discussion_id": int(value["discussion_id"]),
+                    "message_id": int(value["message_id"]),
+                    "sender_id": 0,
+                    "body": "",
+                    "previously_reminded": False,
+                }
+            ]
         }
     if (
         isinstance(value, list)
@@ -351,10 +368,17 @@ def _activation_data(value: Any) -> dict[str, int]:
         and isinstance(value[0]["message_ids"][0], int)
     ):
         return {
-            "discussion_id": value[0]["discussion_id"],
-            "message_id": value[0]["message_ids"][0],
+            "mentions": [
+                {
+                    "discussion_id": value[0]["discussion_id"],
+                    "message_id": value[0]["message_ids"][0],
+                    "sender_id": 0,
+                    "body": "",
+                    "previously_reminded": False,
+                }
+            ]
         }
-    raise RuntimeError("Persisted Activation is invalid")
+    raise RuntimeError("Persisted Reminder is invalid")
 
 
 def _timestamp() -> str:

@@ -87,33 +87,6 @@ def test_json_line_writer_keeps_responses_and_events_atomic() -> None:
     )
 
 
-def test_retries_a_failed_agent_and_returns_complete_snapshot() -> None:
-    state = OrganizationState()
-    state.create_agent("Ada")
-    state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Retry this", [2])
-    assert state.claim_next_activation()[0] is not None
-    state.complete_activation(2, "Model request failed")
-
-    response = Dispatcher(state).dispatch(
-        {
-            "id": 1,
-            "method": "organization.retry_agent",
-            "params": {"agent_id": 2},
-        }
-    )
-
-    assert response["result"]["members"][1] == {
-        "id": 2,
-        "type": "agent",
-        "name": "Ada",
-        "status": "idle",
-    }
-    retried, _ = state.claim_next_activation()
-    assert retried is not None
-    assert retried.message_id == 1
-
-
 def test_returns_structured_errors_without_stopping_the_stream() -> None:
     input_stream = io.StringIO(
         "{invalid}\n"

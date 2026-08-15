@@ -32,7 +32,6 @@ type MembersPageProps = {
   onAgentDialogOpenChange: (open: boolean) => void;
   onAgentNameChange: (name: string) => void;
   onCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
-  onRetryAgent: (agentId: number) => void;
   onSelectMember: (memberId: number) => void;
   selectedMember?: Member;
 };
@@ -53,7 +52,6 @@ export function MembersPage({
   onAgentDialogOpenChange,
   onAgentNameChange,
   onCreateAgent,
-  onRetryAgent,
   onSelectMember,
   selectedMember,
 }: MembersPageProps) {
@@ -143,9 +141,7 @@ export function MembersPage({
         {selectedMember?.type === "agent" ? (
           <AgentDetails
             agent={selectedMember}
-            disabled={disabled}
             history={history ?? { status: "loading" }}
-            onRetry={onRetryAgent}
           />
         ) : selectedMember ? null : (
           <div className="member-detail-empty">
@@ -159,14 +155,10 @@ export function MembersPage({
 
 function AgentDetails({
   agent,
-  disabled,
   history,
-  onRetry,
 }: {
   agent: AgentMember;
-  disabled: boolean;
   history: AgentHistoryState;
-  onRetry: (agentId: number) => void;
 }) {
   return (
     <section
@@ -202,15 +194,6 @@ function AgentDetails({
               <p className="caption-text m-0 text-danger" role="alert">
                 {agent.error}
               </p>
-              <Button
-                aria-label={`Retry ${agent.name}`}
-                disabled={disabled}
-                onClick={() => onRetry(agent.id)}
-                size="compact"
-                variant="secondary"
-              >
-                Retry
-              </Button>
             </section>
           ) : null}
         </div>
@@ -232,11 +215,13 @@ function formatHistoryTime(value: string) {
     : historyTimeFormatter.format(date);
 }
 
-function activationLabel(entry: AgentHistoryEntry) {
-  const activation = entry.activation;
-  return activation
-    ? `Discussion ${activation.discussion_id} · Message ${activation.message_id}`
-    : "";
+function reminderLabel(entry: AgentHistoryEntry) {
+  return (entry.reminder?.mentions ?? [])
+    .map(
+      (mention) =>
+        `${mention.previously_reminded ? "Previously reminded" : "New"} · Discussion ${mention.discussion_id} · Message ${mention.message_id}`,
+    )
+    .join("\n");
 }
 
 function usageLabel(run: AgentHistoryRun) {
@@ -338,16 +323,16 @@ function HistoryEntry({
         ? "Streaming"
         : null;
 
-  if (entry.type === "activation") {
+  if (entry.type === "reminder") {
     const usage = usageLabel(run);
     return (
-      <article className="agent-history-entry agent-history-entry--activation">
+      <article className="agent-history-entry agent-history-entry--reminder">
         <div className="agent-history-entry-meta">
-          <strong>Activation</strong>
+          <strong>Reminder</strong>
           <time dateTime={entry.timestamp}>{time}</time>
         </div>
-        <div className="agent-history-activation">
-          <p>{activationLabel(entry)}</p>
+        <div className="agent-history-reminder">
+          <p>{reminderLabel(entry)}</p>
           <span>
             {run.status.toUpperCase()}
             {usage ? ` · ${usage}` : ""}

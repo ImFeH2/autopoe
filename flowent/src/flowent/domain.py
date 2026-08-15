@@ -26,6 +26,7 @@ class Mention:
     member_id: int
     read: bool = False
     acked: bool = False
+    reminded: bool = False
 
 
 @dataclass
@@ -48,14 +49,23 @@ class Discussion:
 class AgentExecution:
     status: Literal["idle", "running", "error"] = "idle"
     error: str | None = None
-    claimed_mention: tuple[int, int] | None = None
+    acknowledged_in_turn: int = 0
+    consecutive_unproductive_turns: int = 0
 
 
 @dataclass(frozen=True)
-class Activation:
-    agent_id: int
+class ReminderMention:
     discussion_id: int
     message_id: int
+    sender_id: int
+    body: str
+    previously_reminded: bool
+
+
+@dataclass(frozen=True)
+class Reminder:
+    agent_id: int
+    mentions: tuple[ReminderMention, ...]
 
 
 class OrganizationState:
@@ -176,17 +186,6 @@ class OrganizationState:
             self._changed(persist=True)
             return self._snapshot()
 
-    def retry_agent(self, agent_id: int) -> dict[str, Any]:
-        with self._condition:
-            self._require_agent(agent_id)
-            execution = self._agent_execution[agent_id]
-            if execution.status != "error":
-                raise DomainError("invalid_retry", "Only failed Agents can be retried")
-            execution.status = "idle"
-            execution.error = None
-            self._changed()
-            return self._snapshot()
-
     def list_members(self) -> list[dict[str, Any]]:
         with self._condition:
             return [self._member_data(member) for member in self._members.values()]
@@ -289,8 +288,15 @@ class OrganizationState:
                     )
                 if not mention.read:
                     raise DomainError("invalid_ack", "Message must be read before ack")
+            newly_acked = 0
             for message_id in target_ids:
-                messages_by_id[message_id].mentions[agent_id].acked = True
+                mention = messages_by_id[message_id].mentions[agent_id]
+                if not mention.acked:
+                    mention.acked = True
+                    newly_acked += 1
+            execution = self._agent_execution[agent_id]
+            if execution.status == "running":
+                execution.acknowledged_in_turn += newly_acked
             self._changed(persist=True)
             return {"acked_message_ids": list(target_ids)}
 
@@ -340,7 +346,7 @@ class OrganizationState:
                     )
             return results
 
-    def claim_next_activation(self) -> tuple[Activation | None, int]:
+    def claim_next_reminder(self) -> tuple[Reminder | None, int]:
         with self._condition:
             for member in self._members.values():
                 if member.type != "agent":
@@ -348,32 +354,43 @@ class OrganizationState:
                 execution = self._agent_execution[member.id]
                 if execution.status != "idle":
                     continue
-                activation = self._next_pending_activation(member.id)
-                if activation is None:
+                mentions = self._pending_reminder_mentions(member.id)
+                if not mentions:
                     continue
+                for item in mentions:
+                    mention = (
+                        self._discussions[item.discussion_id]
+                        .messages[item.message_id - 1]
+                        .mentions[member.id]
+                    )
+                    mention.read = True
+                    mention.reminded = True
                 execution.status = "running"
                 execution.error = None
-                execution.claimed_mention = (
-                    activation.discussion_id,
-                    activation.message_id,
-                )
-                self._changed()
-                return activation, self._revision
+                execution.acknowledged_in_turn = 0
+                self._changed(persist=True)
+                return Reminder(member.id, mentions), self._revision
             return None, self._revision
 
-    def complete_activation(self, agent_id: int, error: str | None = None) -> None:
+    def complete_turn(self, agent_id: int, error: str | None = None) -> None:
         with self._condition:
             execution = self._agent_execution[agent_id]
-            pending_mentions = self._pending_mentions(agent_id)
-            claimed_mention = execution.claimed_mention
-            has_new_work = bool(
-                pending_mentions - ({claimed_mention} if claimed_mention else set())
-            )
-            execution.status = (
-                "error" if error and pending_mentions and not has_new_work else "idle"
-            )
-            execution.error = error if execution.status == "error" else None
-            execution.claimed_mention = None
+            if error is not None:
+                execution.status = "error"
+                execution.error = error
+            elif execution.acknowledged_in_turn > 0:
+                execution.status = "idle"
+                execution.error = None
+                execution.consecutive_unproductive_turns = 0
+            else:
+                execution.consecutive_unproductive_turns += 1
+                if execution.consecutive_unproductive_turns >= 3:
+                    execution.status = "error"
+                    execution.error = "Agent did not acknowledge any pending Mentions in three consecutive Turns"
+                else:
+                    execution.status = "idle"
+                    execution.error = None
+            execution.acknowledged_in_turn = 0
             self._changed()
 
     def wait_for_change(self, revision: int, stop_event: Event) -> None:
@@ -403,17 +420,23 @@ class OrganizationState:
             and not mention.acked
         )
 
-    def _next_pending_activation(self, agent_id: int) -> Activation | None:
-        for discussion in self._discussions.values():
-            for message in discussion.messages:
-                mention = message.mentions.get(agent_id)
-                if mention is not None and not mention.acked:
-                    return Activation(
-                        agent_id=agent_id,
-                        discussion_id=discussion.id,
-                        message_id=message.id,
-                    )
-        return None
+    def _pending_reminder_mentions(
+        self,
+        agent_id: int,
+    ) -> tuple[ReminderMention, ...]:
+        return tuple(
+            ReminderMention(
+                discussion_id=discussion.id,
+                message_id=message.id,
+                sender_id=message.sender_id,
+                body=message.body,
+                previously_reminded=mention.reminded,
+            )
+            for discussion in self._discussions.values()
+            for message in discussion.messages
+            if (mention := message.mentions.get(agent_id)) is not None
+            and not mention.acked
+        )
 
     def _snapshot(self) -> dict[str, Any]:
         return {
@@ -529,6 +552,7 @@ class OrganizationState:
                             member_id=mention["member_id"],
                             read=mention["read"],
                             acked=mention["acked"],
+                            reminded=mention.get("reminded", False),
                         )
                         for mention in message["mentions"]
                     },
@@ -564,6 +588,7 @@ class OrganizationState:
                                     "member_id": mention.member_id,
                                     "read": mention.read,
                                     "acked": mention.acked,
+                                    "reminded": mention.reminded,
                                 }
                                 for mention in message.mentions.values()
                             ],

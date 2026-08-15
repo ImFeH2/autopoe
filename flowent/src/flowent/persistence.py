@@ -11,7 +11,7 @@ from typing import Any
 
 from flowent.history import RunStatus
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -40,6 +40,8 @@ class SQLiteStore:
                 self._migrate_version_three(connection)
             elif version == 4:
                 self._migrate_version_four(connection)
+            elif version == 5:
+                self._migrate_version_five(connection)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"Unsupported Flowent database version: {version}")
             self._interrupt_running_agent_runs(connection)
@@ -119,6 +121,7 @@ class SQLiteStore:
                 member_id INTEGER NOT NULL,
                 read INTEGER NOT NULL CHECK (read IN (0, 1)),
                 acked INTEGER NOT NULL CHECK (acked IN (0, 1)),
+                reminded INTEGER NOT NULL DEFAULT 0 CHECK (reminded IN (0, 1)),
                 PRIMARY KEY (discussion_id, message_id, position),
                 UNIQUE (discussion_id, message_id, member_id),
                 FOREIGN KEY (discussion_id, message_id)
@@ -159,7 +162,7 @@ class SQLiteStore:
                 ),
                 started_at TEXT NOT NULL,
                 completed_at TEXT,
-                activation_json TEXT NOT NULL,
+                reminder_json TEXT NOT NULL,
                 messages_json TEXT NOT NULL DEFAULT '[]',
                 usage_json TEXT,
                 error TEXT,
@@ -281,6 +284,17 @@ class SQLiteStore:
     def _migrate_version_four(self, connection: sqlite3.Connection) -> None:
         with connection:
             self._create_agent_runs_table(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_five(connection: sqlite3.Connection) -> None:
+        with connection:
+            connection.execute(
+                "ALTER TABLE mentions ADD COLUMN reminded INTEGER NOT NULL DEFAULT 0 CHECK (reminded IN (0, 1))"
+            )
+            connection.execute(
+                "ALTER TABLE agent_runs RENAME COLUMN activation_json TO reminder_json"
+            )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -444,10 +458,11 @@ class SQLiteStore:
                             "member_id": mention["member_id"],
                             "read": bool(mention["read"]),
                             "acked": bool(mention["acked"]),
+                            "reminded": bool(mention["reminded"]),
                         }
                         for mention in connection.execute(
                             """
-                            SELECT member_id, read, acked FROM mentions
+                            SELECT member_id, read, acked, reminded FROM mentions
                             WHERE discussion_id = ? AND message_id = ?
                             ORDER BY position
                             """,
@@ -525,8 +540,8 @@ class SQLiteStore:
                     connection.execute(
                         """
                         INSERT INTO mentions
-                            (discussion_id, message_id, position, member_id, read, acked)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                            (discussion_id, message_id, position, member_id, read, acked, reminded)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             discussion_id,
@@ -535,6 +550,7 @@ class SQLiteStore:
                             mention["member_id"],
                             int(mention["read"]),
                             int(mention["acked"]),
+                            int(mention.get("reminded", False)),
                         ),
                     )
 
@@ -565,7 +581,7 @@ class SQLiteStore:
         agent_id: int,
         run_id: str,
         started_at: str,
-        activation: dict[str, int],
+        reminder: dict[str, Any],
     ) -> int:
         with self._connect() as connection, connection:
             row = connection.execute(
@@ -576,7 +592,7 @@ class SQLiteStore:
             connection.execute(
                 """
                 INSERT INTO agent_runs
-                    (agent_id, sequence, run_id, status, started_at, activation_json)
+                    (agent_id, sequence, run_id, status, started_at, reminder_json)
                 VALUES (?, ?, ?, 'running', ?, ?)
                 """,
                 (
@@ -584,7 +600,7 @@ class SQLiteStore:
                     sequence,
                     run_id,
                     started_at,
-                    json.dumps(activation, separators=(",", ":")),
+                    json.dumps(reminder, separators=(",", ":")),
                 ),
             )
         self.path.chmod(0o600)
@@ -636,7 +652,7 @@ class SQLiteStore:
                     "status": row["status"],
                     "started_at": row["started_at"],
                     "completed_at": row["completed_at"],
-                    "activation": json.loads(row["activation_json"]),
+                    "reminder": json.loads(row["reminder_json"]),
                     "messages_json": row["messages_json"],
                     "usage": json.loads(row["usage_json"])
                     if row["usage_json"] is not None
@@ -646,7 +662,7 @@ class SQLiteStore:
                 for row in connection.execute(
                     """
                     SELECT agent_id, sequence, run_id, status, started_at,
-                        completed_at, activation_json, messages_json, usage_json, error
+                        completed_at, reminder_json, messages_json, usage_json, error
                     FROM agent_runs WHERE agent_id = ? ORDER BY sequence
                     """,
                     (agent_id,),

@@ -9,7 +9,7 @@ from typing import Any, Protocol
 
 from pydantic_ai.messages import ModelMessage
 
-from flowent.domain import Activation, OrganizationState
+from flowent.domain import OrganizationState, Reminder
 from flowent.history import AgentHistory, AgentHistoryRun
 from flowent.host_tools import HostToolError, HostTools
 
@@ -130,7 +130,7 @@ class AgentRunOutcome:
 class AgentRunner(Protocol):
     def run(
         self,
-        activation: Activation,
+        reminder: Reminder,
         context: AgentRunContext,
     ) -> AgentRunOutcome | None: ...
 
@@ -188,40 +188,40 @@ class AgentRuntime:
     def _schedule(self) -> None:
         revision = -1
         while not self._stop_event.is_set():
-            activation, revision = self._state.claim_next_activation()
+            reminder, revision = self._state.claim_next_reminder()
             if self._stop_event.is_set():
-                if activation is not None:
-                    self._state.complete_activation(
-                        activation.agent_id,
+                if reminder is not None:
+                    self._state.complete_turn(
+                        reminder.agent_id,
                         "Agent runtime stopped",
                     )
                 return
-            if activation is None:
+            if reminder is None:
                 self._state.wait_for_change(revision, self._stop_event)
                 continue
 
             worker = Thread(
-                target=self._run_activation,
-                args=(activation,),
-                name=f"flowent-agent-{activation.agent_id}",
+                target=self._run_turn,
+                args=(reminder,),
+                name=f"flowent-agent-{reminder.agent_id}",
                 daemon=True,
             )
             with self._workers_lock:
                 self._workers.add(worker)
                 worker.start()
 
-    def _run_activation(self, activation: Activation) -> None:
+    def _run_turn(self, reminder: Reminder) -> None:
         completed = False
         error: str | None = None
         outcome = AgentRunOutcome()
         history_run: AgentHistoryRun | None = None
         try:
             if self._history is not None:
-                history_run = self._history.start(activation)
+                history_run = self._history.start(reminder)
             result = self._runner.run(
-                activation,
+                reminder,
                 AgentRunContext(
-                    agent_id=activation.agent_id,
+                    agent_id=reminder.agent_id,
                     state=self._state,
                     host_tools=self._host_tools,
                     run_id=history_run.run_id if history_run is not None else None,
@@ -265,10 +265,10 @@ class AgentRuntime:
                         completed = False
                         error = "Agent history could not be saved"
                 if completed:
-                    self._state.complete_activation(activation.agent_id)
+                    self._state.complete_turn(reminder.agent_id)
                 else:
-                    self._state.complete_activation(
-                        activation.agent_id,
+                    self._state.complete_turn(
+                        reminder.agent_id,
                         error or "Agent run failed",
                     )
             finally:

@@ -10,13 +10,16 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from flowent.domain import Activation
+from flowent.domain import Reminder, ReminderMention
 from flowent.history import AgentHistory
 from flowent.persistence import SQLiteStore
 
 
-def activation() -> Activation:
-    return Activation(agent_id=2, discussion_id=1, message_id=3)
+def reminder() -> Reminder:
+    return Reminder(
+        agent_id=2,
+        mentions=(ReminderMention(1, 3, 1, "Please handle this", False),),
+    )
 
 
 def test_persists_complete_agent_history_and_restores_model_messages(
@@ -24,7 +27,7 @@ def test_persists_complete_agent_history_and_restores_model_messages(
 ) -> None:
     store = SQLiteStore(tmp_path / "data")
     history = AgentHistory(store)
-    first = history.start(activation())
+    first = history.start(reminder())
     messages = (
         ModelRequest(
             parts=[UserPromptPart(content="Process the activation")],
@@ -65,14 +68,14 @@ def test_persists_complete_agent_history_and_restores_model_messages(
     first.complete("completed", messages, {"input_tokens": 12}, None)
 
     restored = AgentHistory(SQLiteStore(tmp_path / "data"))
-    second = restored.start(activation())
+    second = restored.start(reminder())
 
     assert second.message_history == messages
     snapshot = restored.snapshot(2)
     first_run = snapshot["runs"][0]
     assert first_run["status"] == "completed"
     assert [entry["type"] for entry in first_run["entries"]] == [
-        "activation",
+        "reminder",
         "thinking",
         "tool_call",
         "tool_result",
@@ -87,7 +90,7 @@ def test_keeps_failed_interrupted_messages_in_the_next_agent_context(
     tmp_path: Path,
 ) -> None:
     history = AgentHistory(SQLiteStore(tmp_path / "data"))
-    first = history.start(activation())
+    first = history.start(reminder())
     interrupted = ModelResponse(
         parts=[TextPart(content="Partial response")],
         model_name="test-model",
@@ -97,7 +100,7 @@ def test_keeps_failed_interrupted_messages_in_the_next_agent_context(
     )
     first.complete("failed", [interrupted], None, "Model request failed")
 
-    second = AgentHistory(SQLiteStore(tmp_path / "data")).start(activation())
+    second = AgentHistory(SQLiteStore(tmp_path / "data")).start(reminder())
 
     assert second.message_history == (interrupted,)
     failed_run = history.snapshot(2)["runs"][0]
@@ -108,7 +111,7 @@ def test_keeps_failed_interrupted_messages_in_the_next_agent_context(
 def test_merges_live_text_deltas_and_publishes_ordered_events(tmp_path: Path) -> None:
     events: list[dict[str, object]] = []
     history = AgentHistory(SQLiteStore(tmp_path / "data"), events.append)
-    run = history.start(activation())
+    run = history.start(reminder())
 
     run.emit("thinking", part_id="0-0")
     run.emit("thinking", part_id="0-0")
@@ -118,7 +121,7 @@ def test_merges_live_text_deltas_and_publishes_ordered_events(tmp_path: Path) ->
 
     active = history.snapshot(2)["runs"][0]
     assert [entry["type"] for entry in active["entries"]] == [
-        "activation",
+        "reminder",
         "thinking",
         "assistant",
         "tool_call",

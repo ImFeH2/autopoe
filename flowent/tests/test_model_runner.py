@@ -15,7 +15,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.models.test import TestModel
 
-from flowent.domain import Activation, OrganizationState
+from flowent.domain import OrganizationState, Reminder, ReminderMention
 from flowent.host_tools import HostTools
 from flowent.model_runner import (
     ApiType,
@@ -32,11 +32,13 @@ from flowent.observability import (
 from flowent.runtime import AgentRunContext, AgentRunFailure
 
 
-def activation_context(tmp_path: Path) -> tuple[Activation, AgentRunContext]:
+def activation_context(tmp_path: Path) -> tuple[Reminder, AgentRunContext]:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    activation = Activation(agent_id=2, discussion_id=1, message_id=1)
+    state.send_message(1, 1, "Please inspect this", [2])
+    activation, _ = state.claim_next_reminder()
+    assert activation is not None
     return activation, AgentRunContext(
         agent_id=2,
         state=state,
@@ -121,7 +123,7 @@ def test_all_agents_use_the_latest_shared_runner(
         def __init__(self, model: str) -> None:
             self.model = model
 
-        def run(self, activation: Activation, context: AgentRunContext) -> None:
+        def run(self, activation: Reminder, context: AgentRunContext) -> None:
             del context
             calls.append((self.model, activation.agent_id))
 
@@ -145,7 +147,10 @@ def test_all_agents_use_the_latest_shared_runner(
 
     for agent_id in (2, 3):
         runtime.run(
-            Activation(agent_id=agent_id, discussion_id=1, message_id=1),
+            Reminder(
+                agent_id=agent_id,
+                mentions=(ReminderMention(1, 1, 1, "Request", False),),
+            ),
             AgentRunContext(agent_id, state, host_tools),
         )
 
@@ -262,12 +267,12 @@ def test_pydantic_runner_exports_only_pydantic_ai_spans(tmp_path: Path) -> None:
     )
     assert all(span.name != "Flowent activation" for span in visible_spans)
     assert len({span.context.trace_id for span in visible_spans}) == 1
-    assert all("Process this Activation" not in str(item) for item in hidden_attributes)
-    assert any("Process this Activation" in str(item) for item in visible_attributes)
+    assert all("Here is your Reminder" not in str(item) for item in hidden_attributes)
+    assert any("Here is your Reminder" in str(item) for item in visible_attributes)
     assert any("TRACE_RESPONSE" in str(item) for item in visible_attributes)
     assert all(
         item.get("langfuse.trace.metadata.agent_id") == 2
-        and item.get("langfuse.session.id") == "flowent-discussion-1"
+        and item.get("langfuse.session.id") == "flowent-agent-2"
         for item in visible_attributes
     )
     assert any("gen_ai.usage.output_tokens" in item for item in visible_attributes)
@@ -319,6 +324,7 @@ def test_pydantic_runner_continues_the_same_agent_message_history(
 
     assert len(seen_messages) == 2
     assert len(seen_messages[0]) == 1
+    assert "Please inspect this" in str(seen_messages[0])
     assert len(seen_messages[1]) == 3
     assert seen_messages[1][0:2] == list(first.messages)
     assert len(first.messages) == 2

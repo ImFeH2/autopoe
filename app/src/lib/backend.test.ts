@@ -46,11 +46,21 @@ describe("Agent history", () => {
           event_sequence: 0,
           entries: [
             {
-              id: "activation",
-              type: "activation",
+              id: "reminder",
+              type: "reminder",
               timestamp: "2026-08-15T00:00:00+00:00",
               state: "complete",
-              activation: { discussion_id: 1, message_id: 3 },
+              reminder: {
+                mentions: [
+                  {
+                    discussion_id: 1,
+                    message_id: 3,
+                    sender_id: 1,
+                    body: "Request",
+                    previously_reminded: false,
+                  },
+                ],
+              },
             },
             {
               id: "thinking",
@@ -86,7 +96,17 @@ describe("Agent history", () => {
       sequence: 1,
       timestamp: "2026-08-15T00:00:00+00:00",
       type: "run_started",
-      activation: { discussion_id: 1, message_id: 3 },
+      reminder: {
+        mentions: [
+          {
+            discussion_id: 1,
+            message_id: 3,
+            sender_id: 1,
+            body: "Request",
+            previously_reminded: false,
+          },
+        ],
+      },
     });
     const first = parseAgentHistoryEvent({
       agent_id: 2,

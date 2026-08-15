@@ -47,7 +47,6 @@ class Dispatcher:
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
-            "organization.retry_agent": self._retry_agent,
             "agent.history.get": self._get_agent_history,
             "discussion.create": self._create_discussion,
             "discussion.send": self._send_message,
@@ -152,9 +151,6 @@ class Dispatcher:
         if self._history is None:
             raise RuntimeError("Agent history is unavailable")
         return self._history.snapshot(agent_id)
-
-    def _retry_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.retry_agent(agent_id=require_integer(params, "agent_id"))
 
     def _create_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_discussion(

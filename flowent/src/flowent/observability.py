@@ -16,7 +16,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from pydantic_ai import InstrumentationSettings
 from pydantic_ai.capabilities import Instrumentation
 
-from flowent.domain import Activation
+from flowent.domain import Reminder
 
 
 @dataclass(frozen=True)
@@ -68,19 +68,20 @@ class ObservabilityConfig:
 
 
 @dataclass(frozen=True)
-class ActivationTrace:
+class ReminderTrace:
     agent_id: int
     discussion_ids: str
     message_count: int
     session_id: str | None
 
     @classmethod
-    def create(cls, activation: Activation) -> ActivationTrace:
+    def create(cls, reminder: Reminder) -> ReminderTrace:
+        discussion_ids = sorted({item.discussion_id for item in reminder.mentions})
         return cls(
-            agent_id=activation.agent_id,
-            discussion_ids=str(activation.discussion_id),
-            message_count=1,
-            session_id=f"flowent-discussion-{activation.discussion_id}",
+            agent_id=reminder.agent_id,
+            discussion_ids=",".join(str(item) for item in discussion_ids),
+            message_count=len(reminder.mentions),
+            session_id=f"flowent-agent-{reminder.agent_id}",
         )
 
     def run_metadata(self) -> dict[str, str | int]:
@@ -91,7 +92,7 @@ class ActivationTrace:
         }
 
 
-_active_trace: ContextVar[ActivationTrace | None] = ContextVar(
+_active_trace: ContextVar[ReminderTrace | None] = ContextVar(
     "flowent_active_trace",
     default=None,
 )
@@ -107,7 +108,7 @@ class LangfuseSpanProcessor(SpanProcessor):
         trace = _active_trace.get()
         if trace is None or span.instrumentation_scope.name != "pydantic-ai":
             return
-        span.set_attribute("langfuse.trace.name", "Agent activation")
+        span.set_attribute("langfuse.trace.name", "Agent turn")
         span.set_attribute("langfuse.trace.tags", ["flowent", "agent"])
         span.set_attribute("langfuse.trace.metadata.agent_id", trace.agent_id)
         span.set_attribute(
@@ -134,7 +135,7 @@ class TraceProvider(Protocol):
 
 @dataclass(frozen=True)
 class PydanticAIRunObservability:
-    trace: ActivationTrace
+    trace: ReminderTrace
 
     @contextmanager
     def activate(self) -> Iterator[None]:
@@ -156,8 +157,8 @@ class PydanticAIObservability:
     def capability(self) -> Instrumentation:
         return Instrumentation(settings=self._instrumentation)
 
-    def bind(self, activation: Activation) -> PydanticAIRunObservability:
-        return PydanticAIRunObservability(ActivationTrace.create(activation))
+    def bind(self, reminder: Reminder) -> PydanticAIRunObservability:
+        return PydanticAIRunObservability(ReminderTrace.create(reminder))
 
     def shutdown(self) -> None:
         self._provider.shutdown()

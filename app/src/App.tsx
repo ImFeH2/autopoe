@@ -245,10 +245,6 @@ function App() {
     }
   }
 
-  async function handleRetryAgent(agentId: number) {
-    await mutate(() => backend.retryAgent(agentId));
-  }
-
   async function handleCreateDiscussion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextSnapshot = await mutate(() =>
@@ -369,7 +365,6 @@ function App() {
             onAgentDialogOpenChange={changeAgentDialog}
             onAgentNameChange={setAgentName}
             onCreateAgent={handleCreateAgent}
-            onRetryAgent={handleRetryAgent}
             onSelectMember={setSelectedMemberId}
             selectedMember={selectedMember}
           />

@@ -16,13 +16,20 @@ export type AgentMember = {
 
 export type Member = HumanMember | AgentMember;
 
-export type AgentActivation = {
+export type AgentReminderMention = {
   discussion_id: number;
   message_id: number;
+  sender_id: number;
+  body: string;
+  previously_reminded: boolean;
+};
+
+export type AgentReminder = {
+  mentions: AgentReminderMention[];
 };
 
 export type AgentHistoryEntryType =
-  | "activation"
+  | "reminder"
   | "assistant"
   | "thinking"
   | "tool_call"
@@ -37,7 +44,7 @@ export type AgentHistoryEntry = {
   state: "complete" | "interrupted" | "streaming";
   content?: string;
   tool_name?: string;
-  activation?: AgentActivation;
+  reminder?: AgentReminder;
 };
 
 export type AgentHistoryRun = {
@@ -69,7 +76,7 @@ export type AgentHistoryEvent = {
     | "retry"
     | "run_completed"
     | "run_failed";
-  activation?: AgentActivation;
+  reminder?: AgentReminder;
   part_id?: string;
   content?: string;
   tool_name?: string;
@@ -356,20 +363,43 @@ function nonNegativeInteger(value: unknown, path: string): number {
   return value;
 }
 
-function parseActivation(value: unknown, path: string): AgentActivation {
-  const activation = record(value, path);
+function parseReminder(value: unknown, path: string): AgentReminder {
+  const reminder = record(value, path);
   return {
-    discussion_id: positiveInteger(
-      activation.discussion_id,
-      `${path}.discussion_id`,
+    mentions: array(reminder.mentions, `${path}.mentions`).map(
+      (value, index) => {
+        const itemPath = `${path}.mentions[${index}]`;
+        const item = record(value, itemPath);
+        if (typeof item.previously_reminded !== "boolean") {
+          invalidSnapshot(`${itemPath}.previously_reminded must be a boolean`);
+        }
+        return {
+          discussion_id: positiveInteger(
+            item.discussion_id,
+            `${itemPath}.discussion_id`,
+          ),
+          message_id: positiveInteger(
+            item.message_id,
+            `${itemPath}.message_id`,
+          ),
+          sender_id: nonNegativeInteger(
+            item.sender_id,
+            `${itemPath}.sender_id`,
+          ),
+          body:
+            typeof item.body === "string"
+              ? item.body
+              : invalidSnapshot(`${itemPath}.body must be a string`),
+          previously_reminded: item.previously_reminded,
+        };
+      },
     ),
-    message_id: positiveInteger(activation.message_id, `${path}.message_id`),
   };
 }
 
 function historyEntryType(value: unknown, path: string): AgentHistoryEntryType {
   if (
-    value === "activation" ||
+    value === "reminder" ||
     value === "assistant" ||
     value === "thinking" ||
     value === "tool_call" ||
@@ -410,8 +440,8 @@ function parseHistoryEntry(
     timestamp: nonEmptyString(item.timestamp, `${path}.timestamp`),
     state: historyEntryState(item.state, `${path}.state`),
   };
-  if (type === "activation") {
-    entry.activation = parseActivation(item.activation, `${path}.activation`);
+  if (type === "reminder") {
+    entry.reminder = parseReminder(item.reminder, `${path}.reminder`);
     return entry;
   }
   if (type !== "thinking") {
@@ -488,7 +518,7 @@ export function parseAgentHistoryEvent(value: unknown): AgentHistoryEvent {
     return {
       ...base,
       type: event.type,
-      activation: parseActivation(event.activation, "activation"),
+      reminder: parseReminder(event.reminder, "reminder"),
     };
   }
   if (event.type === "text_delta") {
@@ -570,11 +600,11 @@ export function applyAgentHistoryEvent(
           event_sequence: event.sequence,
           entries: [
             {
-              id: `${event.run_id}-activation`,
-              type: "activation",
+              id: `${event.run_id}-reminder`,
+              type: "reminder",
               timestamp: event.timestamp,
               state: "complete",
-              activation: event.activation,
+              reminder: event.reminder,
             },
           ],
         },
@@ -736,8 +766,6 @@ export const backend = {
     }),
   createAgent: (name: string) =>
     organizationRequest("organization.create_agent", { name }),
-  retryAgent: (agentId: number) =>
-    organizationRequest("organization.retry_agent", { agent_id: agentId }),
   createDiscussion: (topic: string, memberIds: number[]) =>
     organizationRequest("discussion.create", {
       topic,

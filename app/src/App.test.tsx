@@ -216,7 +216,6 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
-          onRetryAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -260,11 +259,21 @@ describe("App", () => {
                   event_sequence: 3,
                   entries: [
                     {
-                      id: "activation",
-                      type: "activation",
+                      id: "reminder",
+                      type: "reminder",
                       timestamp: "2026-08-15T00:00:00+00:00",
                       state: "complete",
-                      activation: { discussion_id: 1, message_id: 3 },
+                      reminder: {
+                        mentions: [
+                          {
+                            discussion_id: 1,
+                            message_id: 3,
+                            sender_id: 1,
+                            body: "Request",
+                            previously_reminded: false,
+                          },
+                        ],
+                      },
                     },
                     {
                       id: "tool",
@@ -291,7 +300,6 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
-          onRetryAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -306,7 +314,7 @@ describe("App", () => {
     expect(markup).toContain("Streaming");
   });
 
-  it("shows Agent errors and Retry in Member details", () => {
+  it("shows Agent errors without an automatic recovery action", () => {
     const agent = {
       id: 2,
       type: "agent" as const,
@@ -325,7 +333,6 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
-          onRetryAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -335,7 +342,7 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Agent error"');
     expect(markup).toContain('role="alert"');
     expect(markup).toContain("Model request failed");
-    expect(markup).toContain('aria-label="Retry Ada"');
+    expect(markup).not.toContain("Retry Ada");
   });
 
   it("keeps Human Member details empty", () => {
@@ -351,7 +358,6 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
-          onRetryAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={human}
         />

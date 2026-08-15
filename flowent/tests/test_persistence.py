@@ -218,11 +218,11 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
             "mentions": [{"member_id": 2, "status": "read"}],
         }
     ]
-    activation, _ = restored.claim_next_activation()
+    activation, _ = restored.claim_next_reminder()
     assert activation is not None
     assert activation.agent_id == 2
-    assert activation.message_id == 1
-    restored.complete_activation(2, "Stopped for test")
+    assert activation.mentions[0].message_id == 1
+    restored.complete_turn(2, "Stopped for test")
     assert restored.create_agent("Lin")["members"][-1]["id"] == 3
     assert restored.create_discussion("Next", 1, [3])["discussions"][-1]["id"] == 2
 
@@ -331,7 +331,7 @@ def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> N
     }
     assert migrated.load_observability_config() is None
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'observability_settings'"
     ).fetchone() == ("observability_settings",)
@@ -379,7 +379,7 @@ def test_migrates_version_three_openai_to_chat_without_losing_secrets(
         "legacy-tracing-secret"
     )
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(model_settings)")
     }
@@ -411,7 +411,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
         "model": "legacy-model",
     }
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
     for table in ("members", "discussions", "model_settings"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         assert "working_directory" not in columns
@@ -445,7 +445,7 @@ def test_migrates_version_four_with_an_empty_agent_history_table(
     migrated = SQLiteStore(data)
 
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'agent_runs'"
     ).fetchone() == ("agent_runs",)

@@ -32,7 +32,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_core import to_jsonable_python
 
-from flowent.domain import Activation, DomainError
+from flowent.domain import DomainError, Reminder
 from flowent.host_tools import HostToolError
 from flowent.observability import (
     ObservabilityConfig,
@@ -89,8 +89,8 @@ class UnavailableRunner:
     def __init__(self, message: str) -> None:
         self._message = message
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
-        del activation, context
+    def run(self, reminder: Reminder, context: AgentRunContext) -> None:
+        del reminder, context
         raise AgentRunFailure(self._message)
 
 
@@ -140,17 +140,15 @@ class PydanticAgentRunner:
             name="flowent_agent",
             instructions=(
                 "You are an Agent in Flowent. All Agents are equal and use the same tools. "
-                "An Activation only identifies Messages waiting for you; it never contains their body. "
-                "Use discussion action=read to inspect enough of each listed Discussion around "
-                "its Message IDs before deciding what to do. You can read every Message in "
-                "Discussions you belong to, including Messages that do not mention you. "
+                "Each Turn starts with a Reminder containing your current Pending Mentions. "
+                "Decide how to handle them and use discussion action=read when you need surrounding context. "
                 "Communicate only with discussion action=send. Use organization and discussion tools "
                 "to discover Members, create Agents, or open a new Discussion when useful. "
                 "Use exec with an argv list to inspect the launch directory and run commands. "
                 "Use patch with a unified diff to create, modify, delete, or rename text files. "
                 "Never read or expose .env files, environment variables, credentials, tokens, or secrets. "
-                "Acknowledge each triggering Message with discussion action=ack only after you have "
-                "finished handling it. Do not claim you used tools that are not available."
+                "The triggering Message is already delivered; do not wait for an acknowledgement "
+                "before completing your Turn."
             ),
             retries=2,
             capabilities=capabilities,
@@ -269,22 +267,29 @@ class PydanticAgentRunner:
 
     def run(
         self,
-        activation: Activation,
+        reminder: Reminder,
         context: AgentRunContext,
     ) -> AgentRunOutcome:
-        activation_data = {
-            "discussion_id": activation.discussion_id,
-            "message_id": activation.message_id,
-        }
+        mention_lines = [
+            (
+                f"- [{'previously reminded' if mention.previously_reminded else 'new'}] "
+                f"Discussion {mention.discussion_id}, Message {mention.message_id}, "
+                f"from Member {mention.sender_id}: {mention.body}"
+            )
+            for mention in reminder.mentions
+        ]
         prompt = (
-            f"You are Member {activation.agent_id}. Process this Activation: {activation_data}. "
-            "This Activation identifies the one Message that requires acknowledgement, not your "
-            "visible Message range. Read enough of its Discussion around that Message to understand "
-            "the conversation, do the requested work using available tools, communicate through "
-            "Discussions, then acknowledge the triggering Message when complete."
+            f"You are Member {reminder.agent_id}. Here is your Reminder with current Pending Mentions:\n\n"
+            + "\n".join(mention_lines)
+            + "\n\nDecide how to handle these messages using available tools and communicate through Discussions."
         )
+        if any(mention.previously_reminded for mention in reminder.mentions):
+            prompt += (
+                " Some Mentions were previously reminded but remain pending. Only discussion.ack "
+                "marks a Mention as handled."
+            )
         run_observability = (
-            self._observability.bind(activation) if self._observability else None
+            self._observability.bind(reminder) if self._observability else None
         )
         trace_context = (
             run_observability.activate() if run_observability else nullcontext()
@@ -549,7 +554,7 @@ class ModelRuntime:
 
     def run(
         self,
-        activation: Activation,
+        reminder: Reminder,
         context: AgentRunContext,
     ) -> AgentRunOutcome | None:
         with self._lock:
@@ -561,7 +566,7 @@ class ModelRuntime:
                     self._active_session_runs.get(session_id, 0) + 1
                 )
         try:
-            return runner.run(activation, context)
+            return runner.run(reminder, context)
         finally:
             session_to_shutdown = None
             if session is not None:
