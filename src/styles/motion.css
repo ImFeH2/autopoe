@@ -42,6 +42,18 @@
   }
 }
 
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .ui-button {
     transition:
@@ -54,7 +66,8 @@
 
   .ui-input,
   .ui-textarea,
-  .ui-checkbox {
+  .ui-checkbox,
+  .ui-segmented-control__item {
     transition:
       background-color var(--duration-standard) var(--ease-standard),
       border-color var(--duration-standard) var(--ease-standard),
@@ -85,6 +98,12 @@
   .ui-dialog-content[data-state="closed"] {
     animation: dialog-out var(--duration-fast) ease-in;
   }
+
+  .ui-tooltip-content[data-state="delayed-open"],
+  .ui-tooltip-content[data-state="instant-open"] {
+    animation: tooltip-in var(--duration-fast) var(--ease-out);
+    transform-origin: var(--radix-tooltip-content-transform-origin);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -94,7 +113,9 @@
   .ui-checkbox,
   .ui-checkbox::before,
   .ui-dialog-overlay,
-  .ui-dialog-content {
+  .ui-dialog-content,
+  .ui-segmented-control__item,
+  .ui-tooltip-content {
     transition: none;
     animation: none;
   }

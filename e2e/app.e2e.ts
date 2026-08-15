@@ -122,7 +122,10 @@ describe("Flowent desktop", () => {
     await expect($("button=New Agent")).toExist();
     await expect($("form[aria-label='Create Discussion']")).not.toExist();
     await expect($("[aria-label='Search discussions']")).toExist();
-    await expect($("button[aria-label='New discussion']")).toBeDisabled();
+    const disabledDiscussionButton = $("button[aria-label='New discussion']");
+    await expect(disabledDiscussionButton).toBeDisabled();
+    await disabledDiscussionButton.moveTo();
+    await expect($("[role='tooltip']")).toHaveText("Create an Agent first");
     await expect($("#recent-title")).not.toExist();
     for (const destination of destinations) {
       await expect($(`button[aria-label='${destination}']`)).toExist();
@@ -201,13 +204,36 @@ describe("Flowent desktop", () => {
     await $("button[aria-label='Settings']").click();
     await expect($("h2=Settings")).toExist();
     await expect($("legend=API type")).toExist();
-    await expect($("button=Chat")).toHaveAttribute("aria-pressed", "true");
+    await expect($("button=Chat")).toHaveAttribute("aria-checked", "true");
     await expect($("button=Responses")).toHaveAttribute(
-      "aria-pressed",
+      "aria-checked",
       "false",
     );
     await expect($("button=Anthropic")).toExist();
     await expect($("button=Google")).toExist();
+    expect(
+      await browser.execute(() => ({
+        itemTabIndexes: Array.from(
+          document.querySelectorAll<HTMLElement>("[role='radio']"),
+        ).map((option) => option.tabIndex),
+        rootTabIndex: document.querySelector<HTMLElement>("[role='radiogroup']")
+          ?.tabIndex,
+      })),
+    ).toEqual({
+      itemTabIndexes: [-1, -1, -1, -1],
+      rootTabIndex: 0,
+    });
+    await $("button=Chat").click();
+    await browser.keys(["ArrowRight"]);
+    await expect($("button=Responses")).toBeFocused();
+    await expect($("button=Responses")).toHaveAttribute("aria-checked", "true");
+    expect(
+      await browser.execute(() =>
+        Array.from(document.querySelectorAll("[role='radio']"))
+          .filter((option) => (option as HTMLElement).tabIndex === 0)
+          .map((option) => option.textContent),
+      ),
+    ).toEqual(["Responses"]);
     await expect($("[aria-label='Base URL']")).toHaveValue("");
     await expect($("[aria-label='API key']")).toHaveValue("");
     await expect($("[aria-label='Model']")).toHaveValue("");
@@ -219,7 +245,6 @@ describe("Flowent desktop", () => {
       "development",
     );
     await expect($("#capture-content")).not.toBeChecked();
-    await $("button=Responses").click();
     await $("[aria-label='Base URL']").setValue("https://example.invalid");
     await $("[aria-label='API key']").setValue("e2e-local-secret");
     await $("[aria-label='Model']").setValue("gpt-test");
@@ -258,7 +283,7 @@ describe("Flowent desktop", () => {
     expect(settingsText).not.toContain("e2e-tracing-secret");
     await $("button[aria-label='Discussions']").click();
     await $("button[aria-label='Settings']").click();
-    await expect($("button=Responses")).toHaveAttribute("aria-pressed", "true");
+    await expect($("button=Responses")).toHaveAttribute("aria-checked", "true");
     await expect($("[aria-label='Base URL']")).toHaveValue(
       "https://example.invalid",
     );

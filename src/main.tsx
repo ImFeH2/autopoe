@@ -2,6 +2,7 @@ import "@fontsource-variable/inter/wght.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "@/App";
+import { TooltipProvider } from "@/components/ui";
 import "@/styles/index.css";
 
 function installDesktopInteractionGuards() {
@@ -29,7 +30,9 @@ async function render() {
   installDesktopInteractionGuards();
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <App />
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
     </React.StrictMode>,
   );
 }

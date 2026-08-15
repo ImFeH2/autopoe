@@ -19,6 +19,7 @@ import {
   ListButton,
   Plus,
   Search,
+  SegmentedControl,
   StatusIndicator,
   Textarea,
 } from "@/components/ui";
@@ -688,21 +689,14 @@ function SettingsPage() {
             onSubmit={handleSaveModel}
           >
             <fieldset className="settings-api-type">
-              <legend>API type</legend>
-              <div>
-                {apiTypeOptions.map((option) => (
-                  <Button
-                    aria-pressed={apiType === option.value}
-                    disabled={modelBusy}
-                    key={option.value}
-                    onClick={() => setApiType(option.value)}
-                    size="compact"
-                    variant={apiType === option.value ? "secondary" : "quiet"}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
+              <legend id="model-api-type-label">API type</legend>
+              <SegmentedControl
+                aria-labelledby="model-api-type-label"
+                disabled={modelBusy}
+                onValueChange={setApiType}
+                options={apiTypeOptions}
+                value={apiType}
+              />
             </fieldset>
             <label className="settings-field" htmlFor="model-base-url">
               <span>Base URL</span>
@@ -944,6 +938,9 @@ function DiscussionsPage({
             onOpenChange={onDialogOpenChange}
             open={isCreating}
             title="New discussion"
+            triggerTooltip={
+              agents.length === 0 ? "Create an Agent first" : "New discussion"
+            }
             trigger={
               <Button
                 aria-describedby={
@@ -952,9 +949,6 @@ function DiscussionsPage({
                 aria-label="New discussion"
                 disabled={agents.length === 0 || disabled}
                 size="icon"
-                title={
-                  agents.length === 0 ? "Create an Agent first" : undefined
-                }
                 variant="primary"
               >
                 <Plus aria-hidden="true" size={15} />

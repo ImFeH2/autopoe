@@ -4,6 +4,7 @@ import {
   Button,
   MessageSquare,
   Settings2,
+  Tooltip,
   Users,
 } from "@/components/ui";
 
@@ -51,37 +52,38 @@ export function AppSidebar({
         {navigation.map((item) => {
           const Icon = item.icon;
           return (
-            <Button
-              aria-current={view === item.view ? "page" : undefined}
-              aria-label={item.label}
-              className="sidebar-nav-button"
-              key={item.view}
-              onClick={() => onSelectView(item.view)}
-              title={item.label}
-              variant={view === item.view ? "secondary" : "quiet"}
-            >
-              <Icon aria-hidden="true" size={15} />
-              <span>{item.label}</span>
-              <Badge className="sidebar-count" size="small">
-                {counts[item.view]}
-              </Badge>
-            </Button>
+            <Tooltip content={item.label} key={item.view} side="right">
+              <Button
+                aria-current={view === item.view ? "page" : undefined}
+                aria-label={item.label}
+                className="sidebar-nav-button"
+                onClick={() => onSelectView(item.view)}
+                variant={view === item.view ? "secondary" : "quiet"}
+              >
+                <Icon aria-hidden="true" size={15} />
+                <span>{item.label}</span>
+                <Badge className="sidebar-count" size="small">
+                  {counts[item.view]}
+                </Badge>
+              </Button>
+            </Tooltip>
           );
         })}
       </nav>
 
       <div className="sidebar-footer">
-        <Button
-          aria-current={view === "settings" ? "page" : undefined}
-          aria-label="Settings"
-          className="sidebar-settings-button"
-          onClick={() => onSelectView("settings")}
-          title="Settings"
-          variant={view === "settings" ? "secondary" : "quiet"}
-        >
-          <Settings2 aria-hidden="true" size={15} />
-          <span>Settings</span>
-        </Button>
+        <Tooltip content="Settings" side="right">
+          <Button
+            aria-current={view === "settings" ? "page" : undefined}
+            aria-label="Settings"
+            className="sidebar-settings-button"
+            onClick={() => onSelectView("settings")}
+            variant={view === "settings" ? "secondary" : "quiet"}
+          >
+            <Settings2 aria-hidden="true" size={15} />
+            <span>Settings</span>
+          </Button>
+        </Tooltip>
         <footer className="sidebar-user" title={workingDirectory}>
           <span className="sidebar-user-mark" aria-hidden="true">
             Y

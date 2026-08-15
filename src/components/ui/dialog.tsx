@@ -2,6 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import type { ReactElement, ReactNode } from "react";
 import { Button } from "./button";
 import { X } from "./icons";
+import { Tooltip } from "./tooltip";
 
 type DialogProps = {
   children: ReactNode;
@@ -10,7 +11,8 @@ type DialogProps = {
   onOpenChange: (open: boolean) => void;
   open: boolean;
   title: string;
-  trigger: ReactElement;
+  trigger: ReactElement<{ disabled?: boolean }>;
+  triggerTooltip?: ReactNode;
 };
 
 export function Dialog({
@@ -21,10 +23,25 @@ export function Dialog({
   open,
   title,
   trigger,
+  triggerTooltip,
 }: DialogProps) {
+  const dialogTrigger = (
+    <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger>
+  );
+
   return (
     <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
-      <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger>
+      {triggerTooltip ? (
+        <Tooltip
+          content={triggerTooltip}
+          disabledTrigger={trigger.props.disabled}
+          side="right"
+        >
+          {dialogTrigger}
+        </Tooltip>
+      ) : (
+        dialogTrigger
+      )}
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="ui-dialog-overlay" />
         <DialogPrimitive.Content

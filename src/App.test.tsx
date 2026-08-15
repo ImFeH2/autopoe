@@ -13,8 +13,11 @@ import {
   Button,
   Input,
   ListButton,
+  SegmentedControl,
   StatusIndicator,
   Textarea,
+  Tooltip,
+  TooltipProvider,
 } from "@/components/ui";
 
 describe("App", () => {
@@ -130,14 +133,16 @@ describe("App", () => {
 
   it("keeps the sidebar focused on global destinations", () => {
     const markup = renderToStaticMarkup(
-      <AppSidebar
-        agentCount={2}
-        discussionCount={1}
-        memberCount={3}
-        onSelectView={() => undefined}
-        view="discussions"
-        workingDirectory="/project/flowent"
-      />,
+      <TooltipProvider>
+        <AppSidebar
+          agentCount={2}
+          discussionCount={1}
+          memberCount={3}
+          onSelectView={() => undefined}
+          view="discussions"
+          workingDirectory="/project/flowent"
+        />
+      </TooltipProvider>,
     );
 
     expect(markup).toContain('aria-label="Workspace"');
@@ -166,6 +171,42 @@ describe("App", () => {
     expect(markup).toContain("ui-textarea--composer");
     expect(markup).toContain('type="submit"');
     expect(markup).toContain(">Send</button>");
+  });
+
+  it("exposes an accessible segmented radio group", () => {
+    const markup = renderToStaticMarkup(
+      <SegmentedControl
+        aria-label="API type"
+        onValueChange={() => undefined}
+        options={[
+          { label: "Chat", value: "chat" },
+          { label: "Responses", value: "responses" },
+        ]}
+        value="chat"
+      />,
+    );
+
+    expect(markup).toContain('role="radiogroup"');
+    expect(markup).toContain('aria-label="API type"');
+    expect(markup).toContain('role="radio"');
+    expect(markup).toContain('aria-checked="true"');
+    expect(markup).toContain('aria-checked="false"');
+  });
+
+  it("keeps disabled Tooltip triggers visually hoverable", () => {
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <Tooltip content="Create an Agent first">
+          <Button aria-label="New discussion" disabled size="icon">
+            +
+          </Button>
+        </Tooltip>
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain("ui-tooltip-trigger");
+    expect(markup).toContain('aria-label="New discussion"');
+    expect(markup).toContain("disabled");
   });
 
   it("exposes reusable list, badge, and status semantics", () => {
