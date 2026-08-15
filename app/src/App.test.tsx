@@ -227,6 +227,79 @@ describe("App", () => {
     expect(markup).toContain(">Member ID<");
   });
 
+  it("renders persistent Agent history as one continuous timeline", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "running" as const,
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <MembersPage
+          agentName=""
+          disabled={false}
+          error={null}
+          history={{
+            status: "ready",
+            history: {
+              agent_id: 2,
+              runs: [
+                {
+                  run_id: "run-1",
+                  status: "running",
+                  started_at: "2026-08-15T00:00:00+00:00",
+                  completed_at: null,
+                  usage: null,
+                  event_sequence: 3,
+                  entries: [
+                    {
+                      id: "activation",
+                      type: "activation",
+                      timestamp: "2026-08-15T00:00:00+00:00",
+                      state: "complete",
+                      items: [{ discussion_id: 1, message_ids: [3] }],
+                    },
+                    {
+                      id: "tool",
+                      type: "tool_call",
+                      timestamp: "2026-08-15T00:00:01+00:00",
+                      state: "complete",
+                      tool_name: "discussion",
+                      content: '{"action":"read"}',
+                    },
+                    {
+                      id: "reply",
+                      type: "assistant",
+                      timestamp: "2026-08-15T00:00:02+00:00",
+                      state: "streaming",
+                      content: "Continuing the same context",
+                    },
+                  ],
+                },
+              ],
+            },
+          }}
+          isCreatingAgent={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          onAgentDialogOpenChange={() => undefined}
+          onAgentNameChange={() => undefined}
+          onCreateAgent={() => undefined}
+          onRetryAgent={() => undefined}
+          onSelectMember={() => undefined}
+          selectedMember={agent}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Ada history"');
+    expect(markup).toContain("Discussion 1 · Message 3");
+    expect(markup).toContain("Tool call");
+    expect(markup).toContain("discussion");
+    expect(markup).toContain("Continuing the same context");
+    expect(markup).toContain("Streaming");
+  });
+
   it("shows Agent errors and Retry in Member details", () => {
     const agent = {
       id: 2,

@@ -6,8 +6,20 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Literal, cast
 
-from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai import (
+    Agent,
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+    ModelRetry,
+    PartDeltaEvent,
+    PartStartEvent,
+    RunContext,
+    TextPartDelta,
+    ThinkingPartDelta,
+    capture_run_messages,
+)
 from pydantic_ai.exceptions import AgentRunError
+from pydantic_ai.messages import TextPart, ThinkingPart
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
 from pydantic_ai.models.google import GoogleModel, GoogleModelName
 from pydantic_ai.models.openai import (
@@ -18,6 +30,7 @@ from pydantic_ai.models.openai import (
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_core import to_jsonable_python
 
 from flowent.domain import Activation, DomainError
 from flowent.host_tools import HostToolError
@@ -26,7 +39,12 @@ from flowent.observability import (
     PydanticAIObservability,
     create_pydantic_ai_observability,
 )
-from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRunner
+from flowent.runtime import (
+    AgentRunContext,
+    AgentRunFailure,
+    AgentRunner,
+    AgentRunOutcome,
+)
 
 ApiType = Literal["openai-chat", "openai-responses", "anthropic", "google"]
 
@@ -238,7 +256,11 @@ class PydanticAgentRunner:
             except DomainError as error:
                 raise ModelRetry(error.message) from error
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
+    def run(
+        self,
+        activation: Activation,
+        context: AgentRunContext,
+    ) -> AgentRunOutcome:
         items = [
             {
                 "discussion_id": item.discussion_id,
@@ -258,15 +280,75 @@ class PydanticAgentRunner:
             run_observability.activate() if run_observability else nullcontext()
         )
         run_metadata = run_observability.metadata() if run_observability else None
-        try:
-            with trace_context:
-                self._agent.run_sync(
-                    prompt,
-                    deps=context,
-                    metadata=run_metadata,
-                )
-        except AgentRunError as error:
-            raise AgentRunFailure("Model request failed") from error
+        request_index = 0
+
+        async def handle_events(
+            _run_context: RunContext[AgentRunContext],
+            events: Any,
+        ) -> None:
+            nonlocal request_index
+            current_request = request_index
+            request_index += 1
+            async for event in events:
+                part_id = None
+                if isinstance(event, (PartStartEvent, PartDeltaEvent)):
+                    part_id = f"{current_request}-{event.index}"
+                if isinstance(event, PartStartEvent):
+                    if isinstance(event.part, TextPart):
+                        context.emit_history_event(
+                            "text_delta",
+                            part_id=part_id,
+                            content=event.part.content,
+                        )
+                    elif isinstance(event.part, ThinkingPart):
+                        context.emit_history_event("thinking", part_id=part_id)
+                elif isinstance(event, PartDeltaEvent):
+                    if isinstance(event.delta, TextPartDelta):
+                        context.emit_history_event(
+                            "text_delta",
+                            part_id=part_id,
+                            content=event.delta.content_delta,
+                        )
+                    elif isinstance(event.delta, ThinkingPartDelta):
+                        context.emit_history_event("thinking", part_id=part_id)
+                elif isinstance(event, FunctionToolCallEvent):
+                    context.emit_history_event(
+                        "tool_call",
+                        tool_name=event.part.tool_name,
+                        tool_call_id=event.tool_call_id,
+                        content=to_jsonable_python(event.part.args),
+                    )
+                elif isinstance(event, FunctionToolResultEvent):
+                    context.emit_history_event(
+                        "retry"
+                        if event.part.part_kind == "retry-prompt"
+                        else "tool_result",
+                        tool_name=event.part.tool_name,
+                        tool_call_id=event.tool_call_id,
+                        content=to_jsonable_python(event.part.content),
+                    )
+
+        message_history = list(context.message_history)
+        with capture_run_messages() as captured_messages:
+            try:
+                with trace_context:
+                    result = self._agent.run_sync(
+                        prompt,
+                        deps=context,
+                        metadata=run_metadata,
+                        message_history=message_history,
+                        run_id=context.run_id,
+                        event_stream_handler=handle_events,
+                    )
+            except AgentRunError as error:
+                raise AgentRunFailure(
+                    "Model request failed",
+                    tuple(captured_messages[len(message_history) :]),
+                ) from error
+        return AgentRunOutcome(
+            tuple(result.new_messages()),
+            cast(dict[str, Any], to_jsonable_python(result.usage)),
+        )
 
 
 class ModelRuntime:
@@ -455,7 +537,11 @@ class ModelRuntime:
         self._observability_sessions.remove(session)
         return session
 
-    def run(self, activation: Activation, context: AgentRunContext) -> None:
+    def run(
+        self,
+        activation: Activation,
+        context: AgentRunContext,
+    ) -> AgentRunOutcome | None:
         with self._lock:
             runner = self._runner
             session = self._current_observability_session
@@ -465,7 +551,7 @@ class ModelRuntime:
                     self._active_session_runs.get(session_id, 0) + 1
                 )
         try:
-            runner.run(activation, context)
+            return runner.run(activation, context)
         finally:
             session_to_shutdown = None
             if session is not None:

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyAgentHistoryEvent,
+  parseAgentHistory,
+  parseAgentHistoryEvent,
   parseModelSettings,
   parseObservabilitySettings,
   parseOrganizationSnapshot,
@@ -28,6 +31,106 @@ const validSnapshot = {
     },
   ],
 };
+
+describe("Agent history", () => {
+  it("parses complete persistent history without exposing thinking content", () => {
+    const history = parseAgentHistory({
+      agent_id: 2,
+      runs: [
+        {
+          run_id: "run-1",
+          status: "completed",
+          started_at: "2026-08-15T00:00:00+00:00",
+          completed_at: "2026-08-15T00:01:00+00:00",
+          usage: { input_tokens: 10, output_tokens: 4 },
+          event_sequence: 0,
+          entries: [
+            {
+              id: "activation",
+              type: "activation",
+              timestamp: "2026-08-15T00:00:00+00:00",
+              state: "complete",
+              items: [{ discussion_id: 1, message_ids: [3] }],
+            },
+            {
+              id: "thinking",
+              type: "thinking",
+              timestamp: "2026-08-15T00:00:01+00:00",
+              state: "complete",
+            },
+            {
+              id: "reply",
+              type: "assistant",
+              timestamp: "2026-08-15T00:00:02+00:00",
+              state: "complete",
+              content: "Done",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(history.runs[0].entries[1]).toEqual({
+      id: "thinking",
+      type: "thinking",
+      timestamp: "2026-08-15T00:00:01+00:00",
+      state: "complete",
+    });
+    expect(history.runs[0].entries[2].content).toBe("Done");
+  });
+
+  it("coalesces ordered text deltas and ignores duplicate events", () => {
+    const started = parseAgentHistoryEvent({
+      agent_id: 2,
+      run_id: "run-1",
+      sequence: 1,
+      timestamp: "2026-08-15T00:00:00+00:00",
+      type: "run_started",
+      activation: [{ discussion_id: 1, message_ids: [3] }],
+    });
+    const first = parseAgentHistoryEvent({
+      agent_id: 2,
+      run_id: "run-1",
+      sequence: 2,
+      timestamp: "2026-08-15T00:00:01+00:00",
+      type: "text_delta",
+      part_id: "0-0",
+      content: "Flow",
+    });
+    const second = parseAgentHistoryEvent({
+      agent_id: 2,
+      run_id: "run-1",
+      sequence: 3,
+      timestamp: "2026-08-15T00:00:02+00:00",
+      type: "text_delta",
+      part_id: "0-0",
+      content: "ent",
+    });
+
+    let history = applyAgentHistoryEvent({ agent_id: 2, runs: [] }, started);
+    history = applyAgentHistoryEvent(history, first);
+    history = applyAgentHistoryEvent(history, second);
+    const duplicate = applyAgentHistoryEvent(history, second);
+
+    expect(history.runs[0].entries[1].content).toBe("Flowent");
+    expect(duplicate).toBe(history);
+  });
+
+  it("formats streamed tool arguments for inspection", () => {
+    const event = parseAgentHistoryEvent({
+      agent_id: 2,
+      run_id: "run-1",
+      sequence: 2,
+      timestamp: "2026-08-15T00:00:01+00:00",
+      type: "tool_call",
+      tool_name: "exec",
+      content: { argv: ["pwd"] },
+    });
+
+    expect(event.content).toContain('"argv"');
+    expect(event.tool_name).toBe("exec");
+  });
+});
 
 describe("parseModelSettings", () => {
   it("accepts safe shared model settings", () => {

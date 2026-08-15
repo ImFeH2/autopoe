@@ -331,7 +331,7 @@ def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> N
     }
     assert migrated.load_observability_config() is None
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'observability_settings'"
     ).fetchone() == ("observability_settings",)
@@ -379,7 +379,7 @@ def test_migrates_version_three_openai_to_chat_without_losing_secrets(
         "legacy-tracing-secret"
     )
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(model_settings)")
     }
@@ -411,7 +411,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
         "model": "legacy-model",
     }
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
     for table in ("members", "discussions", "model_settings"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         assert "working_directory" not in columns
@@ -429,6 +429,49 @@ def test_rejects_conflicting_version_one_model_partitions(tmp_path: Path) -> Non
     assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
     assert connection.execute("SELECT COUNT(*) FROM model_settings").fetchone()[0] == 2
     connection.close()
+
+
+def test_migrates_version_four_with_an_empty_agent_history_table(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    connection = sqlite3.connect(store.path)
+    connection.execute("DROP TABLE agent_runs")
+    connection.execute("PRAGMA user_version = 4")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+
+    connection = sqlite3.connect(migrated.path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'agent_runs'"
+    ).fetchone() == ("agent_runs",)
+    connection.close()
+
+
+def test_organization_persistence_does_not_rewrite_agent_history(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    store.begin_agent_run(2, "persistent-run", "2026-08-15T00:00:00+00:00", [])
+    store.complete_agent_run(
+        2,
+        "persistent-run",
+        "completed",
+        "2026-08-15T00:01:00+00:00",
+        "[]",
+        None,
+        None,
+    )
+
+    state.create_discussion("Later mutation", 1, [2])
+
+    assert store.load_agent_runs(2)[0]["run_id"] == "persistent-run"
 
 
 def test_restricts_data_directory_and_database_permissions(tmp_path: Path) -> None:

@@ -1,10 +1,14 @@
 import io
 import json
 import sqlite3
+from pathlib import Path
+from threading import Thread
 
 from flowent.domain import OrganizationState
+from flowent.history import AgentHistory
 from flowent.model_runner import ModelRuntime
-from flowent.protocol import Dispatcher, serve
+from flowent.persistence import SQLiteStore
+from flowent.protocol import Dispatcher, JsonLineWriter, serve
 
 
 def run_requests(*requests: object) -> list[dict[str, object]]:
@@ -39,6 +43,48 @@ def test_dispatches_mutations_and_returns_complete_snapshot() -> None:
     assert snapshot["discussions"][0]["messages"] == [
         {"id": 1, "sender_id": 1, "body": "Begin.", "mentions": []}
     ]
+
+
+def test_returns_the_selected_agents_complete_history(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+
+    response = Dispatcher(state, history=history).dispatch(
+        {"id": 1, "method": "agent.history.get", "params": {"agent_id": 2}}
+    )
+
+    assert response == {"id": 1, "result": {"agent_id": 2, "runs": []}}
+
+
+def test_json_line_writer_keeps_responses_and_events_atomic() -> None:
+    output = io.StringIO()
+    writer = JsonLineWriter(output)
+
+    def write_responses() -> None:
+        for request_id in range(1, 101):
+            writer.write({"id": request_id, "result": {"ok": True}})
+
+    def write_events() -> None:
+        for sequence in range(1, 101):
+            writer.write_event(
+                "agent.history.updated",
+                {"agent_id": 2, "sequence": sequence},
+            )
+
+    threads = [Thread(target=write_responses), Thread(target=write_events)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert len(messages) == 200
+    assert sum("id" in message for message in messages) == 100
+    assert (
+        sum(message.get("event") == "agent.history.updated" for message in messages)
+        == 100
+    )
 
 
 def test_retries_a_failed_agent_and_returns_complete_snapshot() -> None:

@@ -52,10 +52,13 @@ def request(
         json.dumps({"id": request_id, "method": method, "params": params}) + "\n"
     )
     process.stdin.flush()
-    response = json.loads(process.stdout.readline())
-    assert response["id"] == request_id
-    assert "error" not in response
-    return response["result"]
+    while True:
+        response = json.loads(process.stdout.readline())
+        if response.get("event") is not None:
+            continue
+        assert response["id"] == request_id
+        assert "error" not in response
+        return response["result"]
 
 
 def test_flowent_runs_until_stdin_closes(tmp_path: Path) -> None:
@@ -231,6 +234,143 @@ def test_persists_state_and_model_settings_across_launch_directories(
         }
         assert "restart-trace-secret" not in str(tracing)
         assert request(second, 4, "system.shutdown", {}) == {"stopped": True}
+        assert second.wait(timeout=10) == 0
+    finally:
+        close_process(second)
+
+
+def test_agent_model_history_continues_across_process_restarts(
+    tmp_path: Path,
+) -> None:
+    support = tmp_path / "history-support"
+    support.mkdir()
+    (support / "sitecustomize.py").write_text(
+        "import flowent.model_runner as model_runner\n"
+        "from pydantic_ai.messages import ModelRequest,ModelResponse,TextPart,UserPromptPart\n"
+        "from flowent.runtime import AgentRunOutcome\n"
+        "class PersistentRunner:\n"
+        "    def shutdown(self):\n"
+        "        pass\n"
+        "    def run(self, activation, context):\n"
+        "        previous = len(context.message_history)\n"
+        "        conversation_id = (context.message_history[-1].conversation_id "
+        "if context.message_history else 'flowent-agent-2')\n"
+        "        for item in activation.items:\n"
+        "            context.discussion('read', discussion_id=item.discussion_id, "
+        "message_ids=list(item.message_ids))\n"
+        "            context.discussion('send', discussion_id=item.discussion_id, "
+        "body=f'Inherited {previous} model messages')\n"
+        "            context.discussion('ack', discussion_id=item.discussion_id, "
+        "message_ids=list(item.message_ids))\n"
+        "        return AgentRunOutcome((\n"
+        "            ModelRequest(parts=[UserPromptPart(content='Activation')], "
+        "run_id=context.run_id, conversation_id=conversation_id),\n"
+        "            ModelResponse(parts=[TextPart(content=f'Inherited {previous} model messages')], "
+        "model_name='test', run_id=context.run_id, conversation_id=conversation_id),\n"
+        "        ))\n"
+        "model_runner.create_runner = lambda **kwargs: PersistentRunner()\n"
+    )
+    environment = os.environ.copy()
+    python_path = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = (
+        str(support) if not python_path else f"{support}{os.pathsep}{python_path}"
+    )
+    data = tmp_path / "data"
+
+    first = start_flowent(data, tmp_path, environment)
+    try:
+        request(first, 1, "organization.create_agent", {"name": "Ada"})
+        request(
+            first,
+            2,
+            "discussion.create",
+            {"topic": "Identity", "creator_id": 1, "member_ids": [2]},
+        )
+        request(
+            first,
+            3,
+            "discussion.send",
+            {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": "Remember this",
+                "mention_ids": [2],
+            },
+        )
+        request_id = 4
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            snapshot = request(first, request_id, "organization.get", {})
+            request_id += 1
+            if (
+                snapshot["members"][1]["status"] == "idle"
+                and snapshot["discussions"][0]["messages"][0]["mentions"][0]["status"]
+                == "acked"
+            ):
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("First Agent activation did not complete")
+        history = request(
+            first,
+            request_id,
+            "agent.history.get",
+            {"agent_id": 2},
+        )
+        request_id += 1
+        assert len(history["runs"]) == 1
+        assert history["runs"][0]["entries"][-1]["content"] == (
+            "Inherited 0 model messages"
+        )
+        assert request(first, request_id, "system.shutdown", {}) == {"stopped": True}
+        assert first.wait(timeout=10) == 0
+    finally:
+        close_process(first)
+
+    second = start_flowent(data, tmp_path, environment)
+    try:
+        snapshot = request(
+            second,
+            1,
+            "discussion.send",
+            {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": "Continue as the same Agent",
+                "mention_ids": [2],
+            },
+        )
+        triggering_message_id = snapshot["discussions"][0]["messages"][-1]["id"]
+        request_id = 2
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            snapshot = request(second, request_id, "organization.get", {})
+            request_id += 1
+            trigger = next(
+                message
+                for message in snapshot["discussions"][0]["messages"]
+                if message["id"] == triggering_message_id
+            )
+            if (
+                snapshot["members"][1]["status"] == "idle"
+                and trigger["mentions"][0]["status"] == "acked"
+            ):
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("Second Agent activation did not complete")
+        history = request(
+            second,
+            request_id,
+            "agent.history.get",
+            {"agent_id": 2},
+        )
+        request_id += 1
+        assert len(history["runs"]) == 2
+        assert history["runs"][1]["entries"][-1]["content"] == (
+            "Inherited 2 model messages"
+        )
+        assert request(second, request_id, "system.shutdown", {}) == {"stopped": True}
         assert second.wait(timeout=10) == 0
     finally:
         close_process(second)

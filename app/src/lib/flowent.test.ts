@@ -60,6 +60,31 @@ describe("FlowentClient", () => {
     ).toHaveLength(1);
   });
 
+  it("dispatches backend events without disturbing pending requests", async () => {
+    const { channel, client, commands, invokeCommand } = createHarness();
+    const events: Array<{ event: string; data: unknown }> = [];
+    const unsubscribe = client.onEvent((event, data) =>
+      events.push({ event, data }),
+    );
+    const response = client.request("organization.get");
+    await vi.waitFor(() => expect(invokeCommand).toHaveBeenCalledTimes(2));
+
+    channel.onmessage({
+      event: "agent.history.updated",
+      data: { agent_id: 2, type: "text_delta" },
+    });
+    expect(events).toEqual([
+      {
+        event: "agent.history.updated",
+        data: { agent_id: 2, type: "text_delta" },
+      },
+    ]);
+
+    channel.onmessage({ id: sentMessage(commands).id, result: { ok: true } });
+    await expect(response).resolves.toEqual({ ok: true });
+    unsubscribe();
+  });
+
   it("rejects the matching request when Python returns a JSON error", async () => {
     const { channel, client, commands, invokeCommand } = createHarness();
 

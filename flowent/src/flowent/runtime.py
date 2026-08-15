@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event, Lock, Thread, current_thread
 from typing import Any, Protocol
 
+from pydantic_ai.messages import ModelMessage
+
 from flowent.domain import Activation, OrganizationState
+from flowent.history import AgentHistory, AgentHistoryRun
 from flowent.host_tools import HostToolError, HostTools
 
 
@@ -14,6 +19,13 @@ class AgentRunContext:
     agent_id: int
     state: OrganizationState
     host_tools: HostTools
+    run_id: str | None = None
+    message_history: tuple[ModelMessage, ...] = ()
+    history_event_sink: Callable[..., None] | None = None
+
+    def emit_history_event(self, event_type: str, **data: Any) -> None:
+        if self.history_event_sink is not None:
+            self.history_event_sink(event_type, **data)
 
     def organization(self, action: str, **arguments: Any) -> Any:
         if action == "list_members":
@@ -103,12 +115,30 @@ def discussion_summary(discussion: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class AgentRunOutcome:
+    messages: tuple[ModelMessage, ...] = ()
+    usage: dict[str, Any] | None = None
+
+
 class AgentRunner(Protocol):
-    def run(self, activation: Activation, context: AgentRunContext) -> None: ...
+    def run(
+        self,
+        activation: Activation,
+        context: AgentRunContext,
+    ) -> AgentRunOutcome | None: ...
 
 
 class AgentRunFailure(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        messages: tuple[ModelMessage, ...] = (),
+        usage: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.messages = messages
+        self.usage = usage
 
 
 class AgentRuntime:
@@ -117,10 +147,12 @@ class AgentRuntime:
         state: OrganizationState,
         runner: AgentRunner,
         host_tools: HostTools,
+        history: AgentHistory | None = None,
     ) -> None:
         self._state = state
         self._runner = runner
         self._host_tools = host_tools
+        self._history = history
         self._stop_event = Event()
         self._workers_lock = Lock()
         self._workers: set[Thread] = set()
@@ -175,20 +207,57 @@ class AgentRuntime:
     def _run_activation(self, activation: Activation) -> None:
         completed = False
         error: str | None = None
+        outcome = AgentRunOutcome()
+        history_run: AgentHistoryRun | None = None
         try:
-            self._runner.run(
+            if self._history is not None:
+                history_run = self._history.start(activation)
+            result = self._runner.run(
                 activation,
                 AgentRunContext(
                     agent_id=activation.agent_id,
                     state=self._state,
                     host_tools=self._host_tools,
+                    run_id=history_run.run_id if history_run is not None else None,
+                    message_history=(
+                        history_run.message_history if history_run is not None else ()
+                    ),
+                    history_event_sink=(
+                        history_run.emit if history_run is not None else None
+                    ),
                 ),
             )
+            if result is not None:
+                outcome = result
             completed = True
-        except (AgentRunFailure, HostToolError) as exception:
+        except AgentRunFailure as exception:
             error = str(exception)
+            outcome = AgentRunOutcome(exception.messages, exception.usage)
+        except HostToolError as exception:
+            error = str(exception)
+        except (OSError, RuntimeError, TypeError, ValueError) as exception:
+            print(
+                f"[Runtime] Agent run failed: {type(exception).__name__}",
+                file=sys.stderr,
+            )
+            error = "Agent run failed"
         finally:
             try:
+                if history_run is not None:
+                    try:
+                        history_run.complete(
+                            "completed" if completed else "failed",
+                            outcome.messages,
+                            outcome.usage,
+                            error,
+                        )
+                    except (OSError, RuntimeError, TypeError, ValueError) as exception:
+                        print(
+                            f"[Runtime] Agent history failed: {type(exception).__name__}",
+                            file=sys.stderr,
+                        )
+                        completed = False
+                        error = "Agent history could not be saved"
                 if completed:
                     self._state.complete_activation(activation.agent_id)
                 else:

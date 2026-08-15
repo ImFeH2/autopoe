@@ -9,6 +9,8 @@ export type FlowentChannel = {
   onmessage: (message: unknown) => void;
 };
 
+export type FlowentEventListener = (event: string, data: unknown) => void;
+
 type PendingRequest = {
   reject: (error: Error) => void;
   resolve: (value: unknown) => void;
@@ -35,6 +37,7 @@ function responseRecord(value: unknown): Record<string, unknown> | null {
 export class FlowentClient {
   private readonly channelFactory: () => FlowentChannel;
   private readonly invokeCommand: InvokeCommand;
+  private readonly eventListeners = new Set<FlowentEventListener>();
   private readonly pending = new Map<number, PendingRequest>();
   private readonly timeoutMs: number;
   private nextRequestId = 1;
@@ -48,6 +51,12 @@ export class FlowentClient {
     this.channelFactory = channelFactory;
     this.invokeCommand = invokeCommand;
     this.timeoutMs = timeoutMs;
+  }
+
+  onEvent(listener: FlowentEventListener): () => void {
+    this.eventListeners.add(listener);
+    void this.ensureSubscribed().catch(() => undefined);
+    return () => this.eventListeners.delete(listener);
   }
 
   async request(
@@ -99,6 +108,22 @@ export class FlowentClient {
       this.rejectAll(new Error("Invalid Flowent response: expected an object"));
       return;
     }
+    if (Object.getOwnPropertyDescriptor(envelope, "event") !== undefined) {
+      const event = envelope.event;
+      if (
+        typeof event !== "string" ||
+        !event ||
+        Object.getOwnPropertyDescriptor(envelope, "data") === undefined
+      ) {
+        this.rejectAll(new Error("Invalid Flowent event"));
+        return;
+      }
+      for (const listener of this.eventListeners) {
+        listener(event, envelope.data);
+      }
+      return;
+    }
+
     const id = envelope.id;
     if (!Number.isSafeInteger(id) || typeof id !== "number" || id < 1) {
       this.rejectAll(new Error("Invalid Flowent response id"));

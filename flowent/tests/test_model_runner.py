@@ -8,7 +8,9 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from pydantic_ai import InstrumentationSettings
 from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.models.test import TestModel
@@ -274,6 +276,62 @@ def test_pydantic_runner_exports_only_pydantic_ai_spans(tmp_path: Path) -> None:
     assert any("gen_ai.usage.output_tokens" in item for item in visible_attributes)
 
 
+def test_pydantic_runner_continues_the_same_agent_message_history(
+    tmp_path: Path,
+) -> None:
+    seen_messages: list[list[ModelMessage]] = []
+
+    async def respond(
+        messages: list[ModelMessage],
+        _info: AgentInfo,
+    ):
+        seen_messages.append(list(messages))
+        yield f"Reply {len(seen_messages)}"
+
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid/v1",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    activation, first_context = activation_context(tmp_path)
+    first_events: list[tuple[str, dict[str, Any]]] = []
+    first_context = AgentRunContext(
+        first_context.agent_id,
+        first_context.state,
+        first_context.host_tools,
+        run_id="first-run",
+        history_event_sink=lambda event_type, **data: first_events.append(
+            (event_type, data)
+        ),
+    )
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        first = runner.run(activation, first_context)
+        second = runner.run(
+            activation,
+            AgentRunContext(
+                first_context.agent_id,
+                first_context.state,
+                first_context.host_tools,
+                run_id="second-run",
+                message_history=first.messages,
+            ),
+        )
+
+    assert len(seen_messages) == 2
+    assert len(seen_messages[0]) == 1
+    assert len(seen_messages[1]) == 3
+    assert seen_messages[1][0:2] == list(first.messages)
+    assert len(first.messages) == 2
+    assert len(second.messages) == 2
+    assert first.messages[0].conversation_id == second.messages[0].conversation_id
+    assert first.messages[0].run_id == "first-run"
+    assert second.messages[0].run_id == "second-run"
+    assert any(event_type == "text_delta" for event_type, _data in first_events)
+
+
 def test_missing_model_config_returns_runner_that_fails_on_activation(
     tmp_path: Path,
 ) -> None:
@@ -291,6 +349,7 @@ def test_pydantic_model_errors_are_mapped_to_safe_message(tmp_path: Path) -> Non
             prompt: str,
             deps: AgentRunContext,
             metadata: dict[str, Any],
+            **_kwargs: Any,
         ) -> Any:
             del prompt, deps, metadata
             raise ModelHTTPError(401, "secret upstream detail", "test-model")

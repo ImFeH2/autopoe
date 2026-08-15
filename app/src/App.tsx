@@ -14,7 +14,9 @@ import {
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
 import {
+  type AgentHistory,
   type AgentMember,
+  applyAgentHistoryEvent,
   backend,
   type OrganizationSnapshot,
 } from "@/lib/backend";
@@ -22,6 +24,11 @@ import {
 type RequestState =
   | { status: "loading" }
   | { status: "ready"; snapshot: OrganizationSnapshot }
+  | { status: "error"; message: string };
+
+export type AgentHistoryRequestState =
+  | { status: "loading" }
+  | { status: "ready"; history: AgentHistory }
   | { status: "error"; message: string };
 
 function errorMessage(error: unknown) {
@@ -52,10 +59,20 @@ function App() {
   const [messageBody, setMessageBody] = useState("");
   const [messageMentions, setMessageMentions] = useState<DraftMention[]>([]);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [agentHistories, setAgentHistories] = useState<
+    Record<number, AgentHistoryRequestState>
+  >({});
   const [isSaving, setIsSaving] = useState(false);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const restoreMessageFocusRef = useRef(false);
   const focusMessageAfterDialogRef = useRef(false);
+  const selectedAgentId =
+    requestState.status === "ready" &&
+    requestState.snapshot.members.find(
+      (member) => member.id === selectedMemberId,
+    )?.type === "agent"
+      ? selectedMemberId
+      : null;
 
   useEffect(() => {
     let active = true;
@@ -84,6 +101,89 @@ function App() {
       if (timer) {
         clearTimeout(timer);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedAgentId === null) {
+      return;
+    }
+    let active = true;
+    setAgentHistories((current) =>
+      current[selectedAgentId]
+        ? current
+        : { ...current, [selectedAgentId]: { status: "loading" } },
+    );
+    void backend
+      .getAgentHistory(selectedAgentId)
+      .then((history) => {
+        if (active) {
+          setAgentHistories((current) => ({
+            ...current,
+            [selectedAgentId]: { status: "ready", history },
+          }));
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setAgentHistories((current) => ({
+            ...current,
+            [selectedAgentId]: {
+              status: "error",
+              message: errorMessage(error),
+            },
+          }));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedAgentId]);
+
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = backend.onAgentHistoryEvent((event) => {
+      setAgentHistories((current) => {
+        const existing = current[event.agent_id];
+        const history =
+          existing?.status === "ready"
+            ? existing.history
+            : { agent_id: event.agent_id, runs: [] };
+        return {
+          ...current,
+          [event.agent_id]: {
+            status: "ready",
+            history: applyAgentHistoryEvent(history, event),
+          },
+        };
+      });
+      if (event.type === "run_completed" || event.type === "run_failed") {
+        void backend
+          .getAgentHistory(event.agent_id)
+          .then((history) => {
+            if (active) {
+              setAgentHistories((current) => ({
+                ...current,
+                [event.agent_id]: { status: "ready", history },
+              }));
+            }
+          })
+          .catch((error) => {
+            if (active) {
+              setAgentHistories((current) => ({
+                ...current,
+                [event.agent_id]: {
+                  status: "error",
+                  message: errorMessage(error),
+                },
+              }));
+            }
+          });
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
     };
   }, []);
 
@@ -260,6 +360,11 @@ function App() {
             agentName={agentName}
             disabled={isSaving}
             error={isCreatingAgent ? mutationError : null}
+            history={
+              selectedMember?.type === "agent"
+                ? (agentHistories[selectedMember.id] ?? { status: "loading" })
+                : undefined
+            }
             isCreatingAgent={isCreatingAgent}
             members={snapshot.members}
             onAgentDialogOpenChange={changeAgentDialog}

@@ -16,6 +16,67 @@ export type AgentMember = {
 
 export type Member = HumanMember | AgentMember;
 
+export type AgentActivationItem = {
+  discussion_id: number;
+  message_ids: number[];
+};
+
+export type AgentHistoryEntryType =
+  | "activation"
+  | "assistant"
+  | "thinking"
+  | "tool_call"
+  | "tool_result"
+  | "retry"
+  | "error";
+
+export type AgentHistoryEntry = {
+  id: string;
+  type: AgentHistoryEntryType;
+  timestamp: string;
+  state: "complete" | "interrupted" | "streaming";
+  content?: string;
+  tool_name?: string;
+  items?: AgentActivationItem[];
+};
+
+export type AgentHistoryRun = {
+  run_id: string;
+  status: "running" | "completed" | "failed" | "interrupted";
+  started_at: string;
+  completed_at: string | null;
+  usage: Record<string, unknown> | null;
+  event_sequence: number;
+  entries: AgentHistoryEntry[];
+};
+
+export type AgentHistory = {
+  agent_id: number;
+  runs: AgentHistoryRun[];
+};
+
+export type AgentHistoryEvent = {
+  agent_id: number;
+  run_id: string;
+  sequence: number;
+  timestamp: string;
+  type:
+    | "run_started"
+    | "text_delta"
+    | "thinking"
+    | "tool_call"
+    | "tool_result"
+    | "retry"
+    | "run_completed"
+    | "run_failed";
+  activation?: AgentActivationItem[];
+  part_id?: string;
+  content?: string;
+  tool_name?: string;
+  status?: "completed" | "failed" | "interrupted";
+  error?: string;
+};
+
 export type Mention = {
   member_id: number;
   status: "pending" | "read" | "acked";
@@ -288,6 +349,320 @@ export function parseOrganizationSnapshot(
   };
 }
 
+function nonNegativeInteger(value: unknown, path: string): number {
+  if (!Number.isInteger(value) || typeof value !== "number" || value < 0) {
+    invalidSnapshot(`${path} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function parseActivationItems(
+  value: unknown,
+  path: string,
+): AgentActivationItem[] {
+  return array(value, path).map((item, index) => {
+    const itemPath = `${path}[${index}]`;
+    const activation = record(item, itemPath);
+    return {
+      discussion_id: positiveInteger(
+        activation.discussion_id,
+        `${itemPath}.discussion_id`,
+      ),
+      message_ids: array(activation.message_ids, `${itemPath}.message_ids`).map(
+        (messageId, messageIndex) =>
+          positiveInteger(
+            messageId,
+            `${itemPath}.message_ids[${messageIndex}]`,
+          ),
+      ),
+    };
+  });
+}
+
+function historyEntryType(value: unknown, path: string): AgentHistoryEntryType {
+  if (
+    value === "activation" ||
+    value === "assistant" ||
+    value === "thinking" ||
+    value === "tool_call" ||
+    value === "tool_result" ||
+    value === "retry" ||
+    value === "error"
+  ) {
+    return value;
+  }
+  return invalidSnapshot(`${path} is invalid`);
+}
+
+function historyEntryState(
+  value: unknown,
+  path: string,
+): AgentHistoryEntry["state"] {
+  if (
+    value === "complete" ||
+    value === "interrupted" ||
+    value === "streaming"
+  ) {
+    return value;
+  }
+  return invalidSnapshot(`${path} is invalid`);
+}
+
+function parseHistoryEntry(
+  value: unknown,
+  runIndex: number,
+  entryIndex: number,
+): AgentHistoryEntry {
+  const path = `runs[${runIndex}].entries[${entryIndex}]`;
+  const item = record(value, path);
+  const type = historyEntryType(item.type, `${path}.type`);
+  const entry: AgentHistoryEntry = {
+    id: nonEmptyString(item.id, `${path}.id`),
+    type,
+    timestamp: nonEmptyString(item.timestamp, `${path}.timestamp`),
+    state: historyEntryState(item.state, `${path}.state`),
+  };
+  if (type === "activation") {
+    entry.items = parseActivationItems(item.items, `${path}.items`);
+    return entry;
+  }
+  if (type !== "thinking") {
+    entry.content = typeof item.content === "string" ? item.content : "";
+  }
+  if (item.tool_name !== undefined && item.tool_name !== null) {
+    entry.tool_name = nonEmptyString(item.tool_name, `${path}.tool_name`);
+  }
+  return entry;
+}
+
+function parseHistoryRun(value: unknown, index: number): AgentHistoryRun {
+  const path = `runs[${index}]`;
+  const item = record(value, path);
+  if (
+    item.status !== "running" &&
+    item.status !== "completed" &&
+    item.status !== "failed" &&
+    item.status !== "interrupted"
+  ) {
+    invalidSnapshot(`${path}.status is invalid`);
+  }
+  const completedAt = item.completed_at;
+  if (completedAt !== null && typeof completedAt !== "string") {
+    invalidSnapshot(`${path}.completed_at must be a string or null`);
+  }
+  const usage = item.usage;
+  if (usage !== null && (typeof usage !== "object" || Array.isArray(usage))) {
+    invalidSnapshot(`${path}.usage must be an object or null`);
+  }
+  return {
+    run_id: nonEmptyString(item.run_id, `${path}.run_id`),
+    status: item.status,
+    started_at: nonEmptyString(item.started_at, `${path}.started_at`),
+    completed_at: completedAt,
+    usage: usage as Record<string, unknown> | null,
+    event_sequence: nonNegativeInteger(
+      item.event_sequence,
+      `${path}.event_sequence`,
+    ),
+    entries: array(item.entries, `${path}.entries`).map((entry, entryIndex) =>
+      parseHistoryEntry(entry, index, entryIndex),
+    ),
+  };
+}
+
+export function parseAgentHistory(value: unknown): AgentHistory {
+  const history = record(value, "agent history");
+  const agentId = positiveInteger(history.agent_id, "agent_id");
+  const runs = array(history.runs, "runs").map(parseHistoryRun);
+  const runIds = new Set(runs.map((run) => run.run_id));
+  if (runIds.size !== runs.length) {
+    invalidSnapshot("Agent history Run IDs must be unique");
+  }
+  return { agent_id: agentId, runs };
+}
+
+function formatEventContent(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value, null, 2) ?? "";
+}
+
+export function parseAgentHistoryEvent(value: unknown): AgentHistoryEvent {
+  const event = record(value, "agent history event");
+  const base = {
+    agent_id: positiveInteger(event.agent_id, "agent_id"),
+    run_id: nonEmptyString(event.run_id, "run_id"),
+    sequence: positiveInteger(event.sequence, "sequence"),
+    timestamp: nonEmptyString(event.timestamp, "timestamp"),
+  };
+  if (event.type === "run_started") {
+    return {
+      ...base,
+      type: event.type,
+      activation: parseActivationItems(event.activation, "activation"),
+    };
+  }
+  if (event.type === "text_delta") {
+    return {
+      ...base,
+      type: event.type,
+      part_id: nonEmptyString(event.part_id, "part_id"),
+      content: typeof event.content === "string" ? event.content : "",
+    };
+  }
+  if (event.type === "thinking") {
+    return {
+      ...base,
+      type: event.type,
+      part_id: nonEmptyString(event.part_id, "part_id"),
+    };
+  }
+  if (
+    event.type === "tool_call" ||
+    event.type === "tool_result" ||
+    event.type === "retry"
+  ) {
+    return {
+      ...base,
+      type: event.type,
+      content: formatEventContent(event.content),
+      tool_name:
+        typeof event.tool_name === "string" && event.tool_name
+          ? event.tool_name
+          : undefined,
+    };
+  }
+  if (event.type === "run_completed" || event.type === "run_failed") {
+    if (
+      event.status !== "completed" &&
+      event.status !== "failed" &&
+      event.status !== "interrupted"
+    ) {
+      invalidSnapshot("status is invalid");
+    }
+    return {
+      ...base,
+      type: event.type,
+      status: event.status,
+      error: typeof event.error === "string" ? event.error : undefined,
+    };
+  }
+  return invalidSnapshot("Agent history event type is invalid");
+}
+
+export function applyAgentHistoryEvent(
+  history: AgentHistory,
+  event: AgentHistoryEvent,
+): AgentHistory {
+  if (history.agent_id !== event.agent_id) {
+    return history;
+  }
+  const runIndex = history.runs.findIndex((run) => run.run_id === event.run_id);
+  if (event.type === "run_started") {
+    if (runIndex >= 0) {
+      const current = history.runs[runIndex];
+      if (event.sequence <= current.event_sequence) {
+        return history;
+      }
+      const runs = [...history.runs];
+      runs[runIndex] = { ...current, event_sequence: event.sequence };
+      return { ...history, runs };
+    }
+    return {
+      ...history,
+      runs: [
+        ...history.runs,
+        {
+          run_id: event.run_id,
+          status: "running",
+          started_at: event.timestamp,
+          completed_at: null,
+          usage: null,
+          event_sequence: event.sequence,
+          entries: [
+            {
+              id: `${event.run_id}-activation`,
+              type: "activation",
+              timestamp: event.timestamp,
+              state: "complete",
+              items: event.activation ?? [],
+            },
+          ],
+        },
+      ],
+    };
+  }
+  if (runIndex < 0 || event.sequence <= history.runs[runIndex].event_sequence) {
+    return history;
+  }
+  const runs = [...history.runs];
+  const current = history.runs[runIndex];
+  const entries = [...current.entries];
+  const run: AgentHistoryRun = {
+    ...current,
+    event_sequence: event.sequence,
+    entries,
+  };
+  runs[runIndex] = run;
+
+  if (event.type === "text_delta") {
+    const id = `live-text-${event.part_id}`;
+    const entryIndex = entries.findIndex((entry) => entry.id === id);
+    if (entryIndex >= 0) {
+      entries[entryIndex] = {
+        ...entries[entryIndex],
+        content: `${entries[entryIndex].content ?? ""}${event.content ?? ""}`,
+      };
+    } else {
+      entries.push({
+        id,
+        type: "assistant",
+        timestamp: event.timestamp,
+        state: "streaming",
+        content: event.content ?? "",
+      });
+    }
+  } else if (event.type === "thinking") {
+    const id = `live-thinking-${event.part_id}`;
+    if (!entries.some((entry) => entry.id === id)) {
+      entries.push({
+        id,
+        type: "thinking",
+        timestamp: event.timestamp,
+        state: "streaming",
+      });
+    }
+  } else if (
+    event.type === "tool_call" ||
+    event.type === "tool_result" ||
+    event.type === "retry"
+  ) {
+    entries.push({
+      id: `live-${event.type}-${event.sequence}`,
+      type: event.type,
+      timestamp: event.timestamp,
+      state: "complete",
+      content: event.content ?? "",
+      tool_name: event.tool_name,
+    });
+  } else {
+    run.status =
+      event.status ?? (event.type === "run_completed" ? "completed" : "failed");
+    run.completed_at = event.timestamp;
+    if (event.error) {
+      entries.push({
+        id: `${event.run_id}-error-live`,
+        type: "error",
+        timestamp: event.timestamp,
+        state: "complete",
+        content: event.error,
+      });
+    }
+  }
+  return { ...history, runs };
+}
+
 export function parseObservabilitySettings(
   value: unknown,
 ): ObservabilitySettings {
@@ -361,6 +736,16 @@ async function organizationRequest(
 
 export const backend = {
   getOrganization: () => organizationRequest("organization.get"),
+  getAgentHistory: async (agentId: number) =>
+    parseAgentHistory(
+      await request("agent.history.get", { agent_id: agentId }),
+    ),
+  onAgentHistoryEvent: (listener: (event: AgentHistoryEvent) => void) =>
+    flowent.onEvent((event, data) => {
+      if (event === "agent.history.updated") {
+        listener(parseAgentHistoryEvent(data));
+      }
+    }),
   createAgent: (name: string) =>
     organizationRequest("organization.create_agent", { name }),
   retryAgent: (agentId: number) =>

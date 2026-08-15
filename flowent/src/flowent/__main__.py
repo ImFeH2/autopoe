@@ -23,10 +23,11 @@ def main(
     from pathlib import Path
 
     from flowent.domain import OrganizationState
+    from flowent.history import AgentHistory
     from flowent.host_tools import HostTools, ProcessWatcher
     from flowent.model_runner import create_runner
     from flowent.persistence import SQLiteStore, data_directory
-    from flowent.protocol import serve
+    from flowent.protocol import JsonLineWriter, serve
     from flowent.runtime import AgentRuntime
 
     if create_model_runtime is None:
@@ -34,6 +35,11 @@ def main(
 
     working_directory = Path.cwd().resolve()
     store = SQLiteStore(data_directory())
+    writer = JsonLineWriter(sys.stdout)
+    history = AgentHistory(
+        store,
+        lambda event: writer.write_event("agent.history.updated", event),
+    )
     host_tools = HostTools(working_directory)
     watcher = ProcessWatcher(host_tools.process_owner)
     state = OrganizationState(
@@ -51,6 +57,7 @@ def main(
         state,
         model_runtime,
         host_tools,
+        history,
     )
     runtime.start()
     try:
@@ -60,6 +67,8 @@ def main(
             state,
             runtime.stop,
             model_runtime,
+            history,
+            writer,
         )
     finally:
         runtime.stop()

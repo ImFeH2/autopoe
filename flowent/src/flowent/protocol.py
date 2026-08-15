@@ -4,14 +4,31 @@ import json
 import sqlite3
 import sys
 from collections.abc import Callable
+from threading import Lock
 from typing import Any, TextIO
 
 from flowent.domain import DomainError, OrganizationState
+from flowent.history import AgentHistory
 from flowent.model_runner import ModelRuntime
 
 
 class ProtocolError(Exception):
     pass
+
+
+class JsonLineWriter:
+    def __init__(self, output_stream: TextIO) -> None:
+        self._output_stream = output_stream
+        self._lock = Lock()
+
+    def write(self, message: dict[str, Any]) -> None:
+        encoded = json.dumps(message, separators=(",", ":")) + "\n"
+        with self._lock:
+            self._output_stream.write(encoded)
+            self._output_stream.flush()
+
+    def write_event(self, event: str, data: dict[str, Any]) -> None:
+        self.write({"event": event, "data": data})
 
 
 class Dispatcher:
@@ -20,15 +37,18 @@ class Dispatcher:
         state: OrganizationState,
         on_shutdown: Callable[[], None] | None = None,
         model_runtime: ModelRuntime | None = None,
+        history: AgentHistory | None = None,
     ) -> None:
         self._state = state
         self._on_shutdown = on_shutdown
         self._model_runtime = model_runtime or ModelRuntime()
+        self._history = history
         self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
             "organization.retry_agent": self._retry_agent,
+            "agent.history.get": self._get_agent_history,
             "discussion.create": self._create_discussion,
             "discussion.send": self._send_message,
             "settings.get_model": self._get_model_settings,
@@ -124,6 +144,15 @@ class Dispatcher:
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
 
+    def _get_agent_history(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        member = self._state.member(agent_id)
+        if member["type"] != "agent":
+            raise DomainError("not_an_agent", "Member is not an Agent")
+        if self._history is None:
+            raise RuntimeError("Agent history is unavailable")
+        return self._history.snapshot(agent_id)
+
     def _retry_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.retry_agent(agent_id=require_integer(params, "agent_id"))
 
@@ -183,8 +212,11 @@ def serve(
     state: OrganizationState,
     on_shutdown: Callable[[], None] | None = None,
     model_runtime: ModelRuntime | None = None,
+    history: AgentHistory | None = None,
+    writer: JsonLineWriter | None = None,
 ) -> None:
-    dispatcher = Dispatcher(state, on_shutdown, model_runtime)
+    dispatcher = Dispatcher(state, on_shutdown, model_runtime, history)
+    protocol_writer = writer or JsonLineWriter(output_stream)
     for line in input_stream:
         try:
             request = json.loads(line)
@@ -196,7 +228,6 @@ def serve(
         else:
             response = dispatcher.dispatch(request)
 
-        output_stream.write(json.dumps(response, separators=(",", ":")) + "\n")
-        output_stream.flush()
+        protocol_writer.write(response)
         if dispatcher.shutdown_requested:
             return

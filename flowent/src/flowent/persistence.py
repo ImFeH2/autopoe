@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 4
+from flowent.history import RunStatus
+
+SCHEMA_VERSION = 5
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -34,8 +38,11 @@ class SQLiteStore:
                 self._migrate_version_two(connection)
             elif version == 3:
                 self._migrate_version_three(connection)
+            elif version == 4:
+                self._migrate_version_four(connection)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"Unsupported Flowent database version: {version}")
+            self._interrupt_running_agent_runs(connection)
         self.path.chmod(0o600)
 
     @contextmanager
@@ -137,6 +144,29 @@ class SQLiteStore:
         for statement in statements:
             connection.execute(statement)
         SQLiteStore._create_model_settings_table(connection)
+        SQLiteStore._create_agent_runs_table(connection)
+
+    @staticmethod
+    def _create_agent_runs_table(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                agent_id INTEGER NOT NULL,
+                sequence INTEGER NOT NULL,
+                run_id TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL CHECK (
+                    status IN ('running', 'completed', 'failed', 'interrupted')
+                ),
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                activation_json TEXT NOT NULL,
+                messages_json TEXT NOT NULL DEFAULT '[]',
+                usage_json TEXT,
+                error TEXT,
+                PRIMARY KEY (agent_id, sequence)
+            )
+            """
+        )
 
     @staticmethod
     def _create_model_settings_table(connection: sqlite3.Connection) -> None:
@@ -239,12 +269,32 @@ class SQLiteStore:
                 """
             )
             self._migrate_model_api_type(connection)
+            self._create_agent_runs_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_three(self, connection: sqlite3.Connection) -> None:
         with connection:
             self._migrate_model_api_type(connection)
+            self._create_agent_runs_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _migrate_version_four(self, connection: sqlite3.Connection) -> None:
+        with connection:
+            self._create_agent_runs_table(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _interrupt_running_agent_runs(connection: sqlite3.Connection) -> None:
+        with connection:
+            connection.execute(
+                """
+                UPDATE agent_runs
+                SET status = 'interrupted', completed_at = ?,
+                    error = 'Flowent stopped before this run completed'
+                WHERE status = 'running'
+                """,
+                (datetime.now(UTC).isoformat(),),
+            )
 
     @staticmethod
     def _migrate_model_api_type(connection: sqlite3.Connection) -> None:
@@ -509,6 +559,99 @@ class SQLiteStore:
         with self._connect() as connection, connection:
             self._write_model_config(connection, config)
         self.path.chmod(0o600)
+
+    def begin_agent_run(
+        self,
+        agent_id: int,
+        run_id: str,
+        started_at: str,
+        activation: list[dict[str, Any]],
+    ) -> int:
+        with self._connect() as connection, connection:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_runs WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()
+            sequence = int(row[0])
+            connection.execute(
+                """
+                INSERT INTO agent_runs
+                    (agent_id, sequence, run_id, status, started_at, activation_json)
+                VALUES (?, ?, ?, 'running', ?, ?)
+                """,
+                (
+                    agent_id,
+                    sequence,
+                    run_id,
+                    started_at,
+                    json.dumps(activation, separators=(",", ":")),
+                ),
+            )
+        self.path.chmod(0o600)
+        return sequence
+
+    def complete_agent_run(
+        self,
+        agent_id: int,
+        run_id: str,
+        status: RunStatus,
+        completed_at: str,
+        messages_json: str,
+        usage: dict[str, Any] | None,
+        error: str | None,
+    ) -> None:
+        if status == "running":
+            raise ValueError("A completed Agent run cannot remain running")
+        with self._connect() as connection, connection:
+            cursor = connection.execute(
+                """
+                UPDATE agent_runs
+                SET status = ?, completed_at = ?, messages_json = ?,
+                    usage_json = ?, error = ?
+                WHERE agent_id = ? AND run_id = ? AND status = 'running'
+                """,
+                (
+                    status,
+                    completed_at,
+                    messages_json,
+                    json.dumps(usage, separators=(",", ":"))
+                    if usage is not None
+                    else None,
+                    error,
+                    agent_id,
+                    run_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Agent run is not active")
+        self.path.chmod(0o600)
+
+    def load_agent_runs(self, agent_id: int) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            return [
+                {
+                    "agent_id": row["agent_id"],
+                    "sequence": row["sequence"],
+                    "run_id": row["run_id"],
+                    "status": row["status"],
+                    "started_at": row["started_at"],
+                    "completed_at": row["completed_at"],
+                    "activation": json.loads(row["activation_json"]),
+                    "messages_json": row["messages_json"],
+                    "usage": json.loads(row["usage_json"])
+                    if row["usage_json"] is not None
+                    else None,
+                    "error": row["error"],
+                }
+                for row in connection.execute(
+                    """
+                    SELECT agent_id, sequence, run_id, status, started_at,
+                        completed_at, activation_json, messages_json, usage_json, error
+                    FROM agent_runs WHERE agent_id = ? ORDER BY sequence
+                    """,
+                    (agent_id,),
+                )
+            ]
 
     def load_observability_config(self) -> dict[str, Any] | None:
         with self._connect() as connection:
