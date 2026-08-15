@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "identifier": "im.feh2.flowent.desktop-debug",
+  "identifier": "im.feh2.flowent.debug",
   "build": {
-    "beforeBuildCommand": "pnpm build:desktop:debug:frontend",
-    "frontendDist": "../dist-desktop-debug"
+    "beforeBuildCommand": "pnpm build:debug:frontend",
+    "frontendDist": "../dist-debug"
   },
   "bundle": {
     "externalBin": ["binaries/flowent-agent"]
@@ -14,7 +14,7 @@
       "capabilities": [
         "default",
         {
-          "identifier": "desktop-debug",
+          "identifier": "debug",
           "description": "Capability for local desktop debugging",
           "windows": ["main"],
           "permissions": ["wdio:default", "core:window:allow-set-size"]

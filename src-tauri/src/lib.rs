@@ -29,7 +29,7 @@ fn subscribe(sidecar: tauri::State<'_, Sidecar>, channel: Channel<Value>) -> Res
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
-    #[cfg(feature = "desktop-debug")]
+    #[cfg(feature = "debug")]
     let builder = builder
         .plugin(tauri_plugin_wdio_webdriver::init())
         .plugin(tauri_plugin_wdio::init());
