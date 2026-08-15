@@ -9,6 +9,16 @@
     "externalBin": ["binaries/flowent"]
   },
   "app": {
+    "windows": [
+      {
+        "title": "Flowent",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 960,
+        "minHeight": 680,
+        "focus": false
+      }
+    ],
     "withGlobalTauri": true,
     "security": {
       "capabilities": [
