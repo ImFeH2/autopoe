@@ -1,18 +1,101 @@
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -49%) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -49%) scale(0.98);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  button,
-  input,
-  textarea {
+  .ui-button {
     transition:
-      background-color 100ms ease-out,
-      border-color 100ms ease-out,
-      color 100ms ease-out;
+      background-color var(--duration-fast) ease,
+      border-color var(--duration-fast) ease,
+      color var(--duration-fast) ease,
+      box-shadow var(--duration-fast) ease,
+      transform 100ms var(--ease-standard);
+  }
+
+  .ui-input,
+  .ui-textarea,
+  .ui-checkbox {
+    transition:
+      background-color var(--duration-standard) var(--ease-standard),
+      border-color var(--duration-standard) var(--ease-standard),
+      color var(--duration-standard) var(--ease-standard),
+      box-shadow var(--duration-standard) var(--ease-standard);
+  }
+
+  .ui-checkbox::before {
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+
+  .ui-button:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  .ui-dialog-overlay[data-state="open"] {
+    animation: overlay-in var(--duration-fast) ease-out;
+  }
+
+  .ui-dialog-overlay[data-state="closed"] {
+    animation: overlay-out var(--duration-fast) ease-in;
+  }
+
+  .ui-dialog-content[data-state="open"] {
+    animation: dialog-in var(--duration-fast) var(--ease-out);
+  }
+
+  .ui-dialog-content[data-state="closed"] {
+    animation: dialog-out var(--duration-fast) ease-in;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button,
-  input,
-  textarea {
+  .ui-button,
+  .ui-input,
+  .ui-textarea,
+  .ui-checkbox,
+  .ui-checkbox::before,
+  .ui-dialog-overlay,
+  .ui-dialog-content {
     transition: none;
+    animation: none;
   }
 }

@@ -1,4 +1,11 @@
-import { Bot, Button, MessageSquare, Settings2, Users } from "@/components/ui";
+import {
+  Badge,
+  Bot,
+  Button,
+  MessageSquare,
+  Settings2,
+  Users,
+} from "@/components/ui";
 
 export type WorkspaceView = "discussions" | "members" | "agents" | "settings";
 
@@ -54,7 +61,9 @@ export function AppSidebar({
             >
               <Icon aria-hidden="true" size={15} />
               <span>{item.label}</span>
-              <span className="sidebar-count">{counts[item.view]}</span>
+              <Badge className="sidebar-count" size="small">
+                {counts[item.view]}
+              </Badge>
             </Button>
           );
         })}

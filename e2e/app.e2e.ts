@@ -132,9 +132,41 @@ describe("Flowent desktop", () => {
     await expect($(".workspace-breadcrumbs")).not.toExist();
     expect(
       await browser.execute(() => getComputedStyle(document.body).fontFamily),
-    ).toBe(
-      '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif',
-    );
+    ).toContain('"Inter Variable"');
+    expect(
+      await browser.execute(() => {
+        const sidebar = document.querySelector(".app-sidebar");
+        const primaryButton = document.querySelector(".ui-button--primary");
+        const navigationButton = document.querySelector(
+          "button[aria-label='Discussions']",
+        );
+        if (!sidebar || !primaryButton || !navigationButton) {
+          return null;
+        }
+        const buttonStyle = getComputedStyle(primaryButton);
+        return {
+          accent: buttonStyle.backgroundColor,
+          canvas: getComputedStyle(document.body).backgroundColor,
+          colorScheme: getComputedStyle(document.documentElement).colorScheme,
+          controlHeight: buttonStyle.height,
+          controlRadius: buttonStyle.borderRadius,
+          cursor: getComputedStyle(navigationButton).cursor,
+          disabledCursor: buttonStyle.cursor,
+          sidebar: getComputedStyle(sidebar).backgroundColor,
+          transitionDuration: buttonStyle.transitionDuration,
+        };
+      }),
+    ).toEqual({
+      accent: "rgb(63, 93, 179)",
+      canvas: "rgb(31, 30, 30)",
+      colorScheme: "dark",
+      controlHeight: "36px",
+      controlRadius: "6px",
+      cursor: "pointer",
+      disabledCursor: "not-allowed",
+      sidebar: "rgb(24, 23, 23)",
+      transitionDuration: "0.12s, 0.12s, 0.12s, 0.12s, 0.1s",
+    });
     expect(
       await browser.execute(() => {
         const main = document.querySelector("main");
@@ -459,7 +491,7 @@ describe("Flowent desktop", () => {
       expect(await isFullyVisible("button[aria-label='New discussion']")).toBe(
         true,
       );
-      expect(await isFullyVisible(".discussion-list-button")).toBe(true);
+      expect(await isFullyVisible(".ui-list-button")).toBe(true);
       expect(await isFullyVisible(".sidebar-user")).toBe(true);
       expect(await isFullyVisible("form[aria-label='Send Message']")).toBe(
         true,

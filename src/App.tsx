@@ -6,14 +6,21 @@ import {
   useRef,
   useState,
 } from "react";
-import { AppSidebar, type WorkspaceView } from "@/components/layout";
 import {
+  AppSidebar,
+  PageHeader,
+  type WorkspaceView,
+} from "@/components/layout";
+import {
+  Badge,
   Button,
   Checkbox,
   Dialog,
   Input,
+  ListButton,
   Plus,
   Search,
+  StatusIndicator,
   Textarea,
 } from "@/components/ui";
 import {
@@ -21,6 +28,7 @@ import {
   backend,
   type Discussion,
   type Member,
+  type Mention,
   type ModelProvider,
   type ModelSettings,
   type ObservabilitySettings,
@@ -40,6 +48,26 @@ function toggleId(ids: number[], id: number) {
   return ids.includes(id)
     ? ids.filter((current) => current !== id)
     : [...ids, id];
+}
+
+function agentStatusTone(status: AgentMember["status"]) {
+  if (status === "error") {
+    return "danger" as const;
+  }
+  if (status === "running") {
+    return "accent" as const;
+  }
+  return "success" as const;
+}
+
+function mentionStatusTone(status: Mention["status"]) {
+  if (status === "acked") {
+    return "success" as const;
+  }
+  if (status === "read") {
+    return "accent" as const;
+  }
+  return "neutral" as const;
 }
 
 export function filterDiscussions(
@@ -349,21 +377,10 @@ function StatusPage({
   );
 }
 
-function PageHeading({ count, title }: { count?: number; title: string }) {
-  return (
-    <header className="page-heading border-border border-b">
-      <h2 className="page-title m-0 font-semibold">{title}</h2>
-      {count !== undefined ? (
-        <span className="meta-text font-mono text-text-tertiary">{count}</span>
-      ) : null}
-    </header>
-  );
-}
-
 function MembersPage({ members }: { members: Member[] }) {
   return (
     <section className="page-pane">
-      <PageHeading count={members.length} title="Members" />
+      <PageHeader count={members.length} title="Members" />
       <ul className="entity-list">
         {members.map((member) => (
           <li key={member.id}>
@@ -374,9 +391,15 @@ function MembersPage({ members }: { members: Member[] }) {
               <strong>{member.name}</strong>
               <span>{member.type === "human" ? "Human" : "Agent"}</span>
             </span>
-            <span className="meta-text font-mono text-text-tertiary">
+            <StatusIndicator
+              tone={
+                member.type === "agent"
+                  ? agentStatusTone(member.status)
+                  : "success"
+              }
+            >
               {member.type === "agent" ? member.status.toUpperCase() : "ACTIVE"}
-            </span>
+            </StatusIndicator>
           </li>
         ))}
       </ul>
@@ -405,7 +428,7 @@ function AgentsPage({
 }: AgentsPageProps) {
   return (
     <section className="page-pane page-pane--agents">
-      <PageHeading count={agents.length} title="Agents" />
+      <PageHeader count={agents.length} title="Agents" />
       <form
         className="entity-create-form border-border border-b"
         aria-label="Create Agent"
@@ -442,9 +465,9 @@ function AgentsPage({
                 <strong>{agent.name}</strong>
                 <span>Agent {agent.id}</span>
               </span>
-              <span className="meta-text font-mono text-text-tertiary">
+              <StatusIndicator tone={agentStatusTone(agent.status)}>
                 {agent.status.toUpperCase()}
-              </span>
+              </StatusIndicator>
               {agent.error ? (
                 <div className="entity-error">
                   <span className="caption-text text-danger" role="alert">
@@ -603,7 +626,7 @@ function SettingsPage() {
 
   return (
     <section className="page-pane page-pane--settings">
-      <PageHeading title="Settings" />
+      <PageHeader title="Settings" />
       <div className="settings-scroll">
         <section className="settings-section">
           <h3 className="settings-section-title">Model</h3>
@@ -850,6 +873,7 @@ function DiscussionsPage({
               aria-label="Search discussions"
               autoComplete="off"
               id="discussion-search"
+              inset="leading-icon"
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search"
               type="search"
@@ -895,17 +919,14 @@ function DiscussionsPage({
             {filteredDiscussions.map((discussion) => {
               const selected = selectedDiscussion?.id === discussion.id;
               return (
-                <Button
-                  aria-current={selected ? "page" : undefined}
+                <ListButton
+                  active={selected}
                   aria-label={`Open ${discussion.topic}`}
-                  className="discussion-list-button"
                   key={discussion.id}
+                  meta={`${discussion.messages.length} messages`}
                   onClick={() => onSelectDiscussion(discussion.id)}
-                  variant={selected ? "secondary" : "quiet"}
-                >
-                  <span>{discussion.topic}</span>
-                  <span>{discussion.messages.length} messages</span>
-                </Button>
+                  title={discussion.topic}
+                />
               );
             })}
           </div>
@@ -1144,11 +1165,16 @@ function DiscussionView({
                     {message.mentions.length > 0 ? (
                       <ul className="mention-statuses" aria-label="Mentions">
                         {message.mentions.map((mention) => (
-                          <li className="font-mono" key={mention.member_id}>
-                            @
-                            {membersById.get(mention.member_id)?.name ??
-                              mention.member_id}{" "}
-                            · {mention.status.toUpperCase()}
+                          <li key={mention.member_id}>
+                            <Badge
+                              size="small"
+                              tone={mentionStatusTone(mention.status)}
+                            >
+                              @
+                              {membersById.get(mention.member_id)?.name ??
+                                mention.member_id}{" "}
+                              · {mention.status.toUpperCase()}
+                            </Badge>
                           </li>
                         ))}
                       </ul>

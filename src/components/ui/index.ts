@@ -1,3 +1,4 @@
+export { Badge } from "./badge";
 export { Button } from "./button";
 export { Checkbox } from "./checkbox";
 export { Dialog } from "./dialog";
@@ -11,4 +12,6 @@ export {
   X,
 } from "./icons";
 export { Input } from "./input";
+export { ListButton } from "./list-button";
+export { StatusIndicator } from "./status-indicator";
 export { Textarea } from "./textarea";

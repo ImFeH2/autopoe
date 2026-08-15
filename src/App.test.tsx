@@ -2,7 +2,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import App, { filterDiscussions, shouldSubmitMessage } from "@/App";
 import { AppSidebar } from "@/components/layout";
-import { Button, Input, Textarea } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Input,
+  ListButton,
+  StatusIndicator,
+  Textarea,
+} from "@/components/ui";
 
 describe("App", () => {
   it("renders a clear startup state before the backend responds", () => {
@@ -87,5 +94,27 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Message"');
     expect(markup).toContain('type="submit"');
     expect(markup).toContain(">Send</button>");
+  });
+
+  it("exposes reusable list, badge, and status semantics", () => {
+    const markup = renderToStaticMarkup(
+      <div>
+        <ListButton
+          active
+          aria-label="Open Repository work"
+          meta="2 messages"
+          title="Repository work"
+        />
+        <Badge tone="success">ACKED</Badge>
+        <StatusIndicator tone="success">IDLE</StatusIndicator>
+      </div>,
+    );
+
+    expect(markup).toContain('aria-current="page"');
+    expect(markup).toContain('aria-label="Open Repository work"');
+    expect(markup).toContain("Repository work");
+    expect(markup).toContain("2 messages");
+    expect(markup).toContain("ACKED");
+    expect(markup).toContain("IDLE");
   });
 });
