@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "dev:components": "vite --open /component-lab.html",
-    "dev:desktop": "pnpm build:flowent && pnpm dev",
+    "dev:desktop": "pnpm dev",
     "build:frontend": "tsc && vite build",
     "build:desktop": "pnpm build:frontend && pnpm build:flowent",
     "build:debug:frontend": "tsc && vite build --mode debug --outDir dist-debug && pnpm build:flowent",

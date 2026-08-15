@@ -14,7 +14,26 @@ use tauri_plugin_shell::{
 };
 
 const FLOWENT_BINARY: &str = "flowent";
+const FLOWENT_DEVELOPMENT_PYTHON: &str = "FLOWENT_DEVELOPMENT_PYTHON";
 const SHUTDOWN_ID: u64 = u64::MAX;
+
+#[derive(Debug, PartialEq)]
+enum FlowentExecutable {
+    Development(PathBuf),
+    Sidecar,
+}
+
+fn resolve_flowent_executable(
+    is_dev: bool,
+    development_python: Option<PathBuf>,
+) -> Result<FlowentExecutable> {
+    if is_dev {
+        return development_python
+            .map(FlowentExecutable::Development)
+            .context("Flowent development Python is not configured");
+    }
+    Ok(FlowentExecutable::Sidecar)
+}
 
 type SharedChild = Arc<Mutex<Option<CommandChild>>>;
 type SharedSubscriber = Arc<Mutex<Option<Channel<Value>>>>;
@@ -39,13 +58,20 @@ impl Default for FlowentProcess {
 
 impl FlowentProcess {
     pub fn start(&self, app: &AppHandle) -> Result<()> {
-        let command = app
-            .shell()
-            .sidecar(FLOWENT_BINARY)
-            .context("create Flowent command")?
-            .env_clear()
-            .envs(std::env::vars_os())
-            .current_dir(&self.working_directory);
+        let shell = app.shell();
+        let executable = resolve_flowent_executable(
+            tauri::is_dev(),
+            std::env::var_os(FLOWENT_DEVELOPMENT_PYTHON).map(PathBuf::from),
+        )?;
+        let command = match executable {
+            FlowentExecutable::Development(python) => shell.command(python).args(["-m", "flowent"]),
+            FlowentExecutable::Sidecar => shell
+                .sidecar(FLOWENT_BINARY)
+                .context("create Flowent sidecar command")?,
+        }
+        .env_clear()
+        .envs(std::env::vars_os())
+        .current_dir(&self.working_directory);
         let (mut events, child) = command.spawn().context("start Flowent")?;
         *self
             .child
@@ -172,6 +198,21 @@ fn disconnect(child: &SharedChild, subscriber: &SharedSubscriber, kill: bool) {
 mod tests {
     use super::*;
     use tauri::ipc::InvokeResponseBody;
+
+    #[test]
+    fn selects_development_python_only_for_tauri_dev() {
+        let python = PathBuf::from("/tmp/flowent-python");
+
+        assert_eq!(
+            resolve_flowent_executable(true, Some(python.clone())).unwrap(),
+            FlowentExecutable::Development(python)
+        );
+        assert!(resolve_flowent_executable(true, None).is_err());
+        assert_eq!(
+            resolve_flowent_executable(false, Some(PathBuf::from("ignored"))).unwrap(),
+            FlowentExecutable::Sidecar
+        );
+    }
 
     #[test]
     fn forwards_json_to_the_subscriber() {
