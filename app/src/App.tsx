@@ -351,7 +351,6 @@ function App() {
         memberCount={snapshot.members.length}
         onSelectView={selectWorkspaceView}
         view={workspaceView}
-        workingDirectory={snapshot.working_directory}
       />
 
       <section className="workspace-main bg-surface">

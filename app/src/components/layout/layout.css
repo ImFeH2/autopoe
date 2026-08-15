@@ -21,15 +21,10 @@
   padding: 0 8px;
 }
 
-.sidebar-brand-mark,
-.sidebar-user-mark {
+.sidebar-brand-mark {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  font-weight: 650;
-}
-
-.sidebar-brand-mark {
   width: 26px;
   height: 26px;
   border: 1px solid var(--color-border-strong);
@@ -37,6 +32,7 @@
   background: var(--color-surface-selected);
   color: var(--color-text-primary);
   font-size: 11px;
+  font-weight: 650;
   box-shadow: var(--shadow-control);
 }
 
@@ -47,13 +43,15 @@
 }
 
 .sidebar-navigation {
-  display: grid;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
   gap: 2px;
   margin-top: 12px;
 }
 
-.sidebar-nav-button,
-.sidebar-settings-button {
+.sidebar-nav-button {
   width: 100%;
   min-height: 36px;
   justify-content: flex-start;
@@ -62,8 +60,7 @@
   text-align: left;
 }
 
-.sidebar-nav-button[aria-current="page"],
-.sidebar-settings-button[aria-current="page"] {
+.sidebar-nav-button[aria-current="page"] {
   background: var(--color-surface-subtle);
   color: var(--color-text-primary);
 }
@@ -72,48 +69,8 @@
   margin-left: auto;
 }
 
-.sidebar-footer {
-  display: grid;
-  gap: 8px;
+.sidebar-nav-button--bottom {
   margin-top: auto;
-}
-
-.sidebar-user {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 9px;
-  border-top: 1px solid var(--color-border);
-  padding: 11px 8px 1px;
-}
-
-.sidebar-user-mark {
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 50%;
-  background: var(--color-surface-selected);
-  color: var(--color-text-primary);
-  font-size: 10px;
-}
-
-.sidebar-user-copy {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
-.sidebar-user-copy strong {
-  color: var(--color-text-primary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.sidebar-user-copy span {
-  color: var(--color-text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 9px;
 }
 
 .workspace-main {
@@ -163,24 +120,15 @@
   }
 
   .app-brand,
-  .sidebar-nav-button > span,
-  .sidebar-settings-button > span,
-  .sidebar-user-copy {
+  .sidebar-nav-button > span {
     display: none;
   }
 
-  .sidebar-nav-button,
-  .sidebar-settings-button {
+  .sidebar-nav-button {
     width: 36px;
     align-self: center;
     justify-content: center;
     padding: 0;
-  }
-
-  .sidebar-user {
-    grid-template-columns: auto;
-    justify-items: center;
-    padding-inline: 0;
   }
 
   .page-heading {

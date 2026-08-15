@@ -151,7 +151,6 @@ export function ComponentLab() {
             memberCount={3}
             onSelectView={() => undefined}
             view="discussions"
-            workingDirectory="/project/flowent"
           />
           <div className="component-lab-layout-main">
             <PageHeader count={3} title="Members" />

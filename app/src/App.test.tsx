@@ -175,7 +175,6 @@ describe("App", () => {
           memberCount={3}
           onSelectView={() => undefined}
           view="discussions"
-          workingDirectory="/project/flowent"
         />
       </TooltipProvider>,
     );
@@ -189,7 +188,14 @@ describe("App", () => {
     expect(markup).toContain(">Settings<");
     expect(markup).not.toContain("Recent");
     expect(markup).not.toContain("Launch narrative");
-    expect(markup).toContain("/project/flowent");
+    expect(markup).not.toContain("/project/flowent");
+    expect(markup).not.toContain(">You<");
+    expect(markup).not.toContain("sidebar-settings-button");
+    expect(markup).toContain("sidebar-nav-button--bottom");
+    const navigationButtons = [...markup.matchAll(/class="([^"]+)"/g)].filter(
+      ([, className]) => className.split(" ").includes("sidebar-nav-button"),
+    );
+    expect(navigationButtons).toHaveLength(3);
   });
 
   it("renders Members as a selectable list with Agent details", () => {

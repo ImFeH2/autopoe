@@ -14,12 +14,17 @@ type AppSidebarProps = {
   memberCount: number;
   onSelectView: (view: WorkspaceView) => void;
   view: WorkspaceView;
-  workingDirectory: string;
 };
 
 const navigation = [
-  { icon: MessageSquare, label: "Discussions", view: "discussions" },
-  { icon: Users, label: "Members", view: "members" },
+  {
+    count: "discussions",
+    icon: MessageSquare,
+    label: "Discussions",
+    view: "discussions",
+  },
+  { count: "members", icon: Users, label: "Members", view: "members" },
+  { icon: Settings2, label: "Settings", view: "settings" },
 ] as const;
 
 export function AppSidebar({
@@ -27,7 +32,6 @@ export function AppSidebar({
   memberCount,
   onSelectView,
   view,
-  workingDirectory,
 }: AppSidebarProps) {
   const counts: Record<Exclude<WorkspaceView, "settings">, number> = {
     discussions: discussionCount,
@@ -46,49 +50,28 @@ export function AppSidebar({
       <nav className="sidebar-navigation" aria-label="Workspace">
         {navigation.map((item) => {
           const Icon = item.icon;
+          const count = "count" in item ? counts[item.count] : null;
           return (
             <Tooltip content={item.label} key={item.view} side="right">
               <Button
                 aria-current={view === item.view ? "page" : undefined}
                 aria-label={item.label}
-                className="sidebar-nav-button"
+                className={`sidebar-nav-button${item.view === "settings" ? " sidebar-nav-button--bottom" : ""}`}
                 onClick={() => onSelectView(item.view)}
                 variant={view === item.view ? "secondary" : "quiet"}
               >
                 <Icon aria-hidden="true" size={15} />
                 <span>{item.label}</span>
-                <Badge className="sidebar-count" size="small">
-                  {counts[item.view]}
-                </Badge>
+                {count === null ? null : (
+                  <Badge className="sidebar-count" size="small">
+                    {count}
+                  </Badge>
+                )}
               </Button>
             </Tooltip>
           );
         })}
       </nav>
-
-      <div className="sidebar-footer">
-        <Tooltip content="Settings" side="right">
-          <Button
-            aria-current={view === "settings" ? "page" : undefined}
-            aria-label="Settings"
-            className="sidebar-settings-button"
-            onClick={() => onSelectView("settings")}
-            variant={view === "settings" ? "secondary" : "quiet"}
-          >
-            <Settings2 aria-hidden="true" size={15} />
-            <span>Settings</span>
-          </Button>
-        </Tooltip>
-        <footer className="sidebar-user" title={workingDirectory}>
-          <span className="sidebar-user-mark" aria-hidden="true">
-            Y
-          </span>
-          <span className="sidebar-user-copy">
-            <strong>You</strong>
-            <span className="truncate">{workingDirectory}</span>
-          </span>
-        </footer>
-      </div>
     </aside>
   );
 }
