@@ -21,7 +21,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="flowent-agent",
+    name="flowent",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

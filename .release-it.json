@@ -18,20 +18,21 @@
   },
   "hooks": {
     "before:init": "pnpm verify",
-    "after:bump": [
-      "uv lock --project agent",
-      "cargo check --manifest-path src-tauri/Cargo.toml"
-    ]
+    "after:bump": ["uv lock --project flowent", "node scripts/cargo.mjs check"]
   },
   "plugins": {
     "@release-it/bumper": {
       "out": [
         {
-          "file": "src-tauri/Cargo.toml",
+          "file": "app/package.json",
+          "path": "version"
+        },
+        {
+          "file": "app/src-tauri/Cargo.toml",
           "path": "package.version"
         },
         {
-          "file": "agent/pyproject.toml",
+          "file": "flowent/pyproject.toml",
           "path": "project.version"
         }
       ]

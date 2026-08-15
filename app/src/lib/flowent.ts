@@ -5,7 +5,7 @@ type InvokeCommand = (
   args?: Record<string, unknown>,
 ) => Promise<unknown>;
 
-export type SidecarChannel = {
+export type FlowentChannel = {
   onmessage: (message: unknown) => void;
 };
 
@@ -15,8 +15,8 @@ type PendingRequest = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
-type SidecarClientOptions = {
-  channelFactory?: () => SidecarChannel;
+type FlowentClientOptions = {
+  channelFactory?: () => FlowentChannel;
   invokeCommand?: InvokeCommand;
   timeoutMs?: number;
 };
@@ -32,8 +32,8 @@ function responseRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-export class SidecarClient {
-  private readonly channelFactory: () => SidecarChannel;
+export class FlowentClient {
+  private readonly channelFactory: () => FlowentChannel;
   private readonly invokeCommand: InvokeCommand;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly timeoutMs: number;
@@ -44,7 +44,7 @@ export class SidecarClient {
     channelFactory = () => new Channel<unknown>(),
     invokeCommand = invoke,
     timeoutMs = 30_000,
-  }: SidecarClientOptions = {}) {
+  }: FlowentClientOptions = {}) {
     this.channelFactory = channelFactory;
     this.invokeCommand = invokeCommand;
     this.timeoutMs = timeoutMs;
@@ -60,7 +60,7 @@ export class SidecarClient {
     const response = new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Sidecar response timed out: ${method}`));
+        reject(new Error(`Flowent response timed out: ${method}`));
       }, this.timeoutMs);
       this.pending.set(id, { reject, resolve, timeout });
     });
@@ -96,12 +96,12 @@ export class SidecarClient {
   private receive(message: unknown) {
     const envelope = responseRecord(message);
     if (!envelope) {
-      this.rejectAll(new Error("Invalid Sidecar response: expected an object"));
+      this.rejectAll(new Error("Invalid Flowent response: expected an object"));
       return;
     }
     const id = envelope.id;
     if (!Number.isSafeInteger(id) || typeof id !== "number" || id < 1) {
-      this.rejectAll(new Error("Invalid Sidecar response id"));
+      this.rejectAll(new Error("Invalid Flowent response id"));
       return;
     }
     const pending = this.pending.get(id);
@@ -116,7 +116,7 @@ export class SidecarClient {
     if (hasResult === hasError) {
       this.rejectPending(
         id,
-        new Error("Invalid Sidecar response: expected result or error"),
+        new Error("Invalid Flowent response: expected result or error"),
       );
       return;
     }
@@ -130,7 +130,7 @@ export class SidecarClient {
     if (typeof responseMessage !== "string") {
       this.rejectPending(
         id,
-        new Error("Invalid Sidecar response error message"),
+        new Error("Invalid Flowent response error message"),
       );
       return;
     }
@@ -164,4 +164,4 @@ export class SidecarClient {
   }
 }
 
-export const sidecar = new SidecarClient();
+export const flowent = new FlowentClient();

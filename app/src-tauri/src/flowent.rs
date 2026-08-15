@@ -13,42 +13,44 @@ use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
 };
 
-const SIDECAR_NAME: &str = "flowent-agent";
+const FLOWENT_BINARY: &str = "flowent";
 const SHUTDOWN_ID: u64 = u64::MAX;
 
 type SharedChild = Arc<Mutex<Option<CommandChild>>>;
 type SharedSubscriber = Arc<Mutex<Option<Channel<Value>>>>;
 
-pub struct Sidecar {
+pub struct FlowentProcess {
     child: SharedChild,
     subscriber: SharedSubscriber,
     working_directory: PathBuf,
 }
 
-impl Default for Sidecar {
+impl Default for FlowentProcess {
     fn default() -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
             subscriber: Arc::new(Mutex::new(None)),
-            working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            working_directory: std::env::var_os("FLOWENT_WORKING_DIRECTORY")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
         }
     }
 }
 
-impl Sidecar {
+impl FlowentProcess {
     pub fn start(&self, app: &AppHandle) -> Result<()> {
         let command = app
             .shell()
-            .sidecar(SIDECAR_NAME)
-            .context("create sidecar command")?
+            .sidecar(FLOWENT_BINARY)
+            .context("create Flowent command")?
             .env_clear()
             .envs(std::env::vars_os())
             .current_dir(&self.working_directory);
-        let (mut events, child) = command.spawn().context("start sidecar")?;
+        let (mut events, child) = command.spawn().context("start Flowent")?;
         *self
             .child
             .lock()
-            .map_err(|_| anyhow::anyhow!("sidecar child lock poisoned"))? = Some(child);
+            .map_err(|_| anyhow::anyhow!("Flowent child lock poisoned"))? = Some(child);
 
         let shared_child = Arc::clone(&self.child);
         let subscriber = Arc::clone(&self.subscriber);
@@ -59,20 +61,20 @@ impl Sidecar {
                         let message = match serde_json::from_slice(&line) {
                             Ok(message) => message,
                             Err(error) => {
-                                eprintln!("[Sidecar] Invalid JSON: {error}");
+                                eprintln!("[Flowent] Invalid JSON: {error}");
                                 disconnect(&shared_child, &subscriber, true);
                                 return;
                             }
                         };
                         if let Err(error) = forward_message(&subscriber, message) {
-                            eprintln!("[Sidecar] {error}");
+                            eprintln!("[Flowent] {error}");
                         }
                     }
                     CommandEvent::Stderr(line) => {
-                        eprint!("[Sidecar] {}", String::from_utf8_lossy(&line));
+                        eprint!("[Flowent] {}", String::from_utf8_lossy(&line));
                     }
                     CommandEvent::Error(error) => {
-                        eprintln!("[Sidecar] {error}");
+                        eprintln!("[Flowent] {error}");
                         disconnect(&shared_child, &subscriber, true);
                         return;
                     }
@@ -94,11 +96,11 @@ impl Sidecar {
         let result = self
             .child
             .lock()
-            .map_err(|_| "Sidecar child lock poisoned".to_string())?
+            .map_err(|_| "Flowent child lock poisoned".to_string())?
             .as_mut()
-            .ok_or_else(|| "Sidecar is not running".to_string())?
+            .ok_or_else(|| "Flowent is not running".to_string())?
             .write(&encoded)
-            .map_err(|error| format!("Write Sidecar message: {error}"));
+            .map_err(|error| format!("Write Flowent message: {error}"));
         if result.is_err() {
             disconnect(&self.child, &self.subscriber, true);
         }
@@ -109,15 +111,15 @@ impl Sidecar {
         if self
             .child
             .lock()
-            .map_err(|_| "Sidecar child lock poisoned".to_string())?
+            .map_err(|_| "Flowent child lock poisoned".to_string())?
             .is_none()
         {
-            return Err("Sidecar is not running".to_string());
+            return Err("Flowent is not running".to_string());
         }
         *self
             .subscriber
             .lock()
-            .map_err(|_| "Sidecar subscriber lock poisoned".to_string())? = Some(channel);
+            .map_err(|_| "Flowent subscriber lock poisoned".to_string())? = Some(channel);
         Ok(())
     }
 
@@ -141,7 +143,7 @@ impl Sidecar {
 
 fn encode_message(message: &Value) -> Result<Vec<u8>, String> {
     let mut encoded =
-        serde_json::to_vec(message).map_err(|error| format!("Encode Sidecar message: {error}"))?;
+        serde_json::to_vec(message).map_err(|error| format!("Encode Flowent message: {error}"))?;
     encoded.push(b'\n');
     Ok(encoded)
 }
@@ -149,11 +151,11 @@ fn encode_message(message: &Value) -> Result<Vec<u8>, String> {
 fn forward_message(subscriber: &SharedSubscriber, message: Value) -> Result<(), String> {
     subscriber
         .lock()
-        .map_err(|_| "Sidecar subscriber lock poisoned".to_string())?
+        .map_err(|_| "Flowent subscriber lock poisoned".to_string())?
         .as_ref()
-        .ok_or_else(|| "Sidecar is not subscribed".to_string())?
+        .ok_or_else(|| "Flowent is not subscribed".to_string())?
         .send(message)
-        .map_err(|error| format!("Forward Sidecar message: {error}"))
+        .map_err(|error| format!("Forward Flowent message: {error}"))
 }
 
 fn disconnect(child: &SharedChild, subscriber: &SharedSubscriber, kill: bool) {

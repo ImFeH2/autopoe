@@ -1,4 +1,4 @@
-import { sidecar } from "@/lib/sidecar";
+import { flowent } from "@/lib/flowent";
 
 export type HumanMember = {
   id: number;
@@ -349,7 +349,7 @@ async function request(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<unknown> {
-  return sidecar.request(method, params);
+  return flowent.request(method, params);
 }
 
 async function organizationRequest(

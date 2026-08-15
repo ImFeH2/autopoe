@@ -6,11 +6,9 @@ commit-msg:
 pre-commit:
   parallel: true
   jobs:
-    - name: frontend
-      run: pnpm check && pnpm test
-    - name: python
-      root: agent
-      run: uv run ruff check . && uv run ruff format --check . && uv run pytest
+    - name: app
+      run: pnpm check:app && pnpm test:app
+    - name: flowent
+      run: pnpm check:flowent && pnpm test:flowent
     - name: rust
-      root: src-tauri
-      run: cargo fmt --check && cargo check && cargo clippy --all-targets -- -D warnings && cargo test
+      run: pnpm check:rust && pnpm test:rust

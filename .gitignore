@@ -20,9 +20,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
-/agent/build/
-/agent/dist/
-/src-tauri/binaries/
+/flowent/build/
+/flowent/dist/
+/app/src-tauri/binaries/
 
 # Editor directories and files
 .vscode/*

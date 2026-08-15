@@ -3,11 +3,14 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
-const targetDir = resolve(rootDir, "src-tauri", "target", "flowent-debug");
+const appDir = resolve(rootDir, "app");
+const targetDir = resolve(appDir, "src-tauri", "target", "flowent-debug");
 const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const child = spawn(
   packageManager,
   [
+    "--dir",
+    appDir,
     "tauri",
     "build",
     "--debug",

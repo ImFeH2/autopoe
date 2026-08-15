@@ -1,7 +1,7 @@
-mod sidecar;
+mod flowent;
 
+use flowent::FlowentProcess;
 use serde_json::Value;
-use sidecar::Sidecar;
 use tauri::{Manager, ipc::Channel};
 
 fn validate_frontend_message(message: &Value) -> Result<(), String> {
@@ -10,20 +10,23 @@ fn validate_frontend_message(message: &Value) -> Result<(), String> {
         .and_then(Value::as_str)
         .is_some_and(|method| method.starts_with("system."))
     {
-        return Err("Internal Sidecar method".to_string());
+        return Err("Internal Flowent method".to_string());
     }
     Ok(())
 }
 
 #[tauri::command]
-fn send(sidecar: tauri::State<'_, Sidecar>, message: Value) -> Result<(), String> {
+fn send(flowent: tauri::State<'_, FlowentProcess>, message: Value) -> Result<(), String> {
     validate_frontend_message(&message)?;
-    sidecar.send(message)
+    flowent.send(message)
 }
 
 #[tauri::command]
-fn subscribe(sidecar: tauri::State<'_, Sidecar>, channel: Channel<Value>) -> Result<(), String> {
-    sidecar.subscribe(channel)
+fn subscribe(
+    flowent: tauri::State<'_, FlowentProcess>,
+    channel: Channel<Value>,
+) -> Result<(), String> {
+    flowent.subscribe(channel)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,10 +39,10 @@ pub fn run() {
 
     let app = builder
         .plugin(tauri_plugin_shell::init())
-        .manage(Sidecar::default())
+        .manage(FlowentProcess::default())
         .invoke_handler(tauri::generate_handler![send, subscribe])
         .setup(|app| {
-            app.state::<Sidecar>()
+            app.state::<FlowentProcess>()
                 .start(app.handle())
                 .map_err(|error| std::io::Error::other(format!("{error:#}")))?;
             Ok(())
@@ -49,7 +52,7 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
-            app_handle.state::<Sidecar>().stop();
+            app_handle.state::<FlowentProcess>().stop();
         }
     });
 }
@@ -61,11 +64,11 @@ mod tests {
     use super::validate_frontend_message;
 
     #[test]
-    fn reserves_internal_sidecar_methods() {
+    fn reserves_internal_flowent_methods() {
         assert!(validate_frontend_message(&json!({"method": "organization.get"})).is_ok());
         assert_eq!(
             validate_frontend_message(&json!({"method": "system.shutdown"})).unwrap_err(),
-            "Internal Sidecar method"
+            "Internal Flowent method"
         );
     }
 }

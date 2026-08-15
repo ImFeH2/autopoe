@@ -177,7 +177,7 @@ def create_pydantic_ai_observability(
     tracer_provider = TracerProvider(
         resource=Resource.create(
             {
-                "service.name": "flowent-agent",
+                "service.name": "flowent",
                 "deployment.environment.name": config.environment,
             }
         )

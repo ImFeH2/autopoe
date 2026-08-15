@@ -11,7 +11,7 @@ import psutil
 import pytest
 
 
-def start_sidecar(
+def start_flowent(
     data_directory: Path,
     cwd: Path | None = None,
     environment: dict[str, str] | None = None,
@@ -56,8 +56,8 @@ def request(
     return response["result"]
 
 
-def test_sidecar_runs_until_stdin_closes(tmp_path: Path) -> None:
-    process = start_sidecar(tmp_path / "data")
+def test_flowent_runs_until_stdin_closes(tmp_path: Path) -> None:
+    process = start_flowent(tmp_path / "data")
 
     try:
         with pytest.raises(subprocess.TimeoutExpired):
@@ -70,8 +70,8 @@ def test_sidecar_runs_until_stdin_closes(tmp_path: Path) -> None:
         close_process(process)
 
 
-def test_sidecar_shutdown_request_stops_the_process(tmp_path: Path) -> None:
-    process = start_sidecar(tmp_path / "data")
+def test_flowent_shutdown_request_stops_the_process(tmp_path: Path) -> None:
+    process = start_flowent(tmp_path / "data")
 
     try:
         assert request(process, 1, "system.shutdown", {}) == {"stopped": True}
@@ -80,7 +80,7 @@ def test_sidecar_shutdown_request_stops_the_process(tmp_path: Path) -> None:
         close_process(process)
 
 
-def test_sidecar_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> None:
+def test_flowent_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> None:
     working_directory = tmp_path / "project"
     working_directory.mkdir()
     (working_directory / ".env").write_text(
@@ -89,7 +89,7 @@ def test_sidecar_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> Non
         "api_key=ignored-secret\n"
         "model=ignored-model\n"
     )
-    process = start_sidecar(tmp_path / "data", working_directory)
+    process = start_flowent(tmp_path / "data", working_directory)
 
     try:
         assert request(process, 1, "settings.get_model", {}) == {
@@ -120,7 +120,7 @@ def test_persists_state_and_model_settings_across_launch_directories(
     first_directory.mkdir()
     second_directory.mkdir()
     data = tmp_path / "data"
-    first = start_sidecar(data, first_directory)
+    first = start_flowent(data, first_directory)
 
     try:
         request(first, 1, "organization.create_agent", {"name": "Ada"})
@@ -171,7 +171,7 @@ def test_persists_state_and_model_settings_across_launch_directories(
     finally:
         close_process(first)
 
-    second = start_sidecar(data, second_directory)
+    second = start_flowent(data, second_directory)
     try:
         snapshot = request(second, 1, "organization.get", {})
         settings = request(second, 2, "settings.get_model", {})
@@ -204,8 +204,8 @@ def test_persists_state_and_model_settings_across_launch_directories(
         close_process(second)
 
 
-def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
-    work = tmp_path / "artifacts" / "desktop" / "e2e-agent-work"
+def test_hard_killed_flowent_cleans_active_exec(tmp_path: Path) -> None:
+    work = tmp_path / "artifacts" / "desktop" / "process-work"
     work.mkdir(parents=True)
     support = tmp_path / "test-support"
     support.mkdir()
@@ -221,7 +221,7 @@ def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
         "message_ids=list(item.message_ids))\n"
         "        context.exec([sys.executable, '-c', \"import os,pathlib,time; "
         "pathlib.Path('long.pid').write_text(str(os.getpid())); time.sleep(60)\"], "
-        "'artifacts/desktop/e2e-agent-work', 60)\n"
+        "'artifacts/desktop/process-work', 60)\n"
         "model_runner.create_runner = lambda **kwargs: LongExecRunner()\n"
     )
     environment = os.environ.copy()
@@ -229,7 +229,7 @@ def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
     environment["PYTHONPATH"] = (
         str(support) if not python_path else f"{support}{os.pathsep}{python_path}"
     )
-    process = start_sidecar(tmp_path / "data", tmp_path, environment)
+    process = start_flowent(tmp_path / "data", tmp_path, environment)
 
     try:
         request(process, 1, "organization.create_agent", {"name": "Ada"})
@@ -246,7 +246,7 @@ def test_hard_killed_sidecar_cleans_active_exec(tmp_path: Path) -> None:
             {
                 "discussion_id": 1,
                 "sender_id": 1,
-                "body": "Run until the Sidecar is killed",
+                "body": "Run until Flowent is killed",
                 "mention_ids": [2],
             },
         )

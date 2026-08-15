@@ -11,10 +11,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const agent = resolve(root, "agent");
-const binaries = resolve(root, "src-tauri", "binaries");
-const dist = resolve(agent, "dist", "sidecar");
-const work = resolve(agent, "build", "sidecar");
+const core = resolve(root, "flowent");
+const binaries = resolve(root, "app", "src-tauri", "binaries");
+const dist = resolve(core, "dist");
+const work = resolve(core, "build");
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -55,7 +55,7 @@ run(
   [
     "run",
     "--project",
-    agent,
+    core,
     "pyinstaller",
     "--noconfirm",
     "--clean",
@@ -63,19 +63,19 @@ run(
     dist,
     "--workpath",
     work,
-    resolve(agent, "flowent-agent.spec"),
+    resolve(core, "flowent.spec"),
   ],
-  { cwd: agent },
+  { cwd: core },
 );
 
-const source = resolve(dist, `flowent-agent${extension}`);
-const destination = resolve(binaries, `flowent-agent-${target}${extension}`);
+const source = resolve(dist, `flowent${extension}`);
+const destination = resolve(binaries, `flowent-${target}${extension}`);
 copyFileSync(source, destination);
 if (process.platform !== "win32") {
   chmodSync(destination, 0o755);
 }
 
-const smokeData = mkdtempSync(join(tmpdir(), "flowent-sidecar-smoke-"));
+const smokeData = mkdtempSync(join(tmpdir(), "flowent-smoke-"));
 let smoke;
 try {
   smoke = spawnSync(destination, [], {
@@ -92,7 +92,7 @@ try {
 }
 if (smoke.error || smoke.status !== 0) {
   throw (
-    smoke.error ?? new Error(`Sidecar smoke exited with status ${smoke.status}`)
+    smoke.error ?? new Error(`Flowent smoke exited with status ${smoke.status}`)
   );
 }
 const responses = smoke.stdout
@@ -106,7 +106,7 @@ if (
   responses[1].id !== 2 ||
   responses[1].result?.stopped !== true
 ) {
-  throw new Error("Sidecar smoke returned an invalid response");
+  throw new Error("Flowent smoke returned an invalid response");
 }
 
 process.stdout.write(`${destination}\n`);

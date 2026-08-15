@@ -6,7 +6,7 @@
     "frontendDist": "../dist-debug"
   },
   "bundle": {
-    "externalBin": ["binaries/flowent-agent"]
+    "externalBin": ["binaries/flowent"]
   },
   "app": {
     "withGlobalTauri": true,

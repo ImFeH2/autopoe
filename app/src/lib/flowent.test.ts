@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { type SidecarChannel, SidecarClient } from "@/lib/sidecar";
+import { type FlowentChannel, FlowentClient } from "@/lib/flowent";
 
 function createHarness() {
-  const channel: SidecarChannel = { onmessage: () => undefined };
+  const channel: FlowentChannel = { onmessage: () => undefined };
   const commands: Array<{ command: string; args?: Record<string, unknown> }> =
     [];
   const invokeCommand = vi.fn(
@@ -11,7 +11,7 @@ function createHarness() {
       return undefined;
     },
   );
-  const client = new SidecarClient({
+  const client = new FlowentClient({
     channelFactory: () => channel,
     invokeCommand,
     timeoutMs: 100,
@@ -27,7 +27,7 @@ function sentMessage(commands: ReturnType<typeof createHarness>["commands"]) {
   };
 }
 
-describe("SidecarClient", () => {
+describe("FlowentClient", () => {
   it("subscribes once before sending JSON requests and correlates responses", async () => {
     const { channel, client, commands, invokeCommand } = createHarness();
 
@@ -74,23 +74,23 @@ describe("SidecarClient", () => {
   });
 
   it("rejects a request when the Rust send command fails", async () => {
-    const channel: SidecarChannel = { onmessage: () => undefined };
+    const channel: FlowentChannel = { onmessage: () => undefined };
     const invokeCommand = vi.fn(
       async (command: string, _args?: Record<string, unknown>) => {
         if (command === "send") {
-          throw new Error("Sidecar stopped");
+          throw new Error("Flowent stopped");
         }
         return undefined;
       },
     );
-    const client = new SidecarClient({
+    const client = new FlowentClient({
       channelFactory: () => channel,
       invokeCommand,
       timeoutMs: 100,
     });
 
     await expect(client.request("organization.get")).rejects.toThrow(
-      "Sidecar stopped",
+      "Flowent stopped",
     );
   });
 
@@ -104,11 +104,11 @@ describe("SidecarClient", () => {
     await expect(response).rejects.toThrow("expected result or error");
   });
 
-  it("times out when the Sidecar does not return JSON for a request", async () => {
+  it("times out when Flowent does not return JSON for a request", async () => {
     vi.useFakeTimers();
     const { client } = createHarness();
     const response = expect(client.request("organization.get")).rejects.toThrow(
-      "Sidecar response timed out: organization.get",
+      "Flowent response timed out: organization.get",
     );
     await vi.advanceTimersByTimeAsync(101);
 

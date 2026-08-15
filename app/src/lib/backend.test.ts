@@ -46,7 +46,7 @@ describe("parseModelSettings", () => {
     });
   });
 
-  it("rejects API keys returned by the Sidecar", () => {
+  it("rejects API keys returned by Flowent", () => {
     expect(() =>
       parseModelSettings({
         api_type: "openai-responses",
@@ -80,7 +80,7 @@ describe("parseObservabilitySettings", () => {
     });
   });
 
-  it("rejects secret keys returned by the Sidecar", () => {
+  it("rejects secret keys returned by Flowent", () => {
     expect(() =>
       parseObservabilitySettings({
         enabled: true,
