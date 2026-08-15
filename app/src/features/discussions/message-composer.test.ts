@@ -26,13 +26,22 @@ describe("MessageComposer", () => {
     ).toBe(false);
   });
 
-  it("finds inline mention queries without treating emails as mentions", () => {
+  it("finds mention queries after any preceding character", () => {
     expect(findMentionQuery("Ask @ad", 7, [])).toEqual({
       start: 4,
       end: 7,
       query: "ad",
     });
-    expect(findMentionQuery("mail@example.com", 16, [])).toBeNull();
+    expect(findMentionQuery("mail@example", 12, [])).toEqual({
+      start: 4,
+      end: 12,
+      query: "example",
+    });
+    expect(findMentionQuery("请@ad", 4, [])).toEqual({
+      start: 1,
+      end: 4,
+      query: "ad",
+    });
     expect(
       findMentionQuery("@Ada ", 5, [
         { start: 0, end: 4, label: "@Ada", memberId: 2 },
@@ -40,21 +49,53 @@ describe("MessageComposer", () => {
     ).toBeNull();
   });
 
-  it("filters mention candidates and inserts the selected Agent at the caret", () => {
+  it("ranks exact, prefix, word, substring, initials, and fuzzy matches", () => {
     const agents = [
-      { id: 2, type: "agent" as const, name: "Ada", status: "idle" as const },
+      { id: 2, type: "agent" as const, name: "ABCD", status: "idle" as const },
+      { id: 3, type: "agent" as const, name: "ABC", status: "idle" as const },
       {
-        id: 3,
+        id: 4,
+        type: "agent" as const,
+        name: "Team ABC",
+        status: "idle" as const,
+      },
+      { id: 5, type: "agent" as const, name: "XABC", status: "idle" as const },
+      {
+        id: 6,
         type: "agent" as const,
         name: "Grace Hopper",
         status: "idle" as const,
       },
+      {
+        id: 7,
+        type: "agent" as const,
+        name: "AxByCz",
+        status: "idle" as const,
+      },
     ];
 
-    expect(filterMentionAgents(agents, "hop")).toEqual([agents[1]]);
+    expect(filterMentionAgents(agents, "abc")).toEqual([
+      agents[1],
+      agents[0],
+      agents[2],
+      agents[3],
+      agents[5],
+    ]);
+    expect(filterMentionAgents(agents, "GH")).toEqual([agents[4]]);
+    expect(filterMentionAgents(agents, "ABCDEF")).toEqual([]);
+  });
+
+  it("inserts the selected Agent at the caret", () => {
+    const agent = {
+      id: 3,
+      type: "agent" as const,
+      name: "Grace Hopper",
+      status: "idle" as const,
+    };
+
     expect(
       insertDraftMention({
-        agent: agents[1],
+        agent,
         body: "Ask @gr about it",
         mentions: [],
         query: { start: 4, end: 7, query: "gr" },
@@ -101,6 +142,11 @@ describe("MessageComposer", () => {
       { start: 16, end: 22, label: "@Linus", memberId: 3 },
       { start: 23, end: 27, label: "@Ada", memberId: 2 },
     ]);
+    expect(
+      reconcileDraftMentions("@ABC ", "@ABCDEF", [
+        { start: 0, end: 4, label: "@ABC", memberId: 4 },
+      ]),
+    ).toEqual([]);
     expect(getDraftMentionIds(mentions)).toEqual([2, 3]);
   });
 

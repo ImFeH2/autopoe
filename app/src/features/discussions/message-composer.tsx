@@ -40,6 +40,10 @@ export function getDraftMentionIds(mentions: DraftMention[]): number[] {
   return [...new Set(mentions.map((mention) => mention.memberId))];
 }
 
+function isMentionBoundary(value: string | undefined): boolean {
+  return value === undefined || !/[\p{L}\p{N}\p{M}_]/u.test(value);
+}
+
 export function reconcileDraftMentions(
   previousBody: string,
   nextBody: string,
@@ -84,8 +88,9 @@ export function reconcileDraftMentions(
       return [];
     }
 
+    const nextCharacter = nextBody[nextMention.end];
     return nextBody.slice(nextMention.start, nextMention.end) ===
-      nextMention.label
+      nextMention.label && isMentionBoundary(nextCharacter)
       ? [nextMention]
       : [];
   });
@@ -106,11 +111,6 @@ export function findMentionQuery(
     return null;
   }
 
-  const precedingCharacter = start > 0 ? body[start - 1] : undefined;
-  if (precedingCharacter && !/[\s([{]/u.test(precedingCharacter)) {
-    return null;
-  }
-
   const query = body.slice(start + 1, caret);
   if (/[\r\n@]/u.test(query)) {
     return null;
@@ -127,17 +127,102 @@ export function findMentionQuery(
   return { end: caret, query, start };
 }
 
+type MentionMatch = {
+  agent: AgentMember;
+  index: number;
+  position: number;
+  rank: number;
+  spread: number;
+};
+
+function normalizeMentionText(value: string): string {
+  return value.normalize("NFKC").trim().toLowerCase();
+}
+
+function findOrderedMatch(value: string, query: string) {
+  let queryIndex = 0;
+  let start = -1;
+  let end = -1;
+  for (let valueIndex = 0; valueIndex < value.length; valueIndex += 1) {
+    if (value[valueIndex] !== query[queryIndex]) {
+      continue;
+    }
+    if (start < 0) {
+      start = valueIndex;
+    }
+    end = valueIndex;
+    queryIndex += 1;
+    if (queryIndex === query.length) {
+      return { position: start, spread: end - start + 1 };
+    }
+  }
+  return null;
+}
+
+function getMentionMatch(
+  agent: AgentMember,
+  query: string,
+  index: number,
+): MentionMatch | null {
+  const name = normalizeMentionText(agent.name);
+  if (name === query) {
+    return { agent, index, position: 0, rank: 0, spread: query.length };
+  }
+  if (name.startsWith(query)) {
+    return { agent, index, position: 0, rank: 1, spread: query.length };
+  }
+
+  const words = name.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const wordPosition = words.findIndex((word) => word.startsWith(query));
+  if (wordPosition >= 0) {
+    return {
+      agent,
+      index,
+      position: wordPosition,
+      rank: 2,
+      spread: query.length,
+    };
+  }
+
+  const substringPosition = name.indexOf(query);
+  if (substringPosition >= 0) {
+    return {
+      agent,
+      index,
+      position: substringPosition,
+      rank: 3,
+      spread: query.length,
+    };
+  }
+
+  const initials = words.map((word) => word[0]).join("");
+  if (initials.startsWith(query)) {
+    return { agent, index, position: 0, rank: 4, spread: query.length };
+  }
+
+  const orderedMatch = findOrderedMatch(name, query);
+  return orderedMatch ? { agent, index, rank: 5, ...orderedMatch } : null;
+}
+
 export function filterMentionAgents(
   agents: AgentMember[],
   query: string,
 ): AgentMember[] {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const normalizedQuery = normalizeMentionText(query);
   if (!normalizedQuery) {
     return agents;
   }
-  return agents.filter((agent) =>
-    agent.name.toLocaleLowerCase().includes(normalizedQuery),
-  );
+  return agents
+    .map((agent, index) => getMentionMatch(agent, normalizedQuery, index))
+    .filter((match): match is MentionMatch => match !== null)
+    .sort(
+      (left, right) =>
+        left.rank - right.rank ||
+        left.position - right.position ||
+        left.spread - right.spread ||
+        left.index - right.index,
+    )
+    .map((match) => match.agent);
 }
 
 export function insertDraftMention({
@@ -154,7 +239,7 @@ export function insertDraftMention({
   const label = `@${agent.name}`;
   const nextCharacter = body[query.end];
   const separator =
-    nextCharacter && /[\s.,!?;:)\]}]/u.test(nextCharacter) ? "" : " ";
+    nextCharacter === undefined || !isMentionBoundary(nextCharacter) ? " " : "";
   const nextBody = `${body.slice(0, query.start)}${label}${separator}${body.slice(query.end)}`;
   const nextMentions = reconcileDraftMentions(body, nextBody, mentions);
   const mention = {
@@ -241,6 +326,7 @@ export function MessageComposer({
     Math.max(mentionCandidates.length - 1, 0),
   );
   const activeMention = mentionCandidates[resolvedMentionIndex];
+  const mentionMenuOpen = mentionQuery !== null && mentionCandidates.length > 0;
   const mentionListId = `mention-suggestions-${discussionId}`;
   const activeMentionId = activeMention
     ? `${mentionListId}-${activeMention.id}`
@@ -374,42 +460,36 @@ export function MessageComposer({
     >
       <div className="message-composer-row">
         <div className="message-composer-input">
-          {mentionQuery ? (
+          {mentionMenuOpen ? (
             <div
               aria-label="Agents"
               className="mention-suggestions"
               id={mentionListId}
               role="listbox"
             >
-              {mentionCandidates.length > 0 ? (
-                <ul role="none">
-                  {mentionCandidates.map((agent, index) => (
-                    <li key={agent.id} role="none">
-                      <MenuOption
-                        aria-label={`Mention ${agent.name}`}
-                        id={`${mentionListId}-${agent.id}`}
-                        label={`@${agent.name}`}
-                        meta="Agent"
-                        onClick={() => selectMention(agent)}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onMouseEnter={() => setActiveMentionIndex(index)}
-                        selected={index === resolvedMentionIndex}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mention-suggestions-empty" role="status">
-                  No matching Agents
-                </p>
-              )}
+              <ul role="none">
+                {mentionCandidates.map((agent, index) => (
+                  <li key={agent.id} role="none">
+                    <MenuOption
+                      aria-label={`Mention ${agent.name}`}
+                      id={`${mentionListId}-${agent.id}`}
+                      label={`@${agent.name}`}
+                      meta="Agent"
+                      onClick={() => selectMention(agent)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setActiveMentionIndex(index)}
+                      selected={index === resolvedMentionIndex}
+                    />
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
           <Textarea
             aria-activedescendant={activeMentionId}
             aria-autocomplete="list"
-            aria-controls={mentionQuery ? mentionListId : undefined}
-            aria-expanded={mentionQuery !== null}
+            aria-controls={mentionMenuOpen ? mentionListId : undefined}
+            aria-expanded={mentionMenuOpen}
             aria-haspopup="listbox"
             aria-label="Message"
             autoFocus
