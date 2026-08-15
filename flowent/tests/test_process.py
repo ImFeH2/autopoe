@@ -26,6 +26,8 @@ def start_flowent(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="strict",
     )
 
 
@@ -75,6 +77,36 @@ def test_flowent_shutdown_request_stops_the_process(tmp_path: Path) -> None:
 
     try:
         assert request(process, 1, "system.shutdown", {}) == {"stopped": True}
+        assert process.wait(timeout=10) == 0
+    finally:
+        close_process(process)
+
+
+def test_flowent_accepts_utf8_jsonl_messages(tmp_path: Path) -> None:
+    process = start_flowent(tmp_path / "data")
+
+    try:
+        request(process, 1, "organization.create_agent", {"name": "Ada"})
+        request(
+            process,
+            2,
+            "discussion.create",
+            {"topic": "Work", "creator_id": 1, "member_ids": [2]},
+        )
+        snapshot = request(
+            process,
+            3,
+            "discussion.send",
+            {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": "你在哪个目录下？",
+            },
+        )
+
+        message = snapshot["discussions"][0]["messages"][0]
+        assert message["body"] == "你在哪个目录下？"
+        assert request(process, 4, "system.shutdown", {}) == {"stopped": True}
         assert process.wait(timeout=10) == 0
     finally:
         close_process(process)

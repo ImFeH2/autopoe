@@ -17,6 +17,9 @@ def main(
         watch_processes(sys.argv[2], sys.stdin.buffer)
         return
 
+    sys.stdin.reconfigure(encoding="utf-8", errors="strict")
+    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+
     from pathlib import Path
 
     from flowent.domain import OrganizationState
