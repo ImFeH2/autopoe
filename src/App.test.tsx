@@ -1,12 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import App, {
-  filterDiscussions,
-  formatMessageCount,
-  isModelSettingsDirty,
-  isObservabilitySettingsDirty,
-  shouldSubmitMessage,
-} from "@/App";
+import App from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
   Badge,
@@ -19,6 +13,15 @@ import {
   Tooltip,
   TooltipProvider,
 } from "@/components/ui";
+import {
+  filterDiscussions,
+  formatMessageCount,
+  shouldSubmitMessage,
+} from "@/features/discussions";
+import {
+  isModelSettingsDirty,
+  isObservabilitySettingsDirty,
+} from "@/features/settings";
 
 describe("App", () => {
   it("renders a clear startup state before the backend responds", () => {
