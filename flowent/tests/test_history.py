@@ -3,6 +3,7 @@ from pathlib import Path
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    SystemPromptPart,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -30,7 +31,10 @@ def test_persists_complete_agent_history_and_restores_model_messages(
     first = history.start(reminder())
     messages = (
         ModelRequest(
-            parts=[UserPromptPart(content="Process the activation")],
+            parts=[
+                SystemPromptPart(content="You are a Flowent Agent"),
+                UserPromptPart(content="Process the Reminder"),
+            ],
             run_id=first.run_id,
             conversation_id="agent-2",
         ),
@@ -76,11 +80,13 @@ def test_persists_complete_agent_history_and_restores_model_messages(
     assert first_run["status"] == "completed"
     assert [entry["type"] for entry in first_run["entries"]] == [
         "reminder",
+        "system",
         "thinking",
         "tool_call",
         "tool_result",
         "assistant",
     ]
+    assert first_run["entries"][1]["content"] == "You are a Flowent Agent"
     assert "private reasoning" not in str(first_run)
     assert first_run["entries"][-1]["content"] == "Work completed"
     assert first_run["usage"] == {"input_tokens": 12}

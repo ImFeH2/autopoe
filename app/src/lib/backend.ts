@@ -31,6 +31,7 @@ export type AgentReminder = {
 export type AgentHistoryEntryType =
   | "reminder"
   | "assistant"
+  | "system"
   | "thinking"
   | "tool_call"
   | "tool_result"
@@ -401,6 +402,7 @@ function historyEntryType(value: unknown, path: string): AgentHistoryEntryType {
   if (
     value === "reminder" ||
     value === "assistant" ||
+    value === "system" ||
     value === "thinking" ||
     value === "tool_call" ||
     value === "tool_result" ||

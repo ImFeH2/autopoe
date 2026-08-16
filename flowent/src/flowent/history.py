@@ -278,7 +278,17 @@ class AgentHistory:
             for part_index, part in enumerate(message.get("parts", [])):
                 part_kind = part.get("part_kind")
                 entry_id = f"{run['run_id']}-{message_index}-{part_index}"
-                if part_kind == "text":
+                if part_kind == "system-prompt":
+                    entries.append(
+                        {
+                            "id": entry_id,
+                            "type": "system",
+                            "timestamp": message_timestamp,
+                            "content": _format_content(part.get("content")),
+                            "state": message_state,
+                        }
+                    )
+                elif part_kind == "text":
                     entries.append(
                         {
                             "id": entry_id,

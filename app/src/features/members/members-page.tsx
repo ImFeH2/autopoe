@@ -10,13 +10,8 @@ import {
   Trash2,
 } from "@/components/ui";
 import { agentStatusTone } from "@/features/agent-status";
-import type {
-  AgentHistory,
-  AgentHistoryEntry,
-  AgentHistoryRun,
-  AgentMember,
-  Member,
-} from "@/lib/backend";
+import type { AgentHistory, AgentMember, Member } from "@/lib/backend";
+import { HistoryBlock } from "./history-block";
 
 type AgentHistoryState =
   | { status: "loading" }
@@ -259,36 +254,6 @@ function AgentDetails({
   );
 }
 
-const historyTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "medium",
-});
-
-function formatHistoryTime(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf())
-    ? value
-    : historyTimeFormatter.format(date);
-}
-
-function reminderLabel(entry: AgentHistoryEntry) {
-  return (entry.reminder?.mentions ?? [])
-    .map(
-      (mention) =>
-        `${mention.previously_reminded ? "Previously reminded" : "New"} · Discussion ${mention.discussion_id} · Message ${mention.message_id}`,
-    )
-    .join("\n");
-}
-
-function usageLabel(run: AgentHistoryRun) {
-  const input = run.usage?.input_tokens;
-  const output = run.usage?.output_tokens;
-  if (typeof input !== "number" && typeof output !== "number") {
-    return null;
-  }
-  return `${typeof input === "number" ? input : 0} in · ${typeof output === "number" ? output : 0} out`;
-}
-
 function AgentHistoryView({
   agent,
   state,
@@ -353,7 +318,7 @@ function AgentHistoryView({
             {state.history.runs.map((run) => (
               <div className="agent-history-run" key={run.run_id}>
                 {run.entries.map((entry) => (
-                  <HistoryEntry entry={entry} key={entry.id} run={run} />
+                  <HistoryBlock entry={entry} key={entry.id} run={run} />
                 ))}
               </div>
             ))}
@@ -362,98 +327,4 @@ function AgentHistoryView({
       </section>
     </section>
   );
-}
-
-function HistoryEntry({
-  entry,
-  run,
-}: {
-  entry: AgentHistoryEntry;
-  run: AgentHistoryRun;
-}) {
-  const time = formatHistoryTime(entry.timestamp);
-  const stateLabel =
-    entry.state === "interrupted"
-      ? "Interrupted"
-      : entry.state === "streaming"
-        ? "Streaming"
-        : null;
-
-  if (entry.type === "reminder") {
-    const usage = usageLabel(run);
-    return (
-      <article className="agent-history-entry agent-history-entry--reminder">
-        <div className="agent-history-entry-meta">
-          <strong>Reminder</strong>
-          <time dateTime={entry.timestamp}>{time}</time>
-        </div>
-        <div className="agent-history-reminder">
-          <p>{reminderLabel(entry)}</p>
-          <span>
-            {run.status.toUpperCase()}
-            {usage ? ` · ${usage}` : ""}
-          </span>
-        </div>
-      </article>
-    );
-  }
-
-  if (
-    entry.type === "tool_call" ||
-    entry.type === "tool_result" ||
-    entry.type === "retry"
-  ) {
-    const label =
-      entry.type === "tool_call"
-        ? "Tool call"
-        : entry.type === "tool_result"
-          ? "Tool result"
-          : "Retry";
-    return (
-      <article className="agent-history-entry">
-        <div className="agent-history-entry-meta">
-          <strong>{label}</strong>
-          <time dateTime={entry.timestamp}>{time}</time>
-        </div>
-        <details className="agent-history-tool">
-          <summary>
-            <span>{entry.tool_name ?? "Tool"}</span>
-            {stateLabel ? <span>{stateLabel}</span> : null}
-          </summary>
-          <pre>{entry.content}</pre>
-        </details>
-      </article>
-    );
-  }
-
-  return (
-    <article
-      className={`agent-history-entry agent-history-entry--${entry.type}`}
-    >
-      <div className="agent-history-entry-meta">
-        <strong>
-          {entry.type === "assistant"
-            ? agentHistoryAssistantLabel(run)
-            : entry.type === "thinking"
-              ? "Thinking"
-              : "Error"}
-        </strong>
-        <time dateTime={entry.timestamp}>{time}</time>
-      </div>
-      <div className="agent-history-content">
-        {entry.type === "thinking" ? (
-          <span className="agent-history-thinking">Thinking</span>
-        ) : (
-          <p>{entry.content}</p>
-        )}
-        {stateLabel ? (
-          <span className="agent-history-state">{stateLabel}</span>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function agentHistoryAssistantLabel(run: AgentHistoryRun) {
-  return run.status === "running" ? "Agent · Live" : "Agent";
 }
