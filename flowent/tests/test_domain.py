@@ -162,3 +162,42 @@ def test_discussion_topic_and_members_are_snapshot_values() -> None:
     current = state.snapshot()["discussions"][0]
     assert current["topic"] == "Fixed topic"
     assert current["member_ids"] == [1, 2]
+
+
+def test_deleting_discussion_removes_its_messages() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Delete this")
+
+    snapshot = state.delete_discussion(1)
+
+    assert snapshot["discussions"] == []
+
+
+def test_deleting_agent_removes_their_discussions() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Shared", 1, [2, 3])
+    state.create_discussion("Lin only", 1, [3])
+
+    snapshot = state.delete_agent(2)
+
+    assert [member["name"] for member in snapshot["members"]] == ["You", "Lin"]
+    assert [discussion["topic"] for discussion in snapshot["discussions"]] == [
+        "Lin only"
+    ]
+
+
+def test_running_agent_and_their_discussion_cannot_be_deleted() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Handle this", [2])
+    assert state.claim_next_reminder()[0] is not None
+
+    with pytest.raises(DomainError, match="Running Agents"):
+        state.delete_agent(2)
+    with pytest.raises(DomainError, match="running Agents"):
+        state.delete_discussion(1)

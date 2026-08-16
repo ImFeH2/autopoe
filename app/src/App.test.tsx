@@ -146,6 +146,7 @@ describe("App", () => {
           messageMentions={[]}
           onCreateAgent={() => undefined}
           onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
@@ -165,6 +166,7 @@ describe("App", () => {
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).not.toContain("mention-picker");
     expect(markup).not.toContain(">Mention<");
+    expect(markup).toContain('aria-label="Delete Repository work"');
   });
 
   it("keeps the sidebar focused on global destinations", () => {
@@ -216,6 +218,7 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
+          onDeleteAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -300,6 +303,7 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
+          onDeleteAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -311,6 +315,8 @@ describe("App", () => {
     expect(markup).toContain("Tool call");
     expect(markup).toContain("discussion");
     expect(markup).toContain("Continuing the same context");
+    expect(markup).toContain('aria-label="Delete Ada"');
+    expect(markup).not.toContain('aria-label="Delete You"');
     expect(markup).toContain("Streaming");
   });
 
@@ -333,6 +339,7 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
+          onDeleteAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -358,6 +365,7 @@ describe("App", () => {
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
+          onDeleteAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={human}
         />

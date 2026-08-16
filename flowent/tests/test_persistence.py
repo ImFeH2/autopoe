@@ -245,6 +245,19 @@ def test_shares_state_across_launch_directories(tmp_path: Path) -> None:
     assert store.load_organization() is not None
 
 
+def test_deleted_entities_stay_deleted_after_restart(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+
+    state.delete_agent(2)
+    restored = persisted_state(store, tmp_path)
+
+    assert restored.snapshot()["members"] == [{"id": 1, "type": "human", "name": "You"}]
+    assert restored.snapshot()["discussions"] == []
+
+
 def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
     runtime = ModelRuntime(on_configure=store.save_model_config)

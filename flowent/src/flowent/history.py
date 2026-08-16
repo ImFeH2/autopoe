@@ -39,6 +39,8 @@ class AgentHistoryRepository(Protocol):
 
     def load_agent_runs(self, agent_id: int) -> list[dict[str, Any]]: ...
 
+    def delete_agent_runs(self, agent_id: int) -> None: ...
+
 
 @dataclass
 class AgentHistoryRun:
@@ -113,6 +115,12 @@ class AgentHistory:
             self._active_runs[reminder.agent_id] = run
         self._publish(run, "run_started", reminder=reminder_data)
         return run
+
+    def delete(self, agent_id: int) -> None:
+        with self._lock:
+            if agent_id in self._active_runs:
+                raise RuntimeError("Running Agent history cannot be deleted")
+        self._repository.delete_agent_runs(agent_id)
 
     def snapshot(self, agent_id: int) -> dict[str, Any]:
         runs = [

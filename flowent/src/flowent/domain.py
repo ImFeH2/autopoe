@@ -106,6 +106,24 @@ class OrganizationState:
             self._changed(persist=True)
             return self._snapshot()
 
+    def delete_agent(self, agent_id: int) -> dict[str, Any]:
+        with self._condition:
+            self._require_agent(agent_id)
+            execution = self._agent_execution[agent_id]
+            if execution.status == "running":
+                raise DomainError("agent_running", "Running Agents cannot be deleted")
+            discussion_ids = [
+                discussion.id
+                for discussion in self._discussions.values()
+                if agent_id in discussion.member_ids
+            ]
+            for discussion_id in discussion_ids:
+                del self._discussions[discussion_id]
+            del self._agent_execution[agent_id]
+            del self._members[agent_id]
+            self._changed(persist=True)
+            return self._snapshot()
+
     def create_discussion(
         self,
         topic: str,
@@ -132,6 +150,22 @@ class OrganizationState:
                 topic=normalized_topic,
                 member_ids=participants,
             )
+            self._changed(persist=True)
+            return self._snapshot()
+
+    def delete_discussion(self, discussion_id: int) -> dict[str, Any]:
+        with self._condition:
+            discussion = self._require_discussion(discussion_id)
+            if any(
+                self._members[member_id].type == "agent"
+                and self._agent_execution[member_id].status == "running"
+                for member_id in discussion.member_ids
+            ):
+                raise DomainError(
+                    "discussion_active",
+                    "Discussions with running Agents cannot be deleted",
+                )
+            del self._discussions[discussion_id]
             self._changed(persist=True)
             return self._snapshot()
 

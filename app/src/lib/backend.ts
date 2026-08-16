@@ -766,12 +766,16 @@ export const backend = {
     }),
   createAgent: (name: string) =>
     organizationRequest("organization.create_agent", { name }),
+  deleteAgent: (agentId: number) =>
+    organizationRequest("organization.delete_agent", { agent_id: agentId }),
   createDiscussion: (topic: string, memberIds: number[]) =>
     organizationRequest("discussion.create", {
       topic,
       creator_id: 1,
       member_ids: memberIds,
     }),
+  deleteDiscussion: (discussionId: number) =>
+    organizationRequest("discussion.delete", { discussion_id: discussionId }),
   sendMessage: (discussionId: number, body: string, mentionIds: number[]) =>
     organizationRequest("discussion.send", {
       discussion_id: discussionId,

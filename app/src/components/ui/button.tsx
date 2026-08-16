@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, forwardRef } from "react";
 
-type ButtonVariant = "primary" | "secondary" | "quiet";
+type ButtonVariant = "danger" | "primary" | "secondary" | "quiet";
 type ButtonSize = "default" | "compact" | "icon";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -9,6 +9,7 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const variants: Record<ButtonVariant, string> = {
+  danger: "ui-button--danger",
   primary: "ui-button--primary",
   secondary: "ui-button--secondary",
   quiet: "ui-button--quiet",

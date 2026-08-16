@@ -106,6 +106,16 @@ textarea {
   background: var(--color-accent-active);
 }
 
+.ui-button--danger {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: var(--color-text-inverse);
+}
+
+.ui-button--danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
 .ui-button--secondary {
   border-color: var(--color-border-strong);
   background: var(--color-surface-selected);
@@ -129,6 +139,38 @@ textarea {
   color: var(--color-text-primary);
 }
 
+.ui-list-item {
+  position: relative;
+}
+
+.ui-list-item__action {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.ui-list-item:hover .ui-list-item__action,
+.ui-list-item:focus-within .ui-list-item__action,
+.ui-list-item--focused .ui-list-item__action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ui-list-item__action .ui-button {
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  color: var(--color-danger);
+}
+
+.ui-list-item__action .ui-button:hover:not(:disabled) {
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+}
+
 .ui-list-button {
   display: grid;
   width: 100%;
@@ -137,7 +179,7 @@ textarea {
   justify-content: stretch;
   justify-items: start;
   gap: 3px;
-  padding: 8px 10px;
+  padding: 8px 42px 8px 10px;
   text-align: left;
 }
 

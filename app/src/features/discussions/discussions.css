@@ -92,6 +92,18 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+.discussion-delete-confirmation {
+  display: grid;
+  gap: 20px;
+}
+
+.discussion-delete-confirmation p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .discussion-form {
   display: grid;
   gap: 18px;

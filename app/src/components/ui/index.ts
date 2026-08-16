@@ -8,6 +8,7 @@ export {
   Plus,
   Search,
   Settings2,
+  Trash2,
   Users,
   X,
 } from "./icons";

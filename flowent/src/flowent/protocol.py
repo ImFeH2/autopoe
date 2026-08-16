@@ -47,8 +47,10 @@ class Dispatcher:
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
+            "organization.delete_agent": self._delete_agent,
             "agent.history.get": self._get_agent_history,
             "discussion.create": self._create_discussion,
+            "discussion.delete": self._delete_discussion,
             "discussion.send": self._send_message,
             "settings.get_model": self._get_model_settings,
             "settings.update_model": self._update_model_settings,
@@ -143,6 +145,14 @@ class Dispatcher:
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
 
+    def _delete_agent(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        if self._history is None:
+            raise RuntimeError("Agent history is unavailable")
+        snapshot = self._state.delete_agent(agent_id)
+        self._history.delete(agent_id)
+        return snapshot
+
     def _get_agent_history(self, params: dict[str, Any]) -> dict[str, Any]:
         agent_id = require_integer(params, "agent_id")
         member = self._state.member(agent_id)
@@ -157,6 +167,11 @@ class Dispatcher:
             topic=require_string(params, "topic"),
             creator_id=require_integer(params, "creator_id"),
             member_ids=require_integer_list(params, "member_ids"),
+        )
+
+    def _delete_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.delete_discussion(
+            discussion_id=require_integer(params, "discussion_id")
         )
 
     def _send_message(self, params: dict[str, Any]) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -7,6 +7,7 @@ import {
   ListButton,
   Plus,
   StatusIndicator,
+  Trash2,
 } from "@/components/ui";
 import { agentStatusTone } from "@/features/agent-status";
 import type {
@@ -32,6 +33,7 @@ type MembersPageProps = {
   onAgentDialogOpenChange: (open: boolean) => void;
   onAgentNameChange: (name: string) => void;
   onCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteAgent: (agentId: number) => void;
   onSelectMember: (memberId: number) => void;
   selectedMember?: Member;
 };
@@ -52,10 +54,12 @@ export function MembersPage({
   onAgentDialogOpenChange,
   onAgentNameChange,
   onCreateAgent,
+  onDeleteAgent,
   onSelectMember,
   selectedMember,
 }: MembersPageProps) {
   const agentNameInputRef = useRef<HTMLInputElement>(null);
+  const [deletingAgentId, setDeletingAgentId] = useState<number | null>(null);
 
   return (
     <section className="members-workspace">
@@ -127,6 +131,58 @@ export function MembersPage({
         <div className="member-list-items">
           {members.map((member) => (
             <ListButton
+              action={
+                member.type === "agent" ? (
+                  <Dialog
+                    description={`Delete ${member.name}, their history, and every Discussion they belong to.`}
+                    onOpenChange={(open) =>
+                      setDeletingAgentId(open ? member.id : null)
+                    }
+                    open={deletingAgentId === member.id}
+                    title="Delete Agent"
+                    trigger={
+                      <Button
+                        aria-label={`Delete ${member.name}`}
+                        disabled={disabled || member.status === "running"}
+                        size="icon"
+                        variant="quiet"
+                      >
+                        <Trash2 aria-hidden="true" size={14} />
+                      </Button>
+                    }
+                    triggerTooltip={
+                      member.status === "running"
+                        ? "Running Agents cannot be deleted"
+                        : "Delete"
+                    }
+                  >
+                    <div className="member-delete-confirmation">
+                      <p>
+                        Delete this Agent, their history, and every Discussion
+                        they belong to?
+                      </p>
+                      <div className="member-agent-actions">
+                        <Button
+                          onClick={() => setDeletingAgentId(null)}
+                          variant="quiet"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={disabled}
+                          onClick={() => {
+                            onDeleteAgent(member.id);
+                            setDeletingAgentId(null);
+                          }}
+                          variant="danger"
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  </Dialog>
+                ) : undefined
+              }
               active={selectedMember?.id === member.id}
               aria-label={`Open ${member.name}`}
               key={member.id}

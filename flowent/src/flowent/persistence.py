@@ -642,6 +642,11 @@ class SQLiteStore:
                 raise RuntimeError("Agent run is not active")
         self.path.chmod(0o600)
 
+    def delete_agent_runs(self, agent_id: int) -> None:
+        with self._connect() as connection, connection:
+            connection.execute("DELETE FROM agent_runs WHERE agent_id = ?", (agent_id,))
+        self.path.chmod(0o600)
+
     def load_agent_runs(self, agent_id: int) -> list[dict[str, Any]]:
         with self._connect() as connection:
             return [

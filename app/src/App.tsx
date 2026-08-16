@@ -264,6 +264,39 @@ function App() {
     }
   }
 
+  async function handleDeleteAgent(agentId: number) {
+    const nextSnapshot = await mutate(() => backend.deleteAgent(agentId));
+    if (nextSnapshot) {
+      setSelectedMemberId((current) => (current === agentId ? null : current));
+      setSelectedDiscussionId((current) =>
+        current !== null &&
+        !nextSnapshot.discussions.some(
+          (discussion) => discussion.id === current,
+        )
+          ? null
+          : current,
+      );
+      setAgentHistories((current) => {
+        const next = { ...current };
+        delete next[agentId];
+        return next;
+      });
+      setMessageBody("");
+      setMessageMentions([]);
+    }
+  }
+
+  async function handleDeleteDiscussion(discussionId: number) {
+    const nextSnapshot = await mutate(() =>
+      backend.deleteDiscussion(discussionId),
+    );
+    if (nextSnapshot && selectedDiscussionId === discussionId) {
+      setSelectedDiscussionId(null);
+      setMessageBody("");
+      setMessageMentions([]);
+    }
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedDiscussion) {
@@ -365,6 +398,7 @@ function App() {
             onAgentDialogOpenChange={changeAgentDialog}
             onAgentNameChange={setAgentName}
             onCreateAgent={handleCreateAgent}
+            onDeleteAgent={handleDeleteAgent}
             onSelectMember={setSelectedMemberId}
             selectedMember={selectedMember}
           />
@@ -384,6 +418,7 @@ function App() {
             onCreateDiscussion={handleCreateDiscussion}
             onDialogCloseAutoFocus={focusAfterDiscussionDialogClose}
             onDialogOpenChange={changeDiscussionDialog}
+            onDeleteDiscussion={handleDeleteDiscussion}
             onMessageChange={changeMessageDraft}
             onCreateAgent={() => {
               selectWorkspaceView("members");

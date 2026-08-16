@@ -13,6 +13,7 @@ import {
   ListButton,
   Plus,
   Search,
+  Trash2,
 } from "@/components/ui";
 import type { AgentMember, Discussion, Member } from "@/lib/backend";
 import { type DraftMention, MessageComposer } from "./message-composer";
@@ -48,6 +49,7 @@ type DiscussionsPageProps = {
   onDialogCloseAutoFocus: () => boolean;
   onDialogOpenChange: (open: boolean) => void;
   onCreateAgent: () => void;
+  onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onSelectDiscussion: (discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
@@ -72,6 +74,7 @@ export function DiscussionsPage({
   onCreateDiscussion,
   onDialogCloseAutoFocus,
   onDialogOpenChange,
+  onDeleteDiscussion,
   onMessageChange,
   onSelectDiscussion,
   onSend,
@@ -82,6 +85,9 @@ export function DiscussionsPage({
   topic,
 }: DiscussionsPageProps) {
   const [query, setQuery] = useState("");
+  const [deletingDiscussionId, setDeletingDiscussionId] = useState<
+    number | null
+  >(null);
   const filteredDiscussions = filterDiscussions(discussions, query);
 
   return (
@@ -146,11 +152,64 @@ export function DiscussionsPage({
           <div className="discussion-list-items">
             {filteredDiscussions.map((discussion) => {
               const selected = selectedDiscussion?.id === discussion.id;
+              const hasRunningAgent = discussion.member_ids.some((memberId) =>
+                agents.some(
+                  (agent) =>
+                    agent.id === memberId && agent.status === "running",
+                ),
+              );
               return (
                 <ListButton
                   active={selected}
                   aria-label={`Open ${discussion.topic}`}
                   key={discussion.id}
+                  action={
+                    <Dialog
+                      description={`Delete ${discussion.topic} and all of its messages.`}
+                      onOpenChange={(open) =>
+                        setDeletingDiscussionId(open ? discussion.id : null)
+                      }
+                      open={deletingDiscussionId === discussion.id}
+                      title="Delete discussion"
+                      trigger={
+                        <Button
+                          aria-label={`Delete ${discussion.topic}`}
+                          disabled={disabled || hasRunningAgent}
+                          size="icon"
+                          variant="quiet"
+                        >
+                          <Trash2 aria-hidden="true" size={14} />
+                        </Button>
+                      }
+                      triggerTooltip={
+                        hasRunningAgent
+                          ? "Discussions with running Agents cannot be deleted"
+                          : "Delete"
+                      }
+                    >
+                      <div className="discussion-delete-confirmation">
+                        <p>Delete this discussion and all of its messages?</p>
+                        <div className="discussion-form-actions">
+                          <Button
+                            onClick={() => setDeletingDiscussionId(null)}
+                            variant="quiet"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            disabled={disabled}
+                            onClick={() => {
+                              onDeleteDiscussion(discussion.id);
+                              setDeletingDiscussionId(null);
+                            }}
+                            variant="danger"
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    </Dialog>
+                  }
                   meta={formatMessageCount(discussion.messages.length)}
                   onClick={() => onSelectDiscussion(discussion.id)}
                   title={discussion.topic}

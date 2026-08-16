@@ -86,6 +86,16 @@ def test_persists_complete_agent_history_and_restores_model_messages(
     assert first_run["usage"] == {"input_tokens": 12}
 
 
+def test_deletes_all_history_for_an_agent(tmp_path: Path) -> None:
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+    run = history.start(reminder())
+    run.complete("completed", ())
+
+    history.delete(2)
+
+    assert history.snapshot(2) == {"agent_id": 2, "runs": []}
+
+
 def test_keeps_failed_interrupted_messages_in_the_next_agent_context(
     tmp_path: Path,
 ) -> None:

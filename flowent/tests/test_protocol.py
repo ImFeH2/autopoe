@@ -57,6 +57,31 @@ def test_returns_the_selected_agents_complete_history(tmp_path: Path) -> None:
     assert response == {"id": 1, "result": {"agent_id": 2, "runs": []}}
 
 
+def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Ada work", 1, [2])
+    state.create_discussion("Lin work", 1, [3])
+    dispatcher = Dispatcher(state, history=AgentHistory(SQLiteStore(tmp_path / "data")))
+
+    discussion_response = dispatcher.dispatch(
+        {"id": 1, "method": "discussion.delete", "params": {"discussion_id": 1}}
+    )
+    agent_response = dispatcher.dispatch(
+        {"id": 2, "method": "organization.delete_agent", "params": {"agent_id": 3}}
+    )
+
+    assert [item["topic"] for item in discussion_response["result"]["discussions"]] == [
+        "Lin work"
+    ]
+    assert agent_response["result"]["members"] == [
+        {"id": 1, "type": "human", "name": "You"},
+        {"id": 2, "type": "agent", "name": "Ada", "status": "idle"},
+    ]
+    assert agent_response["result"]["discussions"] == []
+
+
 def test_json_line_writer_keeps_responses_and_events_atomic() -> None:
     output = io.StringIO()
     writer = JsonLineWriter(output)

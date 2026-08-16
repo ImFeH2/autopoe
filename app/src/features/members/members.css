@@ -370,6 +370,18 @@
   overflow-wrap: anywhere;
 }
 
+.member-delete-confirmation {
+  display: grid;
+  gap: 20px;
+}
+
+.member-delete-confirmation p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .member-agent-form {
   display: grid;
   gap: 18px;

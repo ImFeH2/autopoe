@@ -1,31 +1,46 @@
-import type { ButtonHTMLAttributes } from "react";
+import { type ButtonHTMLAttributes, type ReactNode, useState } from "react";
 import { Button } from "./button";
 
 type ListButtonProps = Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
   "children"
 > & {
+  action?: ReactNode;
   active?: boolean;
   meta: string;
   title: string;
 };
 
 export function ListButton({
+  action,
   active = false,
   className = "",
   meta,
   title,
   ...props
 }: ListButtonProps) {
+  const [focusWithin, setFocusWithin] = useState(false);
+
   return (
-    <Button
-      {...props}
-      aria-current={active ? "page" : undefined}
-      className={`ui-list-button ${className}`}
-      variant={active ? "secondary" : "quiet"}
+    <div
+      className={`ui-list-item${focusWithin ? " ui-list-item--focused" : ""}`}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setFocusWithin(false);
+        }
+      }}
+      onFocusCapture={() => setFocusWithin(true)}
     >
-      <span className="ui-list-button__title">{title}</span>
-      <span className="ui-list-button__meta">{meta}</span>
-    </Button>
+      <Button
+        {...props}
+        aria-current={active ? "page" : undefined}
+        className={`ui-list-button ${className}`}
+        variant={active ? "secondary" : "quiet"}
+      >
+        <span className="ui-list-button__title">{title}</span>
+        <span className="ui-list-button__meta">{meta}</span>
+      </Button>
+      {action ? <div className="ui-list-item__action">{action}</div> : null}
+    </div>
   );
 }
