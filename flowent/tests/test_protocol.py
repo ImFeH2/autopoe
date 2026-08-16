@@ -9,6 +9,7 @@ from flowent.history import AgentHistory
 from flowent.model_runner import ModelRuntime
 from flowent.persistence import SQLiteStore
 from flowent.protocol import Dispatcher, JsonLineWriter, serve
+from flowent.todos import AgentTodos
 
 
 def run_requests(*requests: object) -> list[dict[str, object]]:
@@ -63,7 +64,14 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
     state.create_agent("Lin")
     state.create_discussion("Ada work", 1, [2])
     state.create_discussion("Lin work", 1, [3])
-    dispatcher = Dispatcher(state, history=AgentHistory(SQLiteStore(tmp_path / "data")))
+    store = SQLiteStore(tmp_path / "data")
+    todos = AgentTodos(store)
+    todos.create(3, "Lin private work")
+    dispatcher = Dispatcher(
+        state,
+        history=AgentHistory(store),
+        todos=todos,
+    )
 
     discussion_response = dispatcher.dispatch(
         {"id": 1, "method": "discussion.delete", "params": {"discussion_id": 1}}
@@ -87,6 +95,7 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
             "messages": [],
         }
     ]
+    assert todos.list(3)["todos"] == []
 
 
 def test_json_line_writer_keeps_responses_and_events_atomic() -> None:

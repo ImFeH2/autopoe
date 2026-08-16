@@ -15,8 +15,10 @@ from flowent.diagnostics import (
 )
 from flowent.domain import OrganizationState
 from flowent.host_tools import HostTools
+from flowent.persistence import SQLiteStore
 from flowent.protocol import Dispatcher
 from flowent.runtime import AgentRunContext
+from flowent.todos import AgentTodos
 
 
 def read_records(directory: Path) -> list[dict[str, object]]:
@@ -108,11 +110,22 @@ def test_invalid_protocol_metadata_is_not_logged(tmp_path: Path) -> None:
 def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> None:
     secret = "tool-private-content"
     configure_diagnostics(tmp_path)
-    state = OrganizationState(tmp_path)
+    store = SQLiteStore(tmp_path)
+    state = OrganizationState(
+        tmp_path,
+        persisted=store.load_organization(),
+        on_persist=store.save_organization,
+    )
     state.create_agent("Ada")
     state.create_discussion("Private topic", 1, [2])
     tools = HostTools(tmp_path)
-    context = AgentRunContext(2, state, tools, run_id="turn-1")
+    context = AgentRunContext(
+        2,
+        state,
+        tools,
+        run_id="turn-1",
+        todos=AgentTodos(store),
+    )
 
     try:
         result = context.exec(
@@ -122,6 +135,7 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         assert result["stdout"].strip() == secret
         state.send_message(1, 1, secret, [2])
         context.discussion("read", discussion_id=1)
+        context.todo("create", subject=secret, description=secret)
     finally:
         tools.close()
         shutdown_diagnostics()
@@ -143,5 +157,11 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         record["event"] == "tool.completed"
         and record["tool_name"] == "discussion"
         and record["action"] == "read"
+        for record in records
+    )
+    assert any(
+        record["event"] == "tool.completed"
+        and record["tool_name"] == "todo"
+        and record["action"] == "create"
         for record in records
     )

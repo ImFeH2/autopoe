@@ -13,6 +13,7 @@ from flowent.diagnostics import log_event, log_exception
 from flowent.domain import OrganizationState, Reminder
 from flowent.history import AgentHistory, AgentHistoryRun
 from flowent.host_tools import HostToolError, HostTools
+from flowent.todos import AgentTodos, wrap_tool_result
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class AgentRunContext:
     run_id: str | None = None
     message_history: tuple[ModelMessage, ...] = ()
     history_event_sink: Callable[..., None] | None = None
+    todos: AgentTodos | None = None
 
     def emit_history_event(self, event_type: str, **data: Any) -> None:
         if self.history_event_sink is not None:
@@ -60,6 +62,52 @@ class AgentRunContext:
             action,
             lambda: self._discussion(action, arguments),
         )
+
+    def todo(self, action: str, **arguments: Any) -> Any:
+        return self._call_tool(
+            "todo",
+            action,
+            lambda: self._todo(action, arguments),
+        )
+
+    def todo_status_reminder(self) -> str | None:
+        if self.todos is None:
+            return None
+        return self.todos.status_reminder(self.agent_id)
+
+    def model_tool_result(self, result: Any) -> Any:
+        return wrap_tool_result(result, self.todo_status_reminder())
+
+    def _todo(self, action: str, arguments: dict[str, Any]) -> Any:
+        if self.todos is None:
+            raise RuntimeError("Agent Todos are unavailable")
+        if action == "create":
+            return self.todos.create(
+                self.agent_id,
+                arguments["subject"],
+                arguments.get("description", ""),
+            )
+        if action == "list":
+            return self.todos.list(
+                self.agent_id,
+                arguments.get("status"),
+            )
+        if action == "read":
+            return self.todos.read(self.agent_id, arguments["todo_id"])
+        if action == "start":
+            return self.todos.start(self.agent_id, arguments["todo_id"])
+        if action == "update":
+            return self.todos.update(
+                self.agent_id,
+                arguments["todo_id"],
+                arguments.get("subject"),
+                arguments.get("description"),
+            )
+        if action == "complete":
+            return self.todos.complete(self.agent_id, arguments["todo_id"])
+        if action == "delete":
+            return self.todos.delete(self.agent_id, arguments["todo_id"])
+        raise ValueError(f"Unknown todo action: {action}")
 
     def _discussion(self, action: str, arguments: dict[str, Any]) -> Any:
         if action == "create":
@@ -162,6 +210,8 @@ class AgentRunContext:
             }
         elif tool_name == "patch":
             result_fields = {"file_count": len(result["paths"])}
+        elif tool_name == "todo" and action == "list":
+            result_fields = {"result_count": result["count"]}
         elif isinstance(result, list):
             result_fields = {"result_count": len(result)}
         log_event(
@@ -213,11 +263,13 @@ class AgentRuntime:
         runner: AgentRunner,
         host_tools: HostTools,
         history: AgentHistory | None = None,
+        todos: AgentTodos | None = None,
     ) -> None:
         self._state = state
         self._runner = runner
         self._host_tools = host_tools
         self._history = history
+        self._todos = todos
         self._stop_event = Event()
         self._stop_lock = Lock()
         self._stop_completed = False
@@ -329,6 +381,7 @@ class AgentRuntime:
                     history_event_sink=(
                         history_run.emit if history_run is not None else None
                     ),
+                    todos=self._todos,
                 ),
             )
             if result is not None:

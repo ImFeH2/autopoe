@@ -12,8 +12,9 @@ from typing import Any
 
 from flowent.diagnostics import log_event, log_exception
 from flowent.history import RunStatus
+from flowent.todos import TodoStatus
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -59,11 +60,14 @@ class SQLiteStore:
                     self._migrate_version_five(connection)
                 elif version == 6:
                     self._migrate_version_six(connection)
+                elif version == 7:
+                    self._migrate_version_seven(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
                     )
                 interrupted_runs = self._interrupt_running_agent_runs(connection)
+                orphaned_todos = self._delete_orphaned_agent_todos(connection)
             self.path.chmod(0o600)
         except (OSError, RuntimeError, sqlite3.Error) as error:
             log_exception(
@@ -80,6 +84,7 @@ class SQLiteStore:
             previous_schema_version=version,
             schema_version=SCHEMA_VERSION,
             interrupted_runs=interrupted_runs,
+            orphaned_todos=orphaned_todos,
             duration_ms=round((time.monotonic() - started) * 1000),
         )
 
@@ -185,6 +190,41 @@ class SQLiteStore:
             connection.execute(statement)
         SQLiteStore._create_model_settings_table(connection)
         SQLiteStore._create_agent_runs_table(connection)
+        SQLiteStore._create_agent_todos_table(connection)
+
+    @staticmethod
+    def _create_agent_todos_table(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_todos (
+                agent_id INTEGER NOT NULL,
+                id INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (
+                    status IN ('pending', 'in_progress', 'completed')
+                ),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                PRIMARY KEY (agent_id, id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS agent_todos_one_in_progress
+            ON agent_todos (agent_id) WHERE status = 'in_progress'
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_todo_sequences (
+                agent_id INTEGER PRIMARY KEY,
+                next_id INTEGER NOT NULL CHECK (next_id > 0)
+            )
+            """
+        )
 
     @staticmethod
     def _create_agent_runs_table(connection: sqlite3.Connection) -> None:
@@ -311,6 +351,7 @@ class SQLiteStore:
             self._migrate_model_api_type(connection)
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
+            self._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_three(self, connection: sqlite3.Connection) -> None:
@@ -318,12 +359,14 @@ class SQLiteStore:
             self._migrate_model_api_type(connection)
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
+            self._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_four(self, connection: sqlite3.Connection) -> None:
         with connection:
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
+            self._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -336,12 +379,20 @@ class SQLiteStore:
                 "ALTER TABLE agent_runs RENAME COLUMN activation_json TO reminder_json"
             )
             SQLiteStore._add_member_deleted_column(connection)
+            SQLiteStore._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_six(connection: sqlite3.Connection) -> None:
         with connection:
             SQLiteStore._add_member_deleted_column(connection)
+            SQLiteStore._create_agent_todos_table(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_seven(connection: sqlite3.Connection) -> None:
+        with connection:
+            SQLiteStore._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -353,6 +404,18 @@ class SQLiteStore:
             connection.execute(
                 "ALTER TABLE members ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))"
             )
+
+    @staticmethod
+    def _delete_orphaned_agent_todos(connection: sqlite3.Connection) -> int:
+        active_agents = "SELECT id FROM members WHERE type = 'agent' AND deleted = 0"
+        with connection:
+            cursor = connection.execute(
+                f"DELETE FROM agent_todos WHERE agent_id NOT IN ({active_agents})"
+            )
+            connection.execute(
+                f"DELETE FROM agent_todo_sequences WHERE agent_id NOT IN ({active_agents})"
+            )
+        return cursor.rowcount
 
     @staticmethod
     def _interrupt_running_agent_runs(connection: sqlite3.Connection) -> int:
@@ -773,6 +836,165 @@ class SQLiteStore:
                     (agent_id,),
                 )
             ]
+
+    def create_todo(
+        self,
+        agent_id: int,
+        subject: str,
+        description: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with self._connect() as connection, connection:
+            row = connection.execute(
+                "SELECT next_id FROM agent_todo_sequences WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()
+            if row is None:
+                todo_id = 1
+                connection.execute(
+                    "INSERT INTO agent_todo_sequences (agent_id, next_id) VALUES (?, 2)",
+                    (agent_id,),
+                )
+            else:
+                todo_id = int(row["next_id"])
+                connection.execute(
+                    "UPDATE agent_todo_sequences SET next_id = ? WHERE agent_id = ?",
+                    (todo_id + 1, agent_id),
+                )
+            connection.execute(
+                """
+                INSERT INTO agent_todos (
+                    agent_id, id, subject, description, status,
+                    created_at, updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL)
+                """,
+                (
+                    agent_id,
+                    todo_id,
+                    subject,
+                    description,
+                    created_at,
+                    created_at,
+                ),
+            )
+        self.path.chmod(0o600)
+        return {
+            "id": todo_id,
+            "subject": subject,
+            "description": description,
+            "status": "pending",
+            "created_at": created_at,
+            "updated_at": created_at,
+            "completed_at": None,
+        }
+
+    def load_todos(
+        self,
+        agent_id: int,
+        status: TodoStatus | None = None,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, subject, description, status, created_at, updated_at,
+                completed_at
+            FROM agent_todos WHERE agent_id = ?
+        """
+        parameters: tuple[Any, ...] = (agent_id,)
+        if status is not None:
+            query += " AND status = ?"
+            parameters = (agent_id, status)
+        query += " ORDER BY id"
+        with self._connect() as connection:
+            return [
+                self._todo_data(row) for row in connection.execute(query, parameters)
+            ]
+
+    def load_todo(self, agent_id: int, todo_id: int) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, subject, description, status, created_at, updated_at,
+                    completed_at
+                FROM agent_todos WHERE agent_id = ? AND id = ?
+                """,
+                (agent_id, todo_id),
+            ).fetchone()
+        return None if row is None else self._todo_data(row)
+
+    def update_todo(
+        self,
+        agent_id: int,
+        todo_id: int,
+        subject: str,
+        description: str,
+        updated_at: str,
+    ) -> None:
+        with self._connect() as connection, connection:
+            cursor = connection.execute(
+                """
+                UPDATE agent_todos
+                SET subject = ?, description = ?, updated_at = ?
+                WHERE agent_id = ? AND id = ?
+                """,
+                (subject, description, updated_at, agent_id, todo_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Todo does not exist")
+        self.path.chmod(0o600)
+
+    def set_todo_status(
+        self,
+        agent_id: int,
+        todo_id: int,
+        status: TodoStatus,
+        updated_at: str,
+        completed_at: str | None,
+    ) -> None:
+        with self._connect() as connection, connection:
+            cursor = connection.execute(
+                """
+                UPDATE agent_todos
+                SET status = ?, updated_at = ?, completed_at = ?
+                WHERE agent_id = ? AND id = ?
+                """,
+                (status, updated_at, completed_at, agent_id, todo_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Todo does not exist")
+        self.path.chmod(0o600)
+
+    def delete_todo(self, agent_id: int, todo_id: int) -> None:
+        with self._connect() as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM agent_todos WHERE agent_id = ? AND id = ?",
+                (agent_id, todo_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Todo does not exist")
+        self.path.chmod(0o600)
+
+    def delete_agent_todos(self, agent_id: int) -> None:
+        with self._connect() as connection, connection:
+            connection.execute(
+                "DELETE FROM agent_todos WHERE agent_id = ?",
+                (agent_id,),
+            )
+            connection.execute(
+                "DELETE FROM agent_todo_sequences WHERE agent_id = ?",
+                (agent_id,),
+            )
+        self.path.chmod(0o600)
+
+    @staticmethod
+    def _todo_data(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "subject": row["subject"],
+            "description": row["description"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "completed_at": row["completed_at"],
+        }
 
     def load_observability_config(self) -> dict[str, Any] | None:
         with self._connect() as connection:

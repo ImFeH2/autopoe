@@ -35,6 +35,7 @@ def main(
     from flowent.persistence import SQLiteStore, data_directory
     from flowent.protocol import JsonLineWriter, serve
     from flowent.runtime import AgentRuntime
+    from flowent.todos import AgentTodos
 
     if create_model_runtime is None:
         create_model_runtime = create_runner
@@ -61,6 +62,7 @@ def main(
             store,
             lambda event: writer.write_event("agent.history.updated", event),
         )
+        todos = AgentTodos(store)
         host_tools = HostTools(working_directory)
         watcher = ProcessWatcher(host_tools.process_owner)
         state = OrganizationState(
@@ -79,6 +81,7 @@ def main(
             model_runtime,
             host_tools,
             history,
+            todos,
         )
         runtime.start()
         serve(
@@ -89,6 +92,7 @@ def main(
             model_runtime,
             history,
             writer,
+            todos,
         )
     except BaseException as error:
         log_exception("process.failed", error)

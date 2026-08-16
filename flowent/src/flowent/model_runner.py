@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import Lock
 from typing import Any, Literal, cast
 
@@ -20,7 +20,14 @@ from pydantic_ai import (
     capture_run_messages,
 )
 from pydantic_ai.exceptions import AgentRunError
-from pydantic_ai.messages import TextPart, ThinkingPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    TextPart,
+    ThinkingPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
 from pydantic_ai.models.google import GoogleModel, GoogleModelName
 from pydantic_ai.models.openai import (
@@ -47,6 +54,7 @@ from flowent.runtime import (
     AgentRunner,
     AgentRunOutcome,
 )
+from flowent.todos import unwrap_tool_result
 
 ApiType = Literal["openai-chat", "openai-responses", "anthropic", "google"]
 
@@ -148,6 +156,9 @@ class PydanticAgentRunner:
                 "Decide how to handle them and use discussion action=read when you need surrounding context. "
                 "Communicate only with discussion action=send. Use organization and discussion tools "
                 "to discover Members, create Agents, or open a new Discussion when useful. "
+                "Use todo to maintain unfinished multi-step work, keep at most one Todo in progress, "
+                "and complete work promptly. Todo state never replaces discussion.ack and does not "
+                "schedule another Turn. Current Todo status may follow tool results as a reminder. "
                 "Use exec with an argv list to inspect the launch directory and run commands. "
                 "Use patch with a unified diff to create, modify, delete, or rename text files. "
                 "Never read or expose .env files, environment variables, credentials, tokens, or secrets. "
@@ -160,6 +171,9 @@ class PydanticAgentRunner:
         self._register_tools()
 
     def _register_tools(self) -> None:
+        def model_result(ctx: RunContext[AgentRunContext], result: Any) -> Any:
+            return ctx.deps.model_tool_result(result)
+
         @self._agent.tool(name="exec", sequential=True)
         def execute_command(
             ctx: RunContext[AgentRunContext],
@@ -169,7 +183,10 @@ class PydanticAgentRunner:
         ) -> Any:
             """Run argv without a shell inside the launch directory and return captured output."""
             try:
-                return ctx.deps.exec(argv, cwd, timeout_seconds)
+                return model_result(
+                    ctx,
+                    ctx.deps.exec(argv, cwd, timeout_seconds),
+                )
             except HostToolError as error:
                 raise ModelRetry(str(error)) from error
 
@@ -177,7 +194,7 @@ class PydanticAgentRunner:
         def patch(ctx: RunContext[AgentRunContext], diff: str) -> Any:
             """Atomically apply a unified text diff inside the launch directory."""
             try:
-                return ctx.deps.patch(diff)
+                return model_result(ctx, ctx.deps.patch(diff))
             except HostToolError as error:
                 raise ModelRetry(str(error)) from error
 
@@ -192,8 +209,55 @@ class PydanticAgentRunner:
                 if action == "create_agent":
                     if not name:
                         raise ModelRetry("name is required for create_agent")
-                    return ctx.deps.organization(action, name=name)
-                return ctx.deps.organization(action)
+                    result = ctx.deps.organization(action, name=name)
+                else:
+                    result = ctx.deps.organization(action)
+                return model_result(ctx, result)
+            except DomainError as error:
+                raise ModelRetry(error.message) from error
+
+        @self._agent.tool(sequential=True)
+        def todo(
+            ctx: RunContext[AgentRunContext],
+            action: Literal[
+                "create",
+                "list",
+                "read",
+                "start",
+                "update",
+                "complete",
+                "delete",
+            ],
+            todo_id: int | None = None,
+            subject: str | None = None,
+            description: str | None = None,
+            status: Literal["pending", "in_progress", "completed"] | None = None,
+        ) -> Any:
+            """Create, inspect, start, update, complete, or delete persistent Agent Todos."""
+            try:
+                if action == "create":
+                    if subject is None:
+                        raise ModelRetry("subject is required for create")
+                    result = ctx.deps.todo(
+                        action,
+                        subject=subject,
+                        description=description or "",
+                    )
+                elif action == "list":
+                    result = ctx.deps.todo(action, status=status)
+                else:
+                    if todo_id is None:
+                        raise ModelRetry(f"todo_id is required for {action}")
+                    if action == "update":
+                        result = ctx.deps.todo(
+                            action,
+                            todo_id=todo_id,
+                            subject=subject,
+                            description=description,
+                        )
+                    else:
+                        result = ctx.deps.todo(action, todo_id=todo_id)
+                return model_result(ctx, result)
             except DomainError as error:
                 raise ModelRetry(error.message) from error
 
@@ -218,54 +282,59 @@ class PydanticAgentRunner:
                 if action == "create":
                     if not topic or not member_ids:
                         raise ModelRetry("topic and member_ids are required for create")
-                    return ctx.deps.discussion(
+                    result = ctx.deps.discussion(
                         action,
                         topic=topic,
                         member_ids=member_ids,
                     )
-                if action == "send":
+                elif action == "send":
                     if discussion_id is None or not body:
                         raise ModelRetry("discussion_id and body are required for send")
-                    return ctx.deps.discussion(
+                    result = ctx.deps.discussion(
                         action,
                         discussion_id=discussion_id,
                         body=body,
                         mention_ids=mention_ids or [],
                     )
-                if action == "list":
-                    return ctx.deps.discussion(action)
-                if action == "info":
+                elif action == "list":
+                    result = ctx.deps.discussion(action)
+                elif action == "info":
                     if discussion_id is None:
                         raise ModelRetry("discussion_id is required for info")
-                    return ctx.deps.discussion(action, discussion_id=discussion_id)
-                if action == "read":
+                    result = ctx.deps.discussion(
+                        action,
+                        discussion_id=discussion_id,
+                    )
+                elif action == "read":
                     if discussion_id is None:
                         raise ModelRetry("discussion_id is required for read")
-                    return ctx.deps.discussion(
+                    result = ctx.deps.discussion(
                         action,
                         discussion_id=discussion_id,
                         start_message_id=start_message_id,
                         end_message_id=end_message_id,
                         limit=100 if limit is None else limit,
                     )
-                if action == "ack":
+                elif action == "ack":
                     if discussion_id is None or not message_ids:
                         raise ModelRetry(
                             "discussion_id and message_ids are required for ack"
                         )
-                    return ctx.deps.discussion(
+                    result = ctx.deps.discussion(
                         action,
                         discussion_id=discussion_id,
                         message_ids=message_ids,
                     )
-                if not query:
-                    raise ModelRetry("query is required for search")
-                return ctx.deps.discussion(
-                    action,
-                    query=query,
-                    discussion_id=discussion_id,
-                    sender_id=sender_id,
-                )
+                else:
+                    if not query:
+                        raise ModelRetry("query is required for search")
+                    result = ctx.deps.discussion(
+                        action,
+                        query=query,
+                        discussion_id=discussion_id,
+                        sender_id=sender_id,
+                    )
+                return model_result(ctx, result)
             except DomainError as error:
                 raise ModelRetry(error.message) from error
 
@@ -292,6 +361,9 @@ class PydanticAgentRunner:
                 " Some Mentions were previously reminded but remain pending. Only discussion.ack "
                 "marks a Mention as handled."
             )
+        persisted_prompt = prompt
+        if todo_status := context.todo_status_reminder():
+            prompt += f"\n\n{todo_status}"
         run_observability = (
             self._observability.bind(reminder) if self._observability else None
         )
@@ -344,7 +416,9 @@ class PydanticAgentRunner:
                         else "tool_result",
                         tool_name=event.part.tool_name,
                         tool_call_id=event.tool_call_id,
-                        content=to_jsonable_python(event.part.content),
+                        content=to_jsonable_python(
+                            unwrap_tool_result(event.part.content)
+                        ),
                     )
 
         message_history = list(context.message_history)
@@ -384,7 +458,11 @@ class PydanticAgentRunner:
                 )
                 raise AgentRunFailure(
                     "Model request failed",
-                    tuple(captured_messages[len(message_history) :]),
+                    clean_todo_context(
+                        captured_messages[len(message_history) :],
+                        runtime_prompt=prompt,
+                        persisted_prompt=persisted_prompt,
+                    ),
                 ) from error
             except Exception as error:
                 log_exception(
@@ -398,7 +476,11 @@ class PydanticAgentRunner:
                     duration_ms=round((time.monotonic() - started) * 1000),
                 )
                 raise
-        messages = tuple(result.new_messages())
+        messages = clean_todo_context(
+            result.new_messages(),
+            runtime_prompt=prompt,
+            persisted_prompt=persisted_prompt,
+        )
         usage = cast(dict[str, Any], to_jsonable_python(result.usage))
         log_event(
             "model.request.completed",
@@ -411,6 +493,34 @@ class PydanticAgentRunner:
             duration_ms=round((time.monotonic() - started) * 1000),
         )
         return AgentRunOutcome(messages, usage)
+
+
+def clean_todo_context(
+    messages: Sequence[ModelMessage],
+    *,
+    runtime_prompt: str | None = None,
+    persisted_prompt: str | None = None,
+) -> tuple[ModelMessage, ...]:
+    cleaned: list[ModelMessage] = []
+    for message in messages:
+        if not isinstance(message, ModelRequest):
+            cleaned.append(message)
+            continue
+        parts = []
+        for part in message.parts:
+            if (
+                isinstance(part, UserPromptPart)
+                and runtime_prompt is not None
+                and persisted_prompt is not None
+                and part.content == runtime_prompt
+            ):
+                parts.append(replace(part, content=persisted_prompt))
+            elif isinstance(part, ToolReturnPart):
+                parts.append(replace(part, content=unwrap_tool_result(part.content)))
+            else:
+                parts.append(part)
+        cleaned.append(replace(message, parts=parts))
+    return tuple(cleaned)
 
 
 class ModelRuntime:

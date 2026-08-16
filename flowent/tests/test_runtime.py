@@ -11,7 +11,9 @@ import pytest
 
 from flowent.domain import DomainError, OrganizationState, Reminder
 from flowent.host_tools import HostTools
+from flowent.persistence import SQLiteStore
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRuntime
+from flowent.todos import AgentTodos
 
 
 def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> None:
@@ -57,6 +59,39 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
         "has_earlier": False,
         "has_later": True,
     }
+
+
+def test_agent_todo_tool_updates_the_runtime_status_bar(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = OrganizationState(
+        tmp_path,
+        persisted=store.load_organization(),
+        on_persist=store.save_organization,
+    )
+    state.create_agent("Ada")
+    context = AgentRunContext(
+        2,
+        state,
+        HostTools(tmp_path),
+        todos=AgentTodos(store),
+    )
+
+    created = context.todo(
+        "create",
+        subject="Inspect failure",
+        description="Find the root cause",
+    )
+    assert created["todo"]["status"] == "pending"
+    assert "#1 Inspect failure" in context.todo_status_reminder()
+
+    context.todo("start", todo_id=1)
+    wrapped = context.model_tool_result({"ok": True})
+    assert wrapped["result"] == {"ok": True}
+    assert "Current: #1 Inspect failure" in wrapped["todo_status"]
+
+    context.todo("complete", todo_id=1)
+    assert context.todo_status_reminder() is None
+    assert context.model_tool_result({"ok": True}) == {"ok": True}
 
 
 def test_agent_discussion_tools_are_restricted_to_members(tmp_path: Path) -> None:

@@ -8,7 +8,12 @@ import pytest
 
 from flowent.domain import OrganizationState
 from flowent.model_runner import ModelRuntime
-from flowent.persistence import DATA_DIRECTORY_ENV, SQLiteStore, data_directory
+from flowent.persistence import (
+    DATA_DIRECTORY_ENV,
+    SCHEMA_VERSION,
+    SQLiteStore,
+    data_directory,
+)
 
 
 def persisted_state(store: SQLiteStore, working_directory: Path) -> OrganizationState:
@@ -362,7 +367,7 @@ def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> N
     }
     assert migrated.load_observability_config() is None
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'observability_settings'"
     ).fetchone() == ("observability_settings",)
@@ -410,7 +415,7 @@ def test_migrates_version_three_openai_to_chat_without_losing_secrets(
         "legacy-tracing-secret"
     )
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(model_settings)")
     }
@@ -442,7 +447,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
         "model": "legacy-model",
     }
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     for table in ("members", "discussions", "model_settings"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         assert "working_directory" not in columns
@@ -476,7 +481,7 @@ def test_migrates_version_four_with_an_empty_agent_history_table(
     migrated = SQLiteStore(data)
 
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'agent_runs'"
     ).fetchone() == ("agent_runs",)
@@ -495,9 +500,32 @@ def test_migrates_version_six_with_hidden_member_support(tmp_path: Path) -> None
     migrated = SQLiteStore(data)
 
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     columns = {row[1] for row in connection.execute("PRAGMA table_info(members)")}
     assert "deleted" in columns
+    connection.close()
+
+
+def test_migrates_version_seven_with_agent_todo_support(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    connection = sqlite3.connect(store.path)
+    connection.execute("DROP TABLE agent_todos")
+    connection.execute("DROP TABLE agent_todo_sequences")
+    connection.execute("PRAGMA user_version = 7")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+
+    connection = sqlite3.connect(migrated.path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'agent_todos'"
+    ).fetchone() == ("agent_todos",)
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'agent_todo_sequences'"
+    ).fetchone() == ("agent_todo_sequences",)
     connection.close()
 
 

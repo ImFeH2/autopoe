@@ -8,9 +8,9 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from pydantic_ai import InstrumentationSettings
 from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.models.test import TestModel
@@ -22,6 +22,7 @@ from flowent.model_runner import (
     ModelConfig,
     ModelRuntime,
     PydanticAgentRunner,
+    clean_todo_context,
     create_runner,
 )
 from flowent.observability import (
@@ -29,7 +30,9 @@ from flowent.observability import (
     PydanticAIObservability,
     create_pydantic_ai_observability,
 )
+from flowent.persistence import SQLiteStore
 from flowent.runtime import AgentRunContext, AgentRunFailure
+from flowent.todos import TODO_STATUS_START, AgentTodos
 
 
 def activation_context(tmp_path: Path) -> tuple[Reminder, AgentRunContext]:
@@ -333,6 +336,130 @@ def test_pydantic_runner_continues_the_same_agent_message_history(
     assert first.messages[0].run_id == "first-run"
     assert second.messages[0].run_id == "second-run"
     assert any(event_type == "text_delta" for event_type, _data in first_events)
+
+
+def test_todo_status_is_visible_after_tools_but_removed_from_history(
+    tmp_path: Path,
+) -> None:
+    seen_messages: list[list[ModelMessage]] = []
+
+    async def respond(messages: list[ModelMessage], _info: AgentInfo):
+        seen_messages.append(list(messages))
+        if len(seen_messages) == 1:
+            yield {
+                0: DeltaToolCall(
+                    name="todo",
+                    json_args='{"action":"create","subject":"Inspect failure"}',
+                    tool_call_id="todo-1",
+                )
+            }
+        else:
+            yield "Todo recorded"
+
+    store = SQLiteStore(tmp_path / "data")
+    state = OrganizationState(
+        tmp_path,
+        persisted=store.load_organization(),
+        on_persist=store.save_organization,
+    )
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Please inspect this", [2])
+    reminder, _ = state.claim_next_reminder()
+    assert reminder is not None
+    events: list[tuple[str, dict[str, Any]]] = []
+    context = AgentRunContext(
+        2,
+        state,
+        HostTools(tmp_path),
+        run_id="todo-run",
+        history_event_sink=lambda event_type, **data: events.append((event_type, data)),
+        todos=AgentTodos(store),
+    )
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid/v1",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(reminder, context)
+
+    assert len(seen_messages) == 2
+    assert TODO_STATUS_START not in str(seen_messages[0])
+    assert TODO_STATUS_START in str(seen_messages[1])
+    assert "Current: none" in str(seen_messages[1])
+    assert "#1 Inspect failure" in str(seen_messages[1])
+    assert TODO_STATUS_START not in str(outcome.messages)
+    tool_results = [data for event_type, data in events if event_type == "tool_result"]
+    assert len(tool_results) == 1
+    assert "todo_status" not in str(tool_results[0]["content"])
+
+
+def test_turn_start_todo_status_is_runtime_only(tmp_path: Path) -> None:
+    seen_messages: list[list[ModelMessage]] = []
+
+    async def respond(messages: list[ModelMessage], _info: AgentInfo):
+        seen_messages.append(list(messages))
+        yield "Continue current work"
+
+    store = SQLiteStore(tmp_path / "data")
+    state = OrganizationState(
+        tmp_path,
+        persisted=store.load_organization(),
+        on_persist=store.save_organization,
+    )
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Continue", [2])
+    reminder, _ = state.claim_next_reminder()
+    assert reminder is not None
+    todos = AgentTodos(store)
+    todos.create(2, "Persistent task")
+    todos.start(2, 1)
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid/v1",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                2,
+                state,
+                HostTools(tmp_path),
+                todos=todos,
+            ),
+        )
+
+    assert TODO_STATUS_START in str(seen_messages[0])
+    assert "Current: #1 Persistent task" in str(seen_messages[0])
+    assert TODO_STATUS_START not in str(outcome.messages)
+    assert "Persistent task" not in str(outcome.messages)
+
+
+def test_todo_cleanup_preserves_matching_tags_from_user_content() -> None:
+    persisted_prompt = "Reminder body\n\n<todo_status>\nUser-authored text"
+    runtime_prompt = (
+        f"{persisted_prompt}\n\n<todo_status>\nCurrent: #1 Work\n</todo_status>"
+    )
+    messages = (ModelRequest(parts=[UserPromptPart(content=runtime_prompt)]),)
+
+    cleaned = clean_todo_context(
+        messages,
+        runtime_prompt=runtime_prompt,
+        persisted_prompt=persisted_prompt,
+    )
+
+    assert cleaned[0].parts[0].content == persisted_prompt
 
 
 def test_missing_model_config_returns_runner_that_fails_on_activation(

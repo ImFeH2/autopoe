@@ -332,18 +332,25 @@ def test_agent_model_history_continues_across_process_restarts(
         "        pass\n"
         "    def run(self, activation, context):\n"
         "        previous = len(context.message_history)\n"
+        "        todos = context.todo('list')['todos']\n"
+        "        if not todos:\n"
+        "            todo = context.todo('create', subject='Persistent task')['todo']\n"
+        "            todo = context.todo('start', todo_id=todo['id'])['todo']\n"
+        "        else:\n"
+        "            todo = todos[0]\n"
+        '        result = f\'Inherited {previous} model messages; Todo {todo["id"]} {todo["status"]}\'\n'
         "        conversation_id = (context.message_history[-1].conversation_id "
         "if context.message_history else 'flowent-agent-2')\n"
         "        context.discussion('read', discussion_id=activation.mentions[0].discussion_id, "
         "end_message_id=activation.mentions[0].message_id)\n"
         "        context.discussion('send', discussion_id=activation.mentions[0].discussion_id, "
-        "body=f'Inherited {previous} model messages')\n"
+        "body=result)\n"
         "        context.discussion('ack', discussion_id=activation.mentions[0].discussion_id, "
         "message_ids=[activation.mentions[0].message_id])\n"
         "        return AgentRunOutcome((\n"
         "            ModelRequest(parts=[UserPromptPart(content='Reminder')], "
         "run_id=context.run_id, conversation_id=conversation_id),\n"
-        "            ModelResponse(parts=[TextPart(content=f'Inherited {previous} model messages')], "
+        "            ModelResponse(parts=[TextPart(content=result)], "
         "model_name='test', run_id=context.run_id, conversation_id=conversation_id),\n"
         "        ))\n"
         "model_runner.create_runner = lambda **kwargs: PersistentRunner()\n"
@@ -398,7 +405,7 @@ def test_agent_model_history_continues_across_process_restarts(
         request_id += 1
         assert len(history["runs"]) == 1
         assert history["runs"][0]["entries"][-1]["content"] == (
-            "Inherited 0 model messages"
+            "Inherited 0 model messages; Todo 1 in_progress"
         )
         assert request(first, request_id, "system.shutdown", {}) == {"stopped": True}
         assert first.wait(timeout=10) == 0
@@ -446,7 +453,7 @@ def test_agent_model_history_continues_across_process_restarts(
         request_id += 1
         assert len(history["runs"]) == 2
         assert history["runs"][1]["entries"][-1]["content"] == (
-            "Inherited 2 model messages"
+            "Inherited 2 model messages; Todo 1 in_progress"
         )
         assert request(second, request_id, "system.shutdown", {}) == {"stopped": True}
         assert second.wait(timeout=10) == 0
