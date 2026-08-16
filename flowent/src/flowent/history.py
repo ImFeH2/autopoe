@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from uuid import uuid4
 from pydantic_ai import ModelMessagesTypeAdapter
 from pydantic_ai.messages import ModelMessage
 
+from flowent.diagnostics import log_event
 from flowent.domain import Reminder
 
 RunStatus = Literal["running", "completed", "failed", "interrupted"]
@@ -113,6 +115,14 @@ class AgentHistory:
         )
         with self._lock:
             self._active_runs[reminder.agent_id] = run
+        log_event(
+            "history.turn.started",
+            agent_id=reminder.agent_id,
+            turn_id=run_id,
+            sequence=sequence,
+            reminder_count=len(reminder.mentions),
+            previous_message_count=len(message_history),
+        )
         self._publish(run, "run_started", reminder=reminder_data)
         return run
 
@@ -121,6 +131,7 @@ class AgentHistory:
             if agent_id in self._active_runs:
                 raise RuntimeError("Running Agent history cannot be deleted")
         self._repository.delete_agent_runs(agent_id)
+        log_event("history.agent.deleted", agent_id=agent_id)
 
     def snapshot(self, agent_id: int) -> dict[str, Any]:
         runs = [
@@ -140,6 +151,13 @@ class AgentHistory:
                     run["entries"].extend(live_entries)
                     run["event_sequence"] = event_sequence
                     break
+        log_event(
+            "history.agent.loaded",
+            level=logging.DEBUG,
+            agent_id=agent_id,
+            turn_count=len(runs),
+            active=active is not None,
+        )
         return {"agent_id": agent_id, "runs": runs}
 
     def _load_messages(self, agent_id: int) -> list[ModelMessage]:
@@ -231,6 +249,16 @@ class AgentHistory:
         with self._lock:
             if self._active_runs.get(run.agent_id) is run:
                 del self._active_runs[run.agent_id]
+        log_event(
+            "history.turn.completed",
+            agent_id=run.agent_id,
+            turn_id=run.run_id,
+            sequence=run.sequence,
+            status=status,
+            message_count=len(messages),
+            has_usage=usage is not None,
+            has_error=error is not None,
+        )
         self._publish(
             run,
             "run_completed" if status == "completed" else "run_failed",

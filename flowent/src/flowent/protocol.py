@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
-import sys
+import time
 from collections.abc import Callable
 from threading import Lock
 from typing import Any, TextIO
 
+from flowent.diagnostics import log_event, log_exception
 from flowent.domain import DomainError, OrganizationState
 from flowent.history import AgentHistory
 from flowent.model_runner import ModelRuntime
@@ -60,14 +62,28 @@ class Dispatcher:
         }
 
     def dispatch(self, request: Any) -> dict[str, Any]:
+        started = time.monotonic()
         request_id: Any = request.get("id") if isinstance(request, dict) else None
+        method: Any = request.get("method") if isinstance(request, dict) else None
+        diagnostic_request_id = (
+            request_id if type(request_id) is int and request_id >= 1 else None
+        )
+        diagnostic_method = (
+            method
+            if isinstance(method, str) and method in self._handlers
+            else "unknown"
+        )
+        request_log_level = (
+            logging.DEBUG
+            if diagnostic_method in ("organization.get", "agent.history.get")
+            else logging.INFO
+        )
         try:
             if not isinstance(request, dict):
                 raise ProtocolError("Request must be an object")
             if type(request_id) is not int or request_id < 1:
                 raise ProtocolError("Request id must be a positive integer")
 
-            method = request.get("method")
             if not isinstance(method, str):
                 raise ProtocolError("Request method must be a string")
 
@@ -79,21 +95,55 @@ class Dispatcher:
             if handler is None:
                 raise DomainError("method_not_found", f"Unknown method: {method}")
 
-            return {"id": request_id, "result": handler(params)}
+            log_event(
+                "protocol.request.started",
+                level=request_log_level,
+                request_id=diagnostic_request_id,
+                method=diagnostic_method,
+            )
+            result = handler(params)
+            log_event(
+                "protocol.request.completed",
+                level=request_log_level,
+                request_id=diagnostic_request_id,
+                method=diagnostic_method,
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
+            return {"id": request_id, "result": result}
         except DomainError as error:
+            log_event(
+                "protocol.request.rejected",
+                level=logging.WARNING,
+                request_id=diagnostic_request_id,
+                method=diagnostic_method,
+                error_code=error.code,
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
             return {
                 "id": request_id,
                 "error": {"code": error.code, "message": error.message},
             }
         except (KeyError, TypeError, ValueError, ProtocolError) as error:
+            log_event(
+                "protocol.request.rejected",
+                level=logging.WARNING,
+                request_id=diagnostic_request_id,
+                method=diagnostic_method,
+                error_code="invalid_request",
+                error_type=type(error).__name__,
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
             return {
                 "id": request_id,
                 "error": {"code": "invalid_request", "message": str(error)},
             }
         except (OSError, RuntimeError, sqlite3.Error) as error:
-            print(
-                f"[Protocol] Request failed: {type(error).__name__}",
-                file=sys.stderr,
+            log_exception(
+                "protocol.request.failed",
+                error,
+                request_id=diagnostic_request_id,
+                method=diagnostic_method,
+                duration_ms=round((time.monotonic() - started) * 1000),
             )
             return {
                 "id": request_id,
@@ -232,6 +282,11 @@ def serve(
         try:
             request = json.loads(line)
         except json.JSONDecodeError as error:
+            log_event(
+                "protocol.input.invalid_json",
+                level=logging.WARNING,
+                line_length=len(line),
+            )
             response = {
                 "id": None,
                 "error": {"code": "invalid_json", "message": str(error)},

@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from flowent.diagnostics import log_event, log_exception
 from flowent.history import RunStatus
 
 SCHEMA_VERSION = 7
@@ -22,32 +24,64 @@ def data_directory() -> Path:
     return Path.home() / ".flowent"
 
 
+def organization_metrics(organization: dict[str, Any]) -> dict[str, int]:
+    discussions = organization["discussions"]
+    return {
+        "member_count": len(organization["members"]),
+        "discussion_count": len(discussions),
+        "message_count": sum(len(item["messages"]) for item in discussions),
+    }
+
+
 class SQLiteStore:
     def __init__(self, directory: Path) -> None:
+        started = time.monotonic()
         self.directory = directory
         self.path = directory / "flowent.sqlite3"
-        self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.directory.chmod(0o700)
-        with self._connect() as connection:
-            version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version == 0:
-                self._create_schema(connection)
-            elif version == 1:
-                self._migrate_version_one(connection)
-            elif version == 2:
-                self._migrate_version_two(connection)
-            elif version == 3:
-                self._migrate_version_three(connection)
-            elif version == 4:
-                self._migrate_version_four(connection)
-            elif version == 5:
-                self._migrate_version_five(connection)
-            elif version == 6:
-                self._migrate_version_six(connection)
-            elif version != SCHEMA_VERSION:
-                raise RuntimeError(f"Unsupported Flowent database version: {version}")
-            self._interrupt_running_agent_runs(connection)
-        self.path.chmod(0o600)
+        log_event("database.open.started", database_path=str(self.path))
+        version = -1
+        try:
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.directory.chmod(0o700)
+            with self._connect() as connection:
+                version = connection.execute("PRAGMA user_version").fetchone()[0]
+                if version == 0:
+                    self._create_schema(connection)
+                elif version == 1:
+                    self._migrate_version_one(connection)
+                elif version == 2:
+                    self._migrate_version_two(connection)
+                elif version == 3:
+                    self._migrate_version_three(connection)
+                elif version == 4:
+                    self._migrate_version_four(connection)
+                elif version == 5:
+                    self._migrate_version_five(connection)
+                elif version == 6:
+                    self._migrate_version_six(connection)
+                elif version != SCHEMA_VERSION:
+                    raise RuntimeError(
+                        f"Unsupported Flowent database version: {version}"
+                    )
+                interrupted_runs = self._interrupt_running_agent_runs(connection)
+            self.path.chmod(0o600)
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            log_exception(
+                "database.open.failed",
+                error,
+                database_path=str(self.path),
+                previous_schema_version=version,
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
+            raise
+        log_event(
+            "database.open.completed",
+            database_path=str(self.path),
+            previous_schema_version=version,
+            schema_version=SCHEMA_VERSION,
+            interrupted_runs=interrupted_runs,
+            duration_ms=round((time.monotonic() - started) * 1000),
+        )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -321,9 +355,9 @@ class SQLiteStore:
             )
 
     @staticmethod
-    def _interrupt_running_agent_runs(connection: sqlite3.Connection) -> None:
+    def _interrupt_running_agent_runs(connection: sqlite3.Connection) -> int:
         with connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE agent_runs
                 SET status = 'interrupted', completed_at = ?,
@@ -332,6 +366,7 @@ class SQLiteStore:
                 """,
                 (datetime.now(UTC).isoformat(),),
             )
+        return cursor.rowcount
 
     @staticmethod
     def _migrate_model_api_type(connection: sqlite3.Connection) -> None:
@@ -441,11 +476,17 @@ class SQLiteStore:
         return {"members": members, "discussions": discussions}
 
     def load_organization(self) -> dict[str, Any] | None:
+        started = time.monotonic()
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT organization_saved FROM application_state WHERE id = 1"
             ).fetchone()
             if row is None or not row["organization_saved"]:
+                log_event(
+                    "database.organization.loaded",
+                    saved=False,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
                 return None
             members = [
                 {
@@ -513,9 +554,17 @@ class SQLiteStore:
                         "messages": messages,
                     }
                 )
-            return {"members": members, "discussions": discussions}
+            organization = {"members": members, "discussions": discussions}
+        log_event(
+            "database.organization.loaded",
+            saved=True,
+            duration_ms=round((time.monotonic() - started) * 1000),
+            **organization_metrics(organization),
+        )
+        return organization
 
     def save_organization(self, organization: dict[str, Any]) -> None:
+        started = time.monotonic()
         with self._connect() as connection, connection:
             connection.execute(
                 "UPDATE application_state SET organization_saved = 1 WHERE id = 1"
@@ -524,6 +573,11 @@ class SQLiteStore:
             connection.execute("DELETE FROM members")
             self._write_organization(connection, organization)
         self.path.chmod(0o600)
+        log_event(
+            "database.organization.saved",
+            duration_ms=round((time.monotonic() - started) * 1000),
+            **organization_metrics(organization),
+        )
 
     @staticmethod
     def _write_organization(
@@ -596,18 +650,31 @@ class SQLiteStore:
                 """
             ).fetchone()
             if row is None:
+                log_event("database.model_config.loaded", configured=False)
                 return None
-            return {
+            config = {
                 "api_type": row["api_type"],
                 "base_url": row["base_url"],
                 "api_key": row["api_key"],
                 "model": row["model"],
             }
+        log_event(
+            "database.model_config.loaded",
+            configured=True,
+            api_type=config["api_type"],
+            model=config["model"],
+        )
+        return config
 
     def save_model_config(self, config: dict[str, str]) -> None:
         with self._connect() as connection, connection:
             self._write_model_config(connection, config)
         self.path.chmod(0o600)
+        log_event(
+            "database.model_config.saved",
+            api_type=config["api_type"],
+            model=config["model"],
+        )
 
     def begin_agent_run(
         self,
@@ -717,8 +784,9 @@ class SQLiteStore:
                 """
             ).fetchone()
             if row is None:
+                log_event("database.observability_config.loaded", configured=False)
                 return None
-            return {
+            config = {
                 "enabled": bool(row["enabled"]),
                 "base_url": row["base_url"],
                 "public_key": row["public_key"],
@@ -726,6 +794,14 @@ class SQLiteStore:
                 "environment": row["environment"],
                 "capture_content": bool(row["capture_content"]),
             }
+        log_event(
+            "database.observability_config.loaded",
+            configured=True,
+            enabled=config["enabled"],
+            environment=config["environment"],
+            capture_content=config["capture_content"],
+        )
+        return config
 
     def save_observability_config(self, config: dict[str, Any]) -> None:
         with self._connect() as connection, connection:
@@ -753,6 +829,12 @@ class SQLiteStore:
                 ),
             )
         self.path.chmod(0o600)
+        log_event(
+            "database.observability_config.saved",
+            enabled=config["enabled"],
+            environment=config["environment"],
+            capture_content=config["capture_content"],
+        )
 
     @staticmethod
     def _write_model_config(

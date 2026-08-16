@@ -22,6 +22,12 @@ def main(
 
     from pathlib import Path
 
+    from flowent.diagnostics import (
+        configure_diagnostics,
+        log_event,
+        log_exception,
+        shutdown_diagnostics,
+    )
     from flowent.domain import OrganizationState
     from flowent.history import AgentHistory
     from flowent.host_tools import HostTools, ProcessWatcher
@@ -34,33 +40,47 @@ def main(
         create_model_runtime = create_runner
 
     working_directory = Path.cwd().resolve()
-    store = SQLiteStore(data_directory())
-    writer = JsonLineWriter(sys.stdout)
-    history = AgentHistory(
-        store,
-        lambda event: writer.write_event("agent.history.updated", event),
+    storage_directory = data_directory()
+    configure_diagnostics(storage_directory)
+    log_event(
+        "process.started",
+        python_version=(
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        ),
+        working_directory=str(working_directory),
+        data_directory=str(storage_directory),
+        frozen=bool(getattr(sys, "frozen", False)),
     )
-    host_tools = HostTools(working_directory)
-    watcher = ProcessWatcher(host_tools.process_owner)
-    state = OrganizationState(
-        working_directory,
-        persisted=store.load_organization(),
-        on_persist=store.save_organization,
-    )
-    model_runtime = create_model_runtime(
-        stored_config=store.load_model_config(),
-        stored_observability_config=store.load_observability_config(),
-        on_configure=store.save_model_config,
-        on_configure_observability=store.save_observability_config,
-    )
-    runtime = AgentRuntime(
-        state,
-        model_runtime,
-        host_tools,
-        history,
-    )
-    runtime.start()
+    runtime: AgentRuntime | None = None
+    model_runtime: ModelRuntime | None = None
+    watcher: ProcessWatcher | None = None
     try:
+        store = SQLiteStore(storage_directory)
+        writer = JsonLineWriter(sys.stdout)
+        history = AgentHistory(
+            store,
+            lambda event: writer.write_event("agent.history.updated", event),
+        )
+        host_tools = HostTools(working_directory)
+        watcher = ProcessWatcher(host_tools.process_owner)
+        state = OrganizationState(
+            working_directory,
+            persisted=store.load_organization(),
+            on_persist=store.save_organization,
+        )
+        model_runtime = create_model_runtime(
+            stored_config=store.load_model_config(),
+            stored_observability_config=store.load_observability_config(),
+            on_configure=store.save_model_config,
+            on_configure_observability=store.save_observability_config,
+        )
+        runtime = AgentRuntime(
+            state,
+            model_runtime,
+            host_tools,
+            history,
+        )
+        runtime.start()
         serve(
             sys.stdin,
             sys.stdout,
@@ -70,10 +90,18 @@ def main(
             history,
             writer,
         )
+    except BaseException as error:
+        log_exception("process.failed", error)
+        raise
     finally:
-        runtime.stop()
-        model_runtime.shutdown()
-        watcher.close()
+        if runtime is not None:
+            runtime.stop()
+        if model_runtime is not None:
+            model_runtime.shutdown()
+        if watcher is not None:
+            watcher.close()
+        log_event("process.stopped")
+        shutdown_diagnostics()
 
 
 if __name__ == "__main__":

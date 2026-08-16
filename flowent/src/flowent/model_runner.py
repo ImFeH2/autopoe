@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_core import to_jsonable_python
 
+from flowent.diagnostics import log_event, log_exception, register_secret
 from flowent.domain import DomainError, Reminder
 from flowent.host_tools import HostToolError
 from flowent.observability import (
@@ -134,6 +136,8 @@ class PydanticAgentRunner:
             )
         capabilities = [observability.capability()] if observability else None
         self._observability = observability
+        self._api_type = config.api_type
+        self._model_name = config.model
         self._agent = Agent(
             model,
             deps_type=AgentRunContext,
@@ -344,6 +348,18 @@ class PydanticAgentRunner:
                     )
 
         message_history = list(context.message_history)
+        api_type = getattr(self, "_api_type", "unknown")
+        model_name = getattr(self, "_model_name", "unknown")
+        started = time.monotonic()
+        log_event(
+            "model.request.started",
+            agent_id=reminder.agent_id,
+            turn_id=context.run_id,
+            api_type=api_type,
+            model=model_name,
+            reminder_count=len(reminder.mentions),
+            previous_message_count=len(message_history),
+        )
         with capture_run_messages() as captured_messages:
             try:
                 with trace_context:
@@ -356,14 +372,45 @@ class PydanticAgentRunner:
                         event_stream_handler=handle_events,
                     )
             except AgentRunError as error:
+                log_exception(
+                    "model.request.failed",
+                    error,
+                    agent_id=reminder.agent_id,
+                    turn_id=context.run_id,
+                    api_type=api_type,
+                    model=model_name,
+                    request_count=request_index,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
                 raise AgentRunFailure(
                     "Model request failed",
                     tuple(captured_messages[len(message_history) :]),
                 ) from error
-        return AgentRunOutcome(
-            tuple(result.new_messages()),
-            cast(dict[str, Any], to_jsonable_python(result.usage)),
+            except Exception as error:
+                log_exception(
+                    "model.request.failed",
+                    error,
+                    agent_id=reminder.agent_id,
+                    turn_id=context.run_id,
+                    api_type=api_type,
+                    model=model_name,
+                    request_count=request_index,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
+                raise
+        messages = tuple(result.new_messages())
+        usage = cast(dict[str, Any], to_jsonable_python(result.usage))
+        log_event(
+            "model.request.completed",
+            agent_id=reminder.agent_id,
+            turn_id=context.run_id,
+            api_type=api_type,
+            model=model_name,
+            request_count=request_index,
+            message_count=len(messages),
+            duration_ms=round((time.monotonic() - started) * 1000),
         )
+        return AgentRunOutcome(messages, usage)
 
 
 class ModelRuntime:
@@ -383,6 +430,10 @@ class ModelRuntime:
     ) -> None:
         self._lock = Lock()
         self._config = config
+        if config is not None:
+            register_secret(config.api_key)
+        if observability_config is not None:
+            register_secret(observability_config.secret_key)
         self._observability_config = observability_config
         self._on_configure = on_configure
         self._on_configure_observability = on_configure_observability
@@ -393,6 +444,13 @@ class ModelRuntime:
         session = self._create_observability_session(observability_config)
         self._current_observability_session = session
         self._runner = self._runner_factory(config, session)
+        log_event(
+            "model.runtime.initialized",
+            configured=config is not None,
+            api_type=config.api_type if config is not None else None,
+            model=config.model if config is not None else None,
+            observability_enabled=session is not None,
+        )
 
     def _create_observability_session(
         self,
@@ -487,6 +545,7 @@ class ModelRuntime:
                 api_key=api_key,
                 model=model,
             )
+            register_secret(api_key)
             runner = self._runner_factory(
                 config,
                 self._current_observability_session,
@@ -495,6 +554,11 @@ class ModelRuntime:
                 self._on_configure(config.persistence_data())
             self._config = config
             self._runner = runner
+        log_event(
+            "model.config.updated",
+            api_type=config.api_type,
+            model=config.model,
+        )
         return self.settings()
 
     def configure_observability(
@@ -521,6 +585,7 @@ class ModelRuntime:
                 environment=environment,
                 capture_content=capture_content,
             )
+            register_secret(secret_key)
             config.validate()
             session = self._create_observability_session(config)
             try:
@@ -539,6 +604,13 @@ class ModelRuntime:
             session_to_shutdown = self._remove_session_if_idle(previous_session)
         if session_to_shutdown is not None:
             session_to_shutdown.shutdown()
+        log_event(
+            "observability.config.updated",
+            enabled=config.enabled,
+            environment=config.environment,
+            capture_content=config.capture_content,
+            session_active=session is not None,
+        )
         return self.observability_settings()
 
     def _remove_session_if_idle(
@@ -588,6 +660,7 @@ class ModelRuntime:
             self._observability_sessions = []
         for session in sessions:
             session.shutdown()
+        log_event("model.runtime.stopped", observability_session_count=len(sessions))
 
 
 def create_runner(

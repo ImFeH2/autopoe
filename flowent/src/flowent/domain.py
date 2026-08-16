@@ -407,6 +407,17 @@ class OrganizationState:
                 return Reminder(member.id, mentions), self._revision
             return None, self._revision
 
+    def agent_execution_diagnostics(self, agent_id: int) -> dict[str, Any]:
+        with self._condition:
+            execution = self._agent_execution[agent_id]
+            return {
+                "status": execution.status,
+                "acknowledged_in_turn": execution.acknowledged_in_turn,
+                "consecutive_unproductive_turns": (
+                    execution.consecutive_unproductive_turns
+                ),
+            }
+
     def complete_turn(self, agent_id: int, error: str | None = None) -> None:
         with self._condition:
             execution = self._agent_execution[agent_id]

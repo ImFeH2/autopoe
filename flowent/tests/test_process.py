@@ -85,6 +85,85 @@ def test_flowent_shutdown_request_stops_the_process(tmp_path: Path) -> None:
         close_process(process)
 
 
+def test_flowent_writes_private_diagnostics_without_request_content(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    process = start_flowent(data)
+    api_key = "process-api-key-secret"
+    trace_secret = "process-trace-secret"
+    message_body = "process-private-message"
+
+    try:
+        request(
+            process,
+            1,
+            "settings.update_model",
+            {
+                "api_type": "openai-chat",
+                "base_url": "https://example.invalid/v1",
+                "api_key": api_key,
+                "model": "test-model",
+            },
+        )
+        request(
+            process,
+            2,
+            "settings.update_observability",
+            {
+                "enabled": False,
+                "base_url": "",
+                "public_key": "process-public-key",
+                "secret_key": trace_secret,
+                "environment": "test",
+                "capture_content": False,
+            },
+        )
+        request(process, 3, "organization.create_agent", {"name": "Ada"})
+        request(
+            process,
+            4,
+            "discussion.create",
+            {"topic": "Diagnostics", "creator_id": 1, "member_ids": [2]},
+        )
+        request(
+            process,
+            5,
+            "discussion.send",
+            {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": message_body,
+                "mention_ids": [],
+            },
+        )
+        assert request(process, 6, "system.shutdown", {}) == {"stopped": True}
+        assert process.wait(timeout=10) == 0
+    finally:
+        close_process(process)
+
+    log_path = data / "logs" / "flowent.jsonl"
+    content = log_path.read_text()
+    records = [json.loads(line) for line in content.splitlines()]
+    events = {record["event"] for record in records}
+    assert {
+        "diagnostics.configured",
+        "process.started",
+        "database.open.completed",
+        "scheduler.started",
+        "protocol.request.completed",
+        "database.model_config.saved",
+        "database.observability_config.saved",
+        "process.stopped",
+    } <= events
+    assert api_key not in content
+    assert trace_secret not in content
+    assert message_body not in content
+    if os.name == "posix":
+        assert (data / "logs").stat().st_mode & 0o777 == 0o700
+        assert log_path.stat().st_mode & 0o777 == 0o600
+
+
 def test_flowent_accepts_utf8_jsonl_messages(tmp_path: Path) -> None:
     process = start_flowent(tmp_path / "data")
 
