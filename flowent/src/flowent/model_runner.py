@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from threading import Lock
 from typing import Any, Literal, cast
 
+from openai import Timeout
 from pydantic_ai import (
     Agent,
     FunctionToolCallEvent,
@@ -19,7 +20,6 @@ from pydantic_ai import (
     ThinkingPartDelta,
     capture_run_messages,
 )
-from pydantic_ai.exceptions import AgentRunError
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -104,6 +104,16 @@ class UnavailableRunner:
         raise AgentRunFailure(self._message)
 
 
+def _openai_provider(config: ModelConfig) -> OpenAIProvider:
+    provider = OpenAIProvider(
+        base_url=config.base_url,
+        api_key=config.api_key,
+    )
+    provider.client.timeout = Timeout(120, connect=5, write=30, pool=30)
+    provider.client.max_retries = 0
+    return provider
+
+
 class PydanticAgentRunner:
     def __init__(
         self,
@@ -129,18 +139,12 @@ class PydanticAgentRunner:
         elif config.api_type == "openai-responses":
             model = OpenAIResponsesModel(
                 cast(OpenAIModelName, config.model),
-                provider=OpenAIProvider(
-                    base_url=config.base_url,
-                    api_key=config.api_key,
-                ),
+                provider=_openai_provider(config),
             )
         else:
             model = OpenAIChatModel(
                 cast(OpenAIModelName, config.model),
-                provider=OpenAIProvider(
-                    base_url=config.base_url,
-                    api_key=config.api_key,
-                ),
+                provider=_openai_provider(config),
             )
         capabilities = [observability.capability()] if observability else None
         self._observability = observability
@@ -445,7 +449,7 @@ class PydanticAgentRunner:
                         run_id=context.run_id,
                         event_stream_handler=handle_events,
                     )
-            except AgentRunError as error:
+            except Exception as error:
                 log_exception(
                     "model.request.failed",
                     error,
@@ -464,18 +468,6 @@ class PydanticAgentRunner:
                         persisted_prompt=persisted_prompt,
                     ),
                 ) from error
-            except Exception as error:
-                log_exception(
-                    "model.request.failed",
-                    error,
-                    agent_id=reminder.agent_id,
-                    turn_id=context.run_id,
-                    api_type=api_type,
-                    model=model_name,
-                    request_count=request_index,
-                    duration_ms=round((time.monotonic() - started) * 1000),
-                )
-                raise
         messages = clean_todo_context(
             result.new_messages(),
             runtime_prompt=prompt,

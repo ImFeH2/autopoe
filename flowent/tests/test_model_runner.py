@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from openai import APITimeoutError
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
@@ -114,6 +115,25 @@ def test_pydantic_runner_uses_the_selected_api_type(
     )
 
     assert isinstance(runner._agent.model, model_type)
+
+
+@pytest.mark.parametrize("api_type", ["openai-chat", "openai-responses"])
+def test_openai_runner_bounds_silent_requests(api_type: ApiType) -> None:
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type=api_type,
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+
+    client = runner._agent.model.provider.client
+    assert client.timeout.connect == 5
+    assert client.timeout.read == 120
+    assert client.timeout.write == 30
+    assert client.timeout.pool == 30
+    assert client.max_retries == 0
 
 
 def test_all_agents_use_the_latest_shared_runner(
@@ -469,6 +489,27 @@ def test_missing_model_config_returns_runner_that_fails_on_activation(
     activation, context = activation_context(tmp_path)
 
     with pytest.raises(AgentRunFailure, match="configuration is incomplete"):
+        runner.run(activation, context)
+
+
+def test_openai_timeout_is_mapped_to_safe_model_failure(tmp_path: Path) -> None:
+    class TimeoutAgent:
+        def run_sync(
+            self,
+            prompt: str,
+            deps: AgentRunContext,
+            metadata: dict[str, Any],
+            **_kwargs: Any,
+        ) -> Any:
+            del prompt, deps, metadata
+            raise APITimeoutError(request=object())
+
+    runner = object.__new__(PydanticAgentRunner)
+    runner._observability = None  # type: ignore[attr-defined]
+    runner._agent = TimeoutAgent()  # type: ignore[attr-defined]
+    activation, context = activation_context(tmp_path)
+
+    with pytest.raises(AgentRunFailure, match="^Model request failed$"):
         runner.run(activation, context)
 
 

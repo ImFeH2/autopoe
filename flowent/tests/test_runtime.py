@@ -398,5 +398,8 @@ def test_known_runner_failure_sets_error_without_immediate_retry(
             "error": "Model request failed",
         }
         assert runner.calls == 1
+        assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
+            {"member_id": 2, "status": "read"}
+        ]
     finally:
         runtime.stop()
