@@ -11,6 +11,7 @@ import pytest
 
 from flowent.domain import DomainError, OrganizationState, Reminder
 from flowent.host_tools import HostTools
+from flowent.memory import AgentMemory
 from flowent.persistence import SQLiteStore
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRuntime
 from flowent.todos import AgentTodos
@@ -107,6 +108,40 @@ def test_agent_todo_tool_updates_the_runtime_status_bar(tmp_path: Path) -> None:
     context.todo("complete", todo_id=1)
     assert context.todo_status_reminder() is None
     assert context.model_tool_result({"ok": True}) == {"ok": True}
+
+
+def test_agent_memory_tool_is_private_and_exposes_current_index(tmp_path: Path) -> None:
+    memories = AgentMemory(tmp_path / "data")
+    context = AgentRunContext(
+        2,
+        OrganizationState(),
+        HostTools(tmp_path),
+        memories=memories,
+    )
+
+    assert (
+        context.memory(
+            "write",
+            path="MEMORY.md",
+            content="# Index\n- Read patterns.md\n",
+        )["path"]
+        == "MEMORY.md"
+    )
+    assert (
+        context.memory(
+            "write",
+            path="patterns.md",
+            content="Private insight",
+        )["path"]
+        == "patterns.md"
+    )
+    assert context.memory("list") == {
+        "paths": ["MEMORY.md", "patterns.md"],
+        "count": 2,
+    }
+    assert context.memory("read", path="patterns.md")["content"] == ("Private insight")
+    assert "Read patterns.md" in context.memory_index_context()
+    assert memories.list(3) == {"paths": [], "count": 0}
 
 
 def test_agent_discussion_tools_are_restricted_to_members(tmp_path: Path) -> None:

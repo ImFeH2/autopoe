@@ -163,6 +163,9 @@ class PydanticAgentRunner:
                 "Use todo to maintain unfinished multi-step work, keep at most one Todo in progress, "
                 "and complete work promptly. Todo state never replaces discussion.ack and does not "
                 "schedule another Turn. Current Todo status may follow tool results as a reminder. "
+                "Use memory for private long-term knowledge that will help your future Turns. Keep "
+                "MEMORY.md as a concise index and put details in topic Markdown files. Memory is private "
+                "to you, does not schedule Turns, and must not replace Discussion for shared information. "
                 "Use run with an argv list to inspect the launch directory and run commands. "
                 "Use edit for exact text replacement in existing UTF-8 files. Read enough context first, "
                 "provide an old_text value that matches exactly once, and use replace_all only when every "
@@ -227,6 +230,58 @@ class PydanticAgentRunner:
                     result = ctx.deps.organization(action, name=name)
                 else:
                     result = ctx.deps.organization(action)
+                return model_result(ctx, result)
+            except DomainError as error:
+                raise ModelRetry(error.message) from error
+
+        @self._agent.tool(sequential=True)
+        def memory(
+            ctx: RunContext[AgentRunContext],
+            action: Literal["list", "read", "write", "edit", "delete"],
+            path: str | None = None,
+            content: str | None = None,
+            old_text: str | None = None,
+            new_text: str | None = None,
+            replace_all: bool = False,
+            offset: int = 1,
+            limit: int = 200,
+        ) -> Any:
+            """List, read, write, edit, or delete private persistent Markdown Memory."""
+            try:
+                if action == "list":
+                    result = ctx.deps.memory(action)
+                else:
+                    if path is None:
+                        raise ModelRetry(f"path is required for {action}")
+                    if action == "read":
+                        result = ctx.deps.memory(
+                            action,
+                            path=path,
+                            offset=offset,
+                            limit=limit,
+                        )
+                    elif action == "write":
+                        if content is None:
+                            raise ModelRetry("content is required for write")
+                        result = ctx.deps.memory(
+                            action,
+                            path=path,
+                            content=content,
+                        )
+                    elif action == "edit":
+                        if old_text is None or new_text is None:
+                            raise ModelRetry(
+                                "old_text and new_text are required for edit"
+                            )
+                        result = ctx.deps.memory(
+                            action,
+                            path=path,
+                            old_text=old_text,
+                            new_text=new_text,
+                            replace_all=replace_all,
+                        )
+                    else:
+                        result = ctx.deps.memory(action, path=path)
                 return model_result(ctx, result)
             except DomainError as error:
                 raise ModelRetry(error.message) from error
@@ -377,6 +432,8 @@ class PydanticAgentRunner:
                 "marks a Mention as handled."
             )
         persisted_prompt = prompt
+        if memory_context := context.memory_index_context():
+            prompt += f"\n\n{memory_context}"
         if todo_status := context.todo_status_reminder():
             prompt += f"\n\n{todo_status}"
         run_observability = (
@@ -473,13 +530,13 @@ class PydanticAgentRunner:
                 )
                 raise AgentRunFailure(
                     "Model request failed",
-                    clean_todo_context(
+                    clean_runtime_context(
                         captured_messages[len(message_history) :],
                         runtime_prompt=prompt,
                         persisted_prompt=persisted_prompt,
                     ),
                 ) from error
-        messages = clean_todo_context(
+        messages = clean_runtime_context(
             result.new_messages(),
             runtime_prompt=prompt,
             persisted_prompt=persisted_prompt,
@@ -498,7 +555,7 @@ class PydanticAgentRunner:
         return AgentRunOutcome(messages, usage)
 
 
-def clean_todo_context(
+def clean_runtime_context(
     messages: Sequence[ModelMessage],
     *,
     runtime_prompt: str | None = None,

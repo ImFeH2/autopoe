@@ -13,6 +13,7 @@ from flowent.diagnostics import log_event, log_exception
 from flowent.domain import OrganizationState, Reminder
 from flowent.history import AgentHistory, AgentHistoryRun
 from flowent.host_tools import HostToolError, HostTools
+from flowent.memory import AgentMemory
 from flowent.todos import AgentTodos, wrap_tool_result
 
 
@@ -25,6 +26,7 @@ class AgentRunContext:
     message_history: tuple[ModelMessage, ...] = ()
     history_event_sink: Callable[..., None] | None = None
     todos: AgentTodos | None = None
+    memories: AgentMemory | None = None
 
     def emit_history_event(self, event_type: str, **data: Any) -> None:
         if self.history_event_sink is not None:
@@ -80,6 +82,18 @@ class AgentRunContext:
             lambda: self._todo(action, arguments),
         )
 
+    def memory(self, action: str, **arguments: Any) -> Any:
+        return self._call_tool(
+            "memory",
+            action,
+            lambda: self._memory(action, arguments),
+        )
+
+    def memory_index_context(self) -> str | None:
+        if self.memories is None:
+            return None
+        return self.memories.index_context(self.agent_id)
+
     def todo_status_reminder(self) -> str | None:
         if self.todos is None:
             return None
@@ -87,6 +101,36 @@ class AgentRunContext:
 
     def model_tool_result(self, result: Any) -> Any:
         return wrap_tool_result(result, self.todo_status_reminder())
+
+    def _memory(self, action: str, arguments: dict[str, Any]) -> Any:
+        if self.memories is None:
+            raise RuntimeError("Agent Memory is unavailable")
+        if action == "list":
+            return self.memories.list(self.agent_id)
+        if action == "read":
+            return self.memories.read(
+                self.agent_id,
+                arguments["path"],
+                arguments.get("offset", 1),
+                arguments.get("limit", 200),
+            )
+        if action == "write":
+            return self.memories.write(
+                self.agent_id,
+                arguments["path"],
+                arguments["content"],
+            )
+        if action == "edit":
+            return self.memories.edit(
+                self.agent_id,
+                arguments["path"],
+                arguments["old_text"],
+                arguments["new_text"],
+                arguments.get("replace_all", False),
+            )
+        if action == "delete":
+            return self.memories.delete(self.agent_id, arguments["path"])
+        raise ValueError(f"Unknown memory action: {action}")
 
     def _todo(self, action: str, arguments: dict[str, Any]) -> Any:
         if self.todos is None:
@@ -220,6 +264,18 @@ class AgentRunContext:
             }
         elif tool_name == "edit":
             result_fields = {"replacement_count": result["replacement_count"]}
+        elif tool_name == "memory":
+            if action == "list":
+                result_fields = {"result_count": result["count"]}
+            elif action == "read":
+                result_fields = {
+                    "content_bytes": len(result["content"].encode("utf-8")),
+                    "truncated": result["truncated"],
+                }
+            elif action in ("write", "edit"):
+                result_fields = {"content_bytes": result["bytes"]}
+                if action == "edit":
+                    result_fields["replacement_count"] = result["replacement_count"]
         elif tool_name == "todo" and action == "list":
             result_fields = {"result_count": result["count"]}
         elif isinstance(result, list):
@@ -274,12 +330,14 @@ class AgentRuntime:
         host_tools: HostTools,
         history: AgentHistory | None = None,
         todos: AgentTodos | None = None,
+        memories: AgentMemory | None = None,
     ) -> None:
         self._state = state
         self._runner = runner
         self._host_tools = host_tools
         self._history = history
         self._todos = todos
+        self._memories = memories
         self._stop_event = Event()
         self._stop_lock = Lock()
         self._stop_completed = False
@@ -392,6 +450,7 @@ class AgentRuntime:
                         history_run.emit if history_run is not None else None
                     ),
                     todos=self._todos,
+                    memories=self._memories,
                 ),
             )
             if result is not None:

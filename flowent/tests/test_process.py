@@ -10,6 +10,10 @@ from pathlib import Path
 import psutil
 import pytest
 
+from flowent.domain import OrganizationState
+from flowent.memory import AgentMemory
+from flowent.persistence import SQLiteStore
+
 
 def start_flowent(
     data_directory: Path,
@@ -192,6 +196,36 @@ def test_flowent_accepts_utf8_jsonl_messages(tmp_path: Path) -> None:
         assert process.wait(timeout=10) == 0
     finally:
         close_process(process)
+
+
+def test_memory_stays_in_data_directory_and_orphans_are_removed_on_startup(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SQLiteStore(data)
+    state = OrganizationState(
+        workspace,
+        persisted=store.load_organization(),
+        on_persist=store.save_organization,
+    )
+    state.create_agent("Ada")
+    memories = AgentMemory(data)
+    memories.write(2, "MEMORY.md", "Persistent Agent Memory")
+    memories.write(3, "MEMORY.md", "Orphaned Agent Memory")
+
+    process = start_flowent(data, workspace)
+    try:
+        assert request(process, 1, "system.shutdown", {}) == {"stopped": True}
+        assert process.wait(timeout=10) == 0
+    finally:
+        close_process(process)
+
+    restored = AgentMemory(data)
+    assert restored.read(2, "MEMORY.md")["content"] == "Persistent Agent Memory"
+    assert restored.list(3) == {"paths": [], "count": 0}
+    assert list(workspace.iterdir()) == []
 
 
 def test_flowent_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> None:

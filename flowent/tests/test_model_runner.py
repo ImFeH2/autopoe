@@ -28,12 +28,13 @@ from pydantic_ai.models.test import TestModel
 
 from flowent.domain import OrganizationState, Reminder, ReminderMention
 from flowent.host_tools import HostTools
+from flowent.memory import AgentMemory
 from flowent.model_runner import (
     ApiType,
     ModelConfig,
     ModelRuntime,
     PydanticAgentRunner,
-    clean_todo_context,
+    clean_runtime_context,
     create_runner,
 )
 from flowent.observability import (
@@ -159,6 +160,7 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
     assert set(runner._agent._function_toolset.tools) == {
         "discussion",
         "edit",
+        "memory",
         "organization",
         "run",
         "todo",
@@ -239,6 +241,125 @@ def test_pydantic_runner_executes_edit_and_run_tools(tmp_path: Path) -> None:
         for event_type, data in events
     )
     assert "Tools completed" in str(outcome.messages)
+
+
+def test_pydantic_runner_executes_memory_tools(tmp_path: Path) -> None:
+    calls = 0
+    seen_messages: list[list[ModelMessage]] = []
+
+    async def respond(messages: list[ModelMessage], _info: AgentInfo):
+        nonlocal calls
+        calls += 1
+        seen_messages.append(list(messages))
+        if calls == 1:
+            yield {
+                0: DeltaToolCall(
+                    name="memory",
+                    json_args=json.dumps(
+                        {
+                            "action": "write",
+                            "path": "MEMORY.md",
+                            "content": "# Index\n- Read patterns.md\n",
+                        }
+                    ),
+                    tool_call_id="memory-write-1",
+                )
+            }
+        elif calls == 2:
+            yield {
+                0: DeltaToolCall(
+                    name="memory",
+                    json_args=json.dumps(
+                        {
+                            "action": "write",
+                            "path": "patterns.md",
+                            "content": "Persistent insight",
+                        }
+                    ),
+                    tool_call_id="memory-write-2",
+                )
+            }
+        elif calls == 3:
+            yield {
+                0: DeltaToolCall(
+                    name="memory",
+                    json_args=json.dumps({"action": "read", "path": "patterns.md"}),
+                    tool_call_id="memory-read-1",
+                )
+            }
+        else:
+            yield "Memory recorded"
+
+    memories = AgentMemory(tmp_path / "data")
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    reminder, context = activation_context(tmp_path)
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                context.agent_id,
+                context.state,
+                context.host_tools,
+                history_event_sink=lambda event_type, **data: events.append(
+                    (event_type, data)
+                ),
+                memories=memories,
+            ),
+        )
+
+    assert calls == 4
+    assert memories.read(2, "MEMORY.md")["content"] == ("# Index\n- Read patterns.md\n")
+    assert memories.read(2, "patterns.md")["content"] == "Persistent insight"
+    assert "Persistent insight" in str(seen_messages[-1])
+    assert "Memory recorded" in str(outcome.messages)
+    assert [
+        data["tool_name"] for event_type, data in events if event_type == "tool_result"
+    ] == ["memory", "memory", "memory"]
+
+
+def test_memory_index_is_fresh_runtime_only_context(tmp_path: Path) -> None:
+    seen_messages: list[list[ModelMessage]] = []
+
+    async def respond(messages: list[ModelMessage], _info: AgentInfo):
+        seen_messages.append(list(messages))
+        yield "Used current Memory"
+
+    memories = AgentMemory(tmp_path / "data")
+    memories.write(2, "MEMORY.md", "Fresh private insight")
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    reminder, context = activation_context(tmp_path)
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                context.agent_id,
+                context.state,
+                context.host_tools,
+                memories=memories,
+            ),
+        )
+
+    assert "<memory>" in str(seen_messages[0])
+    assert "Fresh private insight" in str(seen_messages[0])
+    assert "<memory>" not in str(outcome.messages)
+    assert "Fresh private insight" not in str(outcome.messages)
 
 
 def test_all_agents_use_the_latest_shared_runner(
@@ -631,7 +752,7 @@ def test_todo_cleanup_preserves_matching_tags_from_user_content() -> None:
     )
     messages = (ModelRequest(parts=[UserPromptPart(content=runtime_prompt)]),)
 
-    cleaned = clean_todo_context(
+    cleaned = clean_runtime_context(
         messages,
         runtime_prompt=runtime_prompt,
         persisted_prompt=persisted_prompt,

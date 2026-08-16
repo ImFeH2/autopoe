@@ -11,6 +11,7 @@ from typing import Any, TextIO
 from flowent.diagnostics import log_event, log_exception
 from flowent.domain import DomainError, OrganizationState
 from flowent.history import AgentHistory
+from flowent.memory import AgentMemory
 from flowent.model_runner import ModelRuntime
 from flowent.todos import AgentTodos
 
@@ -42,12 +43,14 @@ class Dispatcher:
         model_runtime: ModelRuntime | None = None,
         history: AgentHistory | None = None,
         todos: AgentTodos | None = None,
+        memories: AgentMemory | None = None,
     ) -> None:
         self._state = state
         self._on_shutdown = on_shutdown
         self._model_runtime = model_runtime or ModelRuntime()
         self._history = history
         self._todos = todos
+        self._memories = memories
         self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
@@ -206,6 +209,8 @@ class Dispatcher:
         self._history.delete(agent_id)
         if self._todos is not None:
             self._todos.delete_all(agent_id)
+        if self._memories is not None:
+            self._memories.delete_all(agent_id)
         return snapshot
 
     def _get_agent_history(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -281,8 +286,16 @@ def serve(
     history: AgentHistory | None = None,
     writer: JsonLineWriter | None = None,
     todos: AgentTodos | None = None,
+    memories: AgentMemory | None = None,
 ) -> None:
-    dispatcher = Dispatcher(state, on_shutdown, model_runtime, history, todos)
+    dispatcher = Dispatcher(
+        state,
+        on_shutdown,
+        model_runtime,
+        history,
+        todos,
+        memories,
+    )
     protocol_writer = writer or JsonLineWriter(output_stream)
     for line in input_stream:
         try:

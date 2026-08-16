@@ -31,6 +31,7 @@ def main(
     from flowent.domain import OrganizationState
     from flowent.history import AgentHistory
     from flowent.host_tools import HostTools, ProcessWatcher
+    from flowent.memory import AgentMemory
     from flowent.model_runner import create_runner
     from flowent.persistence import SQLiteStore, data_directory
     from flowent.protocol import JsonLineWriter, serve
@@ -63,12 +64,20 @@ def main(
             lambda event: writer.write_event("agent.history.updated", event),
         )
         todos = AgentTodos(store)
+        memories = AgentMemory(storage_directory)
         host_tools = HostTools(working_directory)
         watcher = ProcessWatcher(host_tools.process_owner)
         state = OrganizationState(
             working_directory,
             persisted=store.load_organization(),
             on_persist=store.save_organization,
+        )
+        memories.remove_orphans(
+            {
+                member["id"]
+                for member in state.snapshot()["members"]
+                if member["type"] == "agent"
+            }
         )
         model_runtime = create_model_runtime(
             stored_config=store.load_model_config(),
@@ -82,6 +91,7 @@ def main(
             host_tools,
             history,
             todos,
+            memories,
         )
         runtime.start()
         serve(
@@ -93,6 +103,7 @@ def main(
             history,
             writer,
             todos,
+            memories,
         )
     except BaseException as error:
         log_exception("process.failed", error)

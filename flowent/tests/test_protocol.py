@@ -6,6 +6,7 @@ from threading import Thread
 
 from flowent.domain import OrganizationState
 from flowent.history import AgentHistory
+from flowent.memory import AgentMemory
 from flowent.model_runner import ModelRuntime
 from flowent.persistence import SQLiteStore
 from flowent.protocol import Dispatcher, JsonLineWriter, serve
@@ -67,10 +68,14 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
     todos = AgentTodos(store)
     todos.create(3, "Lin private work")
+    memories = AgentMemory(tmp_path / "data")
+    memories.write(2, "MEMORY.md", "Ada private Memory")
+    memories.write(3, "MEMORY.md", "Lin private Memory")
     dispatcher = Dispatcher(
         state,
         history=AgentHistory(store),
         todos=todos,
+        memories=memories,
     )
 
     discussion_response = dispatcher.dispatch(
@@ -96,6 +101,8 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
         }
     ]
     assert todos.list(3)["todos"] == []
+    assert memories.list(2) == {"paths": ["MEMORY.md"], "count": 1}
+    assert memories.list(3) == {"paths": [], "count": 0}
 
 
 def test_json_line_writer_keeps_responses_and_events_atomic() -> None:

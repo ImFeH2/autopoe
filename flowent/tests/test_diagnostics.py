@@ -15,6 +15,7 @@ from flowent.diagnostics import (
 )
 from flowent.domain import OrganizationState
 from flowent.host_tools import HostTools
+from flowent.memory import AgentMemory
 from flowent.persistence import SQLiteStore
 from flowent.protocol import Dispatcher
 from flowent.runtime import AgentRunContext
@@ -125,6 +126,7 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         tools,
         run_id="turn-1",
         todos=AgentTodos(store),
+        memories=AgentMemory(tmp_path),
     )
 
     try:
@@ -139,6 +141,8 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         state.send_message(1, 1, secret, [2])
         context.discussion("read", discussion_id=1)
         context.todo("create", subject=secret, description=secret)
+        context.memory("write", path=f"{secret}.md", content=secret)
+        context.memory("read", path=f"{secret}.md")
     finally:
         tools.close()
         shutdown_diagnostics()
@@ -172,5 +176,12 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         record["event"] == "tool.completed"
         and record["tool_name"] == "todo"
         and record["action"] == "create"
+        for record in records
+    )
+    assert any(
+        record["event"] == "tool.completed"
+        and record["tool_name"] == "memory"
+        and record["action"] == "read"
+        and record["content_bytes"] > 0
         for record in records
     )
