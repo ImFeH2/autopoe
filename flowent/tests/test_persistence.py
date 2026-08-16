@@ -245,17 +245,35 @@ def test_shares_state_across_launch_directories(tmp_path: Path) -> None:
     assert store.load_organization() is not None
 
 
-def test_deleted_entities_stay_deleted_after_restart(tmp_path: Path) -> None:
+def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
+    tmp_path: Path,
+) -> None:
     store = SQLiteStore(tmp_path / "data")
     state = persisted_state(store, tmp_path)
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
+    state.send_message(1, 2, "Keep this")
 
     state.delete_agent(2)
     restored = persisted_state(store, tmp_path)
 
     assert restored.snapshot()["members"] == [{"id": 1, "type": "human", "name": "You"}]
-    assert restored.snapshot()["discussions"] == []
+    assert restored.snapshot()["discussions"] == [
+        {
+            "id": 1,
+            "topic": "Work",
+            "member_ids": [1],
+            "messages": [
+                {
+                    "id": 1,
+                    "sender_id": 2,
+                    "body": "Keep this",
+                    "mentions": [],
+                }
+            ],
+        }
+    ]
+    assert restored.create_agent("Lin")["members"][-1]["id"] == 3
 
 
 def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> None:
@@ -344,7 +362,7 @@ def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> N
     }
     assert migrated.load_observability_config() is None
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'observability_settings'"
     ).fetchone() == ("observability_settings",)
@@ -392,7 +410,7 @@ def test_migrates_version_three_openai_to_chat_without_losing_secrets(
         "legacy-tracing-secret"
     )
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(model_settings)")
     }
@@ -424,7 +442,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
         "model": "legacy-model",
     }
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
     for table in ("members", "discussions", "model_settings"):
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         assert "working_directory" not in columns
@@ -458,10 +476,28 @@ def test_migrates_version_four_with_an_empty_agent_history_table(
     migrated = SQLiteStore(data)
 
     connection = sqlite3.connect(migrated.path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'agent_runs'"
     ).fetchone() == ("agent_runs",)
+    connection.close()
+
+
+def test_migrates_version_six_with_hidden_member_support(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    connection = sqlite3.connect(store.path)
+    connection.execute("ALTER TABLE members DROP COLUMN deleted")
+    connection.execute("PRAGMA user_version = 6")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+
+    connection = sqlite3.connect(migrated.path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(members)")}
+    assert "deleted" in columns
     connection.close()
 
 

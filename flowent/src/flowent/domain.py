@@ -19,6 +19,7 @@ class Member:
     id: int
     type: Literal["human", "agent"]
     name: str
+    deleted: bool = False
 
 
 @dataclass
@@ -112,15 +113,20 @@ class OrganizationState:
             execution = self._agent_execution[agent_id]
             if execution.status == "running":
                 raise DomainError("agent_running", "Running Agents cannot be deleted")
-            discussion_ids = [
-                discussion.id
-                for discussion in self._discussions.values()
-                if agent_id in discussion.member_ids
-            ]
-            for discussion_id in discussion_ids:
-                del self._discussions[discussion_id]
+            member = self._members[agent_id]
+            self._members[agent_id] = Member(
+                id=member.id,
+                type=member.type,
+                name=member.name,
+                deleted=True,
+            )
+            for discussion in self._discussions.values():
+                discussion.member_ids = tuple(
+                    member_id
+                    for member_id in discussion.member_ids
+                    if member_id != agent_id
+                )
             del self._agent_execution[agent_id]
-            del self._members[agent_id]
             self._changed(persist=True)
             return self._snapshot()
 
@@ -155,16 +161,7 @@ class OrganizationState:
 
     def delete_discussion(self, discussion_id: int) -> dict[str, Any]:
         with self._condition:
-            discussion = self._require_discussion(discussion_id)
-            if any(
-                self._members[member_id].type == "agent"
-                and self._agent_execution[member_id].status == "running"
-                for member_id in discussion.member_ids
-            ):
-                raise DomainError(
-                    "discussion_active",
-                    "Discussions with running Agents cannot be deleted",
-                )
+            self._require_discussion(discussion_id)
             del self._discussions[discussion_id]
             self._changed(persist=True)
             return self._snapshot()
@@ -222,7 +219,11 @@ class OrganizationState:
 
     def list_members(self) -> list[dict[str, Any]]:
         with self._condition:
-            return [self._member_data(member) for member in self._members.values()]
+            return [
+                self._member_data(member)
+                for member in self._members.values()
+                if not member.deleted
+            ]
 
     def list_discussions(self, member_id: int | None = None) -> list[dict[str, Any]]:
         with self._condition:
@@ -383,7 +384,7 @@ class OrganizationState:
     def claim_next_reminder(self) -> tuple[Reminder | None, int]:
         with self._condition:
             for member in self._members.values():
-                if member.type != "agent":
+                if member.type != "agent" or member.deleted:
                     continue
                 execution = self._agent_execution[member.id]
                 if execution.status != "idle":
@@ -476,7 +477,11 @@ class OrganizationState:
         return {
             "organization": {"id": 1},
             "working_directory": str(self._working_directory),
-            "members": [self._member_data(member) for member in self._members.values()],
+            "members": [
+                self._member_data(member)
+                for member in self._members.values()
+                if not member.deleted
+            ],
             "discussions": [
                 self._discussion_data(discussion)
                 for discussion in self._discussions.values()
@@ -569,9 +574,14 @@ class OrganizationState:
 
     def _restore(self, persisted: dict[str, Any]) -> None:
         for item in persisted["members"]:
-            member = Member(id=item["id"], type=item["type"], name=item["name"])
+            member = Member(
+                id=item["id"],
+                type=item["type"],
+                name=item["name"],
+                deleted=item.get("deleted", False),
+            )
             self._members[member.id] = member
-            if member.type == "agent":
+            if member.type == "agent" and not member.deleted:
                 self._agent_execution[member.id] = AgentExecution()
         if self._members.get(1) != Member(id=1, type="human", name="You"):
             raise RuntimeError("Persisted Organization is missing its Human Member")
@@ -604,7 +614,12 @@ class OrganizationState:
     def _persistence_data(self) -> dict[str, Any]:
         return {
             "members": [
-                {"id": member.id, "type": member.type, "name": member.name}
+                {
+                    "id": member.id,
+                    "type": member.type,
+                    "name": member.name,
+                    "deleted": member.deleted,
+                }
                 for member in self._members.values()
             ],
             "discussions": [
@@ -636,7 +651,7 @@ class OrganizationState:
 
     def _require_member(self, member_id: int) -> Member:
         member = self._members.get(member_id)
-        if member is None:
+        if member is None or member.deleted:
             raise DomainError("member_not_found", "Member not found")
         return member
 

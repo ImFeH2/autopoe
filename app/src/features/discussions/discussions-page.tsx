@@ -152,12 +152,6 @@ export function DiscussionsPage({
           <div className="discussion-list-items">
             {filteredDiscussions.map((discussion) => {
               const selected = selectedDiscussion?.id === discussion.id;
-              const hasRunningAgent = discussion.member_ids.some((memberId) =>
-                agents.some(
-                  (agent) =>
-                    agent.id === memberId && agent.status === "running",
-                ),
-              );
               return (
                 <ListButton
                   active={selected}
@@ -174,18 +168,14 @@ export function DiscussionsPage({
                       trigger={
                         <Button
                           aria-label={`Delete ${discussion.topic}`}
-                          disabled={disabled || hasRunningAgent}
+                          disabled={disabled}
                           size="icon"
                           variant="quiet"
                         >
                           <Trash2 aria-hidden="true" size={14} />
                         </Button>
                       }
-                      triggerTooltip={
-                        hasRunningAgent
-                          ? "Discussions with running Agents cannot be deleted"
-                          : "Delete"
-                      }
+                      triggerTooltip="Delete"
                     >
                       <div className="discussion-delete-confirmation">
                         <p>Delete this discussion and all of its messages?</p>

@@ -79,7 +79,14 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
         {"id": 1, "type": "human", "name": "You"},
         {"id": 2, "type": "agent", "name": "Ada", "status": "idle"},
     ]
-    assert agent_response["result"]["discussions"] == []
+    assert agent_response["result"]["discussions"] == [
+        {
+            "id": 2,
+            "topic": "Lin work",
+            "member_ids": [1],
+            "messages": [],
+        }
+    ]
 
 
 def test_json_line_writer_keeps_responses_and_events_atomic() -> None:

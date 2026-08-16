@@ -223,7 +223,6 @@ function parseMessage(
   value: unknown,
   discussionIndex: number,
   messageIndex: number,
-  discussionMembers: Map<number, Member>,
 ): Message {
   const path = `discussions[${discussionIndex}].messages[${messageIndex}]`;
   const item = record(value, path);
@@ -232,9 +231,6 @@ function parseMessage(
     invalidSnapshot(`${path}.id must follow Discussion order`);
   }
   const senderId = positiveInteger(item.sender_id, `${path}.sender_id`);
-  if (!discussionMembers.has(senderId)) {
-    invalidSnapshot(`${path}.sender_id must belong to the Discussion`);
-  }
   const mentionIds = new Set<number>();
   const mentions = array(item.mentions, `${path}.mentions`).map(
     (mention, mentionIndex) => {
@@ -244,15 +240,6 @@ function parseMessage(
         mentionItem.member_id,
         `${mentionPath}.member_id`,
       );
-      const mentionedMember = discussionMembers.get(memberId);
-      if (!mentionedMember) {
-        invalidSnapshot(
-          `${mentionPath}.member_id must belong to the Discussion`,
-        );
-      }
-      if (mentionedMember.type !== "agent") {
-        invalidSnapshot(`${mentionPath}.member_id must identify an Agent`);
-      }
       if (mentionIds.has(memberId)) {
         invalidSnapshot(`${path}.mentions must target unique Members`);
       }
@@ -285,12 +272,10 @@ function parseDiscussion(
   );
   const uniqueMemberIds = new Set(discussionMemberIds);
   if (
-    discussionMemberIds.length < 2 ||
+    discussionMemberIds.length < 1 ||
     uniqueMemberIds.size !== discussionMemberIds.length
   ) {
-    invalidSnapshot(
-      `${path}.member_ids must contain at least two unique Members`,
-    );
+    invalidSnapshot(`${path}.member_ids must contain unique Members`);
   }
   for (const memberId of discussionMemberIds) {
     if (!membersById.has(memberId)) {
@@ -298,19 +283,12 @@ function parseDiscussion(
     }
   }
 
-  const discussionMembers = new Map(
-    discussionMemberIds.map((memberId) => [
-      memberId,
-      membersById.get(memberId) as Member,
-    ]),
-  );
   return {
     id,
     topic: nonEmptyString(item.topic, `${path}.topic`),
     member_ids: discussionMemberIds,
     messages: array(item.messages, `${path}.messages`).map(
-      (message, messageIndex) =>
-        parseMessage(message, index, messageIndex, discussionMembers),
+      (message, messageIndex) => parseMessage(message, index, messageIndex),
     ),
   };
 }

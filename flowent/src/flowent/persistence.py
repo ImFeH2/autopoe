@@ -11,7 +11,7 @@ from typing import Any
 
 from flowent.history import RunStatus
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -42,6 +42,8 @@ class SQLiteStore:
                 self._migrate_version_four(connection)
             elif version == 5:
                 self._migrate_version_five(connection)
+            elif version == 6:
+                self._migrate_version_six(connection)
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"Unsupported Flowent database version: {version}")
             self._interrupt_running_agent_runs(connection)
@@ -80,7 +82,8 @@ class SQLiteStore:
             CREATE TABLE members (
                 id INTEGER PRIMARY KEY,
                 type TEXT NOT NULL CHECK (type IN ('human', 'agent')),
-                name TEXT NOT NULL
+                name TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))
             )
             """,
             """
@@ -273,17 +276,20 @@ class SQLiteStore:
             )
             self._migrate_model_api_type(connection)
             self._create_agent_runs_table(connection)
+            self._add_member_deleted_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_three(self, connection: sqlite3.Connection) -> None:
         with connection:
             self._migrate_model_api_type(connection)
             self._create_agent_runs_table(connection)
+            self._add_member_deleted_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_four(self, connection: sqlite3.Connection) -> None:
         with connection:
             self._create_agent_runs_table(connection)
+            self._add_member_deleted_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -295,7 +301,24 @@ class SQLiteStore:
             connection.execute(
                 "ALTER TABLE agent_runs RENAME COLUMN activation_json TO reminder_json"
             )
+            SQLiteStore._add_member_deleted_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_six(connection: sqlite3.Connection) -> None:
+        with connection:
+            SQLiteStore._add_member_deleted_column(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _add_member_deleted_column(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(members)")
+        }
+        if "deleted" not in columns:
+            connection.execute(
+                "ALTER TABLE members ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))"
+            )
 
     @staticmethod
     def _interrupt_running_agent_runs(connection: sqlite3.Connection) -> None:
@@ -425,9 +448,14 @@ class SQLiteStore:
             if row is None or not row["organization_saved"]:
                 return None
             members = [
-                {"id": row["id"], "type": row["type"], "name": row["name"]}
+                {
+                    "id": row["id"],
+                    "type": row["type"],
+                    "name": row["name"],
+                    "deleted": bool(row["deleted"]),
+                }
                 for row in connection.execute(
-                    "SELECT id, type, name FROM members ORDER BY id"
+                    "SELECT id, type, name, deleted FROM members ORDER BY id"
                 )
             ]
             discussions: list[dict[str, Any]] = []
@@ -504,8 +532,13 @@ class SQLiteStore:
     ) -> None:
         for member in organization["members"]:
             connection.execute(
-                "INSERT INTO members (id, type, name) VALUES (?, ?, ?)",
-                (member["id"], member["type"], member["name"]),
+                "INSERT INTO members (id, type, name, deleted) VALUES (?, ?, ?, ?)",
+                (
+                    member["id"],
+                    member["type"],
+                    member["name"],
+                    int(member.get("deleted", False)),
+                ),
             )
         for discussion in organization["discussions"]:
             discussion_id = discussion["id"]

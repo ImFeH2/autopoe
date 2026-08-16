@@ -129,7 +129,7 @@ export function MembersPage({
               action={
                 member.type === "agent" ? (
                   <Dialog
-                    description={`Delete ${member.name}, their history, and every Discussion they belong to.`}
+                    description={`Delete ${member.name}, remove them from Discussions, and delete their history.`}
                     onOpenChange={(open) =>
                       setDeletingAgentId(open ? member.id : null)
                     }
@@ -153,8 +153,8 @@ export function MembersPage({
                   >
                     <div className="member-delete-confirmation">
                       <p>
-                        Delete this Agent, their history, and every Discussion
-                        they belong to?
+                        Delete this Agent, remove them from Discussions, and
+                        delete their history? Messages will be kept.
                       </p>
                       <div className="member-agent-actions">
                         <Button

@@ -175,22 +175,36 @@ def test_deleting_discussion_removes_its_messages() -> None:
     assert snapshot["discussions"] == []
 
 
-def test_deleting_agent_removes_their_discussions() -> None:
+def test_deleting_agent_preserves_discussions_and_messages() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_agent("Lin")
     state.create_discussion("Shared", 1, [2, 3])
-    state.create_discussion("Lin only", 1, [3])
+    state.create_discussion("Ada only", 1, [2])
+    state.send_message(1, 2, "Keep my message")
 
     snapshot = state.delete_agent(2)
 
     assert [member["name"] for member in snapshot["members"]] == ["You", "Lin"]
     assert [discussion["topic"] for discussion in snapshot["discussions"]] == [
-        "Lin only"
+        "Shared",
+        "Ada only",
     ]
+    assert snapshot["discussions"][0]["member_ids"] == [1, 3]
+    assert snapshot["discussions"][1]["member_ids"] == [1]
+    assert snapshot["discussions"][0]["messages"] == [
+        {
+            "id": 1,
+            "sender_id": 2,
+            "body": "Keep my message",
+            "mentions": [],
+        }
+    ]
+    with pytest.raises(DomainError, match="Member not found"):
+        state.member(2)
 
 
-def test_running_agent_and_their_discussion_cannot_be_deleted() -> None:
+def test_running_agent_cannot_be_deleted_but_their_discussion_can() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
@@ -199,5 +213,4 @@ def test_running_agent_and_their_discussion_cannot_be_deleted() -> None:
 
     with pytest.raises(DomainError, match="Running Agents"):
         state.delete_agent(2)
-    with pytest.raises(DomainError, match="running Agents"):
-        state.delete_discussion(1)
+    assert state.delete_discussion(1)["discussions"] == []
