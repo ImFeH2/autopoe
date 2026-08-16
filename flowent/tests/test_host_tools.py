@@ -258,11 +258,22 @@ def test_run_rejects_non_utf8_argv_and_cwd(
         tools.run([sys.executable, "-c", "pass"], cwd=value)
 
 
-def test_run_rejects_cwd_outside_launch_root(tmp_path: Path) -> None:
-    tools = HostTools(tmp_path)
+@pytest.mark.parametrize("absolute", [False, True])
+def test_run_accepts_cwd_outside_launch_root(
+    tmp_path: Path,
+    absolute: bool,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-cwd"
+    outside.mkdir()
+    cwd = str(outside) if absolute else f"../{outside.name}"
 
-    with pytest.raises(HostToolError, match="stay within"):
-        tools.run([sys.executable, "-c", "pass"], cwd="../outside")
+    result = HostTools(tmp_path).run(
+        [sys.executable, "-c", "import os; print(os.getcwd())"],
+        cwd=cwd,
+    )
+
+    assert result["cwd"] == str(outside)
+    assert result["stdout"].strip() == str(outside)
 
 
 def test_edit_replaces_one_exact_match_and_preserves_mode(tmp_path: Path) -> None:
@@ -360,12 +371,23 @@ def test_edit_rejects_invalid_inputs(tmp_path: Path) -> None:
         tools.edit("source.txt", "before", "after", replace_all=1)  # type: ignore[arg-type]
     with pytest.raises(HostToolError, match="valid UTF-8"):
         tools.edit("source.txt", "before", "\ud800")
-    with pytest.raises(HostToolError, match="NUL"):
-        tools.edit("source.txt", "before", "after\0")
-    with pytest.raises(HostToolError, match="exceeds 262144 bytes"):
-        tools.edit("source.txt", "before", "x" * 262_145)
 
     assert target.read_text() == "before\n"
+
+
+def test_edit_accepts_nul_and_large_text(tmp_path: Path) -> None:
+    target = tmp_path / "source.txt"
+    target.write_bytes(b"before\0after")
+    replacement = "x" * 262_145 + "\0done"
+
+    result = HostTools(tmp_path).edit(
+        "source.txt",
+        "before\0after",
+        replacement,
+    )
+
+    assert result["replacement_count"] == 1
+    assert target.read_bytes() == replacement.encode()
 
 
 @pytest.mark.parametrize(
@@ -378,57 +400,59 @@ def test_edit_rejects_invalid_inputs(tmp_path: Path) -> None:
         "nested/.env.production",
     ],
 )
-def test_edit_rejects_protected_paths(tmp_path: Path, path: str) -> None:
-    if ".." not in path:
-        target = tmp_path / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("before\n")
+def test_edit_accepts_previously_protected_paths(tmp_path: Path, path: str) -> None:
+    target = (tmp_path / path).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("before\n")
 
-    with pytest.raises(
-        HostToolError, match="launch directory|Git metadata|environment"
-    ):
-        HostTools(tmp_path).edit(path, "before", "after")
+    HostTools(tmp_path).edit(path, "before", "after")
+
+    assert target.read_text() == "after\n"
 
 
-def test_edit_rejects_absolute_missing_and_directory_paths(tmp_path: Path) -> None:
+def test_edit_accepts_absolute_paths_and_rejects_missing_or_directory_paths(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-absolute.txt"
+    outside.write_text("before\n")
     directory = tmp_path / "folder"
     directory.mkdir()
 
-    with pytest.raises(HostToolError, match="launch directory"):
-        HostTools(tmp_path).edit(str(tmp_path / "outside.txt"), "before", "after")
+    result = HostTools(tmp_path).edit(str(outside), "before", "after")
+
+    assert result["path"] == str(outside)
+    assert outside.read_text() == "after\n"
     with pytest.raises(HostToolError, match="existing file"):
         HostTools(tmp_path).edit("missing.txt", "before", "after")
     with pytest.raises(HostToolError, match="existing file"):
         HostTools(tmp_path).edit("folder", "before", "after")
 
 
-def test_edit_rejects_binary_files(tmp_path: Path) -> None:
-    nul_file = tmp_path / "nul.dat"
+def test_edit_rejects_non_utf8_files(tmp_path: Path) -> None:
     invalid_utf8 = tmp_path / "invalid.dat"
-    nul_file.write_bytes(b"before\0after")
     invalid_utf8.write_bytes(b"before\xffafter")
 
-    with pytest.raises(HostToolError, match="UTF-8 text file"):
-        HostTools(tmp_path).edit("nul.dat", "before", "after")
     with pytest.raises(HostToolError, match="UTF-8 text file"):
         HostTools(tmp_path).edit("invalid.dat", "before", "after")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows symlink privilege")
-def test_edit_rejects_symbolic_link_escape(tmp_path: Path) -> None:
+def test_edit_follows_symbolic_links_outside_launch_root(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     outside.mkdir()
     target = outside / "file.txt"
     target.write_text("before\n")
-    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    link = tmp_path / "link"
+    link.symlink_to(outside, target_is_directory=True)
 
-    with pytest.raises(HostToolError, match="Symlinks"):
-        HostTools(tmp_path).edit("link/file.txt", "before", "after")
+    result = HostTools(tmp_path).edit("link/file.txt", "before", "after")
 
-    assert target.read_text() == "before\n"
+    assert result["path"] == str(target)
+    assert link.is_symlink()
+    assert target.read_text() == "after\n"
 
 
-def test_edit_rejects_existing_submodule_but_allows_its_sibling(
+def test_edit_accepts_existing_submodule_and_its_sibling(
     tmp_path: Path,
 ) -> None:
     initialize_repository(tmp_path)
@@ -458,11 +482,10 @@ def test_edit_rejects_existing_submodule_but_allows_its_sibling(
     git(tmp_path, "commit", "-qm", "submodule")
 
     HostTools(tmp_path).edit("vendor/readme.txt", "before", "after")
-    with pytest.raises(HostToolError, match="Submodules"):
-        HostTools(tmp_path).edit("vendor/module/file.txt", "before", "after")
+    HostTools(tmp_path).edit("vendor/module/file.txt", "before", "after")
 
     assert sibling.read_text() == "after\n"
-    assert (tmp_path / "vendor" / "module" / "file.txt").read_text() == "before\n"
+    assert (tmp_path / "vendor" / "module" / "file.txt").read_text() == "after\n"
 
 
 def test_edit_uses_launch_root_paths_inside_parent_repository(tmp_path: Path) -> None:

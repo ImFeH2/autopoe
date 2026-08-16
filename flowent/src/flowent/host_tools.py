@@ -365,7 +365,7 @@ class HostTools:
         stderr_text, stderr_truncated = stderr.render()
         return {
             "argv": argv,
-            "cwd": str(working_directory.relative_to(self.root)),
+            "cwd": self._display_path(working_directory),
             "exit_code": process.returncode,
             "timed_out": timed_out,
             "duration_ms": round((time.monotonic() - started) * 1000),
@@ -394,15 +394,10 @@ class HostTools:
             raise HostToolError("old_text is required")
         if old_text == new_text:
             raise HostToolError("old_text and new_text must differ")
-        if "\0" in old_text or "\0" in new_text:
-            raise HostToolError("Edit text cannot contain NUL bytes")
-        if len(old_text.encode("utf-8")) + len(new_text.encode("utf-8")) > 262_144:
-            raise HostToolError("Edit text exceeds 262144 bytes")
 
         with self._edit_lock:
             self._require_open()
-            relative, target = self._resolve_edit_path(path)
-            self._reject_submodule_paths([str(relative)])
+            target = self._resolve_edit_path(path)
             original = self._read_edit(target)
             match_count = original.count(old_text)
             if match_count == 0:
@@ -420,7 +415,7 @@ class HostTools:
             self._write_edit(target, updated.encode("utf-8"))
             return {
                 "edited": True,
-                "path": str(relative),
+                "path": self._display_path(target),
                 "replacement_count": replacement_count,
             }
 
@@ -449,39 +444,39 @@ class HostTools:
             time.sleep(0.01)
 
     def _resolve_directory(self, cwd: str | None) -> Path:
-        relative = Path(cwd or ".")
-        if relative.is_absolute() or ".." in relative.parts:
-            raise HostToolError("cwd must stay within the launch directory")
-        resolved = (self.root / relative).resolve()
-        if not resolved.is_relative_to(self.root):
-            raise HostToolError("cwd must stay within the launch directory")
+        candidate = Path(cwd or ".")
+        if not candidate.is_absolute():
+            candidate = self.root / candidate
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError, ValueError) as error:
+            raise HostToolError(f"Cannot resolve cwd: {error}") from error
         if not resolved.is_dir():
             raise HostToolError("cwd must identify an existing directory")
         return resolved
 
-    def _resolve_edit_path(self, path: str) -> tuple[Path, Path]:
+    def _resolve_edit_path(self, path: str) -> Path:
         if not isinstance(path, str):
             raise HostToolError("path must be a string")
         self._require_utf8(path, "path")
-        relative = Path(path)
-        if not path or relative.is_absolute() or ".." in relative.parts:
-            raise HostToolError("Edit paths must stay within the launch directory")
-        normalized_parts = [part.casefold() for part in relative.parts]
-        if ".git" in normalized_parts:
-            raise HostToolError("Edits cannot modify Git metadata")
-        if any(part == ".env" or part.startswith(".env.") for part in normalized_parts):
-            raise HostToolError("Edits cannot modify environment files")
-        candidate = self.root
-        for part in relative.parts:
-            candidate /= part
-            if candidate.is_symlink():
-                raise HostToolError("Symlinks cannot be edited")
-        resolved = candidate.resolve()
-        if not resolved.is_relative_to(self.root):
-            raise HostToolError("Edit paths must stay within the launch directory")
+        if not path:
+            raise HostToolError("path is required")
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = self.root / candidate
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError, ValueError) as error:
+            raise HostToolError(f"Cannot resolve edit path: {error}") from error
         if not resolved.is_file():
             raise HostToolError("Edit path must identify an existing file")
-        return relative, resolved
+        return resolved
+
+    def _display_path(self, path: Path) -> str:
+        try:
+            return str(path.relative_to(self.root))
+        except ValueError:
+            return str(path)
 
     @staticmethod
     def _read_edit(path: Path) -> str:
@@ -489,8 +484,6 @@ class HostTools:
             content = path.read_bytes()
         except OSError as error:
             raise HostToolError(f"Cannot read edit file: {error}") from error
-        if b"\0" in content:
-            raise HostToolError("Edit path must identify a UTF-8 text file")
         try:
             return content.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -525,108 +518,6 @@ class HostTools:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-
-    def _reject_submodule_paths(self, paths: list[str]) -> None:
-        repository = self._git_command(["git", "rev-parse", "--show-toplevel"])
-        if repository.returncode != 0:
-            return
-        repository_root = Path(os.fsdecode(repository.stdout.rstrip(b"\r\n"))).resolve()
-        try:
-            launch_prefix = self.root.relative_to(repository_root)
-        except ValueError:
-            return
-        ancestors = list(
-            dict.fromkeys(
-                ancestor
-                for path in paths
-                for ancestor in self._path_ancestors(Path(path))
-            )
-        )
-        if not ancestors:
-            return
-        repository_ancestors = {
-            launch_prefix / ancestor if launch_prefix.parts else ancestor
-            for ancestor in ancestors
-        }
-        result = self._git_command(
-            [
-                "git",
-                "--literal-pathspecs",
-                "ls-files",
-                "--stage",
-                "-z",
-                "--",
-                *(str(ancestor) for ancestor in repository_ancestors),
-            ],
-            cwd=repository_root,
-        )
-        if result.returncode != 0:
-            raise HostToolError(self._command_error("Cannot inspect Git index", result))
-        for record in result.stdout.split(b"\0"):
-            header, separator, raw_path = record.partition(b"\t")
-            if (
-                separator
-                and header.startswith(b"160000 ")
-                and Path(os.fsdecode(raw_path)) in repository_ancestors
-            ):
-                raise HostToolError("Submodules cannot be edited")
-
-    @staticmethod
-    def _path_ancestors(path: Path) -> list[Path]:
-        parts = path.parts
-        return [Path(*parts[:index]) for index in range(1, len(parts) + 1)]
-
-    def _git_command(
-        self,
-        argv: list[str],
-        *,
-        cwd: Path | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        environment = os.environ.copy()
-        for key in (
-            "GIT_DIR",
-            "GIT_WORK_TREE",
-            "GIT_INDEX_FILE",
-            "GIT_CEILING_DIRECTORIES",
-        ):
-            environment.pop(key, None)
-        managed = self._start_process(
-            argv,
-            cwd=cwd or self.root,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            error_prefix=f"Cannot run {argv[0]}",
-        )
-        process = managed.process
-        try:
-            stdout, stderr = process.communicate(timeout=30)
-        except subprocess.TimeoutExpired as error:
-            self._terminate(managed)
-            process.communicate()
-            raise HostToolError(f"Cannot run {argv[0]}: TimeoutExpired") from error
-        finally:
-            self._close_tree(managed)
-            stopped = self._unregister(managed)
-        if stopped:
-            raise HostToolError("Host tools are stopped")
-        return subprocess.CompletedProcess(
-            process.args,
-            process.returncode,
-            stdout,
-            stderr,
-        )
-
-    @staticmethod
-    def _command_error(
-        prefix: str,
-        result: subprocess.CompletedProcess[bytes],
-    ) -> str:
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        if len(detail) > 4096:
-            detail = f"{detail[:4096]}..."
-        return f"{prefix}: {detail}" if detail else prefix
 
     def _validate_argv(self, argv: list[str]) -> None:
         if not isinstance(argv, list) or not argv or len(argv) > 128:

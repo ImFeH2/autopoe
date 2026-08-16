@@ -166,11 +166,14 @@ class PydanticAgentRunner:
                 "Use memory for private long-term knowledge that will help your future Turns. Keep "
                 "MEMORY.md as a concise index and put details in topic Markdown files. Memory is private "
                 "to you, does not schedule Turns, and must not replace Discussion for shared information. "
-                "Use run with an argv list to inspect the launch directory and run commands. "
-                "Use edit for exact text replacement in existing UTF-8 files. Read enough context first, "
+                "Use run with an argv list to inspect files and run host commands. The cwd and edit path "
+                "may be relative to the launch directory or absolute and may access any path available to "
+                "the host user. Use edit for exact text replacement in existing UTF-8 files. Read enough "
+                "context first, "
                 "provide an old_text value that matches exactly once, and use replace_all only when every "
                 "exact match should change. "
-                "Never read or expose .env files, environment variables, credentials, tokens, or secrets. "
+                "Treat credentials and secrets as private. Access them when the task requires it, but never "
+                "expose them through Discussions, Memory, or Todos. "
                 "The triggering Message is already delivered; do not wait for an acknowledgement "
                 "before completing your Turn."
             ),
@@ -190,7 +193,7 @@ class PydanticAgentRunner:
             cwd: str | None = None,
             timeout_seconds: int = 60,
         ) -> Any:
-            """Run argv without a shell inside the launch directory and return captured output."""
+            """Run argv without a shell in any existing host directory and return captured output."""
             try:
                 return model_result(
                     ctx,

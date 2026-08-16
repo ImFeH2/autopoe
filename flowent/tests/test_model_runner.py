@@ -167,21 +167,27 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
     }
 
 
-def test_pydantic_runner_executes_edit_and_run_tools(tmp_path: Path) -> None:
-    target = tmp_path / "source.txt"
+def test_pydantic_runner_executes_edit_and_run_tools_anywhere_on_host(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-tools"
+    outside.mkdir()
+    target = outside / ".env"
     target.write_text("before\n")
     calls = 0
+    instructions: list[str] = []
 
-    async def respond(_messages: list[ModelMessage], _info: AgentInfo):
+    async def respond(_messages: list[ModelMessage], info: AgentInfo):
         nonlocal calls
         calls += 1
+        instructions.append(info.instructions or "")
         if calls == 1:
             yield {
                 0: DeltaToolCall(
                     name="edit",
                     json_args=json.dumps(
                         {
-                            "path": "source.txt",
+                            "path": str(target),
                             "old_text": "before",
                             "new_text": "after",
                         }
@@ -198,8 +204,9 @@ def test_pydantic_runner_executes_edit_and_run_tools(tmp_path: Path) -> None:
                             "argv": [
                                 sys.executable,
                                 "-c",
-                                'print("run complete")',
-                            ]
+                                'from pathlib import Path; print(Path(".env").read_text())',
+                            ],
+                            "cwd": str(outside),
                         }
                     ),
                     tool_call_id="run-1",
@@ -234,10 +241,13 @@ def test_pydantic_runner_executes_edit_and_run_tools(tmp_path: Path) -> None:
 
     assert target.read_text() == "after\n"
     assert calls == 3
+    assert "may access any path available to the host user" in instructions[0]
+    assert "Access them when the task requires it" in instructions[0]
+    assert "Never read or expose" not in instructions[0]
     assert any(
         event_type == "tool_result"
         and data["tool_name"] == "run"
-        and "run complete" in str(data["content"])
+        and "after" in str(data["content"])
         for event_type, data in events
     )
     assert "Tools completed" in str(outcome.messages)
