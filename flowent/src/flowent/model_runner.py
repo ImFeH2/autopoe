@@ -163,8 +163,10 @@ class PydanticAgentRunner:
                 "Use todo to maintain unfinished multi-step work, keep at most one Todo in progress, "
                 "and complete work promptly. Todo state never replaces discussion.ack and does not "
                 "schedule another Turn. Current Todo status may follow tool results as a reminder. "
-                "Use exec with an argv list to inspect the launch directory and run commands. "
-                "Use patch with a unified diff to create, modify, delete, or rename text files. "
+                "Use run with an argv list to inspect the launch directory and run commands. "
+                "Use edit for exact text replacement in existing UTF-8 files. Read enough context first, "
+                "provide an old_text value that matches exactly once, and use replace_all only when every "
+                "exact match should change. "
                 "Never read or expose .env files, environment variables, credentials, tokens, or secrets. "
                 "The triggering Message is already delivered; do not wait for an acknowledgement "
                 "before completing your Turn."
@@ -178,8 +180,8 @@ class PydanticAgentRunner:
         def model_result(ctx: RunContext[AgentRunContext], result: Any) -> Any:
             return ctx.deps.model_tool_result(result)
 
-        @self._agent.tool(name="exec", sequential=True)
-        def execute_command(
+        @self._agent.tool(sequential=True)
+        def run(
             ctx: RunContext[AgentRunContext],
             argv: list[str],
             cwd: str | None = None,
@@ -189,16 +191,25 @@ class PydanticAgentRunner:
             try:
                 return model_result(
                     ctx,
-                    ctx.deps.exec(argv, cwd, timeout_seconds),
+                    ctx.deps.run(argv, cwd, timeout_seconds),
                 )
             except HostToolError as error:
                 raise ModelRetry(str(error)) from error
 
         @self._agent.tool(sequential=True)
-        def patch(ctx: RunContext[AgentRunContext], diff: str) -> Any:
-            """Atomically apply a unified text diff inside the launch directory."""
+        def edit(
+            ctx: RunContext[AgentRunContext],
+            path: str,
+            old_text: str,
+            new_text: str,
+            replace_all: bool = False,
+        ) -> Any:
+            """Atomically replace exact text in an existing UTF-8 file."""
             try:
-                return model_result(ctx, ctx.deps.patch(diff))
+                return model_result(
+                    ctx,
+                    ctx.deps.edit(path, old_text, new_text, replace_all),
+                )
             except HostToolError as error:
                 raise ModelRetry(str(error)) from error
 

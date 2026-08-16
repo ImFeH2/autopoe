@@ -41,20 +41,30 @@ class AgentRunContext:
 
         return self._call_tool("organization", action, operation)
 
-    def exec(
+    def run(
         self,
         argv: list[str],
         cwd: str | None = None,
         timeout_seconds: int = 60,
     ) -> dict[str, Any]:
         return self._call_tool(
-            "exec",
+            "run",
             None,
-            lambda: self.host_tools.exec(argv, cwd, timeout_seconds),
+            lambda: self.host_tools.run(argv, cwd, timeout_seconds),
         )
 
-    def patch(self, diff: str) -> dict[str, Any]:
-        return self._call_tool("patch", None, lambda: self.host_tools.patch(diff))
+    def edit(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        replace_all: bool = False,
+    ) -> dict[str, Any]:
+        return self._call_tool(
+            "edit",
+            None,
+            lambda: self.host_tools.edit(path, old_text, new_text, replace_all),
+        )
 
     def discussion(self, action: str, **arguments: Any) -> Any:
         return self._call_tool(
@@ -201,15 +211,15 @@ class AgentRunContext:
             )
             raise
         result_fields: dict[str, Any] = {}
-        if tool_name == "exec":
+        if tool_name == "run":
             result_fields = {
                 "exit_code": result["exit_code"],
                 "timed_out": result["timed_out"],
                 "stdout_bytes": len(result["stdout"].encode("utf-8")),
                 "stderr_bytes": len(result["stderr"].encode("utf-8")),
             }
-        elif tool_name == "patch":
-            result_fields = {"file_count": len(result["paths"])}
+        elif tool_name == "edit":
+            result_fields = {"replacement_count": result["replacement_count"]}
         elif tool_name == "todo" and action == "list":
             result_fields = {"result_count": result["count"]}
         elif isinstance(result, list):

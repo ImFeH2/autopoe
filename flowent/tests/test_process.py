@@ -461,7 +461,7 @@ def test_agent_model_history_continues_across_process_restarts(
         close_process(second)
 
 
-def test_hard_killed_flowent_cleans_active_exec(tmp_path: Path) -> None:
+def test_hard_killed_flowent_cleans_active_run(tmp_path: Path) -> None:
     work = tmp_path / "artifacts" / "desktop" / "process-work"
     work.mkdir(parents=True)
     support = tmp_path / "test-support"
@@ -469,16 +469,16 @@ def test_hard_killed_flowent_cleans_active_exec(tmp_path: Path) -> None:
     (support / "sitecustomize.py").write_text(
         "import sys\n"
         "import flowent.model_runner as model_runner\n"
-        "class LongExecRunner:\n"
+        "class LongRunRunner:\n"
         "    def shutdown(self):\n"
         "        pass\n"
         "    def run(self, activation, context):\n"
         "        context.discussion('read', discussion_id=activation.mentions[0].discussion_id, "
         "end_message_id=activation.mentions[0].message_id)\n"
-        "        context.exec([sys.executable, '-c', \"import os,pathlib,time; "
+        "        context.run([sys.executable, '-c', \"import os,pathlib,time; "
         "pathlib.Path('long.pid').write_text(str(os.getpid())); time.sleep(60)\"], "
         "'artifacts/desktop/process-work', 60)\n"
-        "model_runner.create_runner = lambda **kwargs: LongExecRunner()\n"
+        "model_runner.create_runner = lambda **kwargs: LongRunRunner()\n"
     )
     environment = os.environ.copy()
     python_path = environment.get("PYTHONPATH")

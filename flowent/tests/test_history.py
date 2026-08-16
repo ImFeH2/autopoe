@@ -133,7 +133,7 @@ def test_merges_live_text_deltas_and_publishes_ordered_events(tmp_path: Path) ->
     run.emit("thinking", part_id="0-0")
     run.emit("text_delta", part_id="0-1", content="Flow")
     run.emit("text_delta", part_id="0-1", content="ent")
-    run.emit("tool_call", tool_name="exec", content={"argv": ["pwd"]})
+    run.emit("tool_call", tool_name="run", content={"argv": ["pwd"]})
 
     active = history.snapshot(2)["runs"][0]
     assert [entry["type"] for entry in active["entries"]] == [

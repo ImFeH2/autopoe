@@ -143,12 +143,12 @@ describe("Agent history", () => {
       sequence: 2,
       timestamp: "2026-08-15T00:00:01+00:00",
       type: "tool_call",
-      tool_name: "exec",
+      tool_name: "run",
       content: { argv: ["pwd"] },
     });
 
     expect(event.content).toContain('"argv"');
-    expect(event.tool_name).toBe("exec");
+    expect(event.tool_name).toBe("run");
   });
 });
 

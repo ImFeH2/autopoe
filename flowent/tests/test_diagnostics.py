@@ -128,11 +128,14 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
     )
 
     try:
-        result = context.exec(
+        result = context.run(
             [sys.executable, "-c", f"print('{secret}')"],
             timeout_seconds=5,
         )
         assert result["stdout"].strip() == secret
+        target = tmp_path / "private.txt"
+        target.write_text(secret)
+        context.edit("private.txt", secret, "redacted")
         state.send_message(1, 1, secret, [2])
         context.discussion("read", discussion_id=1)
         context.todo("create", subject=secret, description=secret)
@@ -148,9 +151,15 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
     assert "-c" not in content
     assert any(
         record["event"] == "tool.completed"
-        and record["tool_name"] == "exec"
+        and record["tool_name"] == "run"
         and record["exit_code"] == 0
         and record["stdout_bytes"] > 0
+        for record in records
+    )
+    assert any(
+        record["event"] == "tool.completed"
+        and record["tool_name"] == "edit"
+        and record["replacement_count"] == 1
         for record in records
     )
     assert any(

@@ -1,3 +1,5 @@
+import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +11,15 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from pydantic_ai import InstrumentationSettings
 from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.google import GoogleModel
@@ -134,6 +144,101 @@ def test_openai_runner_bounds_silent_requests(api_type: ApiType) -> None:
     assert client.timeout.write == 30
     assert client.timeout.pool == 30
     assert client.max_retries == 0
+
+
+def test_pydantic_runner_exposes_only_current_tool_names() -> None:
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+
+    assert set(runner._agent._function_toolset.tools) == {
+        "discussion",
+        "edit",
+        "organization",
+        "run",
+        "todo",
+    }
+
+
+def test_pydantic_runner_executes_edit_and_run_tools(tmp_path: Path) -> None:
+    target = tmp_path / "source.txt"
+    target.write_text("before\n")
+    calls = 0
+
+    async def respond(_messages: list[ModelMessage], _info: AgentInfo):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            yield {
+                0: DeltaToolCall(
+                    name="edit",
+                    json_args=json.dumps(
+                        {
+                            "path": "source.txt",
+                            "old_text": "before",
+                            "new_text": "after",
+                        }
+                    ),
+                    tool_call_id="edit-1",
+                )
+            }
+        elif calls == 2:
+            yield {
+                0: DeltaToolCall(
+                    name="run",
+                    json_args=json.dumps(
+                        {
+                            "argv": [
+                                sys.executable,
+                                "-c",
+                                'print("run complete")',
+                            ]
+                        }
+                    ),
+                    tool_call_id="run-1",
+                )
+            }
+        else:
+            yield "Tools completed"
+
+    events: list[tuple[str, dict[str, Any]]] = []
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    reminder, context = activation_context(tmp_path)
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                context.agent_id,
+                context.state,
+                context.host_tools,
+                history_event_sink=lambda event_type, **data: events.append(
+                    (event_type, data)
+                ),
+            ),
+        )
+
+    assert target.read_text() == "after\n"
+    assert calls == 3
+    assert any(
+        event_type == "tool_result"
+        and data["tool_name"] == "run"
+        and "run complete" in str(data["content"])
+        for event_type, data in events
+    )
+    assert "Tools completed" in str(outcome.messages)
 
 
 def test_all_agents_use_the_latest_shared_runner(
@@ -356,6 +461,59 @@ def test_pydantic_runner_continues_the_same_agent_message_history(
     assert first.messages[0].run_id == "first-run"
     assert second.messages[0].run_id == "second-run"
     assert any(event_type == "text_delta" for event_type, _data in first_events)
+
+
+def test_runner_accepts_legacy_exec_and_patch_message_history(
+    tmp_path: Path,
+) -> None:
+    seen_messages: list[list[ModelMessage]] = []
+
+    async def respond(messages: list[ModelMessage], _info: AgentInfo):
+        seen_messages.append(list(messages))
+        yield "Continue with current tools"
+
+    legacy_messages: tuple[ModelMessage, ...] = (
+        ModelRequest(parts=[UserPromptPart(content="Legacy Turn")]),
+        ModelResponse(
+            parts=[
+                ToolCallPart("exec", {"argv": ["pwd"]}, "legacy-exec"),
+                ToolCallPart("patch", {"diff": "legacy diff"}, "legacy-patch"),
+            ],
+            model_name="legacy-model",
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart("exec", {"exit_code": 0}, "legacy-exec"),
+                ToolReturnPart("patch", {"applied": True}, "legacy-patch"),
+            ]
+        ),
+        ModelResponse(parts=[TextPart("Legacy complete")], model_name="legacy-model"),
+    )
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    reminder, context = activation_context(tmp_path)
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                context.agent_id,
+                context.state,
+                context.host_tools,
+                message_history=legacy_messages,
+            ),
+        )
+
+    assert seen_messages[0][:4] == list(legacy_messages)
+    assert "exec" in str(seen_messages[0])
+    assert "patch" in str(seen_messages[0])
+    assert len(outcome.messages) == 2
 
 
 def test_todo_status_is_visible_after_tools_but_removed_from_history(

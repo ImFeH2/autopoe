@@ -61,6 +61,21 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
     }
 
 
+def test_agent_edit_tool_replaces_exact_file_content(tmp_path: Path) -> None:
+    target = tmp_path / "source.txt"
+    target.write_text("before\n")
+    context = AgentRunContext(2, OrganizationState(), HostTools(tmp_path))
+
+    result = context.edit("source.txt", "before", "after")
+
+    assert result == {
+        "edited": True,
+        "path": "source.txt",
+        "replacement_count": 1,
+    }
+    assert target.read_text() == "after\n"
+
+
 def test_agent_todo_tool_updates_the_runtime_status_bar(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
     state = OrganizationState(
@@ -246,7 +261,7 @@ class ExecutingRunner:
         )
         self.started.set()
         try:
-            context.exec([sys.executable, "-c", script], timeout_seconds=60)
+            context.run([sys.executable, "-c", script], timeout_seconds=60)
         finally:
             self.finished.set()
 

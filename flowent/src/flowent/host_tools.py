@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import codecs
 import os
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,19 +17,13 @@ import psutil
 
 EXECUTION_ENV = "FLOWENT_EXECUTION_ID"
 OWNER_ENV = "FLOWENT_PROCESS_OWNER"
-PROTECTED_PATCH_ENV = "FLOWENT_PROTECTED_PATCH"
 
 
 class HostToolError(Exception):
     pass
 
 
-def marked_processes(
-    key: str,
-    value: str,
-    *,
-    protected: bool | None = None,
-) -> list[psutil.Process]:
+def marked_processes(key: str, value: str) -> list[psutil.Process]:
     matches: list[psutil.Process] = []
     for process in psutil.process_iter(["pid"]):
         if process.pid == os.getpid():
@@ -44,9 +39,7 @@ def marked_processes(
             continue
         if environment.get(key) != value:
             continue
-        is_protected = environment.get(PROTECTED_PATCH_ENV) == "1"
-        if protected is None or protected == is_protected:
-            matches.append(process)
+        matches.append(process)
     return matches
 
 
@@ -69,15 +62,10 @@ def terminate_processes(
     psutil.wait_procs(alive, timeout=timeout / 2)
 
 
-def terminate_marked_processes(
-    key: str,
-    value: str,
-    *,
-    protected: bool | None = None,
-) -> None:
+def terminate_marked_processes(key: str, value: str) -> None:
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
-        processes = marked_processes(key, value, protected=protected)
+        processes = marked_processes(key, value)
         if not processes:
             return
         terminate_processes(processes)
@@ -120,10 +108,7 @@ class ProcessWatcher:
 
 def watch_processes(owner: str, input_stream: BinaryIO) -> None:
     input_stream.read()
-    terminate_marked_processes(OWNER_ENV, owner, protected=False)
-    while marked_processes(OWNER_ENV, owner, protected=True):
-        time.sleep(0.05)
-    terminate_marked_processes(OWNER_ENV, owner, protected=False)
+    terminate_marked_processes(OWNER_ENV, owner)
 
 
 class ProcessTree(Protocol):
@@ -137,7 +122,6 @@ class ManagedProcess:
     process: subprocess.Popen[bytes]
     execution_id: str
     tree: ProcessTree | None = None
-    protected: bool = False
 
 
 class UnixProcessGroup:
@@ -239,21 +223,14 @@ if os.name == "nt":
     _resume_process.restype = ctypes.c_long
 
     class WindowsJob:
-        def __init__(
-            self,
-            process: subprocess.Popen[bytes],
-            *,
-            kill_on_close: bool,
-        ) -> None:
+        def __init__(self, process: subprocess.Popen[bytes]) -> None:
             self._lock = Lock()
             handle = _create_job_object(None, None)
             if not handle:
                 raise ctypes.WinError(ctypes.get_last_error())
             self._handle: int | None = handle
             information = _JobObjectExtendedLimitInformation()
-            information.BasicLimitInformation.LimitFlags = (
-                0x00002000 if kill_on_close else 0
-            )
+            information.BasicLimitInformation.LimitFlags = 0x00002000
             if not _set_job_information(
                 handle,
                 9,
@@ -332,11 +309,11 @@ class HostTools:
         self.process_owner = process_owner or uuid4().hex
         self._output_limit = output_limit
         self._lock = Lock()
-        self._patch_lock = Lock()
+        self._edit_lock = Lock()
         self._processes: dict[int, ManagedProcess] = {}
         self._closed = False
 
-    def exec(
+    def run(
         self,
         argv: list[str],
         cwd: str | None = None,
@@ -398,60 +375,61 @@ class HostTools:
             "stderr_truncated": stderr_truncated,
         }
 
-    def patch(self, diff: str) -> dict[str, Any]:
-        if not isinstance(diff, str):
-            raise HostToolError("diff must be a string")
-        try:
-            encoded = diff.encode("utf-8")
-        except UnicodeEncodeError as error:
-            raise HostToolError("diff must be valid UTF-8") from error
-        if not encoded.strip():
-            raise HostToolError("diff is required")
-        if len(encoded) > 262_144:
-            raise HostToolError("diff exceeds 262144 bytes")
-        if "\0" in diff:
-            raise HostToolError("Binary patches are not supported")
-        if self._has_special_file_mode(diff):
-            raise HostToolError("Symlink and submodule patches are not supported")
+    def edit(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        replace_all: bool = False,
+    ) -> dict[str, Any]:
+        if not isinstance(old_text, str):
+            raise HostToolError("old_text must be a string")
+        if not isinstance(new_text, str):
+            raise HostToolError("new_text must be a string")
+        if type(replace_all) is not bool:
+            raise HostToolError("replace_all must be a boolean")
+        self._require_utf8(old_text, "old_text")
+        self._require_utf8(new_text, "new_text")
+        if not old_text:
+            raise HostToolError("old_text is required")
+        if old_text == new_text:
+            raise HostToolError("old_text and new_text must differ")
+        if "\0" in old_text or "\0" in new_text:
+            raise HostToolError("Edit text cannot contain NUL bytes")
+        if len(old_text.encode("utf-8")) + len(new_text.encode("utf-8")) > 262_144:
+            raise HostToolError("Edit text exceeds 262144 bytes")
 
-        with self._patch_lock:
+        with self._edit_lock:
             self._require_open()
-            forward = self._git_apply(["--numstat", "-z"], encoded)
-            if forward.returncode != 0:
-                raise HostToolError(self._patch_error("Invalid patch", forward))
-            reverse = self._git_apply(["--numstat", "-z", "--reverse"], encoded)
-            if reverse.returncode != 0:
-                raise HostToolError(self._patch_error("Invalid patch", reverse))
-            paths = list(
-                dict.fromkeys(
-                    [
-                        *self._parse_numstat_paths(forward.stdout),
-                        *self._parse_numstat_paths(reverse.stdout),
-                    ]
+            relative, target = self._resolve_edit_path(path)
+            self._reject_submodule_paths([str(relative)])
+            original = self._read_edit(target)
+            match_count = original.count(old_text)
+            if match_count == 0:
+                raise HostToolError("old_text was not found in the file")
+            if match_count > 1 and not replace_all:
+                raise HostToolError(
+                    f"old_text must match exactly once; found {match_count} matches"
                 )
+            replacement_count = match_count if replace_all else 1
+            updated = original.replace(
+                old_text,
+                new_text,
+                -1 if replace_all else 1,
             )
-            if not paths:
-                raise HostToolError("diff does not contain file changes")
-            for path in paths:
-                self._validate_patch_path(path)
-                self._validate_text_file(path)
-            self._reject_submodule_paths(paths)
-            check = self._git_apply(["--check"], encoded)
-            if check.returncode != 0:
-                raise HostToolError(self._patch_error("Patch does not apply", check))
-            applied = self._git_apply([], encoded, protected=True, timeout=None)
-            if applied.returncode != 0:
-                raise HostToolError(self._patch_error("Patch failed", applied))
-            return {"applied": True, "paths": paths, "diff": diff}
+            self._write_edit(target, updated.encode("utf-8"))
+            return {
+                "edited": True,
+                "path": str(relative),
+                "replacement_count": replacement_count,
+            }
 
     def close(self) -> None:
         with self._lock:
             if self._closed:
                 return
             self._closed = True
-            processes = [
-                managed for managed in self._processes.values() if not managed.protected
-            ]
+            processes = list(self._processes.values())
         cleanup_threads = [
             Thread(target=self._terminate, args=(managed,), daemon=True)
             for managed in processes
@@ -461,7 +439,7 @@ class HostTools:
         cleanup_deadline = time.monotonic() + 6
         for cleanup in cleanup_threads:
             cleanup.join(timeout=max(0, cleanup_deadline - time.monotonic()))
-        with self._patch_lock:
+        with self._edit_lock:
             pass
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -481,40 +459,72 @@ class HostTools:
             raise HostToolError("cwd must identify an existing directory")
         return resolved
 
-    def _validate_patch_path(self, path: str) -> None:
+    def _resolve_edit_path(self, path: str) -> tuple[Path, Path]:
+        if not isinstance(path, str):
+            raise HostToolError("path must be a string")
+        self._require_utf8(path, "path")
         relative = Path(path)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise HostToolError("Patch paths must stay within the launch directory")
+        if not path or relative.is_absolute() or ".." in relative.parts:
+            raise HostToolError("Edit paths must stay within the launch directory")
         normalized_parts = [part.casefold() for part in relative.parts]
         if ".git" in normalized_parts:
-            raise HostToolError("Patches cannot modify Git metadata")
+            raise HostToolError("Edits cannot modify Git metadata")
         if any(part == ".env" or part.startswith(".env.") for part in normalized_parts):
-            raise HostToolError("Patches cannot modify environment files")
+            raise HostToolError("Edits cannot modify environment files")
         candidate = self.root
         for part in relative.parts:
             candidate /= part
             if candidate.is_symlink():
-                raise HostToolError("Symlink patches are not supported")
-        resolved = (self.root / relative).resolve()
+                raise HostToolError("Symlinks cannot be edited")
+        resolved = candidate.resolve()
         if not resolved.is_relative_to(self.root):
-            raise HostToolError("Patch paths must stay within the launch directory")
+            raise HostToolError("Edit paths must stay within the launch directory")
+        if not resolved.is_file():
+            raise HostToolError("Edit path must identify an existing file")
+        return relative, resolved
 
-    def _validate_text_file(self, path: str) -> None:
-        candidate = self.root / path
-        if not candidate.is_file():
-            return
-        decoder = codecs.getincrementaldecoder("utf-8")()
+    @staticmethod
+    def _read_edit(path: Path) -> str:
         try:
-            with candidate.open("rb") as file:
-                while chunk := file.read(65_536):
-                    if b"\0" in chunk:
-                        raise HostToolError("Binary files are not supported")
-                    decoder.decode(chunk)
-                decoder.decode(b"", final=True)
-        except UnicodeDecodeError as error:
-            raise HostToolError("Binary files are not supported") from error
+            content = path.read_bytes()
         except OSError as error:
-            raise HostToolError(f"Cannot inspect patch path: {error}") from error
+            raise HostToolError(f"Cannot read edit file: {error}") from error
+        if b"\0" in content:
+            raise HostToolError("Edit path must identify a UTF-8 text file")
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise HostToolError("Edit path must identify a UTF-8 text file") from error
+
+    @staticmethod
+    def _write_edit(path: Path, content: bytes) -> None:
+        descriptor: int | None = None
+        temporary_path: Path | None = None
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.name}.flowent-",
+                dir=path.parent,
+            )
+            temporary_path = Path(temporary_name)
+            file = os.fdopen(descriptor, "wb")
+            descriptor = None
+            with file:
+                file.write(content)
+                file.flush()
+                os.fsync(file.fileno())
+            temporary_path.chmod(mode)
+            os.replace(temporary_path, path)
+        except OSError as error:
+            raise HostToolError(f"Cannot write edit file: {error}") from error
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _reject_submodule_paths(self, paths: list[str]) -> None:
         repository = self._git_command(["git", "rev-parse", "--show-toplevel"])
@@ -551,7 +561,7 @@ class HostTools:
             cwd=repository_root,
         )
         if result.returncode != 0:
-            raise HostToolError(self._patch_error("Cannot inspect Git index", result))
+            raise HostToolError(self._command_error("Cannot inspect Git index", result))
         for record in result.stdout.split(b"\0"):
             header, separator, raw_path = record.partition(b"\t")
             if (
@@ -559,55 +569,18 @@ class HostTools:
                 and header.startswith(b"160000 ")
                 and Path(os.fsdecode(raw_path)) in repository_ancestors
             ):
-                raise HostToolError("Submodule patches are not supported")
+                raise HostToolError("Submodules cannot be edited")
 
     @staticmethod
     def _path_ancestors(path: Path) -> list[Path]:
         parts = path.parts
         return [Path(*parts[:index]) for index in range(1, len(parts) + 1)]
 
-    def _parse_numstat_paths(self, output: bytes) -> list[str]:
-        records = output.split(b"\0")
-        paths: list[str] = []
-        index = 0
-        while index < len(records):
-            record = records[index]
-            if not record:
-                index += 1
-                continue
-            fields = record.split(b"\t", 2)
-            if len(fields) != 3:
-                raise HostToolError("Cannot parse patch paths")
-            if fields[0] == b"-" or fields[1] == b"-":
-                raise HostToolError("Binary patches are not supported")
-            if fields[2]:
-                paths.append(os.fsdecode(fields[2]))
-                index += 1
-                continue
-            if (
-                index + 2 >= len(records)
-                or not records[index + 1]
-                or not records[index + 2]
-            ):
-                raise HostToolError("Cannot parse patch paths")
-            paths.extend(
-                [
-                    os.fsdecode(records[index + 1]),
-                    os.fsdecode(records[index + 2]),
-                ]
-            )
-            index += 3
-        return paths
-
     def _git_command(
         self,
         argv: list[str],
         *,
-        input: bytes | None = None,
-        protected: bool = False,
-        timeout: float | None = 30,
         cwd: Path | None = None,
-        repository_ceiling: Path | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         environment = os.environ.copy()
         for key in (
@@ -617,21 +590,18 @@ class HostTools:
             "GIT_CEILING_DIRECTORIES",
         ):
             environment.pop(key, None)
-        if repository_ceiling is not None:
-            environment["GIT_CEILING_DIRECTORIES"] = str(repository_ceiling)
         managed = self._start_process(
             argv,
             cwd=cwd or self.root,
             env=environment,
-            stdin=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             error_prefix=f"Cannot run {argv[0]}",
-            protected=protected,
         )
         process = managed.process
         try:
-            stdout, stderr = process.communicate(input=input, timeout=timeout)
+            stdout, stderr = process.communicate(timeout=30)
         except subprocess.TimeoutExpired as error:
             self._terminate(managed)
             process.communicate()
@@ -639,7 +609,7 @@ class HostTools:
         finally:
             self._close_tree(managed)
             stopped = self._unregister(managed)
-        if stopped and not protected:
+        if stopped:
             raise HostToolError("Host tools are stopped")
         return subprocess.CompletedProcess(
             process.args,
@@ -648,24 +618,8 @@ class HostTools:
             stderr,
         )
 
-    def _git_apply(
-        self,
-        arguments: list[str],
-        diff: bytes,
-        *,
-        protected: bool = False,
-        timeout: float | None = 30,
-    ) -> subprocess.CompletedProcess[bytes]:
-        return self._git_command(
-            ["git", "apply", *arguments, "-"],
-            input=diff,
-            protected=protected,
-            timeout=timeout,
-            repository_ceiling=self.root.parent,
-        )
-
-    def _patch_error(
-        self,
+    @staticmethod
+    def _command_error(
         prefix: str,
         result: subprocess.CompletedProcess[bytes],
     ) -> str:
@@ -689,21 +643,6 @@ class HostTools:
         except UnicodeEncodeError as error:
             raise HostToolError(f"{field} must be valid UTF-8") from error
 
-    @staticmethod
-    def _has_special_file_mode(diff: str) -> bool:
-        metadata_prefixes = (
-            "new file mode ",
-            "deleted file mode ",
-            "old mode ",
-            "new mode ",
-            "index ",
-        )
-        return any(
-            line.startswith(metadata_prefixes)
-            and line.rsplit(" ", 1)[-1] in {"120000", "160000"}
-            for line in diff.splitlines()
-        )
-
     def _require_open(self) -> None:
         with self._lock:
             if self._closed:
@@ -719,7 +658,6 @@ class HostTools:
         stderr: Any,
         error_prefix: str,
         env: dict[str, str] | None = None,
-        protected: bool = False,
     ) -> ManagedProcess:
         with self._lock:
             if self._closed:
@@ -728,10 +666,6 @@ class HostTools:
             environment = (env or os.environ).copy()
             environment[EXECUTION_ENV] = execution_id
             environment[OWNER_ENV] = self.process_owner
-            if protected:
-                environment[PROTECTED_PATCH_ENV] = "1"
-            else:
-                environment.pop(PROTECTED_PATCH_ENV, None)
             creationflags = 0x00000204 if os.name == "nt" else 0
             try:
                 process = subprocess.Popen(
@@ -745,7 +679,7 @@ class HostTools:
                     creationflags=creationflags,
                 )
                 tree: ProcessTree = (
-                    WindowsJob(process, kill_on_close=not protected)
+                    WindowsJob(process)
                     if os.name == "nt"
                     else UnixProcessGroup(process.pid, execution_id)
                 )
@@ -764,7 +698,6 @@ class HostTools:
                 process=process,
                 execution_id=execution_id,
                 tree=tree,
-                protected=protected,
             )
             self._processes[process.pid] = managed
             return managed
