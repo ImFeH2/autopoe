@@ -147,6 +147,64 @@ def test_openai_runner_bounds_silent_requests(api_type: ApiType) -> None:
     assert client.max_retries == 0
 
 
+@pytest.mark.parametrize(
+    ("api_type", "expected_settings"),
+    [
+        ("openai-chat", {"openai_prompt_cache_key": "flowent-agent-2"}),
+        ("openai-responses", {"openai_prompt_cache_key": "flowent-agent-2"}),
+        ("anthropic", None),
+        ("google", None),
+    ],
+)
+def test_runner_uses_stable_agent_prompt_cache_settings(
+    tmp_path: Path,
+    api_type: ApiType,
+    expected_settings: dict[str, str] | None,
+) -> None:
+    settings: list[dict[str, str] | None] = []
+
+    class SuccessfulResult:
+        def __init__(self) -> None:
+            self.usage: dict[str, Any] = {}
+
+        def new_messages(self) -> tuple[ModelMessage, ...]:
+            return ()
+
+    class RecordingAgent:
+        def run_sync(self, *_args: Any, **kwargs: Any) -> SuccessfulResult:
+            settings.append(kwargs.get("model_settings"))
+            return SuccessfulResult()
+
+    runner = object.__new__(PydanticAgentRunner)
+    runner._observability = None  # type: ignore[attr-defined]
+    runner._api_type = api_type  # type: ignore[attr-defined]
+    runner._model_name = "test-model"  # type: ignore[attr-defined]
+    runner._agent = RecordingAgent()  # type: ignore[attr-defined]
+    reminder, context = activation_context(tmp_path)
+
+    runner.run(reminder, context)
+    runner.run(
+        reminder,
+        AgentRunContext(
+            context.agent_id,
+            context.state,
+            context.host_tools,
+            run_id="another-turn",
+        ),
+    )
+    runner.run(
+        Reminder(7, reminder.mentions),
+        AgentRunContext(7, context.state, context.host_tools, run_id="other-agent"),
+    )
+
+    other_agent_settings = (
+        {"openai_prompt_cache_key": "flowent-agent-7"}
+        if expected_settings is not None
+        else None
+    )
+    assert settings == [expected_settings, expected_settings, other_agent_settings]
+
+
 def test_pydantic_runner_exposes_only_current_tool_names() -> None:
     runner = PydanticAgentRunner(
         ModelConfig(

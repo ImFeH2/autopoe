@@ -499,6 +499,11 @@ class PydanticAgentRunner:
         message_history = list(context.message_history)
         api_type = getattr(self, "_api_type", "unknown")
         model_name = getattr(self, "_model_name", "unknown")
+        model_settings = (
+            {"openai_prompt_cache_key": f"flowent-agent-{reminder.agent_id}"}
+            if api_type in ("openai-chat", "openai-responses")
+            else None
+        )
         started = time.monotonic()
         log_event(
             "model.request.started",
@@ -516,6 +521,7 @@ class PydanticAgentRunner:
                         prompt,
                         deps=context,
                         metadata=run_metadata,
+                        model_settings=model_settings,
                         message_history=message_history,
                         run_id=context.run_id,
                         event_stream_handler=handle_events,
