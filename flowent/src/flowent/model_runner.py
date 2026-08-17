@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
@@ -7,7 +8,6 @@ from dataclasses import dataclass, field, replace
 from threading import Lock
 from typing import Any, Literal, cast
 
-from openai import Timeout
 from pydantic_ai import (
     Agent,
     FunctionToolCallEvent,
@@ -51,6 +51,12 @@ from pydantic_core import to_jsonable_python
 from flowent.diagnostics import log_event, log_exception, register_secret
 from flowent.domain import DomainError, Reminder
 from flowent.host_tools import HostToolError
+from flowent.model_execution import (
+    ModelExecutionLoop,
+    ModelRequestLimiter,
+    ModelRequestPolicy,
+    RetryingModel,
+)
 from flowent.observability import (
     ObservabilityConfig,
     PydanticAIObservability,
@@ -113,13 +119,10 @@ class UnavailableRunner:
 
 
 def _openai_provider(config: ModelConfig) -> OpenAIProvider:
-    provider = OpenAIProvider(
+    return OpenAIProvider(
         base_url=config.base_url,
         api_key=config.api_key,
     )
-    provider.client.timeout = Timeout(120, connect=5, write=30, pool=30)
-    provider.client.max_retries = 0
-    return provider
 
 
 class PydanticAgentRunner:
@@ -127,6 +130,7 @@ class PydanticAgentRunner:
         self,
         config: ModelConfig,
         observability: PydanticAIObservability | None = None,
+        request_policy: ModelRequestPolicy | None = None,
     ) -> None:
         if config.api_type == "anthropic":
             model = AnthropicModel(
@@ -154,7 +158,9 @@ class PydanticAgentRunner:
                 cast(OpenAIModelName, config.model),
                 provider=_openai_provider(config),
             )
-        capabilities: list[Any] = []
+        self._request_policy = request_policy or ModelRequestPolicy(config.api_type)
+        model = RetryingModel(model, self._request_policy)
+        capabilities: list[Any] = [self._request_policy]
         if observability:
             capabilities.append(observability.capability())
         if config.api_type == "openai-responses":
@@ -481,6 +487,23 @@ class PydanticAgentRunner:
         reminder: Reminder,
         context: AgentRunContext,
     ) -> AgentRunOutcome:
+        async def run_once() -> AgentRunOutcome:
+            async with self._agent:
+                return await self.run_async(reminder, context)
+
+        return asyncio.run(run_once())
+
+    async def start(self) -> None:
+        await self._agent.__aenter__()
+
+    async def close(self) -> None:
+        await self._agent.__aexit__(None, None, None)
+
+    async def run_async(
+        self,
+        reminder: Reminder,
+        context: AgentRunContext,
+    ) -> AgentRunOutcome:
         mention_lines = [
             (
                 f"- [{'previously reminded' if mention.previously_reminded else 'new'}] "
@@ -595,7 +618,7 @@ class PydanticAgentRunner:
         with capture_run_messages() as captured_messages:
             try:
                 with trace_context:
-                    result = self._agent.run_sync(
+                    result = await self._agent.run(
                         prompt,
                         deps=context,
                         metadata=run_metadata,
@@ -800,6 +823,12 @@ class ModelRuntime:
         ] = create_pydantic_ai_observability,
     ) -> None:
         self._lock = Lock()
+        self._model_loop: ModelExecutionLoop | None = None
+        self._request_limiter = ModelRequestLimiter(3)
+        self._started_runners: dict[int, PydanticAgentRunner] = {}
+        self._active_runner_runs: dict[int, int] = {}
+        self._retired_runner_ids: set[int] = set()
+        self._shutting_down = False
         self._config = config
         if config is not None:
             register_secret(config.api_key)
@@ -841,7 +870,48 @@ class ModelRuntime:
     ) -> AgentRunner:
         if config is None:
             return UnavailableRunner("Model configuration is incomplete")
-        return PydanticAgentRunner(config, observability)
+        return PydanticAgentRunner(
+            config,
+            observability,
+            ModelRequestPolicy(config.api_type, limiter=self._request_limiter),
+        )
+
+    def _prepare_runner_locked(
+        self,
+        runner: AgentRunner,
+    ) -> ModelExecutionLoop | None:
+        if not isinstance(runner, PydanticAgentRunner):
+            return None
+        if self._model_loop is None:
+            self._model_loop = ModelExecutionLoop()
+        runner_id = id(runner)
+        if runner_id not in self._started_runners:
+            self._model_loop.run(runner.start())
+            self._started_runners[runner_id] = runner
+        self._active_runner_runs[runner_id] = (
+            self._active_runner_runs.get(runner_id, 0) + 1
+        )
+        return self._model_loop
+
+    def _retire_runner_locked(
+        self,
+        runner: AgentRunner,
+    ) -> PydanticAgentRunner | None:
+        if not isinstance(runner, PydanticAgentRunner):
+            return None
+        runner_id = id(runner)
+        if runner_id not in self._started_runners:
+            return None
+        if self._active_runner_runs.get(runner_id, 0) > 0:
+            self._retired_runner_ids.add(runner_id)
+            return None
+        self._started_runners.pop(runner_id, None)
+        return runner
+
+    def _close_runner(self, runner: PydanticAgentRunner | None) -> None:
+        if runner is None or self._model_loop is None:
+            return
+        self._model_loop.run(runner.close())
 
     def settings(self) -> dict[str, Any]:
         with self._lock:
@@ -923,8 +993,11 @@ class ModelRuntime:
             )
             if self._on_configure is not None:
                 self._on_configure(config.persistence_data())
+            previous_runner = self._runner
             self._config = config
             self._runner = runner
+            runner_to_close = self._retire_runner_locked(previous_runner)
+        self._close_runner(runner_to_close)
         log_event(
             "model.config.updated",
             api_type=config.api_type,
@@ -970,9 +1043,12 @@ class ModelRuntime:
                 raise
             previous_session = self._current_observability_session
             self._observability_config = config
+            previous_runner = self._runner
             self._current_observability_session = session
             self._runner = runner
+            runner_to_close = self._retire_runner_locked(previous_runner)
             session_to_shutdown = self._remove_session_if_idle(previous_session)
+        self._close_runner(runner_to_close)
         if session_to_shutdown is not None:
             session_to_shutdown.shutdown()
         log_event(
@@ -1001,7 +1077,11 @@ class ModelRuntime:
         context: AgentRunContext,
     ) -> AgentRunOutcome | None:
         with self._lock:
+            if self._shutting_down:
+                raise AgentRunFailure("Agent runtime stopped")
             runner = self._runner
+            model_loop = self._prepare_runner_locked(runner)
+            runner_id = id(runner)
             session = self._current_observability_session
             if session is not None:
                 session_id = id(session)
@@ -1009,29 +1089,63 @@ class ModelRuntime:
                     self._active_session_runs.get(session_id, 0) + 1
                 )
         try:
+            if model_loop is not None:
+                return model_loop.run(
+                    cast(PydanticAgentRunner, runner).run_async(reminder, context)
+                )
             return runner.run(reminder, context)
         finally:
             session_to_shutdown = None
-            if session is not None:
-                with self._lock:
+            runner_to_close = None
+            with self._lock:
+                if model_loop is not None:
+                    active_runner_runs = self._active_runner_runs.get(runner_id, 1) - 1
+                    if active_runner_runs > 0:
+                        self._active_runner_runs[runner_id] = active_runner_runs
+                    else:
+                        self._active_runner_runs.pop(runner_id, None)
+                        if runner_id in self._retired_runner_ids:
+                            self._retired_runner_ids.remove(runner_id)
+                            runner_to_close = self._started_runners.pop(
+                                runner_id,
+                                None,
+                            )
+                if session is not None:
                     session_id = id(session)
-                    active_runs = self._active_session_runs[session_id] - 1
+                    active_runs = self._active_session_runs.get(session_id, 1) - 1
                     if active_runs:
                         self._active_session_runs[session_id] = active_runs
                     else:
-                        del self._active_session_runs[session_id]
+                        self._active_session_runs.pop(session_id, None)
                         if session is not self._current_observability_session:
                             session_to_shutdown = self._remove_session_if_idle(session)
+            self._close_runner(runner_to_close)
             if session_to_shutdown is not None:
                 session_to_shutdown.shutdown()
 
     def shutdown(self) -> None:
         with self._lock:
+            if self._shutting_down:
+                return
+            self._shutting_down = True
             sessions = self._observability_sessions
             self._observability_sessions = []
+            runners = list(self._started_runners.values())
+            self._started_runners = {}
+            model_loop = self._model_loop
+        if model_loop is not None and self._active_runner_runs:
+            model_loop.cancel_pending()
+        if model_loop is not None:
+            for runner in runners:
+                model_loop.run(runner.close())
+            model_loop.shutdown()
         for session in sessions:
             session.shutdown()
-        log_event("model.runtime.stopped", observability_session_count=len(sessions))
+        log_event(
+            "model.runtime.stopped",
+            observability_session_count=len(sessions),
+            managed_runner_count=len(runners),
+        )
 
 
 def create_runner(

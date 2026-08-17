@@ -60,12 +60,34 @@ def test_writes_private_redacted_jsonl_logs(tmp_path: Path) -> None:
     }
     assert records[-1]["event"] == "test.failed"
     assert records[-1]["error_type"] == "RuntimeError"
+    assert records[-1]["error_cause_type"] is None
+    assert records[-1]["root_error_type"] == "RuntimeError"
     assert secret not in content
     assert "other-sensitive-value" not in content
     if os.name == "posix":
         assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700
         assert stat.S_IMODE((tmp_path / "logs").stat().st_mode) == 0o700
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_logs_exception_chain_types_without_messages(tmp_path: Path) -> None:
+    path = configure_diagnostics(tmp_path)
+    assert path is not None
+    try:
+        try:
+            raise TimeoutError("private transport detail")
+        except TimeoutError as cause:
+            raise ConnectionError("private provider detail") from cause
+    except ConnectionError as error:
+        log_exception("test.chain.failed", error)
+    shutdown_diagnostics()
+
+    record = json.loads(path.read_text().splitlines()[-1])
+    assert record["error_type"] == "ConnectionError"
+    assert record["error_cause_type"] == "TimeoutError"
+    assert record["root_error_type"] == "TimeoutError"
+    assert "private transport detail" not in path.read_text()
+    assert "private provider detail" not in path.read_text()
 
 
 def test_rotates_logs_without_weakening_permissions(tmp_path: Path) -> None:

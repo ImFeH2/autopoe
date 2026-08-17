@@ -125,6 +125,7 @@ def log_event(event: str, *, level: int = logging.INFO, **fields: Any) -> None:
 
 def log_exception(event: str, error: BaseException, **fields: Any) -> None:
     print(f"[Flowent] {event}: {type(error).__name__}", file=sys.stderr)
+    error_types = exception_chain_types(error)
     stack = [
         f"{frame.filename}:{frame.lineno}:{frame.name}"
         for frame in traceback.extract_tb(error.__traceback__)
@@ -132,10 +133,23 @@ def log_exception(event: str, error: BaseException, **fields: Any) -> None:
     log_event(
         event,
         level=logging.ERROR,
-        error_type=type(error).__name__,
+        error_type=error_types[0],
+        error_cause_type=error_types[1] if len(error_types) > 1 else None,
+        root_error_type=error_types[-1],
         stack=stack,
         **fields,
     )
+
+
+def exception_chain_types(error: BaseException) -> tuple[str, ...]:
+    types: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        types.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return tuple(types)
 
 
 def _sanitize_value(value: Any, *, sensitive: bool = False) -> Any:

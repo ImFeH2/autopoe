@@ -4,13 +4,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from openai import APITimeoutError
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 from pydantic_ai import InstrumentationSettings
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.messages import (
     CompactionPart,
     ModelMessage,
@@ -35,6 +34,7 @@ from flowent.domain import OrganizationState, Reminder, ReminderMention
 from flowent.history import AgentHistory
 from flowent.host_tools import HostTools
 from flowent.memory import AgentMemory
+from flowent.model_execution import RetryingModel
 from flowent.model_runner import (
     ApiType,
     ModelConfig,
@@ -132,7 +132,8 @@ def test_pydantic_runner_uses_the_selected_api_type(
         )
     )
 
-    assert isinstance(runner._agent.model, model_type)
+    assert isinstance(runner._agent.model, RetryingModel)
+    assert isinstance(runner._agent.model.wrapped, model_type)
 
 
 @pytest.mark.parametrize(
@@ -220,11 +221,29 @@ def test_runner_applies_provider_compaction_context_management(
     with runner._agent.override(model=FunctionModel(stream_function=respond)):
         runner.run(reminder, context)
 
-    assert settings == [expected_settings]
+    assert len(settings) == 1
+    actual_settings = dict(settings[0] or {})
+    timeout = actual_settings.pop("timeout")
+    assert timeout.connect == 5
+    assert timeout.read == 120
+    assert timeout.write == 30
+    assert timeout.pool == 30
+    assert actual_settings == expected_settings
 
 
-@pytest.mark.parametrize("api_type", ["openai-chat", "openai-responses"])
-def test_openai_runner_bounds_silent_requests(api_type: ApiType) -> None:
+@pytest.mark.parametrize(
+    ("api_type", "numeric_timeout"),
+    [
+        ("openai-chat", False),
+        ("openai-responses", False),
+        ("anthropic", False),
+        ("google", True),
+    ],
+)
+def test_runner_bounds_silent_requests_through_pydantic_settings(
+    api_type: ApiType,
+    numeric_timeout: bool,
+) -> None:
     runner = PydanticAgentRunner(
         ModelConfig(
             api_type=api_type,
@@ -234,12 +253,14 @@ def test_openai_runner_bounds_silent_requests(api_type: ApiType) -> None:
         )
     )
 
-    client = runner._agent.model.provider.client
-    assert client.timeout.connect == 5
-    assert client.timeout.read == 120
-    assert client.timeout.write == 30
-    assert client.timeout.pool == 30
-    assert client.max_retries == 0
+    timeout = runner._request_policy.get_model_settings()["timeout"]
+    if numeric_timeout:
+        assert timeout == 120
+    else:
+        assert timeout.connect == 5
+        assert timeout.read == 120
+        assert timeout.write == 30
+        assert timeout.pool == 30
 
 
 @pytest.mark.parametrize(
@@ -266,7 +287,13 @@ def test_runner_uses_stable_agent_prompt_cache_settings(
             return ()
 
     class RecordingAgent:
-        def run_sync(self, *_args: Any, **kwargs: Any) -> SuccessfulResult:
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def run(self, *_args: Any, **kwargs: Any) -> SuccessfulResult:
             settings.append(kwargs.get("model_settings"))
             return SuccessfulResult()
 
@@ -1089,9 +1116,15 @@ def test_missing_model_config_returns_runner_that_fails_on_activation(
         runner.run(activation, context)
 
 
-def test_openai_timeout_is_mapped_to_safe_model_failure(tmp_path: Path) -> None:
-    class TimeoutAgent:
-        def run_sync(
+def test_model_api_error_is_mapped_to_safe_model_failure(tmp_path: Path) -> None:
+    class FailingAgent:
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def run(
             self,
             prompt: str,
             deps: AgentRunContext,
@@ -1099,11 +1132,11 @@ def test_openai_timeout_is_mapped_to_safe_model_failure(tmp_path: Path) -> None:
             **_kwargs: Any,
         ) -> Any:
             del prompt, deps, metadata
-            raise APITimeoutError(request=object())
+            raise ModelAPIError("test-model", "connection failed")
 
     runner = object.__new__(PydanticAgentRunner)
     runner._observability = None  # type: ignore[attr-defined]
-    runner._agent = TimeoutAgent()  # type: ignore[attr-defined]
+    runner._agent = FailingAgent()  # type: ignore[attr-defined]
     activation, context = activation_context(tmp_path)
 
     with pytest.raises(AgentRunFailure, match="^Model request failed$"):
@@ -1112,7 +1145,13 @@ def test_openai_timeout_is_mapped_to_safe_model_failure(tmp_path: Path) -> None:
 
 def test_pydantic_model_errors_are_mapped_to_safe_message(tmp_path: Path) -> None:
     class FailingAgent:
-        def run_sync(
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def run(
             self,
             prompt: str,
             deps: AgentRunContext,
