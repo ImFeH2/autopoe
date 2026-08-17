@@ -21,17 +21,25 @@ from pydantic_ai import (
     capture_run_messages,
 )
 from pydantic_ai.messages import (
+    CompactionPart,
     ModelMessage,
     ModelRequest,
+    ModelResponse,
     TextPart,
     ThinkingPart,
     ToolReturnPart,
     UserPromptPart,
+    post_compaction_window,
 )
-from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
+from pydantic_ai.models.anthropic import (
+    AnthropicCompaction,
+    AnthropicModel,
+    AnthropicModelName,
+)
 from pydantic_ai.models.google import GoogleModel, GoogleModelName
 from pydantic_ai.models.openai import (
     OpenAIChatModel,
+    OpenAICompaction,
     OpenAIModelName,
     OpenAIResponsesModel,
 )
@@ -146,7 +154,13 @@ class PydanticAgentRunner:
                 cast(OpenAIModelName, config.model),
                 provider=_openai_provider(config),
             )
-        capabilities = [observability.capability()] if observability else None
+        capabilities: list[Any] = []
+        if observability:
+            capabilities.append(observability.capability())
+        if config.api_type == "openai-responses":
+            capabilities.append(OpenAICompaction())
+        elif config.api_type == "anthropic":
+            capabilities.append(AnthropicCompaction())
         self._observability = observability
         self._api_type = config.api_type
         self._model_name = config.model
@@ -166,6 +180,8 @@ class PydanticAgentRunner:
                 "Use memory for private long-term knowledge that will help your future Turns. Keep "
                 "MEMORY.md as a concise index and put details in topic Markdown files. Memory is private "
                 "to you, does not schedule Turns, and must not replace Discussion for shared information. "
+                "Use history to search or read your private original model context removed by compaction. "
+                "History is read-only and is not Discussion history. "
                 "Use run with an argv list to inspect files and run host commands. The cwd and edit path "
                 "may be relative to the launch directory or absolute and may access any path available to "
                 "the host user. Use edit for exact text replacement in existing UTF-8 files. Read enough "
@@ -285,6 +301,55 @@ class PydanticAgentRunner:
                         )
                     else:
                         result = ctx.deps.memory(action, path=path)
+                return model_result(ctx, result)
+            except DomainError as error:
+                raise ModelRetry(error.message) from error
+
+        @self._agent.tool(sequential=True)
+        def history(
+            ctx: RunContext[AgentRunContext],
+            action: Literal["list", "search", "read"],
+            query: str | None = None,
+            sequence: int | None = None,
+            entry_id: str | None = None,
+            before_sequence: int | None = None,
+            offset: int = 0,
+            limit: int | None = None,
+            max_chars: int = 8_000,
+        ) -> Any:
+            """Inspect this Agent's private original context removed by compaction.
+
+            Use list to page archived Turns, search to find matching entry IDs, and read with
+            sequence to preview a Turn or entry_id to retrieve exact content. offset pages search
+            matches, Turn entry groups, or characters within an entry. Tool calls and their results
+            stay in the same Turn group. Use max_chars for entry reads.
+            """
+            try:
+                if action == "list":
+                    result = ctx.deps.history(
+                        action,
+                        before_sequence=before_sequence,
+                        limit=20 if limit is None else limit,
+                    )
+                elif action == "search":
+                    if query is None:
+                        raise ModelRetry("query is required for search")
+                    result = ctx.deps.history(
+                        action,
+                        query=query,
+                        before_sequence=before_sequence,
+                        offset=offset,
+                        limit=10 if limit is None else limit,
+                    )
+                else:
+                    result = ctx.deps.history(
+                        action,
+                        sequence=sequence,
+                        entry_id=entry_id,
+                        offset=offset,
+                        limit=20 if limit is None else limit,
+                        max_chars=max_chars,
+                    )
                 return model_result(ctx, result)
             except DomainError as error:
                 raise ModelRetry(error.message) from error
@@ -468,6 +533,15 @@ class PydanticAgentRunner:
                         )
                     elif isinstance(event.part, ThinkingPart):
                         context.emit_history_event("thinking", part_id=part_id)
+                    elif isinstance(event.part, CompactionPart):
+                        context.mark_history_compacted(event.part.provider_name)
+                        log_event(
+                            "model.compaction.completed",
+                            agent_id=reminder.agent_id,
+                            turn_id=context.run_id,
+                            api_type=getattr(self, "_api_type", "unknown"),
+                            provider=event.part.provider_name,
+                        )
                 elif isinstance(event, PartDeltaEvent):
                     if isinstance(event.delta, TextPartDelta):
                         context.emit_history_event(
@@ -496,8 +570,8 @@ class PydanticAgentRunner:
                         ),
                     )
 
-        message_history = list(context.message_history)
         api_type = getattr(self, "_api_type", "unknown")
+        message_history = active_message_history(context.message_history, api_type)
         model_name = getattr(self, "_model_name", "unknown")
         model_settings = (
             {"openai_prompt_cache_key": f"flowent-agent-{reminder.agent_id}"}
@@ -513,6 +587,10 @@ class PydanticAgentRunner:
             model=model_name,
             reminder_count=len(reminder.mentions),
             previous_message_count=len(message_history),
+            archived_message_count=max(
+                0,
+                len(context.message_history) - len(message_history),
+            ),
         )
         with capture_run_messages() as captured_messages:
             try:
@@ -564,6 +642,59 @@ class PydanticAgentRunner:
         return AgentRunOutcome(messages, usage)
 
 
+def active_message_history(
+    messages: Sequence[ModelMessage],
+    api_type: str,
+) -> list[ModelMessage]:
+    window = post_compaction_window(messages)
+    compaction = next(
+        (
+            part
+            for message in window
+            if isinstance(message, ModelResponse)
+            for part in message.parts
+            if isinstance(part, CompactionPart)
+        ),
+        None,
+    )
+    if compaction is None:
+        return list(messages)
+    expected_provider = {
+        "openai-responses": "openai",
+        "anthropic": "anthropic",
+    }.get(api_type)
+    compatible = (
+        expected_provider is not None and compaction.provider_name == expected_provider
+    )
+    if api_type == "openai-responses":
+        compatible = compatible and bool(
+            compaction.provider_details
+            and "encrypted_content" in compaction.provider_details
+        )
+    if compatible:
+        return window
+    tail: list[ModelMessage] = []
+    for message in window:
+        if not isinstance(message, ModelResponse):
+            tail.append(message)
+            continue
+        parts = [part for part in message.parts if not isinstance(part, CompactionPart)]
+        if parts:
+            tail.append(replace(message, parts=parts))
+    checkpoint_notice = ModelRequest(
+        parts=[
+            UserPromptPart(
+                content=(
+                    "<history_checkpoint>Earlier private model context was compacted by a "
+                    "different provider. Use the history tool to search or read original "
+                    "details when needed.</history_checkpoint>"
+                )
+            )
+        ]
+    )
+    return [checkpoint_notice, *tail]
+
+
 def clean_runtime_context(
     messages: Sequence[ModelMessage],
     *,
@@ -585,11 +716,72 @@ def clean_runtime_context(
             ):
                 parts.append(replace(part, content=persisted_prompt))
             elif isinstance(part, ToolReturnPart):
-                parts.append(replace(part, content=unwrap_tool_result(part.content)))
+                content = unwrap_tool_result(part.content)
+                if part.tool_name == "history":
+                    content = _history_retrieval_receipt(content)
+                parts.append(replace(part, content=content))
             else:
                 parts.append(part)
         cleaned.append(replace(message, parts=parts))
     return tuple(cleaned)
+
+
+def _history_retrieval_receipt(result: Any) -> dict[str, Any]:
+    receipt: dict[str, Any] = {"retrieved": True}
+    if not isinstance(result, dict):
+        return receipt
+    for key in (
+        "action",
+        "mode",
+        "sequence",
+        "entry_id",
+        "offset",
+        "next_offset",
+        "content_length",
+        "total_entries",
+        "total_groups",
+        "count",
+        "has_more",
+        "truncated",
+    ):
+        if key in result:
+            receipt[key] = result[key]
+    checkpoint = result.get("checkpoint")
+    if isinstance(checkpoint, dict):
+        receipt["checkpoint"] = {
+            key: checkpoint[key]
+            for key in (
+                "sequence",
+                "run_id",
+                "entry_id",
+                "provider",
+                "timestamp",
+                "pending",
+            )
+            if key in checkpoint
+        }
+    if isinstance(entries := result.get("entries"), list):
+        receipt["returned_entries"] = len(entries)
+        receipt["entry_ids"] = [
+            entry["entry_id"]
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("entry_id"), str)
+        ]
+    if isinstance(matches := result.get("matches"), list):
+        receipt["returned_matches"] = len(matches)
+        receipt["entry_ids"] = [
+            match["entry_id"]
+            for match in matches
+            if isinstance(match, dict) and isinstance(match.get("entry_id"), str)
+        ]
+    if isinstance(turns := result.get("turns"), list):
+        receipt["returned_turns"] = len(turns)
+        receipt["sequences"] = [
+            turn["sequence"]
+            for turn in turns
+            if isinstance(turn, dict) and isinstance(turn.get("sequence"), int)
+        ]
+    return receipt
 
 
 class ModelRuntime:

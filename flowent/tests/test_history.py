@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import pytest
 from pydantic_ai.messages import (
+    CompactionPart,
     ModelRequest,
     ModelResponse,
     SystemPromptPart,
@@ -11,7 +13,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from flowent.domain import Reminder, ReminderMention
+from flowent.domain import DomainError, Reminder, ReminderMention
 from flowent.history import AgentHistory
 from flowent.persistence import SQLiteStore
 
@@ -90,6 +92,162 @@ def test_persists_complete_agent_history_and_restores_model_messages(
     assert "private reasoning" not in str(first_run)
     assert first_run["entries"][-1]["content"] == "Work completed"
     assert first_run["usage"] == {"input_tokens": 12}
+
+
+def test_compacted_history_is_searchable_read_only_and_private(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    history = AgentHistory(SQLiteStore(data))
+    first = history.start(reminder())
+    archived_detail = "Archived needle detail " + "x" * 600
+    first.complete(
+        "completed",
+        (
+            ModelRequest(
+                parts=[
+                    SystemPromptPart(content="Private standing instruction"),
+                    UserPromptPart(content="Original compacted request"),
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ThinkingPart(content="hidden compacted reasoning"),
+                    ToolCallPart("run", {"argv": ["pwd"]}, "archived-call"),
+                ],
+                model_name="test-model",
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart("run", archived_detail, "archived-call"),
+                ]
+            ),
+            ModelResponse(
+                parts=[TextPart("Original compacted response")],
+                model_name="test-model",
+            ),
+        ),
+    )
+    second = history.start(reminder())
+    second.complete(
+        "completed",
+        (
+            ModelRequest(parts=[UserPromptPart(content="Create checkpoint")]),
+            ModelResponse(
+                parts=[
+                    CompactionPart(
+                        provider_name="openai",
+                        provider_details={
+                            "encrypted_content": "provider-private-checkpoint"
+                        },
+                    ),
+                    TextPart("Active response after checkpoint"),
+                ],
+                model_name="test-model",
+            ),
+        ),
+    )
+
+    restored = AgentHistory(SQLiteStore(data))
+    listed = restored.list_compacted(2)
+    searched = restored.search_compacted(2, "needle")
+    first_page = restored.search_compacted(2, "compacted", limit=1)
+    second_page = restored.search_compacted(
+        2,
+        "compacted",
+        offset=first_page["next_offset"],
+        limit=1,
+    )
+    turn = restored.read_compacted(2, sequence=1, limit=100)
+    tool_group = restored.read_compacted(2, sequence=1, offset=2, limit=1)
+    entry_id = searched["matches"][0]["entry_id"]
+    first_chunk = restored.read_compacted(
+        2,
+        entry_id=entry_id,
+        max_chars=24,
+    )
+    second_chunk = restored.read_compacted(
+        2,
+        entry_id=entry_id,
+        offset=first_chunk["next_offset"],
+        max_chars=24,
+    )
+
+    assert [item["sequence"] for item in listed["turns"]] == [2, 1]
+    assert listed["checkpoint"]["sequence"] == 2
+    assert listed["checkpoint"]["provider"] == "openai"
+    assert searched["count"] == 1
+    assert "Archived needle detail" in searched["matches"][0]["snippet"]
+    assert first_page["truncated"] is True
+    assert first_page["next_offset"] == 1
+    assert first_page["matches"][0]["entry_id"] != second_page["matches"][0]["entry_id"]
+    assert all(entry["type"] != "thinking" for entry in turn["entries"])
+    assert [entry["type"] for entry in tool_group["entries"]] == [
+        "tool_call",
+        "tool_result",
+    ]
+    assert tool_group["total_groups"] == 4
+    assert {entry["tool_call_id"] for entry in tool_group["entries"]} == {
+        "archived-call"
+    }
+    assert (
+        tool_group["entries"][0]["paired_entry_id"]
+        == tool_group["entries"][1]["entry_id"]
+    )
+    assert (
+        tool_group["entries"][1]["paired_entry_id"]
+        == tool_group["entries"][0]["entry_id"]
+    )
+    assert "hidden compacted reasoning" not in str(turn)
+    assert "provider-private-checkpoint" not in str(listed)
+    assert first_chunk["content"] + second_chunk["content"] == archived_detail[:48]
+    assert first_chunk["truncated"] is True
+    assert first_chunk["next_offset"] == 24
+    assert restored.list_compacted(3) == {
+        "action": "list",
+        "checkpoint": None,
+        "turns": [],
+        "count": 0,
+        "has_more": False,
+    }
+    with pytest.raises(DomainError, match="not found"):
+        restored.read_compacted(3, entry_id=entry_id)
+
+
+def test_pending_compaction_exposes_prior_turns_without_publishing_an_event(
+    tmp_path: Path,
+) -> None:
+    events: list[dict[str, object]] = []
+    history = AgentHistory(SQLiteStore(tmp_path / "data"), events.append)
+    archived = history.start(reminder())
+    archived.complete(
+        "completed",
+        (ModelRequest(parts=[UserPromptPart(content="Prior raw detail")]),),
+    )
+    active = history.start(reminder())
+    event_count = len(events)
+
+    active.mark_compacted("openai")
+    listed = history.list_compacted(2)
+
+    assert listed["checkpoint"]["pending"] is True
+    assert listed["checkpoint"]["provider"] == "openai"
+    assert [turn["sequence"] for turn in listed["turns"]] == [1]
+    assert len(events) == event_count
+
+    active.complete("failed", (), None, "Interrupted after compaction")
+    assert history.list_compacted(2)["checkpoint"] is None
+
+
+def test_compacted_history_rejects_ambiguous_or_unbounded_reads(
+    tmp_path: Path,
+) -> None:
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+
+    with pytest.raises(DomainError, match="exactly one"):
+        history.read_compacted(2)
+    with pytest.raises(DomainError, match="between 1 and 50"):
+        history.search_compacted(2, "query", limit=51)
+    with pytest.raises(DomainError, match="at most 500"):
+        history.search_compacted(2, "x" * 501)
 
 
 def test_deletes_all_history_for_an_agent(tmp_path: Path) -> None:

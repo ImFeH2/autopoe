@@ -27,10 +27,16 @@ class AgentRunContext:
     history_event_sink: Callable[..., None] | None = None
     todos: AgentTodos | None = None
     memories: AgentMemory | None = None
+    history_store: AgentHistory | None = None
+    history_compaction_sink: Callable[[str | None], None] | None = None
 
     def emit_history_event(self, event_type: str, **data: Any) -> None:
         if self.history_event_sink is not None:
             self.history_event_sink(event_type, **data)
+
+    def mark_history_compacted(self, provider: str | None) -> None:
+        if self.history_compaction_sink is not None:
+            self.history_compaction_sink(provider)
 
     def organization(self, action: str, **arguments: Any) -> Any:
         def operation() -> Any:
@@ -75,6 +81,13 @@ class AgentRunContext:
             lambda: self._discussion(action, arguments),
         )
 
+    def history(self, action: str, **arguments: Any) -> Any:
+        return self._call_tool(
+            "history",
+            action,
+            lambda: self._history(action, arguments),
+        )
+
     def todo(self, action: str, **arguments: Any) -> Any:
         return self._call_tool(
             "todo",
@@ -101,6 +114,34 @@ class AgentRunContext:
 
     def model_tool_result(self, result: Any) -> Any:
         return wrap_tool_result(result, self.todo_status_reminder())
+
+    def _history(self, action: str, arguments: dict[str, Any]) -> Any:
+        if self.history_store is None:
+            raise RuntimeError("Agent History is unavailable")
+        if action == "list":
+            return self.history_store.list_compacted(
+                self.agent_id,
+                arguments.get("before_sequence"),
+                arguments.get("limit", 20),
+            )
+        if action == "search":
+            return self.history_store.search_compacted(
+                self.agent_id,
+                arguments["query"],
+                arguments.get("before_sequence"),
+                arguments.get("offset", 0),
+                arguments.get("limit", 10),
+            )
+        if action == "read":
+            return self.history_store.read_compacted(
+                self.agent_id,
+                arguments.get("sequence"),
+                arguments.get("entry_id"),
+                arguments.get("offset", 0),
+                arguments.get("limit", 20),
+                arguments.get("max_chars", 8_000),
+            )
+        raise ValueError(f"Unknown history action: {action}")
 
     def _memory(self, action: str, arguments: dict[str, Any]) -> Any:
         if self.memories is None:
@@ -276,6 +317,27 @@ class AgentRunContext:
                 result_fields = {"content_bytes": result["bytes"]}
                 if action == "edit":
                     result_fields["replacement_count"] = result["replacement_count"]
+        elif tool_name == "history":
+            if action == "list":
+                result_fields = {
+                    "result_count": result["count"],
+                    "has_more": result["has_more"],
+                }
+            elif action == "search":
+                result_fields = {
+                    "result_count": result["count"],
+                    "truncated": result["truncated"],
+                }
+            elif action == "read" and result["mode"] == "entry":
+                result_fields = {
+                    "content_chars": len(result["content"]),
+                    "truncated": result["truncated"],
+                }
+            elif action == "read":
+                result_fields = {
+                    "result_count": len(result["entries"]),
+                    "truncated": result["truncated"],
+                }
         elif tool_name == "todo" and action == "list":
             result_fields = {"result_count": result["count"]}
         elif isinstance(result, list):
@@ -449,8 +511,12 @@ class AgentRuntime:
                     history_event_sink=(
                         history_run.emit if history_run is not None else None
                     ),
+                    history_compaction_sink=(
+                        history_run.mark_compacted if history_run is not None else None
+                    ),
                     todos=self._todos,
                     memories=self._memories,
+                    history_store=self._history,
                 ),
             )
             if result is not None:

@@ -8,8 +8,15 @@ from threading import Event
 
 import psutil
 import pytest
+from pydantic_ai.messages import (
+    CompactionPart,
+    ModelRequest,
+    ModelResponse,
+    UserPromptPart,
+)
 
 from flowent.domain import DomainError, OrganizationState, Reminder
+from flowent.history import AgentHistory
 from flowent.host_tools import HostTools
 from flowent.memory import AgentMemory
 from flowent.persistence import SQLiteStore
@@ -142,6 +149,44 @@ def test_agent_memory_tool_is_private_and_exposes_current_index(tmp_path: Path) 
     assert context.memory("read", path="patterns.md")["content"] == ("Private insight")
     assert "Read patterns.md" in context.memory_index_context()
     assert memories.list(3) == {"paths": [], "count": 0}
+
+
+def test_agent_history_tool_only_reads_its_own_compacted_context(
+    tmp_path: Path,
+) -> None:
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+    for agent_id, content in (
+        (2, "Ada private archived detail"),
+        (3, "Lin other-agent archived detail"),
+    ):
+        archived = history.start(Reminder(agent_id, ()))
+        archived.complete(
+            "completed",
+            (ModelRequest(parts=[UserPromptPart(content=content)]),),
+        )
+        checkpoint = history.start(Reminder(agent_id, ()))
+        checkpoint.complete(
+            "completed",
+            (
+                ModelResponse(
+                    parts=[CompactionPart(content="checkpoint")],
+                    model_name="test-model",
+                ),
+            ),
+        )
+    context = AgentRunContext(
+        2,
+        OrganizationState(),
+        HostTools(tmp_path),
+        history_store=history,
+    )
+
+    own = context.history("search", query="Ada private")
+    other = context.history("search", query="other-agent")
+
+    assert own["count"] == 1
+    assert "Ada private archived detail" in own["matches"][0]["snippet"]
+    assert other["count"] == 0
 
 
 def test_agent_discussion_tools_are_restricted_to_members(tmp_path: Path) -> None:

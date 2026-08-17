@@ -12,6 +12,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 from pydantic_ai import InstrumentationSettings
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
+    CompactionPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -20,13 +21,18 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.anthropic import AnthropicCompaction, AnthropicModel
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
+from pydantic_ai.models.openai import (
+    OpenAIChatModel,
+    OpenAICompaction,
+    OpenAIResponsesModel,
+)
 from pydantic_ai.models.test import TestModel
 
 from flowent.domain import OrganizationState, Reminder, ReminderMention
+from flowent.history import AgentHistory
 from flowent.host_tools import HostTools
 from flowent.memory import AgentMemory
 from flowent.model_runner import (
@@ -34,6 +40,7 @@ from flowent.model_runner import (
     ModelConfig,
     ModelRuntime,
     PydanticAgentRunner,
+    active_message_history,
     clean_runtime_context,
     create_runner,
 )
@@ -128,6 +135,94 @@ def test_pydantic_runner_uses_the_selected_api_type(
     assert isinstance(runner._agent.model, model_type)
 
 
+@pytest.mark.parametrize(
+    ("api_type", "capability_type"),
+    [
+        ("openai-chat", None),
+        ("openai-responses", OpenAICompaction),
+        ("anthropic", AnthropicCompaction),
+        ("google", None),
+    ],
+)
+def test_runner_enables_native_compaction_when_supported(
+    api_type: ApiType,
+    capability_type: type[Any] | None,
+) -> None:
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type=api_type,
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    capabilities: list[Any] = []
+    runner._agent.root_capability.apply(capabilities.append)
+
+    native = [
+        capability
+        for capability in capabilities
+        if isinstance(capability, (OpenAICompaction, AnthropicCompaction))
+    ]
+    if capability_type is None:
+        assert native == []
+    else:
+        assert len(native) == 1
+        assert isinstance(native[0], capability_type)
+
+
+@pytest.mark.parametrize(
+    ("api_type", "expected_settings"),
+    [
+        (
+            "openai-responses",
+            {
+                "openai_prompt_cache_key": "flowent-agent-2",
+                "openai_context_management": [{"type": "compaction"}],
+            },
+        ),
+        (
+            "anthropic",
+            {
+                "anthropic_context_management": {
+                    "edits": [
+                        {
+                            "type": "compact_20260112",
+                            "trigger": {"type": "input_tokens", "value": 150_000},
+                        }
+                    ]
+                }
+            },
+        ),
+    ],
+)
+def test_runner_applies_provider_compaction_context_management(
+    tmp_path: Path,
+    api_type: ApiType,
+    expected_settings: dict[str, Any],
+) -> None:
+    settings: list[dict[str, Any] | None] = []
+
+    async def respond(_messages: list[ModelMessage], info: AgentInfo):
+        settings.append(info.model_settings)
+        yield "Compaction configured"
+
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type=api_type,
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    reminder, context = activation_context(tmp_path)
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        runner.run(reminder, context)
+
+    assert settings == [expected_settings]
+
+
 @pytest.mark.parametrize("api_type", ["openai-chat", "openai-responses"])
 def test_openai_runner_bounds_silent_requests(api_type: ApiType) -> None:
     runner = PydanticAgentRunner(
@@ -218,6 +313,7 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
     assert set(runner._agent._function_toolset.tools) == {
         "discussion",
         "edit",
+        "history",
         "memory",
         "organization",
         "run",
@@ -392,6 +488,75 @@ def test_pydantic_runner_executes_memory_tools(tmp_path: Path) -> None:
     assert [
         data["tool_name"] for event_type, data in events if event_type == "tool_result"
     ] == ["memory", "memory", "memory"]
+
+
+def test_pydantic_runner_reads_compacted_history_without_repersisting_content(
+    tmp_path: Path,
+) -> None:
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+    archived = history.start(Reminder(2, ()))
+    private_detail = "Exact archived payload that must stay outside the recent tail"
+    archived.complete(
+        "completed",
+        (ModelRequest(parts=[UserPromptPart(content=private_detail)]),),
+    )
+    checkpoint = history.start(Reminder(2, ()))
+    checkpoint.complete(
+        "completed",
+        (
+            ModelResponse(
+                parts=[CompactionPart(content="checkpoint")],
+                model_name="test-model",
+            ),
+        ),
+    )
+    match = history.search_compacted(2, "Exact archived")["matches"][0]
+    seen_messages: list[list[ModelMessage]] = []
+
+    async def respond(messages: list[ModelMessage], _info: AgentInfo):
+        seen_messages.append(list(messages))
+        if len(seen_messages) == 1:
+            yield {
+                0: DeltaToolCall(
+                    name="history",
+                    json_args=json.dumps(
+                        {
+                            "action": "read",
+                            "entry_id": match["entry_id"],
+                        }
+                    ),
+                    tool_call_id="history-read-1",
+                )
+            }
+        else:
+            yield "Recovered archived context"
+
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    reminder, context = activation_context(tmp_path)
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                context.agent_id,
+                context.state,
+                context.host_tools,
+                history_store=history,
+            ),
+        )
+
+    assert private_detail in str(seen_messages[-1])
+    assert private_detail not in str(outcome.messages)
+    assert "'retrieved': True" in str(outcome.messages)
+    assert match["entry_id"] in str(outcome.messages)
+    assert "Recovered archived context" in str(outcome.messages)
 
 
 def test_memory_index_is_fresh_runtime_only_context(tmp_path: Path) -> None:
@@ -593,6 +758,55 @@ def test_pydantic_runner_exports_only_pydantic_ai_spans(tmp_path: Path) -> None:
         for item in visible_attributes
     )
     assert any("gen_ai.usage.output_tokens" in item for item in visible_attributes)
+
+
+def test_active_message_history_uses_latest_compatible_compaction_window() -> None:
+    messages: tuple[ModelMessage, ...] = (
+        ModelRequest(parts=[UserPromptPart(content="Archived raw marker")]),
+        ModelResponse(
+            parts=[
+                CompactionPart(
+                    provider_name="openai",
+                    provider_details={"encrypted_content": "opaque"},
+                ),
+                TextPart("Recent response"),
+            ],
+            model_name="test-model",
+        ),
+        ModelRequest(parts=[UserPromptPart(content="Recent request")]),
+    )
+
+    active = active_message_history(messages, "openai-responses")
+
+    assert "Archived raw marker" not in str(active)
+    assert "opaque" in str(active)
+    assert "Recent response" in str(active)
+    assert "Recent request" in str(active)
+
+
+def test_active_message_history_falls_back_safely_after_provider_switch() -> None:
+    messages: tuple[ModelMessage, ...] = (
+        ModelRequest(parts=[UserPromptPart(content="Archived raw marker")]),
+        ModelResponse(
+            parts=[
+                CompactionPart(
+                    provider_name="openai",
+                    provider_details={"encrypted_content": "opaque"},
+                ),
+                TextPart("Recent response"),
+            ],
+            model_name="test-model",
+        ),
+        ModelRequest(parts=[UserPromptPart(content="Recent request")]),
+    )
+
+    active = active_message_history(messages, "google")
+
+    assert "Archived raw marker" not in str(active)
+    assert "opaque" not in str(active)
+    assert "Use the history tool" in str(active)
+    assert "Recent response" in str(active)
+    assert "Recent request" in str(active)
 
 
 def test_pydantic_runner_continues_the_same_agent_message_history(
@@ -827,6 +1041,42 @@ def test_todo_cleanup_preserves_matching_tags_from_user_content() -> None:
     )
 
     assert cleaned[0].parts[0].content == persisted_prompt
+
+
+def test_history_retrieval_receipt_keeps_coordinates_without_content() -> None:
+    messages = (
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    "history",
+                    {
+                        "action": "search",
+                        "checkpoint": {"sequence": 5, "provider": "openai"},
+                        "matches": [
+                            {
+                                "entry_id": "run-2-3-4",
+                                "snippet": "private archived content",
+                            }
+                        ],
+                        "count": 1,
+                        "offset": 0,
+                        "next_offset": None,
+                        "truncated": False,
+                    },
+                    "history-search-1",
+                )
+            ]
+        ),
+    )
+
+    cleaned = clean_runtime_context(messages)
+    receipt = cleaned[0].parts[0].content
+
+    assert receipt["entry_ids"] == ["run-2-3-4"]
+    assert receipt["checkpoint"] == {"sequence": 5, "provider": "openai"}
+    assert receipt["returned_matches"] == 1
+    assert "private archived content" not in str(receipt)
+    assert "snippet" not in str(receipt)
 
 
 def test_missing_model_config_returns_runner_that_fails_on_activation(

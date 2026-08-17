@@ -13,10 +13,16 @@ from pydantic_ai import ModelMessagesTypeAdapter
 from pydantic_ai.messages import ModelMessage
 
 from flowent.diagnostics import log_event
-from flowent.domain import Reminder
+from flowent.domain import DomainError, Reminder
 
 RunStatus = Literal["running", "completed", "failed", "interrupted"]
 HistoryEventSink = Callable[[dict[str, Any]], None]
+HISTORY_LIST_MAX = 100
+HISTORY_SEARCH_MAX = 50
+HISTORY_READ_MAX = 100
+HISTORY_ENTRY_MAX_CHARS = 16_000
+HISTORY_PREVIEW_CHARS = 500
+HISTORY_SNIPPET_CHARS = 400
 
 
 class AgentHistoryRepository(Protocol):
@@ -57,9 +63,14 @@ class AgentHistoryRun:
     _live_entries: list[dict[str, Any]] = field(default_factory=list)
     _text_entries: dict[str, dict[str, Any]] = field(default_factory=dict)
     _thinking_parts: set[str] = field(default_factory=set)
+    _compaction_provider: str | None = None
+    _compaction_timestamp: str | None = None
 
     def emit(self, event_type: str, **data: Any) -> None:
         self._history._record_event(self, event_type, data)
+
+    def mark_compacted(self, provider: str | None) -> None:
+        self._history._mark_compacted(self, provider)
 
     def complete(
         self,
@@ -160,6 +171,275 @@ class AgentHistory:
         )
         return {"agent_id": agent_id, "runs": runs}
 
+    def list_compacted(
+        self,
+        agent_id: int,
+        before_sequence: int | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        limit = _bounded_history_value("limit", limit, 1, HISTORY_LIST_MAX)
+        if before_sequence is not None and before_sequence < 1:
+            raise DomainError(
+                "invalid_history_arguments",
+                "before_sequence must be a positive integer",
+            )
+        entries, checkpoint = self._compacted_archive(agent_id)
+        turns: dict[int, dict[str, Any]] = {}
+        for entry in entries:
+            sequence = entry["sequence"]
+            if before_sequence is not None and sequence >= before_sequence:
+                continue
+            turn = turns.setdefault(
+                sequence,
+                {
+                    "sequence": sequence,
+                    "run_id": entry["run_id"],
+                    "status": entry["status"],
+                    "started_at": entry["started_at"],
+                    "entry_count": 0,
+                },
+            )
+            turn["entry_count"] += 1
+        ordered = sorted(
+            turns.values(), key=lambda item: item["sequence"], reverse=True
+        )
+        selected = ordered[:limit]
+        return {
+            "action": "list",
+            "checkpoint": checkpoint,
+            "turns": selected,
+            "count": len(selected),
+            "has_more": len(ordered) > limit,
+        }
+
+    def search_compacted(
+        self,
+        agent_id: int,
+        query: str,
+        before_sequence: int | None = None,
+        offset: int = 0,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        query = query.strip()
+        if not query:
+            raise DomainError("invalid_history_arguments", "query is required")
+        if len(query) > 500:
+            raise DomainError(
+                "invalid_history_arguments",
+                "query must be at most 500 characters",
+            )
+        if before_sequence is not None and before_sequence < 1:
+            raise DomainError(
+                "invalid_history_arguments",
+                "before_sequence must be a positive integer",
+            )
+        if offset < 0:
+            raise DomainError(
+                "invalid_history_arguments",
+                "offset must be zero or greater",
+            )
+        limit = _bounded_history_value("limit", limit, 1, HISTORY_SEARCH_MAX)
+        entries, checkpoint = self._compacted_archive(agent_id)
+        normalized_query = query.casefold()
+        matches: list[dict[str, Any]] = []
+        for entry in reversed(entries):
+            if before_sequence is not None and entry["sequence"] >= before_sequence:
+                continue
+            searchable = (
+                f"{entry.get('tool_name') or ''}\n"
+                f"{entry.get('tool_call_id') or ''}\n{entry['content']}"
+            )
+            match_index = searchable.casefold().find(normalized_query)
+            if match_index < 0:
+                continue
+            content_index = entry["content"].casefold().find(normalized_query)
+            matches.append(
+                {
+                    "sequence": entry["sequence"],
+                    "entry_id": entry["id"],
+                    "type": entry["type"],
+                    "tool_name": entry.get("tool_name"),
+                    "tool_call_id": entry.get("tool_call_id"),
+                    "paired_entry_id": entry.get("paired_entry_id"),
+                    "snippet": _history_snippet(
+                        entry["content"],
+                        max(content_index, 0),
+                    ),
+                }
+            )
+        selected = matches[offset : offset + limit]
+        end = offset + len(selected)
+        return {
+            "action": "search",
+            "checkpoint": checkpoint,
+            "matches": selected,
+            "count": len(selected),
+            "offset": offset,
+            "next_offset": end if end < len(matches) else None,
+            "truncated": end < len(matches),
+        }
+
+    def read_compacted(
+        self,
+        agent_id: int,
+        sequence: int | None = None,
+        entry_id: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+        max_chars: int = 8_000,
+    ) -> dict[str, Any]:
+        if (sequence is None) == (entry_id is None):
+            raise DomainError(
+                "invalid_history_arguments",
+                "Provide exactly one of sequence or entry_id",
+            )
+        if offset < 0:
+            raise DomainError(
+                "invalid_history_arguments",
+                "offset must be zero or greater",
+            )
+        entries, checkpoint = self._compacted_archive(agent_id)
+        if entry_id is not None:
+            max_chars = _bounded_history_value(
+                "max_chars",
+                max_chars,
+                1,
+                HISTORY_ENTRY_MAX_CHARS,
+            )
+            entry = next((item for item in entries if item["id"] == entry_id), None)
+            if entry is None:
+                raise DomainError(
+                    "history_entry_not_found",
+                    "Compacted History entry was not found",
+                )
+            content = entry["content"]
+            if offset > len(content):
+                raise DomainError(
+                    "invalid_history_arguments",
+                    "offset exceeds the entry content length",
+                )
+            end = min(len(content), offset + max_chars)
+            return {
+                "action": "read",
+                "mode": "entry",
+                "checkpoint": checkpoint,
+                "sequence": entry["sequence"],
+                "entry_id": entry["id"],
+                "type": entry["type"],
+                "tool_name": entry.get("tool_name"),
+                "tool_call_id": entry.get("tool_call_id"),
+                "paired_entry_id": entry.get("paired_entry_id"),
+                "content": content[offset:end],
+                "offset": offset,
+                "next_offset": end if end < len(content) else None,
+                "content_length": len(content),
+                "truncated": end < len(content),
+            }
+        assert sequence is not None
+        if sequence < 1:
+            raise DomainError(
+                "invalid_history_arguments",
+                "sequence must be a positive integer",
+            )
+        limit = _bounded_history_value("limit", limit, 1, HISTORY_READ_MAX)
+        turn_entries = [item for item in entries if item["sequence"] == sequence]
+        if not turn_entries:
+            raise DomainError(
+                "history_turn_not_found",
+                "Compacted History Turn was not found",
+            )
+        groups = _history_entry_groups(turn_entries)
+        if offset > len(groups):
+            raise DomainError(
+                "invalid_history_arguments",
+                "offset exceeds the Turn entry group count",
+            )
+        selected_groups = groups[offset : offset + limit]
+        selected = [entry for group in selected_groups for entry in group]
+        end = offset + len(selected_groups)
+        return {
+            "action": "read",
+            "mode": "turn",
+            "checkpoint": checkpoint,
+            "sequence": sequence,
+            "entries": [_history_entry_preview(entry) for entry in selected],
+            "offset": offset,
+            "next_offset": end if end < len(groups) else None,
+            "total_entries": len(turn_entries),
+            "total_groups": len(groups),
+            "truncated": end < len(groups),
+        }
+
+    def _compacted_archive(
+        self,
+        agent_id: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        runs = self._repository.load_agent_runs(agent_id)
+        decoded_runs: list[list[dict[str, Any]]] = []
+        boundary: tuple[int, int, int] | None = None
+        checkpoint: dict[str, Any] | None = None
+        for run_index, run in enumerate(runs):
+            raw_messages = json.loads(run["messages_json"])
+            if not isinstance(raw_messages, list):
+                raise TypeError("Persisted Agent messages are invalid")
+            decoded_runs.append(raw_messages)
+            for message_index, message in enumerate(raw_messages):
+                if not isinstance(message, dict):
+                    raise TypeError("Persisted Agent message is invalid")
+                parts = message.get("parts", [])
+                if not isinstance(parts, list):
+                    raise TypeError("Persisted Agent message parts are invalid")
+                for part_index, part in enumerate(parts):
+                    if (
+                        not isinstance(part, dict)
+                        or part.get("part_kind") != "compaction"
+                    ):
+                        continue
+                    boundary = (run_index, message_index, part_index)
+                    checkpoint = {
+                        "sequence": run["sequence"],
+                        "run_id": run["run_id"],
+                        "entry_id": (f"{run['run_id']}-{message_index}-{part_index}"),
+                        "provider": part.get("provider_name"),
+                        "timestamp": message.get("timestamp") or run["started_at"],
+                    }
+        with self._lock:
+            active = self._active_runs.get(agent_id)
+            active_provider = (
+                active._compaction_provider if active is not None else None
+            )
+        if active is not None and active_provider is not None:
+            boundary = (len(runs), 0, 0)
+            checkpoint = {
+                "sequence": active.sequence,
+                "run_id": active.run_id,
+                "entry_id": f"{active.run_id}-pending-compaction",
+                "provider": active_provider,
+                "timestamp": active._compaction_timestamp,
+                "pending": True,
+            }
+        if boundary is None:
+            return [], None
+        entries: list[dict[str, Any]] = []
+        for run_index, (run, raw_messages) in enumerate(
+            zip(runs, decoded_runs, strict=True)
+        ):
+            for message_index, message in enumerate(raw_messages):
+                for part_index, part in enumerate(message.get("parts", [])):
+                    if (run_index, message_index, part_index) >= boundary:
+                        continue
+                    entry = _compacted_history_entry(
+                        run,
+                        message,
+                        message_index,
+                        part,
+                        part_index,
+                    )
+                    if entry is not None:
+                        entries.append(entry)
+        _link_tool_entries(entries)
+        return entries, checkpoint
+
     def _load_messages(self, agent_id: int) -> list[ModelMessage]:
         messages: list[ModelMessage] = []
         for run in self._repository.load_agent_runs(agent_id):
@@ -167,6 +447,17 @@ class AgentHistory:
                 ModelMessagesTypeAdapter.validate_json(run["messages_json"])
             )
         return messages
+
+    def _mark_compacted(
+        self,
+        run: AgentHistoryRun,
+        provider: str | None,
+    ) -> None:
+        with self._lock:
+            if self._active_runs.get(run.agent_id) is run:
+                run._compaction_provider = provider or "unknown"
+                if run._compaction_timestamp is None:
+                    run._compaction_timestamp = _timestamp()
 
     def _record_event(
         self,
@@ -425,6 +716,118 @@ def _reminder_data(value: Any) -> dict[str, Any]:
             ]
         }
     raise RuntimeError("Persisted Reminder is invalid")
+
+
+def _compacted_history_entry(
+    run: dict[str, Any],
+    message: dict[str, Any],
+    message_index: int,
+    part: dict[str, Any],
+    part_index: int,
+) -> dict[str, Any] | None:
+    part_kind = part.get("part_kind")
+    entry_type: str | None = None
+    content: Any = None
+    if part_kind == "system-prompt":
+        entry_type = "system"
+        content = part.get("content")
+    elif part_kind == "user-prompt":
+        entry_type = "user"
+        content = part.get("content")
+    elif part_kind == "text":
+        entry_type = "assistant"
+        content = part.get("content")
+    elif part_kind == "tool-call":
+        entry_type = "tool_call"
+        content = part.get("args")
+    elif part_kind == "tool-return":
+        entry_type = "tool_result"
+        content = part.get("content")
+    elif part_kind == "retry-prompt":
+        entry_type = "retry"
+        content = part.get("content")
+    if entry_type is None:
+        return None
+    return {
+        "sequence": run["sequence"],
+        "run_id": run["run_id"],
+        "status": run["status"],
+        "started_at": run["started_at"],
+        "id": f"{run['run_id']}-{message_index}-{part_index}",
+        "type": entry_type,
+        "timestamp": part.get("timestamp")
+        or message.get("timestamp")
+        or run["started_at"],
+        "tool_name": part.get("tool_name"),
+        "tool_call_id": part.get("tool_call_id"),
+        "content": _format_content(content),
+    }
+
+
+def _history_entry_preview(entry: dict[str, Any]) -> dict[str, Any]:
+    content = entry["content"]
+    truncated = len(content) > HISTORY_PREVIEW_CHARS
+    return {
+        "entry_id": entry["id"],
+        "type": entry["type"],
+        "timestamp": entry["timestamp"],
+        "tool_name": entry.get("tool_name"),
+        "tool_call_id": entry.get("tool_call_id"),
+        "paired_entry_id": entry.get("paired_entry_id"),
+        "content": content[:HISTORY_PREVIEW_CHARS],
+        "content_length": len(content),
+        "content_truncated": truncated,
+    }
+
+
+def _link_tool_entries(entries: list[dict[str, Any]]) -> None:
+    by_call_id: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for entry in entries:
+        tool_call_id = entry.get("tool_call_id")
+        if isinstance(tool_call_id, str) and tool_call_id:
+            key = (entry["run_id"], tool_call_id)
+            by_call_id.setdefault(key, []).append(entry)
+    for related in by_call_id.values():
+        if len(related) != 2:
+            continue
+        related[0]["paired_entry_id"] = related[1]["id"]
+        related[1]["paired_entry_id"] = related[0]["id"]
+
+
+def _history_entry_groups(
+    entries: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    by_call_id: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        tool_call_id = entry.get("tool_call_id")
+        if isinstance(tool_call_id, str) and tool_call_id:
+            by_call_id.setdefault(tool_call_id, []).append(entry)
+    groups: list[list[dict[str, Any]]] = []
+    grouped_call_ids: set[str] = set()
+    for entry in entries:
+        tool_call_id = entry.get("tool_call_id")
+        if not isinstance(tool_call_id, str) or not tool_call_id:
+            groups.append([entry])
+            continue
+        if tool_call_id not in grouped_call_ids:
+            grouped_call_ids.add(tool_call_id)
+            groups.append(by_call_id[tool_call_id])
+    return groups
+
+
+def _history_snippet(content: str, match_index: int) -> str:
+    start = max(0, match_index - HISTORY_SNIPPET_CHARS // 3)
+    end = min(len(content), start + HISTORY_SNIPPET_CHARS)
+    return content[start:end]
+
+
+def _bounded_history_value(name: str, value: int, minimum: int, maximum: int) -> int:
+    if value < minimum or value > maximum:
+        raise DomainError(
+            "invalid_history_arguments",
+            f"{name} must be between {minimum} and {maximum}",
+        )
+    return value
 
 
 def _timestamp() -> str:
