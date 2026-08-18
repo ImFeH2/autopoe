@@ -25,6 +25,8 @@
     "tauri": "pnpm --dir app tauri",
     "test": "pnpm test:app && pnpm test:flowent && pnpm test:rust",
     "test:app": "pnpm --dir app test",
+    "test:e2e": "pnpm build:debug && pnpm test:e2e:run",
+    "test:e2e:run": "node scripts/run-e2e.mjs",
     "test:flowent": "node scripts/flowent.mjs pytest",
     "test:rust": "node scripts/cargo.mjs test && cargo test --manifest-path flowent-host/Cargo.toml",
     "typecheck": "pnpm --dir app typecheck",
@@ -35,8 +37,15 @@
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
     "@release-it/bumper": "^8.0.0",
+    "@wdio/cli": "^9.30.1",
+    "@wdio/globals": "^9.29.1",
+    "@wdio/local-runner": "^9.30.1",
+    "@wdio/mocha-framework": "^9.30.1",
+    "@wdio/spec-reporter": "^9.30.1",
     "@wdio/tauri-service": "^1.3.0",
     "lefthook": "^2.1.10",
-    "release-it": "^21.0.0"
+    "mocha": "^10.8.2",
+    "release-it": "^21.0.0",
+    "webdriverio": "^9.30.1"
   }
 }
