@@ -21,11 +21,25 @@ from flowent.host_tools import (
 )
 
 
+def git_environment() -> dict[str, str]:
+    result = subprocess.run(
+        ["git", "rev-parse", "--local-env-vars"],
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    environment = os.environ.copy()
+    for variable in result.stdout.splitlines():
+        environment.pop(variable, None)
+    return environment
+
+
 def git(root: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", *arguments],
         cwd=root,
         check=True,
+        env=git_environment(),
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -36,6 +50,47 @@ def initialize_repository(root: Path) -> None:
     git(root, "init", "-q")
     git(root, "config", "user.email", "test@example.invalid")
     git(root, "config", "user.name", "Test")
+
+
+def test_git_helper_isolates_temporary_repository_from_inherited_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    initialize_repository(outer)
+    (outer / "outer.txt").write_text("outer\n")
+    git(outer, "add", ".")
+    git(outer, "commit", "-qm", "outer")
+    linked = tmp_path / "linked"
+    git(outer, "worktree", "add", "-qb", "feature", str(linked))
+    git_directory = Path(git(linked, "rev-parse", "--absolute-git-dir").strip())
+    common_directory = Path(
+        git(
+            linked,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ).strip()
+    )
+    index = git_directory / "index"
+    feature_ref = common_directory / "refs" / "heads" / "feature"
+    config = common_directory / "config"
+    metadata = {path: path.read_bytes() for path in (config, feature_ref, index)}
+    monkeypatch.setenv("GIT_DIR", str(git_directory))
+    monkeypatch.setenv("GIT_COMMON_DIR", str(common_directory))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(index))
+    monkeypatch.setenv("GIT_WORK_TREE", str(linked))
+    inner = tmp_path / "inner"
+    inner.mkdir()
+
+    initialize_repository(inner)
+    (inner / "inner.txt").write_text("inner\n")
+    git(inner, "add", ".")
+    git(inner, "commit", "-qm", "inner")
+
+    assert (inner / ".git").is_dir()
+    assert all(path.read_bytes() == content for path, content in metadata.items())
 
 
 def wait_for_path(path: Path) -> None:
@@ -465,19 +520,15 @@ def test_edit_accepts_existing_submodule_and_its_sibling(
     (child / "file.txt").write_text("before\n")
     git(child, "add", ".")
     git(child, "commit", "-qm", "child")
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "add",
-            "-q",
-            str(child),
-            "vendor/module",
-        ],
-        cwd=tmp_path,
-        check=True,
+    git(
+        tmp_path,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        str(child),
+        "vendor/module",
     )
     sibling = tmp_path / "vendor" / "readme.txt"
     sibling.write_text("before\n")
