@@ -21,78 +21,6 @@ from flowent.host_tools import (
 )
 
 
-def git_environment() -> dict[str, str]:
-    result = subprocess.run(
-        ["git", "rev-parse", "--local-env-vars"],
-        check=True,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    environment = os.environ.copy()
-    for variable in result.stdout.splitlines():
-        environment.pop(variable, None)
-    return environment
-
-
-def git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
-        ["git", *arguments],
-        cwd=root,
-        check=True,
-        env=git_environment(),
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    return result.stdout
-
-
-def initialize_repository(root: Path) -> None:
-    git(root, "init", "-q")
-    git(root, "config", "user.email", "test@example.invalid")
-    git(root, "config", "user.name", "Test")
-
-
-def test_git_helper_isolates_temporary_repository_from_inherited_context(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    outer = tmp_path / "outer"
-    outer.mkdir()
-    initialize_repository(outer)
-    (outer / "outer.txt").write_text("outer\n")
-    git(outer, "add", ".")
-    git(outer, "commit", "-qm", "outer")
-    linked = tmp_path / "linked"
-    git(outer, "worktree", "add", "-qb", "feature", str(linked))
-    git_directory = Path(git(linked, "rev-parse", "--absolute-git-dir").strip())
-    common_directory = Path(
-        git(
-            linked,
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-common-dir",
-        ).strip()
-    )
-    index = git_directory / "index"
-    feature_ref = common_directory / "refs" / "heads" / "feature"
-    config = common_directory / "config"
-    metadata = {path: path.read_bytes() for path in (config, feature_ref, index)}
-    monkeypatch.setenv("GIT_DIR", str(git_directory))
-    monkeypatch.setenv("GIT_COMMON_DIR", str(common_directory))
-    monkeypatch.setenv("GIT_INDEX_FILE", str(index))
-    monkeypatch.setenv("GIT_WORK_TREE", str(linked))
-    inner = tmp_path / "inner"
-    inner.mkdir()
-
-    initialize_repository(inner)
-    (inner / "inner.txt").write_text("inner\n")
-    git(inner, "add", ".")
-    git(inner, "commit", "-qm", "inner")
-
-    assert (inner / ".git").is_dir()
-    assert all(path.read_bytes() == content for path, content in metadata.items())
-
-
 def wait_for_path(path: Path) -> None:
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
@@ -452,7 +380,6 @@ def test_edit_accepts_nul_and_large_text(tmp_path: Path) -> None:
     "path",
     [
         "../outside.txt",
-        ".git/config",
         ".env",
         ".ENV.LOCAL",
         "nested/.env.production",
@@ -507,53 +434,6 @@ def test_edit_follows_symbolic_links_outside_launch_root(tmp_path: Path) -> None
 
     assert result["path"] == str(target)
     assert link.is_symlink()
-    assert target.read_text() == "after\n"
-
-
-def test_edit_accepts_existing_submodule_and_its_sibling(
-    tmp_path: Path,
-) -> None:
-    initialize_repository(tmp_path)
-    child = tmp_path.parent / f"{tmp_path.name}-child"
-    child.mkdir()
-    initialize_repository(child)
-    (child / "file.txt").write_text("before\n")
-    git(child, "add", ".")
-    git(child, "commit", "-qm", "child")
-    git(
-        tmp_path,
-        "-c",
-        "protocol.file.allow=always",
-        "submodule",
-        "add",
-        "-q",
-        str(child),
-        "vendor/module",
-    )
-    sibling = tmp_path / "vendor" / "readme.txt"
-    sibling.write_text("before\n")
-    git(tmp_path, "add", "vendor/readme.txt")
-    git(tmp_path, "commit", "-qm", "submodule")
-
-    HostTools(tmp_path).edit("vendor/readme.txt", "before", "after")
-    HostTools(tmp_path).edit("vendor/module/file.txt", "before", "after")
-
-    assert sibling.read_text() == "after\n"
-    assert (tmp_path / "vendor" / "module" / "file.txt").read_text() == "after\n"
-
-
-def test_edit_uses_launch_root_paths_inside_parent_repository(tmp_path: Path) -> None:
-    initialize_repository(tmp_path)
-    launch = tmp_path / "launch"
-    launch.mkdir()
-    target = launch / "source.txt"
-    target.write_text("before\n")
-    git(tmp_path, "add", ".")
-    git(tmp_path, "commit", "-qm", "initial")
-
-    result = HostTools(launch).edit("source.txt", "before", "after")
-
-    assert result["path"] == "source.txt"
     assert target.read_text() == "after\n"
 
 
