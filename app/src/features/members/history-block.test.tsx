@@ -39,6 +39,22 @@ describe("Agent history blocks", () => {
     expect(markup).toContain("Done");
   });
 
+  it("labels web search activity clearly", () => {
+    const markup = renderToStaticMarkup(
+      <HistoryBlock
+        entry={entry({
+          content: '{"query":"Flowent"}',
+          tool_name: "web_search",
+          type: "tool_call",
+        })}
+        run={run}
+      />,
+    );
+
+    expect(markup).toContain("<strong>Tool call</strong>");
+    expect(markup).toContain("Web search");
+  });
+
   it("renders GFM Markdown without raw HTML injection", () => {
     const markup = renderToStaticMarkup(
       <HistoryContent

@@ -8,13 +8,16 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from pydantic_ai import InstrumentationSettings
+from pydantic_ai import InstrumentationSettings, PartStartEvent
+from pydantic_ai.capabilities import WebSearch
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.messages import (
     CompactionPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    NativeToolCallPart,
+    NativeToolReturnPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -29,6 +32,7 @@ from pydantic_ai.models.openai import (
     OpenAIResponsesModel,
 )
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.native_tools import WebSearchTool
 
 from flowent.domain import OrganizationState, Reminder, ReminderMention
 from flowent.history import AgentHistory
@@ -172,6 +176,58 @@ def test_runner_enables_native_compaction_when_supported(
         assert isinstance(native[0], capability_type)
 
 
+def test_runner_configures_bounded_web_search_with_local_fallback() -> None:
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-responses",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    capabilities: list[Any] = []
+    runner._agent.root_capability.apply(capabilities.append)
+
+    web_search = next(
+        capability for capability in capabilities if isinstance(capability, WebSearch)
+    )
+    assert isinstance(web_search.native, WebSearchTool)
+    assert web_search.native.max_uses == 8
+    assert web_search.local is not None
+    assert web_search.local.name == "web_search"
+    assert web_search.local.timeout == 30
+
+
+@pytest.mark.parametrize(
+    ("api_type", "model_name"),
+    [
+        ("openai-chat", "test-model"),
+        ("google", "gemini-2.5-pro"),
+    ],
+)
+def test_runner_uses_local_web_search_when_native_is_incompatible(
+    api_type: ApiType,
+    model_name: str,
+) -> None:
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type=api_type,
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model=model_name,
+        )
+    )
+    capabilities: list[Any] = []
+    runner._agent.root_capability.apply(capabilities.append)
+
+    web_search = next(
+        capability for capability in capabilities if isinstance(capability, WebSearch)
+    )
+    assert web_search.native is False
+    assert web_search.local is not None
+    assert web_search.local.name == "web_search"
+
+
 @pytest.mark.parametrize(
     ("api_type", "expected_settings"),
     [
@@ -179,6 +235,7 @@ def test_runner_enables_native_compaction_when_supported(
             "openai-responses",
             {
                 "openai_prompt_cache_key": "flowent-agent-2",
+                "openai_include_web_search_sources": True,
                 "openai_context_management": [{"type": "compaction"}],
             },
         ),
@@ -267,7 +324,13 @@ def test_runner_bounds_silent_requests_through_pydantic_settings(
     ("api_type", "expected_settings"),
     [
         ("openai-chat", {"openai_prompt_cache_key": "flowent-agent-2"}),
-        ("openai-responses", {"openai_prompt_cache_key": "flowent-agent-2"}),
+        (
+            "openai-responses",
+            {
+                "openai_prompt_cache_key": "flowent-agent-2",
+                "openai_include_web_search_sources": True,
+            },
+        ),
         ("anthropic", None),
         ("google", None),
     ],
@@ -320,7 +383,7 @@ def test_runner_uses_stable_agent_prompt_cache_settings(
     )
 
     other_agent_settings = (
-        {"openai_prompt_cache_key": "flowent-agent-7"}
+        {**expected_settings, "openai_prompt_cache_key": "flowent-agent-7"}
         if expected_settings is not None
         else None
     )
@@ -346,6 +409,95 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
         "run",
         "todo",
     }
+
+
+def test_runner_publishes_native_web_search_events(tmp_path: Path) -> None:
+    call = NativeToolCallPart(
+        tool_name="web_search",
+        args={"query": "Flowent"},
+        tool_call_id="search-1",
+        provider_name="openai",
+    )
+    result_part = NativeToolReturnPart(
+        tool_name="web_search",
+        content={
+            "status": "completed",
+            "sources": [{"title": "Flowent", "url": "https://example.com"}],
+        },
+        tool_call_id="search-1",
+        provider_name="openai",
+    )
+    messages = (
+        ModelResponse(
+            parts=[call, result_part, TextPart("Search complete")],
+            model_name="test-model",
+        ),
+    )
+
+    class SuccessfulResult:
+        def __init__(self) -> None:
+            self.usage: dict[str, Any] = {}
+
+        def new_messages(self) -> tuple[ModelMessage, ...]:
+            return messages
+
+    class NativeSearchAgent:
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def run(self, *_args: Any, **kwargs: Any) -> SuccessfulResult:
+            async def events():
+                yield PartStartEvent(index=0, part=call)
+                yield PartStartEvent(index=1, part=result_part)
+
+            await kwargs["event_stream_handler"](None, events())
+            return SuccessfulResult()
+
+    runner = object.__new__(PydanticAgentRunner)
+    runner._observability = None  # type: ignore[attr-defined]
+    runner._api_type = "openai-responses"  # type: ignore[attr-defined]
+    runner._model_name = "test-model"  # type: ignore[attr-defined]
+    runner._agent = NativeSearchAgent()  # type: ignore[attr-defined]
+    reminder, context = activation_context(tmp_path)
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    outcome = runner.run(
+        reminder,
+        AgentRunContext(
+            context.agent_id,
+            context.state,
+            context.host_tools,
+            history_event_sink=lambda event_type, **data: events.append(
+                (event_type, data)
+            ),
+        ),
+    )
+
+    assert events == [
+        (
+            "tool_call",
+            {
+                "tool_name": "web_search",
+                "tool_call_id": "search-1",
+                "content": {"query": "Flowent"},
+            },
+        ),
+        (
+            "tool_result",
+            {
+                "tool_name": "web_search",
+                "tool_call_id": "search-1",
+                "content": {
+                    "status": "completed",
+                    "sources": [{"title": "Flowent", "url": "https://example.com"}],
+                },
+            },
+        ),
+    ]
+    assert outcome.messages == messages
 
 
 def test_pydantic_runner_executes_edit_and_run_tools_anywhere_on_host(

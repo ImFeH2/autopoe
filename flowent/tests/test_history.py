@@ -5,6 +5,8 @@ from pydantic_ai.messages import (
     CompactionPart,
     ModelRequest,
     ModelResponse,
+    NativeToolCallPart,
+    NativeToolReturnPart,
     SystemPromptPart,
     TextPart,
     ThinkingPart,
@@ -92,6 +94,81 @@ def test_persists_complete_agent_history_and_restores_model_messages(
     assert "private reasoning" not in str(first_run)
     assert first_run["entries"][-1]["content"] == "Work completed"
     assert first_run["usage"] == {"input_tokens": 12}
+
+
+def test_native_web_search_is_visible_and_searchable_after_compaction(
+    tmp_path: Path,
+) -> None:
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+    first = history.start(reminder())
+    first.complete(
+        "completed",
+        (
+            ModelResponse(
+                parts=[
+                    NativeToolCallPart(
+                        tool_name="web_search",
+                        args={"query": "Flowent agent collaboration"},
+                        tool_call_id="search-1",
+                        provider_name="openai",
+                    ),
+                    NativeToolReturnPart(
+                        tool_name="web_search",
+                        content={
+                            "status": "completed",
+                            "sources": [
+                                {
+                                    "title": "Flowent",
+                                    "url": "https://example.com/flowent",
+                                }
+                            ],
+                        },
+                        tool_call_id="search-1",
+                        provider_name="openai",
+                        provider_details={"private": "provider-only"},
+                    ),
+                    TextPart("Found the source"),
+                ],
+                model_name="test-model",
+            ),
+        ),
+    )
+
+    snapshot = history.snapshot(2)
+    first_run = snapshot["runs"][0]
+    assert [entry["type"] for entry in first_run["entries"]] == [
+        "reminder",
+        "tool_call",
+        "tool_result",
+        "assistant",
+    ]
+    assert first_run["entries"][1]["tool_name"] == "web_search"
+    assert "Flowent agent collaboration" in first_run["entries"][1]["content"]
+    assert "https://example.com/flowent" in first_run["entries"][2]["content"]
+    assert "provider-only" not in str(first_run)
+
+    second = history.start(reminder())
+    second.complete(
+        "completed",
+        (
+            ModelResponse(
+                parts=[CompactionPart(provider_name="anthropic")],
+                model_name="test-model",
+            ),
+        ),
+    )
+    searched = history.search_compacted(2, "example.com/flowent")
+    turn = history.read_compacted(2, sequence=1)
+
+    assert searched["count"] == 1
+    assert searched["matches"][0]["tool_name"] == "web_search"
+    assert [entry["type"] for entry in turn["entries"][:2]] == [
+        "tool_call",
+        "tool_result",
+    ]
+    assert turn["entries"][0]["paired_entry_id"] == turn["entries"][1]["entry_id"]
+    assert turn["entries"][1]["paired_entry_id"] == turn["entries"][0]["entry_id"]
+    assert "provider-only" not in str(turn)
 
 
 def test_compacted_history_is_searchable_read_only_and_private(tmp_path: Path) -> None:

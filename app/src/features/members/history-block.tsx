@@ -43,6 +43,10 @@ function usageLabel(run: AgentHistoryRun) {
   return `${typeof input === "number" ? input : 0} in · ${typeof output === "number" ? output : 0} out`;
 }
 
+function toolLabel(toolName?: string) {
+  return toolName === "web_search" ? "Web search" : (toolName ?? "Tool");
+}
+
 function entrySummary(entry: AgentHistoryEntry, run: AgentHistoryRun) {
   if (entry.type === "reminder") {
     const count = entry.reminder?.mentions.length ?? 0;
@@ -54,7 +58,7 @@ function entrySummary(entry: AgentHistoryEntry, run: AgentHistoryRun) {
     entry.type === "tool_result" ||
     entry.type === "retry"
   ) {
-    return entry.tool_name ?? "Tool";
+    return toolLabel(entry.tool_name);
   }
   if (entry.state === "streaming") {
     return "Streaming";

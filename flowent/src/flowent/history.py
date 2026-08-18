@@ -626,7 +626,7 @@ class AgentHistory:
                             "state": message_state,
                         }
                     )
-                elif part_kind == "tool-call":
+                elif part_kind in ("tool-call", "builtin-tool-call"):
                     entries.append(
                         {
                             "id": entry_id,
@@ -637,7 +637,7 @@ class AgentHistory:
                             "state": message_state,
                         }
                     )
-                elif part_kind == "tool-return":
+                elif part_kind in ("tool-return", "builtin-tool-return"):
                     entries.append(
                         {
                             "id": entry_id,
@@ -737,10 +737,10 @@ def _compacted_history_entry(
     elif part_kind == "text":
         entry_type = "assistant"
         content = part.get("content")
-    elif part_kind == "tool-call":
+    elif part_kind in ("tool-call", "builtin-tool-call"):
         entry_type = "tool_call"
         content = part.get("args")
-    elif part_kind == "tool-return":
+    elif part_kind in ("tool-return", "builtin-tool-return"):
         entry_type = "tool_result"
         content = part.get("content")
     elif part_kind == "retry-prompt":
