@@ -20,8 +20,6 @@ def main(
     sys.stdin.reconfigure(encoding="utf-8", errors="strict")
     sys.stdout.reconfigure(encoding="utf-8", errors="strict")
 
-    from pathlib import Path
-
     from flowent.diagnostics import (
         configure_diagnostics,
         log_event,
@@ -30,33 +28,37 @@ def main(
     )
     from flowent.domain import OrganizationState
     from flowent.history import AgentHistory
-    from flowent.host_tools import HostTools, ProcessWatcher
+    from flowent.host_tools import AgentHostTools, ProcessWatcher
     from flowent.memory import AgentMemory
     from flowent.model_runner import create_runner
     from flowent.persistence import SQLiteStore, data_directory
     from flowent.protocol import JsonLineWriter, serve
     from flowent.runtime import AgentRuntime
     from flowent.todos import AgentTodos
+    from flowent.wsl_host_tools import create_host_tools
 
     if create_model_runtime is None:
         create_model_runtime = create_runner
 
-    working_directory = Path.cwd().resolve()
     storage_directory = data_directory()
     configure_diagnostics(storage_directory)
-    log_event(
-        "process.started",
-        python_version=(
-            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        ),
-        working_directory=str(working_directory),
-        data_directory=str(storage_directory),
-        frozen=bool(getattr(sys, "frozen", False)),
-    )
     runtime: AgentRuntime | None = None
     model_runtime: ModelRuntime | None = None
+    host_tools: AgentHostTools | None = None
     watcher: ProcessWatcher | None = None
     try:
+        host_tools = create_host_tools()
+        working_directory = host_tools.working_directory
+        log_event(
+            "process.started",
+            python_version=(
+                f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            ),
+            working_directory=working_directory,
+            host_backend=host_tools.execution_backend,
+            data_directory=str(storage_directory),
+            frozen=bool(getattr(sys, "frozen", False)),
+        )
         store = SQLiteStore(storage_directory)
         writer = JsonLineWriter(sys.stdout)
         history = AgentHistory(
@@ -65,7 +67,6 @@ def main(
         )
         todos = AgentTodos(store)
         memories = AgentMemory(storage_directory)
-        host_tools = HostTools(working_directory)
         watcher = ProcessWatcher(host_tools.process_owner)
         state = OrganizationState(
             working_directory,
@@ -111,6 +112,8 @@ def main(
     finally:
         if runtime is not None:
             runtime.stop()
+        elif host_tools is not None:
+            host_tools.close()
         if model_runtime is not None:
             model_runtime.shutdown()
         if watcher is not None:

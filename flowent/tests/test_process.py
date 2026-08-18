@@ -260,7 +260,7 @@ def test_flowent_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> Non
         close_process(process)
 
 
-def test_persists_state_and_model_settings_across_launch_directories(
+def test_persists_state_and_uses_home_across_launch_directories(
     tmp_path: Path,
 ) -> None:
     first_directory = tmp_path / "first"
@@ -324,7 +324,7 @@ def test_persists_state_and_model_settings_across_launch_directories(
         snapshot = request(second, 1, "organization.get", {})
         settings = request(second, 2, "settings.get_model", {})
         tracing = request(second, 3, "settings.get_observability", {})
-        assert snapshot["working_directory"] == str(second_directory)
+        assert snapshot["working_directory"] == str(Path.home())
         assert snapshot["members"][1]["name"] == "Ada"
         assert snapshot["discussions"][0]["topic"] == "Persistent work"
         assert snapshot["discussions"][0]["messages"][0]["body"] == (
@@ -515,6 +515,7 @@ def test_hard_killed_flowent_cleans_active_run(tmp_path: Path) -> None:
         "model_runner.create_runner = lambda **kwargs: LongRunRunner()\n"
     )
     environment = os.environ.copy()
+    environment["FLOWENT_WORKING_DIRECTORY"] = str(tmp_path)
     python_path = environment.get("PYTHONPATH")
     environment["PYTHONPATH"] = (
         str(support) if not python_path else f"{support}{os.pathsep}{python_path}"

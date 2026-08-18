@@ -768,8 +768,11 @@ def test_memory_index_is_fresh_runtime_only_context(tmp_path: Path) -> None:
             ),
         )
 
+    assert "<host_environment>" in str(seen_messages[0])
+    assert str(tmp_path) in str(seen_messages[0])
     assert "<memory>" in str(seen_messages[0])
     assert "Fresh private insight" in str(seen_messages[0])
+    assert "<host_environment>" not in str(outcome.messages)
     assert "<memory>" not in str(outcome.messages)
     assert "Fresh private insight" not in str(outcome.messages)
 

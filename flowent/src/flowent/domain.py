@@ -72,11 +72,18 @@ class Reminder:
 class OrganizationState:
     def __init__(
         self,
-        working_directory: Path | None = None,
+        working_directory: Path | str | None = None,
         persisted: dict[str, Any] | None = None,
         on_persist: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        self._working_directory = (working_directory or Path.cwd()).resolve()
+        if working_directory is None:
+            self._working_directory = str(Path.cwd().resolve())
+        elif isinstance(working_directory, Path):
+            self._working_directory = str(working_directory.resolve())
+        elif isinstance(working_directory, str) and working_directory:
+            self._working_directory = working_directory
+        else:
+            raise ValueError("working_directory must be a non-empty path")
         self._on_persist = on_persist
         self._members: dict[int, Member] = {}
         self._discussions: dict[int, Discussion] = {}
@@ -487,7 +494,7 @@ class OrganizationState:
     def _snapshot(self) -> dict[str, Any]:
         return {
             "organization": {"id": 1},
-            "working_directory": str(self._working_directory),
+            "working_directory": self._working_directory,
             "members": [
                 self._member_data(member)
                 for member in self._members.values()

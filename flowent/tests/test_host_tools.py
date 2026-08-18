@@ -109,6 +109,9 @@ def test_run_uses_launch_root_relative_cwd_without_shell(tmp_path: Path) -> None
         str(nested),
         "$(echo not-a-shell)",
     ]
+    assert tools.execution_backend == "native"
+    assert tools.working_directory == str(tmp_path)
+    assert str(tmp_path) in tools.environment_context
 
 
 def test_run_timeout_terminates_the_process_tree(tmp_path: Path) -> None:

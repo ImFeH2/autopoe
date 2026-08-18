@@ -117,6 +117,36 @@ class ProcessTree(Protocol):
     def close(self) -> None: ...
 
 
+class AgentHostTools(Protocol):
+    process_owner: str
+
+    @property
+    def working_directory(self) -> str: ...
+
+    @property
+    def execution_backend(self) -> str: ...
+
+    @property
+    def environment_context(self) -> str: ...
+
+    def run(
+        self,
+        argv: list[str],
+        cwd: str | None = None,
+        timeout_seconds: int = 60,
+    ) -> dict[str, Any]: ...
+
+    def edit(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        replace_all: bool = False,
+    ) -> dict[str, Any]: ...
+
+    def close(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class ManagedProcess:
     process: subprocess.Popen[bytes]
@@ -312,6 +342,26 @@ class HostTools:
         self._edit_lock = Lock()
         self._processes: dict[int, ManagedProcess] = {}
         self._closed = False
+
+    @property
+    def working_directory(self) -> str:
+        return str(self.root)
+
+    @property
+    def execution_backend(self) -> str:
+        return "native"
+
+    @property
+    def environment_context(self) -> str:
+        system = "Windows" if os.name == "nt" else "Unix"
+        return (
+            "<host_environment>\n"
+            f"Your command and file environment is native {system}.\n"
+            f"The default working directory is {self.root}.\n"
+            "Prefer absolute paths. Flowent service tools such as discussion, memory, todo, "
+            "history, and web_search are not filesystem commands.\n"
+            "</host_environment>"
+        )
 
     def run(
         self,

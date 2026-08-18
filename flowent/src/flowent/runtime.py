@@ -12,7 +12,7 @@ from pydantic_ai.messages import ModelMessage
 from flowent.diagnostics import log_event, log_exception
 from flowent.domain import OrganizationState, Reminder
 from flowent.history import AgentHistory, AgentHistoryRun
-from flowent.host_tools import HostToolError, HostTools
+from flowent.host_tools import AgentHostTools, HostToolError
 from flowent.memory import AgentMemory
 from flowent.todos import AgentTodos, wrap_tool_result
 
@@ -21,7 +21,7 @@ from flowent.todos import AgentTodos, wrap_tool_result
 class AgentRunContext:
     agent_id: int
     state: OrganizationState
-    host_tools: HostTools
+    host_tools: AgentHostTools
     run_id: str | None = None
     message_history: tuple[ModelMessage, ...] = ()
     history_event_sink: Callable[..., None] | None = None
@@ -389,7 +389,7 @@ class AgentRuntime:
         self,
         state: OrganizationState,
         runner: AgentRunner,
-        host_tools: HostTools,
+        host_tools: AgentHostTools,
         history: AgentHistory | None = None,
         todos: AgentTodos | None = None,
         memories: AgentMemory | None = None,

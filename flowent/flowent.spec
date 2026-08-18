@@ -1,10 +1,22 @@
+import os
+from pathlib import Path
+
 from PyInstaller.utils.hooks import copy_metadata
+
+
+datas = copy_metadata("pydantic-ai-slim", recursive=True)
+if host_binary := os.environ.get("FLOWENT_WSL_HOST_BUILD"):
+    host_path = Path(host_binary)
+    if not host_path.is_file():
+        raise RuntimeError("WSL host bridge binary is unavailable")
+    datas.append((str(host_path), "."))
+
 
 a = Analysis(
     ["src/flowent/__main__.py"],
     pathex=["."],
     binaries=[],
-    datas=copy_metadata("pydantic-ai-slim", recursive=True),
+    datas=datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
