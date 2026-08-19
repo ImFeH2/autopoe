@@ -196,6 +196,63 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Delete Repository work"');
   });
 
+  it("renders Markdown before structured Mention statuses", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "idle" as const,
+    };
+    const discussion = {
+      id: 1,
+      topic: "Repository work",
+      member_ids: [1, 2],
+      messages: [
+        {
+          id: 1,
+          sender_id: 1,
+          body: "**Bold request**\nnext line",
+          mentions: [{ member_id: 2, status: "read" as const }],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          messageBody="composer changes do not belong to sent Markdown"
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    const markdownIndex = markup.indexOf("<strong>Bold request</strong>");
+    const mentionIndex = markup.indexOf('class="mention-statuses"');
+    expect(markdownIndex).toBeGreaterThan(-1);
+    expect(markup).toContain("<br/>\nnext line");
+    expect(mentionIndex).toBeGreaterThan(markdownIndex);
+    expect(markup).toContain("@Ada · READ");
+  });
+
   it("keeps the sidebar focused on global destinations", () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>

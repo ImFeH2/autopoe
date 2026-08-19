@@ -194,6 +194,7 @@
 
 .message-bubble {
   width: fit-content;
+  min-width: 0;
   max-width: min(76%, 760px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-bubble);
@@ -229,9 +230,139 @@
   color: var(--color-text-tertiary);
 }
 
-.message-body {
+.message-markdown {
+  min-width: 0;
   font-size: 14px;
   line-height: 21px;
+  overflow-wrap: anywhere;
+}
+
+.message-markdown > :first-child {
+  margin-top: 0;
+}
+
+.message-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.message-markdown h1,
+.message-markdown h2,
+.message-markdown h3,
+.message-markdown h4,
+.message-markdown h5,
+.message-markdown h6 {
+  margin: 14px 0 6px;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.message-markdown p,
+.message-markdown ul,
+.message-markdown ol,
+.message-markdown blockquote,
+.message-markdown pre,
+.message-markdown-table-scroll {
+  margin: 0 0 10px;
+}
+
+.message-markdown ul,
+.message-markdown ol {
+  padding-left: 22px;
+}
+
+.message-markdown li + li {
+  margin-top: 3px;
+}
+
+.message-markdown li > p {
+  margin: 0;
+}
+
+.message-markdown blockquote {
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.message-markdown a {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-markdown a:focus-visible {
+  border-radius: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.message-markdown code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--color-surface-selected);
+  color: var(--color-success-text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.message-markdown pre {
+  max-width: 100%;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-canvas);
+}
+
+.message-markdown pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  line-height: 18px;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.message-markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.message-markdown table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.message-markdown th,
+.message-markdown td {
+  padding: 5px 7px;
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.message-markdown th {
+  background: var(--color-surface-selected);
+  font-weight: 600;
+}
+
+.message-markdown input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  accent-color: var(--color-accent);
+}
+
+.message-markdown hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--color-border-strong);
+}
+
+.message-markdown-image-omitted {
+  color: var(--color-text-tertiary);
+  font-style: italic;
 }
 
 .mention-statuses {

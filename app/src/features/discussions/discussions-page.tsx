@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "@/components/ui";
 import type { AgentMember, Discussion, Member } from "@/lib/backend";
+import { DiscussionMarkdown } from "./discussion-markdown";
 import { type DraftMention, MessageComposer } from "./message-composer";
 
 export function formatMessageCount(count: number): string {
@@ -442,9 +443,7 @@ function DiscussionView({
                       <strong>{sender?.name ?? "Unknown"}</strong>
                       <span className="font-mono">MESSAGE {message.id}</span>
                     </header>
-                    <p className="message-body m-0 whitespace-pre-wrap">
-                      {message.body}
-                    </p>
+                    <DiscussionMarkdown body={message.body} />
                     {message.mentions.length > 0 ? (
                       <ul className="mention-statuses" aria-label="Mentions">
                         {message.mentions.map((mention) => (
