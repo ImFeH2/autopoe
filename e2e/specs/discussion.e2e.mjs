@@ -34,4 +34,26 @@ describe("Discussions", () => {
       expect.stringContaining("IDLE"),
     );
   });
+
+  it("derives a Mention from manually typed exact @Name text", async () => {
+    await waitForWorkspace();
+    await createAgent("Lin");
+    await $("aria/Discussions").click();
+    await $("aria/New discussion").click();
+
+    const form = await $("aria/Create Discussion");
+    await form.waitForDisplayed();
+    await form.$("#discussion-topic").setValue("Direct mention");
+    await form.$("aria/Lin").click();
+    await form.$("button=Create").click();
+
+    const composer = await $("aria/Send Message");
+    await composer.$("aria/Message").setValue("@Lin review this directly.");
+    await composer.$("button=Send").click();
+
+    await expect($("p=@Lin review this directly.")).toBeDisplayed();
+    await expect($(".mention-status")).toHaveText(
+      expect.stringContaining("@Lin"),
+    );
+  });
 });

@@ -160,7 +160,7 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         target = tmp_path / "private.txt"
         target.write_text(secret)
         context.edit("private.txt", secret, "redacted")
-        state.send_message(1, 1, secret, [2])
+        state.send_message(1, 1, f"@Ada {secret}")
         context.discussion("read", discussion_id=1)
         context.todo("create", subject=secret, description=secret)
         context.memory("write", path=f"{secret}.md", content=secret)

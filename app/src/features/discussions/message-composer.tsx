@@ -14,7 +14,6 @@ import type { AgentMember } from "@/lib/backend";
 export type DraftMention = {
   end: number;
   label: string;
-  memberId: number;
   start: number;
 };
 
@@ -34,10 +33,6 @@ export function shouldSubmitMessage({
   shiftKey: boolean;
 }) {
   return key === "Enter" && !shiftKey && !isComposing;
-}
-
-export function getDraftMentionIds(mentions: DraftMention[]): number[] {
-  return [...new Set(mentions.map((mention) => mention.memberId))];
 }
 
 function isMentionBoundary(value: string | undefined): boolean {
@@ -231,7 +226,7 @@ export function insertDraftMention({
   mentions,
   query,
 }: {
-  agent: Pick<AgentMember, "id" | "name">;
+  agent: Pick<AgentMember, "name">;
   body: string;
   mentions: DraftMention[];
   query: MentionQuery;
@@ -245,7 +240,6 @@ export function insertDraftMention({
   const mention = {
     end: query.start + label.length,
     label,
-    memberId: agent.id,
     start: query.start,
   };
 

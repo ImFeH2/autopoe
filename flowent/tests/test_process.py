@@ -138,7 +138,6 @@ def test_flowent_writes_private_diagnostics_without_request_content(
                 "discussion_id": 1,
                 "sender_id": 1,
                 "body": message_body,
-                "mention_ids": [],
             },
         )
         assert request(process, 6, "system.shutdown", {}) == {"stopped": True}
@@ -415,8 +414,7 @@ def test_agent_model_history_continues_across_process_restarts(
             {
                 "discussion_id": 1,
                 "sender_id": 1,
-                "body": "Remember this",
-                "mention_ids": [2],
+                "body": "@Ada Remember this",
             },
         )
         request_id = 4
@@ -458,8 +456,7 @@ def test_agent_model_history_continues_across_process_restarts(
             {
                 "discussion_id": 1,
                 "sender_id": 1,
-                "body": "Continue as the same Agent",
-                "mention_ids": [2],
+                "body": "@Ada Continue as the same Agent",
             },
         )
         triggering_message_id = snapshot["discussions"][0]["messages"][-1]["id"]
@@ -540,8 +537,7 @@ def test_hard_killed_flowent_cleans_active_run(tmp_path: Path) -> None:
             {
                 "discussion_id": 1,
                 "sender_id": 1,
-                "body": "Run until Flowent is killed",
-                "mention_ids": [2],
+                "body": "@Ada Run until Flowent is killed",
             },
         )
         pid_path = work / "long.pid"

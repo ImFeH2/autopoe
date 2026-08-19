@@ -243,7 +243,6 @@ class AgentRunContext:
                 discussion_id=discussion_id,
                 sender_id=self.agent_id,
                 body=arguments["body"],
-                mention_ids=arguments.get("mention_ids", ()),
             )
             discussion = next(
                 item for item in snapshot["discussions"] if item["id"] == discussion_id
@@ -252,7 +251,7 @@ class AgentRunContext:
             return {
                 "discussion_id": discussion_id,
                 "message_id": message["id"],
-                "mention_ids": [
+                "mentioned_agent_ids": [
                     mention["member_id"] for mention in message["mentions"]
                 ],
             }

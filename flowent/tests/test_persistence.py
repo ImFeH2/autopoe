@@ -206,7 +206,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
     state = persisted_state(store, working_directory)
     state.create_agent("Ada")
     state.create_discussion("Persistent work", 1, [2])
-    state.send_message(1, 1, "Continue after restart", [2])
+    state.send_message(1, 1, "@Ada Continue after restart")
     state.read_discussion(2, 1, end_message_id=1)
 
     restored = persisted_state(store, working_directory)
@@ -219,7 +219,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
         {
             "id": 1,
             "sender_id": 1,
-            "body": "Continue after restart",
+            "body": "@Ada Continue after restart",
             "mentions": [{"member_id": 2, "status": "read"}],
         }
     ]
@@ -255,7 +255,7 @@ def test_paused_agent_stays_paused_across_restart(tmp_path: Path) -> None:
     state = persisted_state(store, tmp_path)
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Wait for resume", [2])
+    state.send_message(1, 1, "@Ada Wait for resume")
     state.pause_agent(2)
 
     restored = persisted_state(store, tmp_path)

@@ -47,6 +47,40 @@ def test_dispatches_mutations_and_returns_complete_snapshot() -> None:
     ]
 
 
+def test_discussion_send_derives_mentions_from_body_only() -> None:
+    responses = run_requests(
+        {"id": 1, "method": "organization.create_agent", "params": {"name": "Ada"}},
+        {
+            "id": 2,
+            "method": "discussion.create",
+            "params": {"topic": "Plan", "creator_id": 1, "member_ids": [2]},
+        },
+        {
+            "id": 3,
+            "method": "discussion.send",
+            "params": {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": "No notification",
+                "mention_ids": [2],
+            },
+        },
+        {
+            "id": 4,
+            "method": "discussion.send",
+            "params": {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": "@Ada please begin",
+            },
+        },
+    )
+
+    messages = responses[-1]["result"]["discussions"][0]["messages"]
+    assert messages[0]["mentions"] == []
+    assert messages[1]["mentions"] == [{"member_id": 2, "status": "pending"}]
+
+
 def test_returns_the_selected_agents_complete_history(tmp_path: Path) -> None:
     state = OrganizationState()
     state.create_agent("Ada")

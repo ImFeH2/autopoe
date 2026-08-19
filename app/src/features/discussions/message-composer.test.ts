@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   filterMentionAgents,
   findMentionQuery,
-  getDraftMentionIds,
   getMentionKeyAction,
   insertDraftMention,
   reconcileDraftMentions,
@@ -43,9 +42,7 @@ describe("MessageComposer", () => {
       query: "ad",
     });
     expect(
-      findMentionQuery("@Ada ", 5, [
-        { start: 0, end: 4, label: "@Ada", memberId: 2 },
-      ]),
+      findMentionQuery("@Ada ", 5, [{ start: 0, end: 4, label: "@Ada" }]),
     ).toBeNull();
   });
 
@@ -108,17 +105,16 @@ describe("MessageComposer", () => {
           start: 4,
           end: 17,
           label: "@Grace Hopper",
-          memberId: 3,
         },
       ],
     });
   });
 
-  it("removes edited mentions, shifts later mentions, and deduplicates IDs", () => {
+  it("removes edited mention labels and shifts later labels", () => {
     const mentions = [
-      { start: 0, end: 4, label: "@Ada", memberId: 2 },
-      { start: 9, end: 15, label: "@Linus", memberId: 3 },
-      { start: 16, end: 20, label: "@Ada", memberId: 2 },
+      { start: 0, end: 4, label: "@Ada" },
+      { start: 9, end: 15, label: "@Linus" },
+      { start: 16, end: 20, label: "@Ada" },
     ];
 
     expect(
@@ -128,8 +124,8 @@ describe("MessageComposer", () => {
         mentions,
       ),
     ).toEqual([
-      { start: 9, end: 15, label: "@Linus", memberId: 3 },
-      { start: 16, end: 20, label: "@Ada", memberId: 2 },
+      { start: 9, end: 15, label: "@Linus" },
+      { start: 16, end: 20, label: "@Ada" },
     ]);
     expect(
       reconcileDraftMentions(
@@ -138,16 +134,15 @@ describe("MessageComposer", () => {
         mentions,
       ),
     ).toEqual([
-      { start: 7, end: 11, label: "@Ada", memberId: 2 },
-      { start: 16, end: 22, label: "@Linus", memberId: 3 },
-      { start: 23, end: 27, label: "@Ada", memberId: 2 },
+      { start: 7, end: 11, label: "@Ada" },
+      { start: 16, end: 22, label: "@Linus" },
+      { start: 23, end: 27, label: "@Ada" },
     ]);
     expect(
       reconcileDraftMentions("@ABC ", "@ABCDEF", [
-        { start: 0, end: 4, label: "@ABC", memberId: 4 },
+        { start: 0, end: 4, label: "@ABC" },
       ]),
     ).toEqual([]);
-    expect(getDraftMentionIds(mentions)).toEqual([2, 3]);
   });
 
   it("reserves mention navigation keys without breaking IME or Shift+Enter", () => {

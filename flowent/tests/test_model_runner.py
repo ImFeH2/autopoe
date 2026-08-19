@@ -63,7 +63,7 @@ def activation_context(tmp_path: Path) -> tuple[Reminder, AgentRunContext]:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Please inspect this", [2])
+    state.send_message(1, 1, "@Ada Please inspect this")
     activation, _ = state.claim_next_reminder()
     assert activation is not None
     return activation, AgentRunContext(
@@ -439,6 +439,9 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
         "run",
         "todo",
     }
+    discussion = runner._agent._function_toolset.tools["discussion"]
+    assert "mention_ids" not in discussion.function_schema.json_schema["properties"]
+    assert "@Name" in discussion.description
 
 
 def test_pydantic_runner_executes_agent_management_tools(tmp_path: Path) -> None:
@@ -470,7 +473,7 @@ def test_pydantic_runner_executes_agent_management_tools(tmp_path: Path) -> None
     state.create_agent("Ada")
     state.create_agent("Lin")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Manage the Organization", [2])
+    state.send_message(1, 1, "@Ada Manage the Organization")
     reminder, _ = state.claim_next_reminder()
     assert reminder is not None
     history = AgentHistory(store)
@@ -1219,7 +1222,7 @@ def test_todo_status_is_visible_after_tools_but_removed_from_history(
     )
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Please inspect this", [2])
+    state.send_message(1, 1, "@Ada Please inspect this")
     reminder, _ = state.claim_next_reminder()
     assert reminder is not None
     events: list[tuple[str, dict[str, Any]]] = []
@@ -1269,7 +1272,7 @@ def test_turn_start_todo_status_is_runtime_only(tmp_path: Path) -> None:
     )
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Continue", [2])
+    state.send_message(1, 1, "@Ada Continue")
     reminder, _ = state.claim_next_reminder()
     assert reminder is not None
     todos = AgentTodos(store)

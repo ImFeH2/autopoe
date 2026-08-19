@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Condition, Event, RLock
 from typing import Any, Literal
+from unicodedata import category
 
 
 class DomainError(Exception):
@@ -213,7 +214,6 @@ class OrganizationState:
         discussion_id: int,
         sender_id: int,
         body: str,
-        mention_ids: Iterable[int] = (),
     ) -> dict[str, Any]:
         normalized_body = body.strip()
         if not normalized_body:
@@ -227,21 +227,11 @@ class OrganizationState:
                     "Only Discussion Members can send Messages",
                 )
 
-            targets = tuple(dict.fromkeys(mention_ids))
-            for target_id in targets:
-                if target_id == sender_id:
-                    raise DomainError(
-                        "invalid_mention", "A Member cannot mention itself"
-                    )
-                if target_id not in discussion.member_ids:
-                    raise DomainError(
-                        "invalid_mention",
-                        "Mentioned Agents must belong to the Discussion",
-                    )
-                target = self._members[target_id]
-                if target.type != "agent":
-                    raise DomainError("invalid_mention", "Only Agents can be mentioned")
-
+            targets = self._mentioned_agent_ids(
+                discussion,
+                sender_id,
+                normalized_body,
+            )
             message = Message(
                 id=len(discussion.messages) + 1,
                 sender_id=sender_id,
@@ -258,6 +248,46 @@ class OrganizationState:
                     execution.error = None
             self._changed(persist=True)
             return self._snapshot()
+
+    def _mentioned_agent_ids(
+        self,
+        discussion: Discussion,
+        sender_id: int,
+        body: str,
+    ) -> tuple[int, ...]:
+        candidates = [
+            self._members[member_id]
+            for member_id in discussion.member_ids
+            if member_id != sender_id and self._members[member_id].type == "agent"
+        ]
+        targets: list[int] = []
+        seen: set[int] = set()
+        for start, character in enumerate(body):
+            if character != "@":
+                continue
+            longest = 0
+            matches: list[int] = []
+            for candidate in candidates:
+                end = start + 1 + len(candidate.name)
+                following = body[end] if end < len(body) else None
+                if not body.startswith(candidate.name, start + 1) or not (
+                    following is None
+                    or (
+                        following != "_"
+                        and category(following)[0] not in {"L", "M", "N"}
+                    )
+                ):
+                    continue
+                if len(candidate.name) > longest:
+                    longest = len(candidate.name)
+                    matches = [candidate.id]
+                elif len(candidate.name) == longest:
+                    matches.append(candidate.id)
+            for target_id in matches:
+                if target_id not in seen:
+                    seen.add(target_id)
+                    targets.append(target_id)
+        return tuple(targets)
 
     def list_members(self) -> list[dict[str, Any]]:
         with self._condition:

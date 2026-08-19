@@ -251,8 +251,9 @@ class PydanticAgentRunner:
                 "You are an Agent in Flowent. All Agents are equal and use the same tools. "
                 "Each Turn starts with a Reminder containing your current Pending Mentions. "
                 "Decide how to handle them and use discussion action=read when you need surrounding context. "
-                "Communicate only with discussion action=send. Use organization and discussion tools "
-                "to discover or manage Members and Discussions when useful. Pausing a running Agent "
+                "Communicate only with discussion action=send. Mention an Agent by writing its exact "
+                "@Name in the Message body; plain names do not notify Agents. Use organization and "
+                "discussion tools to discover or manage Members and Discussions when useful. Pausing a running Agent "
                 "lets its current Turn finish before preventing future Turns. "
                 "Use todo to maintain unfinished multi-step work, keep at most one Todo in progress, "
                 "and complete work promptly. Todo state never replaces discussion.ack and does not "
@@ -511,7 +512,6 @@ class PydanticAgentRunner:
             topic: str | None = None,
             member_ids: list[int] | None = None,
             body: str | None = None,
-            mention_ids: list[int] | None = None,
             message_ids: list[int] | None = None,
             start_message_id: int | None = None,
             end_message_id: int | None = None,
@@ -519,7 +519,7 @@ class PydanticAgentRunner:
             query: str | None = None,
             sender_id: int | None = None,
         ) -> Any:
-            """Create, send, list, inspect, read, acknowledge, search, or delete Discussions."""
+            """Create, send, list, inspect, read, acknowledge, search, or delete Discussions. In a sent Message, exact @Name text mentions that Discussion Agent."""
             try:
                 if action == "create":
                     if not topic or not member_ids:
@@ -536,7 +536,6 @@ class PydanticAgentRunner:
                         action,
                         discussion_id=discussion_id,
                         body=body,
-                        mention_ids=mention_ids or [],
                     )
                 elif action == "list":
                     result = ctx.deps.discussion(action)

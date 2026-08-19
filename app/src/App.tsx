@@ -6,11 +6,7 @@ import {
   useState,
 } from "react";
 import { AppSidebar, type WorkspaceView } from "@/components/layout";
-import {
-  DiscussionsPage,
-  type DraftMention,
-  getDraftMentionIds,
-} from "@/features/discussions";
+import { DiscussionsPage, type DraftMention } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
 import {
@@ -311,11 +307,7 @@ function App() {
       return;
     }
     const nextSnapshot = await mutate(() =>
-      backend.sendMessage(
-        selectedDiscussion.id,
-        messageBody,
-        getDraftMentionIds(messageMentions),
-      ),
+      backend.sendMessage(selectedDiscussion.id, messageBody),
     );
     if (nextSnapshot) {
       restoreMessageFocusRef.current = true;

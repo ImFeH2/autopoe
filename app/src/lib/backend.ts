@@ -235,7 +235,7 @@ function parseMessage(
     invalidSnapshot(`${path}.id must follow Discussion order`);
   }
   const senderId = positiveInteger(item.sender_id, `${path}.sender_id`);
-  const mentionIds = new Set<number>();
+  const mentionedMemberIds = new Set<number>();
   const mentions = array(item.mentions, `${path}.mentions`).map(
     (mention, mentionIndex) => {
       const mentionPath = `${path}.mentions[${mentionIndex}]`;
@@ -244,10 +244,10 @@ function parseMessage(
         mentionItem.member_id,
         `${mentionPath}.member_id`,
       );
-      if (mentionIds.has(memberId)) {
+      if (mentionedMemberIds.has(memberId)) {
         invalidSnapshot(`${path}.mentions must target unique Members`);
       }
-      mentionIds.add(memberId);
+      mentionedMemberIds.add(memberId);
       return {
         member_id: memberId,
         status: mentionStatus(mentionItem.status, `${mentionPath}.status`),
@@ -768,12 +768,11 @@ export const backend = {
     }),
   deleteDiscussion: (discussionId: number) =>
     organizationRequest("discussion.delete", { discussion_id: discussionId }),
-  sendMessage: (discussionId: number, body: string, mentionIds: number[]) =>
+  sendMessage: (discussionId: number, body: string) =>
     organizationRequest("discussion.send", {
       discussion_id: discussionId,
       sender_id: 1,
       body,
-      mention_ids: mentionIds,
     }),
   getModelSettings: async () =>
     parseModelSettings(await request("settings.get_model")),

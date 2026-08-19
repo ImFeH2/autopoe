@@ -29,7 +29,7 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "private request", [2])
+    state.send_message(1, 1, "@Ada private request")
     context = AgentRunContext(
         agent_id=2,
         state=state,
@@ -58,7 +58,7 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
             {
                 "id": 1,
                 "sender_id": 1,
-                "body": "private request",
+                "body": "@Ada private request",
                 "mentions": [{"member_id": 2, "status": "read"}],
             }
         ],
@@ -233,6 +233,25 @@ def test_agent_history_tool_only_reads_its_own_compacted_context(
     assert other["count"] == 0
 
 
+def test_agent_discussion_send_derives_mentions_from_body(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+    context = AgentRunContext(2, state, HostTools(tmp_path))
+
+    result = context.discussion("send", discussion_id=1, body="@Lin please review")
+
+    assert result == {
+        "discussion_id": 1,
+        "message_id": 1,
+        "mentioned_agent_ids": [3],
+    }
+    assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 3, "status": "pending"}
+    ]
+
+
 def test_agent_discussion_tools_are_restricted_to_members(tmp_path: Path) -> None:
     state = OrganizationState()
     state.create_agent("Ada")
@@ -315,9 +334,9 @@ def test_runtime_starts_a_follow_up_turn_for_a_new_mention(tmp_path: Path) -> No
     runtime.start()
 
     try:
-        state.send_message(1, 1, "First", [2])
+        state.send_message(1, 1, "@Ada First")
         assert runner.started.wait(timeout=1)
-        state.send_message(1, 1, "Second", [2])
+        state.send_message(1, 1, "@Ada Second")
         runner.release.set()
 
         assert runner.followed_up.wait(timeout=1)
@@ -337,10 +356,10 @@ def test_runtime_finishes_current_turn_before_pausing(tmp_path: Path) -> None:
     runtime.start()
 
     try:
-        state.send_message(1, 1, "First", [2])
+        state.send_message(1, 1, "@Ada First")
         assert runner.started.wait(timeout=1)
         assert state.pause_agent(2)["members"][1]["status"] == "pausing"
-        state.send_message(1, 1, "Second", [2])
+        state.send_message(1, 1, "@Ada Second")
         runner.release.set()
 
         deadline = time.monotonic() + 1
@@ -381,7 +400,7 @@ def test_runtime_stops_after_three_turns_without_ack(tmp_path: Path) -> None:
     runtime.start()
 
     try:
-        state.send_message(1, 1, "Pending", [2])
+        state.send_message(1, 1, "@Ada Pending")
         assert runner.stopped.wait(timeout=1)
         assert runner.calls == 3
         assert state.member(2)["status"] == "error"
@@ -464,7 +483,7 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
     runtime.start()
 
     try:
-        state.send_message(1, 1, "Please handle this", [2])
+        state.send_message(1, 1, "@Ada Please handle this")
         assert runner.completed.wait(timeout=1)
         assert state.completed.wait(timeout=1)
 
@@ -475,7 +494,7 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
             {
                 "id": 1,
                 "sender_id": 1,
-                "body": "Please handle this",
+                "body": "@Ada Please handle this",
                 "mentions": [{"member_id": 2, "status": "acked"}],
             },
             {
@@ -497,7 +516,7 @@ def test_runtime_stop_terminates_running_exec_and_worker(tmp_path: Path) -> None
     runner = ExecutingRunner(pid_path)
     runtime = AgentRuntime(state, runner, HostTools(tmp_path))
     runtime.start()
-    state.send_message(1, 1, "Run a command", [2])
+    state.send_message(1, 1, "@Ada Run a command")
     assert runner.started.wait(timeout=1)
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline and not pid_path.exists():
@@ -532,7 +551,7 @@ def test_runtime_records_late_failure_after_ack(tmp_path: Path) -> None:
     runtime.start()
 
     try:
-        state.send_message(1, 1, "Complete before failing", [2])
+        state.send_message(1, 1, "@Ada Complete before failing")
         assert runner.completed.wait(timeout=1)
         assert state.completed.wait(timeout=1)
         assert state.member(2) == {
@@ -558,7 +577,7 @@ def test_known_runner_failure_sets_error_without_immediate_retry(
     runtime.start()
 
     try:
-        state.send_message(1, 1, "Please handle this", [2])
+        state.send_message(1, 1, "@Ada Please handle this")
         assert runner.completed.wait(timeout=1)
         assert state.error_recorded.wait(timeout=1)
         assert state.member(2) == {

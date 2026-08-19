@@ -66,6 +66,40 @@ def test_only_discussion_members_can_send() -> None:
         state.send_message(1, 3, "I should not be here.")
 
 
+def test_mentions_are_derived_from_longest_discussion_member_names() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Ada Lovelace")
+    state.create_agent("Ada")
+    state.create_agent("Grace")
+    state.create_discussion("Work", 1, [2, 3, 4])
+
+    snapshot = state.send_message(
+        1,
+        1,
+        "Ask @Ada Lovelace, then @Ada. Ignore @Grace, @AdaX, and @ada.",
+    )
+
+    assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 3, "status": "pending"},
+        {"member_id": 2, "status": "pending"},
+        {"member_id": 4, "status": "pending"},
+    ]
+
+
+def test_sender_cannot_mention_itself_by_name() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+
+    snapshot = state.send_message(1, 2, "@Ada handled this for @Lin")
+
+    assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 3, "status": "pending"}
+    ]
+
+
 def test_agent_can_create_a_discussion_with_another_agent() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
@@ -101,8 +135,7 @@ def test_discussion_read_ranges_are_paginated_and_ordered() -> None:
         state.send_message(
             1,
             1,
-            f"Message {message_id}",
-            [2] if message_id == 4 else [],
+            f"{'@Ada ' if message_id == 4 else ''}Message {message_id}",
         )
 
     latest = state.read_discussion(2, 1, limit=2)
@@ -208,7 +241,7 @@ def test_running_agent_cannot_be_deleted_but_their_discussion_can() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Handle this", [2])
+    state.send_message(1, 1, "@Ada Handle this")
     assert state.claim_next_reminder()[0] is not None
 
     with pytest.raises(DomainError, match="Running Agents"):
@@ -220,7 +253,7 @@ def test_paused_agent_keeps_pending_mentions_until_resumed() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
-    state.send_message(1, 1, "Handle this", [2])
+    state.send_message(1, 1, "@Ada Handle this")
 
     paused = state.pause_agent(2)
     assert paused["members"][1]["status"] == "paused"
