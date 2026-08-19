@@ -13,6 +13,7 @@ type ModelSettingsDraft = {
   baseUrl: string;
   apiKey: string;
   model: string;
+  contextWindow: string;
 };
 
 type ObservabilitySettingsDraft = {
@@ -35,6 +36,18 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function parseContextWindow(value: string): number | null {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed) || parsed < 2) {
+    throw new Error("Context window must be an integer of at least 2");
+  }
+  return parsed;
+}
+
 export function isModelSettingsDirty(
   current: ModelSettings | null,
   draft: ModelSettingsDraft,
@@ -43,7 +56,8 @@ export function isModelSettingsDirty(
     draft.apiType !== (current?.api_type ?? "openai-chat") ||
     draft.baseUrl !== (current?.base_url ?? "") ||
     draft.apiKey.length > 0 ||
-    draft.model !== (current?.model ?? "")
+    draft.model !== (current?.model ?? "") ||
+    draft.contextWindow !== (current?.context_window?.toString() ?? "")
   );
 }
 
@@ -69,6 +83,7 @@ export function SettingsPage() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
+  const [contextWindow, setContextWindow] = useState("");
   const [modelStatus, setModelStatus] = useState<
     "loading" | "ready" | "saving" | "saved"
   >("loading");
@@ -98,6 +113,7 @@ export function SettingsPage() {
         setApiType(current.api_type);
         setBaseUrl(current.base_url);
         setModel(current.model);
+        setContextWindow(current.context_window?.toString() ?? "");
         setModelStatus("ready");
       })
       .catch((reason) => {
@@ -141,12 +157,14 @@ export function SettingsPage() {
         base_url: baseUrl,
         api_key: apiKey,
         model,
+        context_window: parseContextWindow(contextWindow),
       });
       setModelSettings(current);
       setApiType(current.api_type);
       setBaseUrl(current.base_url);
       setApiKey("");
       setModel(current.model);
+      setContextWindow(current.context_window?.toString() ?? "");
       setModelStatus("saved");
     } catch (reason) {
       setModelError(errorMessage(reason));
@@ -188,6 +206,7 @@ export function SettingsPage() {
     baseUrl,
     apiKey,
     model,
+    contextWindow,
   });
   const tracingDirty = isObservabilitySettingsDirty(tracingSettings, {
     enabled: tracingEnabled,
@@ -260,6 +279,22 @@ export function SettingsPage() {
                 placeholder="Model"
                 required
                 value={model}
+              />
+            </label>
+            <label className="settings-field" htmlFor="model-context-window">
+              <span>Context window</span>
+              <Input
+                aria-label="Context window"
+                id="model-context-window"
+                autoComplete="off"
+                disabled={modelBusy}
+                inputMode="numeric"
+                min={2}
+                onChange={(event) => setContextWindow(event.target.value)}
+                placeholder="1050000"
+                step={1}
+                type="number"
+                value={contextWindow}
               />
             </label>
             <div className="settings-actions">

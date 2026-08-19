@@ -244,6 +244,7 @@ def test_flowent_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> Non
             "api_type": "openai-chat",
             "base_url": "",
             "model": "",
+            "context_window": None,
             "has_api_key": False,
         }
         assert request(process, 2, "settings.get_observability", {}) == {
@@ -297,6 +298,7 @@ def test_persists_state_and_uses_home_across_launch_directories(
                 "base_url": "https://example.invalid/v1",
                 "api_key": "restart-secret",
                 "model": "test-model",
+                "context_window": 1_050_000,
             },
         )
         assert "restart-secret" not in str(settings)
@@ -334,6 +336,7 @@ def test_persists_state_and_uses_home_across_launch_directories(
             "api_type": "openai-responses",
             "base_url": "https://example.invalid/v1",
             "model": "test-model",
+            "context_window": 1_050_000,
             "has_api_key": True,
         }
         assert "restart-secret" not in str(settings)

@@ -306,12 +306,14 @@ def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> No
         base_url="https://example.invalid",
         api_key="local-secret",
         model="test-model",
+        context_window=200_000,
     )
 
     assert settings == {
         "api_type": "anthropic",
         "base_url": "https://example.invalid",
         "model": "test-model",
+        "context_window": 200_000,
         "has_api_key": True,
     }
     assert "local-secret" not in str(settings)
@@ -320,6 +322,7 @@ def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> No
         "base_url": "https://example.invalid",
         "api_key": "local-secret",
         "model": "test-model",
+        "context_window": 200_000,
     }
     assert store.load_organization() is None
 
@@ -380,6 +383,7 @@ def test_migrates_version_two_without_losing_existing_state(tmp_path: Path) -> N
         "base_url": "https://example.invalid",
         "api_key": "legacy-secret",
         "model": "legacy-model",
+        "context_window": None,
     }
     assert migrated.load_observability_config() is None
     connection = sqlite3.connect(migrated.path)
@@ -426,6 +430,7 @@ def test_migrates_version_three_openai_to_chat_without_losing_secrets(
         "base_url": "https://example.invalid/v1",
         "api_key": "legacy-openai-secret",
         "model": "legacy-model",
+        "context_window": None,
     }
     assert migrated.load_observability_config()["secret_key"] == (
         "legacy-tracing-secret"
@@ -461,6 +466,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
         "base_url": "https://example.invalid",
         "api_key": "legacy-secret",
         "model": "legacy-model",
+        "context_window": None,
     }
     connection = sqlite3.connect(path)
     assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
@@ -537,6 +543,43 @@ def test_migrates_version_eight_with_paused_agent_support(tmp_path: Path) -> Non
     assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     columns = {row[1] for row in connection.execute("PRAGMA table_info(members)")}
     assert "paused" in columns
+    connection.close()
+
+
+def test_migrates_version_nine_with_model_context_window_support(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    store.save_model_config(
+        {
+            "api_type": "openai-responses",
+            "base_url": "https://example.invalid/v1",
+            "api_key": "legacy-secret",
+            "model": "legacy-model",
+        }
+    )
+    connection = sqlite3.connect(store.path)
+    connection.execute("ALTER TABLE model_settings DROP COLUMN context_window")
+    connection.execute("PRAGMA user_version = 9")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+
+    assert migrated.load_model_config() == {
+        "api_type": "openai-responses",
+        "base_url": "https://example.invalid/v1",
+        "api_key": "legacy-secret",
+        "model": "legacy-model",
+        "context_window": None,
+    }
+    connection = sqlite3.connect(migrated.path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(model_settings)")
+    }
+    assert "context_window" in columns
     connection.close()
 
 

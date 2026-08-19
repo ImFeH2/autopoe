@@ -101,6 +101,7 @@ def test_shared_model_settings_never_return_the_api_key() -> None:
         "api_type": "anthropic",
         "base_url": "https://example.invalid",
         "model": "test-model",
+        "context_window": None,
         "has_api_key": True,
     }
     assert secret not in repr(runtime.settings())
@@ -177,6 +178,28 @@ def test_runner_enables_native_compaction_when_supported(
         assert isinstance(native[0], capability_type)
 
 
+def test_runner_sets_compaction_threshold_to_eighty_five_percent() -> None:
+    config = ModelConfig(
+        api_type="openai-responses",
+        base_url="https://example.invalid",
+        api_key="test-key",
+        model="test-model",
+        context_window=1_050_000,
+    )
+    runner = PydanticAgentRunner(config)
+    capabilities: list[Any] = []
+    runner._agent.root_capability.apply(capabilities.append)
+
+    compaction = next(
+        capability
+        for capability in capabilities
+        if isinstance(capability, OpenAICompaction)
+    )
+    assert config.compaction_threshold == 892_500
+    assert compaction.stateless is False
+    assert compaction.token_threshold == 892_500
+
+
 def test_runner_configures_bounded_web_search_with_local_fallback() -> None:
     runner = PydanticAgentRunner(
         ModelConfig(
@@ -230,18 +253,22 @@ def test_runner_uses_local_web_search_when_native_is_incompatible(
 
 
 @pytest.mark.parametrize(
-    ("api_type", "expected_settings"),
+    ("api_type", "context_window", "expected_settings"),
     [
         (
             "openai-responses",
+            1_050_000,
             {
                 "openai_prompt_cache_key": "flowent-agent-2",
                 "openai_include_web_search_sources": True,
-                "openai_context_management": [{"type": "compaction"}],
+                "openai_context_management": [
+                    {"type": "compaction", "compact_threshold": 892_500}
+                ],
             },
         ),
         (
             "anthropic",
+            None,
             {
                 "anthropic_context_management": {
                     "edits": [
@@ -258,6 +285,7 @@ def test_runner_uses_local_web_search_when_native_is_incompatible(
 def test_runner_applies_provider_compaction_context_management(
     tmp_path: Path,
     api_type: ApiType,
+    context_window: int | None,
     expected_settings: dict[str, Any],
 ) -> None:
     settings: list[dict[str, Any] | None] = []
@@ -272,6 +300,7 @@ def test_runner_applies_provider_compaction_context_management(
             base_url="https://example.invalid",
             api_key="test-key",
             model="test-model",
+            context_window=context_window,
         )
     )
     reminder, context = activation_context(tmp_path)

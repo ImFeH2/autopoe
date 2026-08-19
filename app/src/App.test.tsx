@@ -22,6 +22,8 @@ import { MembersPage } from "@/features/members";
 import {
   isModelSettingsDirty,
   isObservabilitySettingsDirty,
+  parseContextWindow,
+  SettingsPage,
 } from "@/features/settings";
 
 describe("App", () => {
@@ -36,6 +38,7 @@ describe("App", () => {
       api_type: "openai-chat" as const,
       base_url: "https://api.example.com",
       model: "model-a",
+      context_window: 1_050_000,
       has_api_key: true,
     };
     const unchanged = {
@@ -43,6 +46,7 @@ describe("App", () => {
       baseUrl: "https://api.example.com",
       apiKey: "",
       model: "model-a",
+      contextWindow: "1050000",
     };
 
     expect(isModelSettingsDirty(current, unchanged)).toBe(false);
@@ -55,6 +59,29 @@ describe("App", () => {
         apiType: "openai-responses",
       }),
     ).toBe(true);
+    expect(
+      isModelSettingsDirty(current, {
+        ...unchanged,
+        contextWindow: "200000",
+      }),
+    ).toBe(true);
+  });
+
+  it("parses optional context window values as safe integers", () => {
+    expect(parseContextWindow("")).toBeNull();
+    expect(parseContextWindow(" 1050000 ")).toBe(1_050_000);
+    expect(() => parseContextWindow("1.5")).toThrow(
+      "Context window must be an integer of at least 2",
+    );
+  });
+
+  it("renders an accessible context window input", () => {
+    const markup = renderToStaticMarkup(<SettingsPage />);
+
+    expect(markup).toContain('aria-label="Context window"');
+    expect(markup).toContain('id="model-context-window"');
+    expect(markup).toContain('type="number"');
+    expect(markup).toContain('placeholder="1050000"');
   });
 
   it("marks tracing settings dirty without requiring saved secrets", () => {

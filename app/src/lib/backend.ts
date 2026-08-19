@@ -121,6 +121,7 @@ export type ModelSettings = {
   api_type: ModelApiType;
   base_url: string;
   model: string;
+  context_window: number | null;
   has_api_key: boolean;
 };
 
@@ -129,6 +130,7 @@ export type ModelSettingsUpdate = {
   base_url: string;
   api_key: string;
   model: string;
+  context_window: number | null;
 };
 
 export type ObservabilitySettings = {
@@ -705,6 +707,9 @@ export function parseModelSettings(value: unknown): ModelSettings {
   if (
     typeof settings.base_url !== "string" ||
     typeof settings.model !== "string" ||
+    (settings.context_window !== null &&
+      (!Number.isSafeInteger(settings.context_window) ||
+        Number(settings.context_window) < 2)) ||
     typeof settings.has_api_key !== "boolean"
   ) {
     throw new Error("Invalid model settings: fields are invalid");
@@ -716,6 +721,7 @@ export function parseModelSettings(value: unknown): ModelSettings {
     api_type: settings.api_type,
     base_url: settings.base_url,
     model: settings.model,
+    context_window: settings.context_window as number | null,
     has_api_key: settings.has_api_key,
   };
 }

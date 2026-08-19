@@ -200,6 +200,7 @@ def test_model_settings_are_shared_without_returning_the_api_key() -> None:
                         "base_url": "https://example.invalid/v1",
                         "api_key": secret,
                         "model": "test-model",
+                        "context_window": 1_050_000,
                     },
                 },
                 {"id": 3, "method": "settings.get_model", "params": {}},
@@ -225,10 +226,32 @@ def test_model_settings_are_shared_without_returning_the_api_key() -> None:
             "api_type": "openai-responses",
             "base_url": "https://example.invalid/v1",
             "model": "test-model",
+            "context_window": 1_050_000,
             "has_api_key": True,
         }
     )
     assert secret not in output
+
+
+def test_model_settings_reject_invalid_context_window() -> None:
+    response = Dispatcher(OrganizationState()).dispatch(
+        {
+            "id": 1,
+            "method": "settings.update_model",
+            "params": {
+                "api_type": "openai-responses",
+                "base_url": "https://example.invalid/v1",
+                "api_key": "test-key",
+                "model": "test-model",
+                "context_window": 1,
+            },
+        }
+    )
+
+    assert response["error"] == {
+        "code": "invalid_request",
+        "message": "context_window must be an integer of at least 2 or null",
+    }
 
 
 def test_observability_settings_never_return_the_secret_key() -> None:
@@ -321,8 +344,9 @@ def test_persistence_error_does_not_stop_or_expose_request_data(capsys) -> None:
             base_url: str,
             api_key: str,
             model: str,
+            context_window: int | None = None,
         ) -> dict[str, object]:
-            del api_type, base_url, api_key, model
+            del api_type, base_url, api_key, model, context_window
             raise sqlite3.OperationalError(secret)
 
     input_stream = io.StringIO(

@@ -78,6 +78,7 @@ from flowent.runtime import (
 from flowent.todos import unwrap_tool_result
 
 ApiType = Literal["openai-chat", "openai-responses", "anthropic", "google"]
+COMPACTION_THRESHOLD_PERCENT = 85
 
 
 @dataclass(frozen=True)
@@ -86,9 +87,10 @@ class ModelConfig:
     base_url: str
     api_key: str = field(repr=False)
     model: str
+    context_window: int | None = None
 
     @classmethod
-    def restore(cls, values: dict[str, str]) -> ModelConfig:
+    def restore(cls, values: dict[str, Any]) -> ModelConfig:
         api_type = values["api_type"]
         if api_type not in (
             "openai-chat",
@@ -97,22 +99,35 @@ class ModelConfig:
             "google",
         ):
             raise RuntimeError("Persisted model API type is invalid")
+        context_window = values.get("context_window")
+        if context_window is not None and (
+            type(context_window) is not int or context_window < 2
+        ):
+            raise RuntimeError("Persisted model context window is invalid")
         config = cls(
             api_type=cast(ApiType, api_type),
             base_url=values["base_url"],
             api_key=values["api_key"],
             model=values["model"],
+            context_window=context_window,
         )
         if not config.base_url or not config.api_key or not config.model:
             raise RuntimeError("Persisted model configuration is incomplete")
         return config
 
-    def persistence_data(self) -> dict[str, str]:
+    @property
+    def compaction_threshold(self) -> int | None:
+        if self.context_window is None:
+            return None
+        return self.context_window * COMPACTION_THRESHOLD_PERCENT // 100
+
+    def persistence_data(self) -> dict[str, Any]:
         return {
             "api_type": self.api_type,
             "base_url": self.base_url,
             "api_key": self.api_key,
             "model": self.model,
+            "context_window": self.context_window,
         }
 
 
@@ -220,7 +235,9 @@ class PydanticAgentRunner:
         if observability:
             capabilities.append(observability.capability())
         if config.api_type == "openai-responses":
-            capabilities.append(OpenAICompaction())
+            capabilities.append(
+                OpenAICompaction(token_threshold=config.compaction_threshold)
+            )
         elif config.api_type == "anthropic":
             capabilities.append(AnthropicCompaction())
         self._observability = observability
@@ -921,7 +938,7 @@ class ModelRuntime:
         self,
         config: ModelConfig | None = None,
         observability_config: ObservabilityConfig | None = None,
-        on_configure: Callable[[dict[str, str]], None] | None = None,
+        on_configure: Callable[[dict[str, Any]], None] | None = None,
         on_configure_observability: Callable[[dict[str, Any]], None] | None = None,
         runner_factory: Callable[
             [ModelConfig | None, PydanticAIObservability | None], AgentRunner
@@ -1030,12 +1047,14 @@ class ModelRuntime:
                     "api_type": "openai-chat",
                     "base_url": "",
                     "model": "",
+                    "context_window": None,
                     "has_api_key": False,
                 }
             return {
                 "api_type": config.api_type,
                 "base_url": config.base_url,
                 "model": config.model,
+                "context_window": config.context_window,
                 "has_api_key": True,
             }
 
@@ -1066,6 +1085,7 @@ class ModelRuntime:
         base_url: str,
         api_key: str,
         model: str,
+        context_window: int | None = None,
     ) -> dict[str, Any]:
         api_type = api_type.strip()
         base_url = base_url.strip()
@@ -1089,11 +1109,16 @@ class ModelRuntime:
                 raise ValueError("api_key must not be empty")
             if not model:
                 raise ValueError("model must not be empty")
+            if context_window is not None and (
+                type(context_window) is not int or context_window < 2
+            ):
+                raise ValueError("context_window must be at least 2")
             config = ModelConfig(
                 api_type=cast(ApiType, api_type),
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
+                context_window=context_window,
             )
             register_secret(api_key)
             runner = self._runner_factory(
@@ -1258,9 +1283,9 @@ class ModelRuntime:
 
 
 def create_runner(
-    stored_config: dict[str, str] | None = None,
+    stored_config: dict[str, Any] | None = None,
     stored_observability_config: dict[str, Any] | None = None,
-    on_configure: Callable[[dict[str, str]], None] | None = None,
+    on_configure: Callable[[dict[str, Any]], None] | None = None,
     on_configure_observability: Callable[[dict[str, Any]], None] | None = None,
 ) -> ModelRuntime:
     config = ModelConfig.restore(stored_config) if stored_config is not None else None

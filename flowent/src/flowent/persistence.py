@@ -14,7 +14,7 @@ from flowent.diagnostics import log_event, log_exception
 from flowent.history import RunStatus
 from flowent.todos import TodoStatus
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -64,6 +64,8 @@ class SQLiteStore:
                     self._migrate_version_seven(connection)
                 elif version == 8:
                     self._migrate_version_eight(connection)
+                elif version == 9:
+                    self._migrate_version_nine(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
@@ -265,6 +267,9 @@ class SQLiteStore:
                 base_url TEXT NOT NULL,
                 api_key TEXT NOT NULL,
                 model TEXT NOT NULL,
+                context_window INTEGER CHECK (
+                    context_window IS NULL OR context_window >= 2
+                ),
                 FOREIGN KEY (id) REFERENCES application_state (id)
                     ON DELETE CASCADE
             )
@@ -372,6 +377,7 @@ class SQLiteStore:
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
             self._add_member_paused_column(connection)
+            self._add_model_context_window_column(connection)
             self._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -386,6 +392,7 @@ class SQLiteStore:
             )
             SQLiteStore._add_member_deleted_column(connection)
             SQLiteStore._add_member_paused_column(connection)
+            SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -394,6 +401,7 @@ class SQLiteStore:
         with connection:
             SQLiteStore._add_member_deleted_column(connection)
             SQLiteStore._add_member_paused_column(connection)
+            SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -402,12 +410,20 @@ class SQLiteStore:
         with connection:
             SQLiteStore._create_agent_todos_table(connection)
             SQLiteStore._add_member_paused_column(connection)
+            SQLiteStore._add_model_context_window_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_eight(connection: sqlite3.Connection) -> None:
         with connection:
             SQLiteStore._add_member_paused_column(connection)
+            SQLiteStore._add_model_context_window_column(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_nine(connection: sqlite3.Connection) -> None:
+        with connection:
+            SQLiteStore._add_model_context_window_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -428,6 +444,17 @@ class SQLiteStore:
         if "paused" not in columns:
             connection.execute(
                 "ALTER TABLE members ADD COLUMN paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1))"
+            )
+
+    @staticmethod
+    def _add_model_context_window_column(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(model_settings)")
+        }
+        if "context_window" not in columns:
+            connection.execute(
+                "ALTER TABLE model_settings ADD COLUMN context_window INTEGER CHECK (context_window IS NULL OR context_window >= 2)"
             )
 
     @staticmethod
@@ -731,12 +758,12 @@ class SQLiteStore:
                         ),
                     )
 
-    def load_model_config(self) -> dict[str, str] | None:
+    def load_model_config(self) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT api_type, base_url, api_key, model FROM model_settings
-                WHERE id = 1
+                SELECT api_type, base_url, api_key, model, context_window
+                FROM model_settings WHERE id = 1
                 """
             ).fetchone()
             if row is None:
@@ -747,6 +774,7 @@ class SQLiteStore:
                 "base_url": row["base_url"],
                 "api_key": row["api_key"],
                 "model": row["model"],
+                "context_window": row["context_window"],
             }
         log_event(
             "database.model_config.loaded",
@@ -756,7 +784,7 @@ class SQLiteStore:
         )
         return config
 
-    def save_model_config(self, config: dict[str, str]) -> None:
+    def save_model_config(self, config: dict[str, Any]) -> None:
         with self._connect() as connection, connection:
             self._write_model_config(connection, config)
         self.path.chmod(0o600)
@@ -1088,23 +1116,25 @@ class SQLiteStore:
     @staticmethod
     def _write_model_config(
         connection: sqlite3.Connection,
-        config: dict[str, str],
+        config: dict[str, Any],
     ) -> None:
         connection.execute(
             """
             INSERT INTO model_settings
-                (id, api_type, base_url, api_key, model)
-            VALUES (1, ?, ?, ?, ?)
+                (id, api_type, base_url, api_key, model, context_window)
+            VALUES (1, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 api_type = excluded.api_type,
                 base_url = excluded.base_url,
                 api_key = excluded.api_key,
-                model = excluded.model
+                model = excluded.model,
+                context_window = excluded.context_window
             """,
             (
                 config["api_type"],
                 config["base_url"],
                 config["api_key"],
                 config["model"],
+                config.get("context_window"),
             ),
         )

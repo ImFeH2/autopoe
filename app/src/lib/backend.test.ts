@@ -159,14 +159,28 @@ describe("parseModelSettings", () => {
         api_type: "anthropic",
         base_url: "https://example.invalid",
         model: "claude-test",
+        context_window: 200000,
         has_api_key: true,
       }),
     ).toEqual({
       api_type: "anthropic",
       base_url: "https://example.invalid",
       model: "claude-test",
+      context_window: 200000,
       has_api_key: true,
     });
+  });
+
+  it("rejects invalid context windows", () => {
+    expect(() =>
+      parseModelSettings({
+        api_type: "openai-responses",
+        base_url: "https://example.invalid",
+        model: "test-model",
+        context_window: 1,
+        has_api_key: true,
+      }),
+    ).toThrow("fields are invalid");
   });
 
   it("rejects API keys returned by Flowent", () => {
@@ -175,6 +189,7 @@ describe("parseModelSettings", () => {
         api_type: "openai-responses",
         base_url: "https://example.invalid",
         model: "test-model",
+        context_window: null,
         has_api_key: true,
         api_key: "secret",
       }),

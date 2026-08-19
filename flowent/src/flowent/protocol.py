@@ -183,6 +183,7 @@ class Dispatcher:
             base_url=require_string(params, "base_url"),
             api_key=require_string(params, "api_key"),
             model=require_string(params, "model"),
+            context_window=require_optional_positive_integer(params, "context_window"),
         )
 
     def _get_observability_settings(
@@ -266,6 +267,15 @@ def require_integer(params: dict[str, Any], key: str) -> int:
     value = params.get(key)
     if type(value) is not int:
         raise ProtocolError(f"{key} must be an integer")
+    return value
+
+
+def require_optional_positive_integer(params: dict[str, Any], key: str) -> int | None:
+    value = params.get(key)
+    if value is None:
+        return None
+    if type(value) is not int or value < 2:
+        raise ProtocolError(f"{key} must be an integer of at least 2 or null")
     return value
 
 
