@@ -115,6 +115,11 @@ class Dispatcher:
                 request_id=diagnostic_request_id,
                 method=diagnostic_method,
             )
+            if diagnostic_method == "system.shutdown" and not params:
+                log_event(
+                    "protocol.shutdown.requested",
+                    request_id=diagnostic_request_id,
+                )
             result = handler(params)
             log_event(
                 "protocol.request.completed",
@@ -296,7 +301,7 @@ def serve(
     todos: AgentTodos | None = None,
     memories: AgentMemory | None = None,
     operations: OrganizationOperations | None = None,
-) -> None:
+) -> str:
     dispatcher = Dispatcher(
         state,
         on_shutdown,
@@ -307,10 +312,15 @@ def serve(
         operations,
     )
     protocol_writer = writer or JsonLineWriter(output_stream)
+    input_line_count = 0
+    parsed_request_count = 0
+    invalid_json_count = 0
     for line in input_stream:
+        input_line_count += 1
         try:
             request = json.loads(line)
         except json.JSONDecodeError as error:
+            invalid_json_count += 1
             log_event(
                 "protocol.input.invalid_json",
                 level=logging.WARNING,
@@ -321,8 +331,25 @@ def serve(
                 "error": {"code": "invalid_json", "message": str(error)},
             }
         else:
+            parsed_request_count += 1
             response = dispatcher.dispatch(request)
 
         protocol_writer.write(response)
         if dispatcher.shutdown_requested:
-            return
+            log_event(
+                "protocol.serve.stopped",
+                reason="system_shutdown",
+                input_line_count=input_line_count,
+                parsed_request_count=parsed_request_count,
+                invalid_json_count=invalid_json_count,
+            )
+            return "system_shutdown"
+    log_event(
+        "protocol.serve.stopped",
+        level=logging.WARNING,
+        reason="stdin_eof",
+        input_line_count=input_line_count,
+        parsed_request_count=parsed_request_count,
+        invalid_json_count=invalid_json_count,
+    )
+    return "stdin_eof"

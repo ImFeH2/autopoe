@@ -47,6 +47,7 @@ def main(
     model_runtime: ModelRuntime | None = None
     host_tools: AgentHostTools | None = None
     watcher: ProcessWatcher | None = None
+    stop_reason = "startup_failure"
     try:
         host_tools = create_host_tools()
         working_directory = host_tools.working_directory
@@ -98,11 +99,11 @@ def main(
             operations,
         )
         runtime.start()
-        serve(
+        stop_reason = serve(
             sys.stdin,
             sys.stdout,
             state,
-            runtime.stop,
+            lambda: runtime.stop(reason="system_shutdown"),
             model_runtime,
             history,
             writer,
@@ -111,18 +112,26 @@ def main(
             operations,
         )
     except BaseException as error:
+        stop_reason = "exception"
         log_exception("process.failed", error)
         raise
     finally:
+        log_event(
+            "process.stopping",
+            reason=stop_reason,
+            runtime_started=runtime is not None,
+            model_runtime_started=model_runtime is not None,
+            host_tools_started=host_tools is not None,
+        )
         if runtime is not None:
-            runtime.stop()
+            runtime.stop(reason=stop_reason)
         elif host_tools is not None:
             host_tools.close()
         if model_runtime is not None:
             model_runtime.shutdown()
         if watcher is not None:
             watcher.close()
-        log_event("process.stopped")
+        log_event("process.stopped", reason=stop_reason)
         shutdown_diagnostics()
 
 

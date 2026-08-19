@@ -66,7 +66,8 @@ def request(
 
 
 def test_flowent_runs_until_stdin_closes(tmp_path: Path) -> None:
-    process = start_flowent(tmp_path / "data")
+    data = tmp_path / "data"
+    process = start_flowent(data)
 
     try:
         with pytest.raises(subprocess.TimeoutExpired):
@@ -78,15 +79,59 @@ def test_flowent_runs_until_stdin_closes(tmp_path: Path) -> None:
     finally:
         close_process(process)
 
+    records = [
+        json.loads(line)
+        for line in (data / "logs" / "flowent.jsonl").read_text().splitlines()
+    ]
+    protocol_stop = next(
+        record for record in records if record["event"] == "protocol.serve.stopped"
+    )
+    process_stop = next(
+        record for record in records if record["event"] == "process.stopping"
+    )
+    scheduler_stop = next(
+        record for record in records if record["event"] == "scheduler.stop.started"
+    )
+    assert protocol_stop["reason"] == "stdin_eof"
+    assert protocol_stop["input_line_count"] == 0
+    assert process_stop["reason"] == "stdin_eof"
+    assert scheduler_stop["reason"] == "stdin_eof"
+    assert scheduler_stop["worker_count"] == 0
+    assert scheduler_stop["active_agent_ids"] == []
+    assert scheduler_stop["active_turn_ids"] == []
+    assert records[-1]["event"] == "process.stopped"
+    assert records[-1]["reason"] == "stdin_eof"
+
 
 def test_flowent_shutdown_request_stops_the_process(tmp_path: Path) -> None:
-    process = start_flowent(tmp_path / "data")
+    data = tmp_path / "data"
+    process = start_flowent(data)
 
     try:
         assert request(process, 1, "system.shutdown", {}) == {"stopped": True}
         assert process.wait(timeout=10) == 0
     finally:
         close_process(process)
+
+    records = [
+        json.loads(line)
+        for line in (data / "logs" / "flowent.jsonl").read_text().splitlines()
+    ]
+    shutdown = next(
+        record for record in records if record["event"] == "protocol.shutdown.requested"
+    )
+    protocol_stop = next(
+        record for record in records if record["event"] == "protocol.serve.stopped"
+    )
+    scheduler_stop = next(
+        record for record in records if record["event"] == "scheduler.stop.started"
+    )
+    assert shutdown["request_id"] == 1
+    assert protocol_stop["reason"] == "system_shutdown"
+    assert protocol_stop["input_line_count"] == 1
+    assert scheduler_stop["reason"] == "system_shutdown"
+    assert records[-1]["event"] == "process.stopped"
+    assert records[-1]["reason"] == "system_shutdown"
 
 
 def test_flowent_writes_private_diagnostics_without_request_content(

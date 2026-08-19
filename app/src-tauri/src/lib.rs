@@ -1,3 +1,4 @@
+mod bridge_diagnostics;
 mod flowent;
 
 use flowent::FlowentProcess;

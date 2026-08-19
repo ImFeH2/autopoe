@@ -15,6 +15,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
+from flowent.diagnostics import configure_diagnostics, shutdown_diagnostics
 from flowent.domain import DomainError, OrganizationState, Reminder
 from flowent.history import AgentHistory
 from flowent.host_tools import HostTools
@@ -509,6 +510,8 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
 
 
 def test_runtime_stop_terminates_running_exec_and_worker(tmp_path: Path) -> None:
+    log_path = configure_diagnostics(tmp_path / "data")
+    assert log_path is not None
     state = ObservableState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
@@ -524,11 +527,30 @@ def test_runtime_stop_terminates_running_exec_and_worker(tmp_path: Path) -> None
     assert pid_path.exists()
     pid = int(pid_path.read_text())
 
-    runtime.stop()
+    runtime.stop(reason="stdin_eof")
+    shutdown_diagnostics()
 
     assert runner.finished.wait(timeout=1)
     assert not psutil.pid_exists(pid)
     assert state.member(2)["status"] == "error"
+    records = [json.loads(line) for line in log_path.read_text().splitlines()]
+    started = next(
+        record for record in records if record["event"] == "scheduler.stop.started"
+    )
+    completed = next(
+        record for record in records if record["event"] == "scheduler.stop.completed"
+    )
+    turn_failed = next(
+        record for record in records if record["event"] == "agent.turn.failed"
+    )
+    assert started["reason"] == "stdin_eof"
+    assert started["worker_count"] == 1
+    assert started["active_agent_ids"] == [2]
+    assert len(started["active_turn_ids"]) == 0
+    assert completed["reason"] == "stdin_eof"
+    assert completed["worker_count"] == 0
+    assert completed["duration_ms"] >= 0
+    assert turn_failed["failure_reason"] == "runtime_stopped"
 
 
 def test_runtime_can_stop_immediately_after_start(tmp_path: Path) -> None:

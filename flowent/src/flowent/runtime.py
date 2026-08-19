@@ -445,8 +445,11 @@ class AgentRuntime:
         self._stop_event = Event()
         self._stop_lock = Lock()
         self._stop_completed = False
+        self._stop_reason: str | None = None
+        self._stop_started_at: float | None = None
         self._workers_lock = Lock()
         self._workers: set[Thread] = set()
+        self._active_turns: dict[Thread, tuple[int, str | None]] = {}
         self._scheduler = Thread(
             target=self._schedule,
             name="flowent-agent-scheduler",
@@ -457,12 +460,21 @@ class AgentRuntime:
         log_event("scheduler.started")
         self._scheduler.start()
 
-    def stop(self) -> None:
+    def stop(self, reason: str = "requested") -> None:
         with self._stop_lock:
             if self._stop_completed:
                 return
             if not self._stop_event.is_set():
-                log_event("scheduler.stop.started")
+                self._stop_reason = reason
+                self._stop_started_at = time.monotonic()
+                diagnostics = self._active_turn_diagnostics()
+                log_event(
+                    "scheduler.stop.started",
+                    reason=reason,
+                    host_backend=self._host_tools.execution_backend,
+                    scheduler_alive=self._scheduler.is_alive(),
+                    **diagnostics,
+                )
                 self._stop_event.set()
                 self._state.wake()
             self._scheduler.join(timeout=5)
@@ -473,17 +485,42 @@ class AgentRuntime:
                     workers = list(self._workers)
                 if not workers:
                     self._stop_completed = True
-                    log_event("scheduler.stop.completed")
+                    log_event(
+                        "scheduler.stop.completed",
+                        reason=self._stop_reason,
+                        duration_ms=self._stop_duration_ms(),
+                        scheduler_alive=self._scheduler.is_alive(),
+                        **self._active_turn_diagnostics(),
+                    )
                     return
                 for worker in workers:
                     worker.join(timeout=max(0, deadline - time.monotonic()))
-            with self._workers_lock:
-                worker_count = len(self._workers)
             log_event(
                 "scheduler.stop.incomplete",
                 level=logging.WARNING,
-                worker_count=worker_count,
+                reason=self._stop_reason,
+                duration_ms=self._stop_duration_ms(),
+                scheduler_alive=self._scheduler.is_alive(),
+                **self._active_turn_diagnostics(),
             )
+
+    def _active_turn_diagnostics(self) -> dict[str, Any]:
+        with self._workers_lock:
+            active_turns = list(self._active_turns.values())
+            worker_count = len(self._workers)
+        return {
+            "worker_count": worker_count,
+            "active_agent_ids": sorted(agent_id for agent_id, _ in active_turns),
+            "active_turn_ids": sorted(
+                turn_id for _, turn_id in active_turns if turn_id is not None
+            ),
+        }
+
+    def _stop_duration_ms(self) -> int:
+        started_at = self._stop_started_at
+        if started_at is None:
+            return 0
+        return round((time.monotonic() - started_at) * 1000)
 
     def _schedule(self) -> None:
         revision = -1
@@ -519,6 +556,7 @@ class AgentRuntime:
             )
             with self._workers_lock:
                 self._workers.add(worker)
+                self._active_turns[worker] = (reminder.agent_id, None)
                 worker.start()
 
     def _run_turn(self, reminder: Reminder) -> None:
@@ -526,11 +564,19 @@ class AgentRuntime:
         completed = False
         error: str | None = None
         failure_type: str | None = None
+        failure_reason: str | None = None
         outcome = AgentRunOutcome()
         history_run: AgentHistoryRun | None = None
         try:
             if self._history is not None:
                 history_run = self._history.start(reminder)
+            with self._workers_lock:
+                worker = current_thread()
+                if worker in self._active_turns:
+                    self._active_turns[worker] = (
+                        reminder.agent_id,
+                        history_run.run_id if history_run is not None else None,
+                    )
             log_event(
                 "agent.turn.started",
                 agent_id=reminder.agent_id,
@@ -568,9 +614,19 @@ class AgentRuntime:
         except AgentRunFailure as exception:
             failure_type = type(exception).__name__
             error = str(exception)
+            failure_reason = (
+                "runtime_stopped"
+                if error == "Agent runtime stopped"
+                else "model_request_failed"
+                if error == "Model request failed"
+                else "agent_run_failure"
+            )
             outcome = AgentRunOutcome(exception.messages, exception.usage)
         except HostToolError as exception:
             failure_type = type(exception).__name__
+            failure_reason = (
+                "runtime_stopped" if self._stop_event.is_set() else "host_tool_error"
+            )
             error = str(exception)
         except (OSError, RuntimeError, TypeError, ValueError) as exception:
             failure_type = type(exception).__name__
@@ -628,7 +684,10 @@ class AgentRuntime:
                     message_count=len(outcome.messages),
                     has_usage=outcome.usage is not None,
                     failure_type=failure_type,
+                    failure_reason=failure_reason,
                 )
             finally:
                 with self._workers_lock:
-                    self._workers.discard(current_thread())
+                    worker = current_thread()
+                    self._workers.discard(worker)
+                    self._active_turns.pop(worker, None)
