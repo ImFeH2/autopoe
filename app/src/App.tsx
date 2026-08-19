@@ -286,6 +286,14 @@ function App() {
     }
   }
 
+  async function handlePauseAgent(agentId: number) {
+    await mutate(() => backend.pauseAgent(agentId));
+  }
+
+  async function handleResumeAgent(agentId: number) {
+    await mutate(() => backend.resumeAgent(agentId));
+  }
+
   async function handleDeleteDiscussion(discussionId: number) {
     const nextSnapshot = await mutate(() =>
       backend.deleteDiscussion(discussionId),
@@ -399,6 +407,8 @@ function App() {
             onAgentNameChange={setAgentName}
             onCreateAgent={handleCreateAgent}
             onDeleteAgent={handleDeleteAgent}
+            onPauseAgent={handlePauseAgent}
+            onResumeAgent={handleResumeAgent}
             onSelectMember={setSelectedMemberId}
             selectedMember={selectedMember}
           />

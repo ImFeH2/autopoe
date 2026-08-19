@@ -10,10 +10,11 @@ from typing import Any, Protocol
 from pydantic_ai.messages import ModelMessage
 
 from flowent.diagnostics import log_event, log_exception
-from flowent.domain import OrganizationState, Reminder
+from flowent.domain import DomainError, OrganizationState, Reminder
 from flowent.history import AgentHistory, AgentHistoryRun
 from flowent.host_tools import AgentHostTools, HostToolError
 from flowent.memory import AgentMemory
+from flowent.operations import OrganizationOperations
 from flowent.todos import AgentTodos, wrap_tool_result
 
 
@@ -29,6 +30,7 @@ class AgentRunContext:
     memories: AgentMemory | None = None
     history_store: AgentHistory | None = None
     history_compaction_sink: Callable[[str | None], None] | None = None
+    operations: OrganizationOperations | None = None
 
     def emit_history_event(self, event_type: str, **data: Any) -> None:
         if self.history_event_sink is not None:
@@ -45,6 +47,29 @@ class AgentRunContext:
             if action == "create_agent":
                 snapshot = self.state.create_agent(name=arguments["name"])
                 return snapshot["members"][-1]
+            if self.operations is None:
+                raise RuntimeError("Organization operations are unavailable")
+            if action == "delete_agent":
+                if arguments["agent_id"] == self.agent_id:
+                    raise DomainError("self_delete", "An Agent cannot delete itself")
+                self.operations.delete_agent(arguments["agent_id"])
+                return {"agent_id": arguments["agent_id"], "deleted": True}
+            if action == "pause_agent":
+                snapshot = self.operations.pause_agent(arguments["agent_id"])
+                member = next(
+                    item
+                    for item in snapshot["members"]
+                    if item["id"] == arguments["agent_id"]
+                )
+                return member
+            if action == "resume_agent":
+                snapshot = self.operations.resume_agent(arguments["agent_id"])
+                member = next(
+                    item
+                    for item in snapshot["members"]
+                    if item["id"] == arguments["agent_id"]
+                )
+                return member
             raise ValueError(f"Unknown organization action: {action}")
 
         return self._call_tool("organization", action, operation)
@@ -269,6 +294,17 @@ class AgentRunContext:
                     member_id=self.agent_id,
                 )
             ]
+        if action == "delete":
+            if self.operations is None:
+                raise RuntimeError("Organization operations are unavailable")
+            self.operations.delete_discussion(
+                arguments["discussion_id"],
+                actor_id=self.agent_id,
+            )
+            return {
+                "discussion_id": arguments["discussion_id"],
+                "deleted": True,
+            }
         raise ValueError(f"Unknown discussion action: {action}")
 
     def _call_tool(
@@ -393,6 +429,7 @@ class AgentRuntime:
         history: AgentHistory | None = None,
         todos: AgentTodos | None = None,
         memories: AgentMemory | None = None,
+        operations: OrganizationOperations | None = None,
     ) -> None:
         self._state = state
         self._runner = runner
@@ -400,6 +437,12 @@ class AgentRuntime:
         self._history = history
         self._todos = todos
         self._memories = memories
+        self._operations = operations or OrganizationOperations(
+            state,
+            history,
+            todos,
+            memories,
+        )
         self._stop_event = Event()
         self._stop_lock = Lock()
         self._stop_completed = False
@@ -517,6 +560,7 @@ class AgentRuntime:
                     todos=self._todos,
                     memories=self._memories,
                     history_store=self._history,
+                    operations=self._operations,
                 ),
             )
             if result is not None:

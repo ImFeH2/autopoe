@@ -250,6 +250,22 @@ def test_shares_state_across_launch_directories(tmp_path: Path) -> None:
     assert store.load_organization() is not None
 
 
+def test_paused_agent_stays_paused_across_restart(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Wait for resume", [2])
+    state.pause_agent(2)
+
+    restored = persisted_state(store, tmp_path)
+
+    assert restored.snapshot()["members"][1]["status"] == "paused"
+    assert restored.claim_next_reminder()[0] is None
+    assert restored.resume_agent(2)["members"][1]["status"] == "idle"
+    assert restored.claim_next_reminder()[0] is not None
+
+
 def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
     tmp_path: Path,
 ) -> None:
@@ -503,6 +519,24 @@ def test_migrates_version_six_with_hidden_member_support(tmp_path: Path) -> None
     assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     columns = {row[1] for row in connection.execute("PRAGMA table_info(members)")}
     assert "deleted" in columns
+    connection.close()
+
+
+def test_migrates_version_eight_with_paused_agent_support(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    connection = sqlite3.connect(store.path)
+    connection.execute("ALTER TABLE members DROP COLUMN paused")
+    connection.execute("PRAGMA user_version = 8")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+
+    connection = sqlite3.connect(migrated.path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(members)")}
+    assert "paused" in columns
     connection.close()
 
 

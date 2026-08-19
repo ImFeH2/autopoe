@@ -53,6 +53,7 @@ from flowent.observability import (
     PydanticAIObservability,
     create_pydantic_ai_observability,
 )
+from flowent.operations import OrganizationOperations
 from flowent.persistence import SQLiteStore
 from flowent.runtime import AgentRunContext, AgentRunFailure
 from flowent.todos import TODO_STATUS_START, AgentTodos
@@ -409,6 +410,68 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
         "run",
         "todo",
     }
+
+
+def test_pydantic_runner_executes_agent_management_tools(tmp_path: Path) -> None:
+    calls = 0
+
+    async def respond(_messages: list[ModelMessage], _info: AgentInfo):
+        nonlocal calls
+        calls += 1
+        tool_calls = (
+            ("organization", {"action": "pause_agent", "agent_id": 3}),
+            ("organization", {"action": "resume_agent", "agent_id": 3}),
+            ("discussion", {"action": "delete", "discussion_id": 1}),
+            ("organization", {"action": "delete_agent", "agent_id": 3}),
+        )
+        if calls <= len(tool_calls):
+            name, arguments = tool_calls[calls - 1]
+            yield {
+                0: DeltaToolCall(
+                    name=name,
+                    json_args=json.dumps(arguments),
+                    tool_call_id=f"management-{calls}",
+                )
+            }
+        else:
+            yield "Management completed"
+
+    store = SQLiteStore(tmp_path / "data")
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Manage the Organization", [2])
+    reminder, _ = state.claim_next_reminder()
+    assert reminder is not None
+    history = AgentHistory(store)
+    todos = AgentTodos(store)
+    memories = AgentMemory(tmp_path / "data")
+    operations = OrganizationOperations(state, history, todos, memories)
+    context = AgentRunContext(
+        2,
+        state,
+        HostTools(tmp_path),
+        operations=operations,
+    )
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(reminder, context)
+
+    assert [member["name"] for member in state.snapshot()["members"]] == [
+        "You",
+        "Ada",
+    ]
+    assert state.snapshot()["discussions"] == []
+    assert "Management completed" in str(outcome.messages)
 
 
 def test_runner_publishes_native_web_search_events(tmp_path: Path) -> None:

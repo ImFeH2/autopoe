@@ -118,6 +118,12 @@
   white-space: nowrap;
 }
 
+.member-detail-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .member-detail-body {
   display: grid;
   width: 100%;

@@ -232,6 +232,21 @@ describe("parseOrganizationSnapshot", () => {
     },
   );
 
+  it.each(["pausing", "paused"] as const)(
+    "accepts the %s Agent status",
+    (status) => {
+      const value = structuredClone(validSnapshot);
+      value.members[1].status = status;
+
+      expect(parseOrganizationSnapshot(value).members[1]).toEqual({
+        id: 2,
+        type: "agent",
+        name: "Ada",
+        status,
+      });
+    },
+  );
+
   it("rejects Discussion references to unknown Members", () => {
     const value = structuredClone(validSnapshot);
     value.discussions[0].member_ids = [1, 99];

@@ -10,7 +10,7 @@ export type AgentMember = {
   id: number;
   type: "agent";
   name: string;
-  status: "idle" | "running" | "error";
+  status: "idle" | "running" | "error" | "pausing" | "paused";
   error?: string;
 };
 
@@ -200,7 +200,9 @@ function parseMember(value: unknown, index: number): Member {
     item.type === "agent" &&
     (item.status === "idle" ||
       item.status === "running" ||
-      item.status === "error")
+      item.status === "error" ||
+      item.status === "pausing" ||
+      item.status === "paused")
   ) {
     const member: AgentMember = {
       id,
@@ -748,6 +750,10 @@ export const backend = {
     organizationRequest("organization.create_agent", { name }),
   deleteAgent: (agentId: number) =>
     organizationRequest("organization.delete_agent", { agent_id: agentId }),
+  pauseAgent: (agentId: number) =>
+    organizationRequest("organization.pause_agent", { agent_id: agentId }),
+  resumeAgent: (agentId: number) =>
+    organizationRequest("organization.resume_agent", { agent_id: agentId }),
   createDiscussion: (topic: string, memberIds: number[]) =>
     organizationRequest("discussion.create", {
       topic,

@@ -214,3 +214,36 @@ def test_running_agent_cannot_be_deleted_but_their_discussion_can() -> None:
     with pytest.raises(DomainError, match="Running Agents"):
         state.delete_agent(2)
     assert state.delete_discussion(1)["discussions"] == []
+
+
+def test_paused_agent_keeps_pending_mentions_until_resumed() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Handle this", [2])
+
+    paused = state.pause_agent(2)
+    assert paused["members"][1]["status"] == "paused"
+    assert state.claim_next_reminder()[0] is None
+
+    resumed = state.resume_agent(2)
+    assert resumed["members"][1]["status"] == "idle"
+    reminder, _ = state.claim_next_reminder()
+    assert reminder is not None
+    assert reminder.mentions[0].previously_reminded is False
+
+    pausing = state.pause_agent(2)
+    assert pausing["members"][1]["status"] == "pausing"
+    assert state.agent_execution_diagnostics(2)["status"] == "pausing"
+    assert state.resume_agent(2)["members"][1]["status"] == "running"
+    assert state.pause_agent(2)["members"][1]["status"] == "pausing"
+
+    state.complete_turn(2)
+    assert state.snapshot()["members"][1]["status"] == "paused"
+    assert state.agent_execution_diagnostics(2)["status"] == "paused"
+    assert state.claim_next_reminder()[0] is None
+
+    state.resume_agent(2)
+    next_reminder, _ = state.claim_next_reminder()
+    assert next_reminder is not None
+    assert next_reminder.mentions[0].previously_reminded is True

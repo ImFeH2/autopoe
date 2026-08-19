@@ -19,6 +19,7 @@ from flowent.domain import DomainError, OrganizationState, Reminder
 from flowent.history import AgentHistory
 from flowent.host_tools import HostTools
 from flowent.memory import AgentMemory
+from flowent.operations import OrganizationOperations
 from flowent.persistence import SQLiteStore
 from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRuntime
 from flowent.todos import AgentTodos
@@ -67,6 +68,49 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
         "has_earlier": False,
         "has_later": True,
     }
+
+
+def test_agent_can_manage_other_agents_and_owned_discussions(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = OrganizationState(
+        tmp_path,
+        persisted=store.load_organization(),
+        on_persist=store.save_organization,
+    )
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Ada work", 1, [2])
+    state.create_discussion("Lin work", 1, [3])
+    history = AgentHistory(store)
+    todos = AgentTodos(store)
+    memories = AgentMemory(tmp_path / "data")
+    todos.create(3, "Lin work")
+    memories.write(3, "MEMORY.md", "Lin private Memory")
+    operations = OrganizationOperations(state, history, todos, memories)
+    context = AgentRunContext(
+        2,
+        state,
+        HostTools(tmp_path),
+        operations=operations,
+    )
+
+    assert context.organization("pause_agent", agent_id=3)["status"] == "paused"
+    assert context.organization("resume_agent", agent_id=3)["status"] == "idle"
+    assert context.discussion("delete", discussion_id=1) == {
+        "discussion_id": 1,
+        "deleted": True,
+    }
+    with pytest.raises(DomainError, match="Only Discussion Members"):
+        context.discussion("delete", discussion_id=2)
+    with pytest.raises(DomainError, match="cannot delete itself"):
+        context.organization("delete_agent", agent_id=2)
+
+    assert context.organization("delete_agent", agent_id=3) == {
+        "agent_id": 3,
+        "deleted": True,
+    }
+    assert todos.list(3)["todos"] == []
+    assert memories.list(3)["paths"] == []
 
 
 def test_agent_edit_tool_replaces_exact_file_content(tmp_path: Path) -> None:
@@ -276,6 +320,38 @@ def test_runtime_starts_a_follow_up_turn_for_a_new_mention(tmp_path: Path) -> No
         state.send_message(1, 1, "Second", [2])
         runner.release.set()
 
+        assert runner.followed_up.wait(timeout=1)
+        assert [
+            activation.mentions[0].message_id for activation in runner.activations
+        ] == [1, 2]
+    finally:
+        runtime.stop()
+
+
+def test_runtime_finishes_current_turn_before_pausing(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    runner = FollowUpRunner()
+    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime.start()
+
+    try:
+        state.send_message(1, 1, "First", [2])
+        assert runner.started.wait(timeout=1)
+        assert state.pause_agent(2)["members"][1]["status"] == "pausing"
+        state.send_message(1, 1, "Second", [2])
+        runner.release.set()
+
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            if state.member(2)["status"] == "paused":
+                break
+            time.sleep(0.01)
+        assert state.member(2)["status"] == "paused"
+        assert not runner.followed_up.wait(timeout=0.1)
+
+        assert state.resume_agent(2)["members"][1]["status"] == "idle"
         assert runner.followed_up.wait(timeout=1)
         assert [
             activation.mentions[0].message_id for activation in runner.activations

@@ -13,6 +13,7 @@ from flowent.domain import DomainError, OrganizationState
 from flowent.history import AgentHistory
 from flowent.memory import AgentMemory
 from flowent.model_runner import ModelRuntime
+from flowent.operations import OrganizationOperations
 from flowent.todos import AgentTodos
 
 
@@ -44,18 +45,25 @@ class Dispatcher:
         history: AgentHistory | None = None,
         todos: AgentTodos | None = None,
         memories: AgentMemory | None = None,
+        operations: OrganizationOperations | None = None,
     ) -> None:
         self._state = state
         self._on_shutdown = on_shutdown
         self._model_runtime = model_runtime or ModelRuntime()
         self._history = history
-        self._todos = todos
-        self._memories = memories
+        self._operations = operations or OrganizationOperations(
+            state,
+            history,
+            todos,
+            memories,
+        )
         self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
             "organization.delete_agent": self._delete_agent,
+            "organization.pause_agent": self._pause_agent,
+            "organization.resume_agent": self._resume_agent,
             "agent.history.get": self._get_agent_history,
             "discussion.create": self._create_discussion,
             "discussion.delete": self._delete_discussion,
@@ -202,16 +210,13 @@ class Dispatcher:
         return self._state.create_agent(name=require_string(params, "name"))
 
     def _delete_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        agent_id = require_integer(params, "agent_id")
-        if self._history is None:
-            raise RuntimeError("Agent history is unavailable")
-        snapshot = self._state.delete_agent(agent_id)
-        self._history.delete(agent_id)
-        if self._todos is not None:
-            self._todos.delete_all(agent_id)
-        if self._memories is not None:
-            self._memories.delete_all(agent_id)
-        return snapshot
+        return self._operations.delete_agent(require_integer(params, "agent_id"))
+
+    def _pause_agent(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._operations.pause_agent(require_integer(params, "agent_id"))
+
+    def _resume_agent(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._operations.resume_agent(require_integer(params, "agent_id"))
 
     def _get_agent_history(self, params: dict[str, Any]) -> dict[str, Any]:
         agent_id = require_integer(params, "agent_id")
@@ -230,7 +235,7 @@ class Dispatcher:
         )
 
     def _delete_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.delete_discussion(
+        return self._operations.delete_discussion(
             discussion_id=require_integer(params, "discussion_id")
         )
 
@@ -287,6 +292,7 @@ def serve(
     writer: JsonLineWriter | None = None,
     todos: AgentTodos | None = None,
     memories: AgentMemory | None = None,
+    operations: OrganizationOperations | None = None,
 ) -> None:
     dispatcher = Dispatcher(
         state,
@@ -295,6 +301,7 @@ def serve(
         history,
         todos,
         memories,
+        operations,
     )
     protocol_writer = writer or JsonLineWriter(output_stream)
     for line in input_stream:

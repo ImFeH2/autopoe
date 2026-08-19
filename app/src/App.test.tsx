@@ -219,6 +219,8 @@ describe("App", () => {
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
+          onPauseAgent={() => undefined}
+          onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -231,6 +233,8 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Open Ada"');
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('aria-label="Ada details"');
+    expect(markup).toContain('aria-label="Pause Ada"');
+    expect(markup).not.toContain('aria-label="Resume Ada"');
     expect(markup).toContain("Agent · IDLE");
     expect(markup).toContain(">Member ID<");
   });
@@ -304,6 +308,8 @@ describe("App", () => {
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
+          onPauseAgent={() => undefined}
+          onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -319,6 +325,49 @@ describe("App", () => {
     expect(markup).not.toContain('aria-label="Delete You"');
     expect(markup).toContain("Streaming");
   });
+
+  it.each(["paused", "pausing"] as const)(
+    "renders Resume for %s Agents",
+    (status) => {
+      const agent = {
+        id: 2,
+        type: "agent" as const,
+        name: "Ada",
+        status,
+      };
+      const markup = renderToStaticMarkup(
+        <TooltipProvider>
+          <MembersPage
+            agentName=""
+            disabled={false}
+            error={null}
+            isCreatingAgent={false}
+            members={[{ id: 1, type: "human", name: "You" }, agent]}
+            onAgentDialogOpenChange={() => undefined}
+            onAgentNameChange={() => undefined}
+            onCreateAgent={() => undefined}
+            onDeleteAgent={() => undefined}
+            onPauseAgent={() => undefined}
+            onResumeAgent={() => undefined}
+            onSelectMember={() => undefined}
+            selectedMember={agent}
+          />
+        </TooltipProvider>,
+      );
+      const deleteButton = markup.match(
+        /<button[^>]*aria-label="Delete Ada"[^>]*>/,
+      )?.[0];
+
+      expect(markup).toContain('aria-label="Resume Ada"');
+      expect(markup).not.toContain('aria-label="Pause Ada"');
+      expect(markup).toContain(status.toUpperCase());
+      if (status === "pausing") {
+        expect(deleteButton).toContain("disabled");
+      } else {
+        expect(deleteButton).not.toContain("disabled");
+      }
+    },
+  );
 
   it("shows Agent errors without an automatic recovery action", () => {
     const agent = {
@@ -340,6 +389,8 @@ describe("App", () => {
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
+          onPauseAgent={() => undefined}
+          onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
         />
@@ -366,6 +417,8 @@ describe("App", () => {
           onAgentNameChange={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
+          onPauseAgent={() => undefined}
+          onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={human}
         />

@@ -1,6 +1,8 @@
 export {
   Bot,
   MessageSquare,
+  Pause,
+  Play,
   Plus,
   Search,
   Settings2,

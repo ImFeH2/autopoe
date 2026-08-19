@@ -5,6 +5,8 @@ export { Dialog } from "./dialog";
 export {
   Bot,
   MessageSquare,
+  Pause,
+  Play,
   Plus,
   Search,
   Settings2,

@@ -235,7 +235,8 @@ class PydanticAgentRunner:
                 "Each Turn starts with a Reminder containing your current Pending Mentions. "
                 "Decide how to handle them and use discussion action=read when you need surrounding context. "
                 "Communicate only with discussion action=send. Use organization and discussion tools "
-                "to discover Members, create Agents, or open a new Discussion when useful. "
+                "to discover or manage Members and Discussions when useful. Pausing a running Agent "
+                "lets its current Turn finish before preventing future Turns. "
                 "Use todo to maintain unfinished multi-step work, keep at most one Todo in progress, "
                 "and complete work promptly. Todo state never replaces discussion.ack and does not "
                 "schedule another Turn. Current Todo status may follow tool results as a reminder. "
@@ -304,15 +305,26 @@ class PydanticAgentRunner:
         @self._agent.tool
         def organization(
             ctx: RunContext[AgentRunContext],
-            action: Literal["list_members", "create_agent"],
+            action: Literal[
+                "list_members",
+                "create_agent",
+                "delete_agent",
+                "pause_agent",
+                "resume_agent",
+            ],
             name: str | None = None,
+            agent_id: int | None = None,
         ) -> Any:
-            """List Organization Members or create an equal Agent by name."""
+            """List Members or create, delete, pause, or resume an Agent."""
             try:
                 if action == "create_agent":
                     if not name:
                         raise ModelRetry("name is required for create_agent")
                     result = ctx.deps.organization(action, name=name)
+                elif action in ("delete_agent", "pause_agent", "resume_agent"):
+                    if agent_id is None:
+                        raise ModelRetry(f"agent_id is required for {action}")
+                    result = ctx.deps.organization(action, agent_id=agent_id)
                 else:
                     result = ctx.deps.organization(action)
                 return model_result(ctx, result)
@@ -468,7 +480,16 @@ class PydanticAgentRunner:
         @self._agent.tool
         def discussion(
             ctx: RunContext[AgentRunContext],
-            action: Literal["create", "send", "list", "info", "read", "ack", "search"],
+            action: Literal[
+                "create",
+                "send",
+                "list",
+                "info",
+                "read",
+                "ack",
+                "search",
+                "delete",
+            ],
             discussion_id: int | None = None,
             topic: str | None = None,
             member_ids: list[int] | None = None,
@@ -481,7 +502,7 @@ class PydanticAgentRunner:
             query: str | None = None,
             sender_id: int | None = None,
         ) -> Any:
-            """Create, send, list, inspect, read, acknowledge, or search Discussions and Messages."""
+            """Create, send, list, inspect, read, acknowledge, search, or delete Discussions."""
             try:
                 if action == "create":
                     if not topic or not member_ids:
@@ -528,6 +549,13 @@ class PydanticAgentRunner:
                         action,
                         discussion_id=discussion_id,
                         message_ids=message_ids,
+                    )
+                elif action == "delete":
+                    if discussion_id is None:
+                        raise ModelRetry("discussion_id is required for delete")
+                    result = ctx.deps.discussion(
+                        action,
+                        discussion_id=discussion_id,
                     )
                 else:
                     if not query:

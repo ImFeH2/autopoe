@@ -20,6 +20,7 @@ class Member:
     type: Literal["human", "agent"]
     name: str
     deleted: bool = False
+    paused: bool = False
 
 
 @dataclass
@@ -126,6 +127,7 @@ class OrganizationState:
                 type=member.type,
                 name=member.name,
                 deleted=True,
+                paused=member.paused,
             )
             for discussion in self._discussions.values():
                 discussion.member_ids = tuple(
@@ -134,6 +136,39 @@ class OrganizationState:
                     if member_id != agent_id
                 )
             del self._agent_execution[agent_id]
+            self._changed(persist=True)
+            return self._snapshot()
+
+    def pause_agent(self, agent_id: int) -> dict[str, Any]:
+        with self._condition:
+            member = self._require_agent(agent_id)
+            if member.paused:
+                return self._snapshot()
+            self._members[agent_id] = Member(
+                id=member.id,
+                type=member.type,
+                name=member.name,
+                paused=True,
+            )
+            self._changed(persist=True)
+            return self._snapshot()
+
+    def resume_agent(self, agent_id: int) -> dict[str, Any]:
+        with self._condition:
+            member = self._require_agent(agent_id)
+            if not member.paused:
+                return self._snapshot()
+            self._members[agent_id] = Member(
+                id=member.id,
+                type=member.type,
+                name=member.name,
+            )
+            execution = self._agent_execution[agent_id]
+            if execution.status != "running":
+                execution.status = "idle"
+                execution.error = None
+                execution.acknowledged_in_turn = 0
+                execution.consecutive_unproductive_turns = 0
             self._changed(persist=True)
             return self._snapshot()
 
@@ -391,7 +426,7 @@ class OrganizationState:
     def claim_next_reminder(self) -> tuple[Reminder | None, int]:
         with self._condition:
             for member in self._members.values():
-                if member.type != "agent" or member.deleted:
+                if member.type != "agent" or member.deleted or member.paused:
                     continue
                 execution = self._agent_execution[member.id]
                 if execution.status != "idle":
@@ -418,7 +453,7 @@ class OrganizationState:
         with self._condition:
             execution = self._agent_execution[agent_id]
             return {
-                "status": execution.status,
+                "status": self._member_data(self._members[agent_id])["status"],
                 "acknowledged_in_turn": execution.acknowledged_in_turn,
                 "consecutive_unproductive_turns": (
                     execution.consecutive_unproductive_turns
@@ -428,6 +463,12 @@ class OrganizationState:
     def complete_turn(self, agent_id: int, error: str | None = None) -> None:
         with self._condition:
             execution = self._agent_execution[agent_id]
+            if self._members[agent_id].paused:
+                execution.status = "idle"
+                execution.error = None
+                execution.acknowledged_in_turn = 0
+                self._changed()
+                return
             if error is not None:
                 execution.status = "error"
                 execution.error = error
@@ -514,9 +555,14 @@ class OrganizationState:
         }
         if member.type == "agent":
             execution = self._agent_execution[member.id]
-            data["status"] = execution.status
-            if execution.error:
-                data["error"] = execution.error
+            if member.paused:
+                data["status"] = (
+                    "pausing" if execution.status == "running" else "paused"
+                )
+            else:
+                data["status"] = execution.status
+                if execution.error:
+                    data["error"] = execution.error
         return data
 
     def _discussion_data(self, discussion: Discussion) -> dict[str, Any]:
@@ -597,6 +643,7 @@ class OrganizationState:
                 type=item["type"],
                 name=item["name"],
                 deleted=item.get("deleted", False),
+                paused=item.get("paused", False),
             )
             self._members[member.id] = member
             if member.type == "agent" and not member.deleted:
@@ -637,6 +684,7 @@ class OrganizationState:
                     "type": member.type,
                     "name": member.name,
                     "deleted": member.deleted,
+                    "paused": member.paused,
                 }
                 for member in self._members.values()
             ],

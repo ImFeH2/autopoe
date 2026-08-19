@@ -31,6 +31,7 @@ def main(
     from flowent.host_tools import AgentHostTools, ProcessWatcher
     from flowent.memory import AgentMemory
     from flowent.model_runner import create_runner
+    from flowent.operations import OrganizationOperations
     from flowent.persistence import SQLiteStore, data_directory
     from flowent.protocol import JsonLineWriter, serve
     from flowent.runtime import AgentRuntime
@@ -86,6 +87,7 @@ def main(
             on_configure=store.save_model_config,
             on_configure_observability=store.save_observability_config,
         )
+        operations = OrganizationOperations(state, history, todos, memories)
         runtime = AgentRuntime(
             state,
             model_runtime,
@@ -93,6 +95,7 @@ def main(
             history,
             todos,
             memories,
+            operations,
         )
         runtime.start()
         serve(
@@ -105,6 +108,7 @@ def main(
             writer,
             todos,
             memories,
+            operations,
         )
     except BaseException as error:
         log_exception("process.failed", error)

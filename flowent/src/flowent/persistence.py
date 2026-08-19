@@ -14,7 +14,7 @@ from flowent.diagnostics import log_event, log_exception
 from flowent.history import RunStatus
 from flowent.todos import TodoStatus
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -62,6 +62,8 @@ class SQLiteStore:
                     self._migrate_version_six(connection)
                 elif version == 7:
                     self._migrate_version_seven(connection)
+                elif version == 8:
+                    self._migrate_version_eight(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
@@ -122,7 +124,8 @@ class SQLiteStore:
                 id INTEGER PRIMARY KEY,
                 type TEXT NOT NULL CHECK (type IN ('human', 'agent')),
                 name TEXT NOT NULL,
-                deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))
+                deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+                paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1))
             )
             """,
             """
@@ -351,6 +354,7 @@ class SQLiteStore:
             self._migrate_model_api_type(connection)
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
+            self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -359,6 +363,7 @@ class SQLiteStore:
             self._migrate_model_api_type(connection)
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
+            self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -366,6 +371,7 @@ class SQLiteStore:
         with connection:
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
+            self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -379,6 +385,7 @@ class SQLiteStore:
                 "ALTER TABLE agent_runs RENAME COLUMN activation_json TO reminder_json"
             )
             SQLiteStore._add_member_deleted_column(connection)
+            SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -386,6 +393,7 @@ class SQLiteStore:
     def _migrate_version_six(connection: sqlite3.Connection) -> None:
         with connection:
             SQLiteStore._add_member_deleted_column(connection)
+            SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -393,6 +401,13 @@ class SQLiteStore:
     def _migrate_version_seven(connection: sqlite3.Connection) -> None:
         with connection:
             SQLiteStore._create_agent_todos_table(connection)
+            SQLiteStore._add_member_paused_column(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_eight(connection: sqlite3.Connection) -> None:
+        with connection:
+            SQLiteStore._add_member_paused_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -403,6 +418,16 @@ class SQLiteStore:
         if "deleted" not in columns:
             connection.execute(
                 "ALTER TABLE members ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))"
+            )
+
+    @staticmethod
+    def _add_member_paused_column(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(members)")
+        }
+        if "paused" not in columns:
+            connection.execute(
+                "ALTER TABLE members ADD COLUMN paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1))"
             )
 
     @staticmethod
@@ -557,9 +582,10 @@ class SQLiteStore:
                     "type": row["type"],
                     "name": row["name"],
                     "deleted": bool(row["deleted"]),
+                    "paused": bool(row["paused"]),
                 }
                 for row in connection.execute(
-                    "SELECT id, type, name, deleted FROM members ORDER BY id"
+                    "SELECT id, type, name, deleted, paused FROM members ORDER BY id"
                 )
             ]
             discussions: list[dict[str, Any]] = []
@@ -649,12 +675,13 @@ class SQLiteStore:
     ) -> None:
         for member in organization["members"]:
             connection.execute(
-                "INSERT INTO members (id, type, name, deleted) VALUES (?, ?, ?, ?)",
+                "INSERT INTO members (id, type, name, deleted, paused) VALUES (?, ?, ?, ?, ?)",
                 (
                     member["id"],
                     member["type"],
                     member["name"],
                     int(member.get("deleted", False)),
+                    int(member.get("paused", False)),
                 ),
             )
         for discussion in organization["discussions"]:

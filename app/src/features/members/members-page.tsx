@@ -5,8 +5,11 @@ import {
   Dialog,
   Input,
   ListButton,
+  Pause,
+  Play,
   Plus,
   StatusIndicator,
+  Tooltip,
   Trash2,
 } from "@/components/ui";
 import { agentStatusTone } from "@/features/agent-status";
@@ -29,6 +32,8 @@ type MembersPageProps = {
   onAgentNameChange: (name: string) => void;
   onCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
   onDeleteAgent: (agentId: number) => void;
+  onPauseAgent: (agentId: number) => void;
+  onResumeAgent: (agentId: number) => void;
   onSelectMember: (memberId: number) => void;
   selectedMember?: Member;
 };
@@ -50,6 +55,8 @@ export function MembersPage({
   onAgentNameChange,
   onCreateAgent,
   onDeleteAgent,
+  onPauseAgent,
+  onResumeAgent,
   onSelectMember,
   selectedMember,
 }: MembersPageProps) {
@@ -138,7 +145,11 @@ export function MembersPage({
                     trigger={
                       <Button
                         aria-label={`Delete ${member.name}`}
-                        disabled={disabled || member.status === "running"}
+                        disabled={
+                          disabled ||
+                          member.status === "running" ||
+                          member.status === "pausing"
+                        }
                         size="icon"
                         variant="quiet"
                       >
@@ -146,7 +157,7 @@ export function MembersPage({
                       </Button>
                     }
                     triggerTooltip={
-                      member.status === "running"
+                      member.status === "running" || member.status === "pausing"
                         ? "Running Agents cannot be deleted"
                         : "Delete"
                     }
@@ -192,7 +203,10 @@ export function MembersPage({
         {selectedMember?.type === "agent" ? (
           <AgentDetails
             agent={selectedMember}
+            disabled={disabled}
             history={history ?? { status: "loading" }}
+            onPause={onPauseAgent}
+            onResume={onResumeAgent}
           />
         ) : selectedMember ? null : (
           <div className="member-detail-empty">
@@ -206,11 +220,20 @@ export function MembersPage({
 
 function AgentDetails({
   agent,
+  disabled,
   history,
+  onPause,
+  onResume,
 }: {
   agent: AgentMember;
+  disabled: boolean;
   history: AgentHistoryState;
+  onPause: (agentId: number) => void;
+  onResume: (agentId: number) => void;
 }) {
+  const paused = agent.status === "paused" || agent.status === "pausing";
+  const action = paused ? "Resume" : "Pause";
+
   return (
     <section
       className="member-agent-detail"
@@ -224,9 +247,26 @@ function AgentDetails({
           <span>Agent {agent.id}</span>
           <h2>{agent.name}</h2>
         </div>
-        <StatusIndicator tone={agentStatusTone(agent.status)}>
-          {agent.status.toUpperCase()}
-        </StatusIndicator>
+        <div className="member-detail-controls">
+          <StatusIndicator tone={agentStatusTone(agent.status)}>
+            {agent.status.toUpperCase()}
+          </StatusIndicator>
+          <Tooltip content={action}>
+            <Button
+              aria-label={`${action} ${agent.name}`}
+              disabled={disabled}
+              onClick={() => (paused ? onResume(agent.id) : onPause(agent.id))}
+              size="icon"
+              variant="quiet"
+            >
+              {paused ? (
+                <Play aria-hidden="true" size={14} />
+              ) : (
+                <Pause aria-hidden="true" size={14} />
+              )}
+            </Button>
+          </Tooltip>
+        </div>
       </header>
       <div className="member-detail-body">
         <div className="member-detail-summary">

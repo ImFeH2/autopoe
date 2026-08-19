@@ -105,6 +105,22 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
     assert memories.list(3) == {"paths": [], "count": 0}
 
 
+def test_dispatches_agent_pause_and_resume() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    dispatcher = Dispatcher(state)
+
+    paused = dispatcher.dispatch(
+        {"id": 1, "method": "organization.pause_agent", "params": {"agent_id": 2}}
+    )
+    resumed = dispatcher.dispatch(
+        {"id": 2, "method": "organization.resume_agent", "params": {"agent_id": 2}}
+    )
+
+    assert paused["result"]["members"][1]["status"] == "paused"
+    assert resumed["result"]["members"][1]["status"] == "idle"
+
+
 def test_json_line_writer_keeps_responses_and_events_atomic() -> None:
     output = io.StringIO()
     writer = JsonLineWriter(output)
