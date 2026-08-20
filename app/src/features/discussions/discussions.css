@@ -295,6 +295,15 @@
   flex: 1;
 }
 
+.message-composer-input .ui-textarea {
+  display: block;
+  height: 40px;
+}
+
+.message-composer-row > .ui-button {
+  height: 40px;
+}
+
 .mention-suggestions {
   position: absolute;
   z-index: var(--z-overlay);
