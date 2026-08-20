@@ -4,11 +4,28 @@ import {
   findMentionQuery,
   getMentionKeyAction,
   insertDraftMention,
+  mentionAgentScopeLabel,
+  normalizeMentionText,
   reconcileDraftMentions,
   shouldSubmitMessage,
 } from "./message-composer";
 
 describe("MessageComposer", () => {
+  it("labels all-Organization candidates by Discussion membership", () => {
+    expect(mentionAgentScopeLabel(2, [1, 2])).toBe("In Discussion");
+    expect(mentionAgentScopeLabel(3, [1, 2])).toBe("Not in Discussion");
+  });
+
+  it("uses NFKC and full casefold-style expansion", () => {
+    expect(normalizeMentionText("ＡＤＡ")).toBe("ada");
+    expect(normalizeMentionText("Straße")).toBe("strasse");
+    expect(normalizeMentionText("ς")).toBe("σ");
+    expect(normalizeMentionText("ᎠᎰ")).toBe("ᎠᎰ");
+    expect(normalizeMentionText("İ")).toBe("i̇");
+    expect(normalizeMentionText("ﬃ")).toBe("ffi");
+    expect(normalizeMentionText("E\u0301")).toBe("é");
+  });
+
   it("submits Enter but preserves Shift+Enter and IME composition", () => {
     expect(
       shouldSubmitMessage({
@@ -31,15 +48,16 @@ describe("MessageComposer", () => {
       end: 7,
       query: "ad",
     });
-    expect(findMentionQuery("mail@example", 12, [])).toEqual({
-      start: 4,
-      end: 12,
-      query: "example",
-    });
+    expect(findMentionQuery("mail@example.com", 16, [])).toBeNull();
     expect(findMentionQuery("请@ad", 4, [])).toEqual({
       start: 1,
       end: 4,
       query: "ad",
+    });
+    expect(findMentionQuery("Ask @Ada-", 9, [])).toEqual({
+      start: 4,
+      end: 9,
+      query: "Ada-",
     });
     expect(
       findMentionQuery("@Ada ", 5, [{ start: 0, end: 4, label: "@Ada" }]),
@@ -53,14 +71,14 @@ describe("MessageComposer", () => {
       {
         id: 4,
         type: "agent" as const,
-        name: "Team ABC",
+        name: "Team-ABC",
         status: "idle" as const,
       },
       { id: 5, type: "agent" as const, name: "XABC", status: "idle" as const },
       {
         id: 6,
         type: "agent" as const,
-        name: "Grace Hopper",
+        name: "Grace-Hopper",
         status: "idle" as const,
       },
       {
@@ -86,7 +104,7 @@ describe("MessageComposer", () => {
     const agent = {
       id: 3,
       type: "agent" as const,
-      name: "Grace Hopper",
+      name: "Grace-Hopper",
       status: "idle" as const,
     };
 
@@ -98,13 +116,13 @@ describe("MessageComposer", () => {
         query: { start: 4, end: 7, query: "gr" },
       }),
     ).toEqual({
-      body: "Ask @Grace Hopper about it",
+      body: "Ask @Grace-Hopper about it",
       caret: 17,
       mentions: [
         {
           start: 4,
           end: 17,
-          label: "@Grace Hopper",
+          label: "@Grace-Hopper",
         },
       ],
     });

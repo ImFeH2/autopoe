@@ -60,6 +60,17 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
                 "id": 1,
                 "sender_id": 1,
                 "body": "@Ada private request",
+                "references": [
+                    {
+                        "member_id": 2,
+                        "name": "Ada",
+                        "start": 0,
+                        "end": 4,
+                        "in_discussion": True,
+                        "notified": True,
+                        "deleted": False,
+                    }
+                ],
                 "mentions": [{"member_id": 2, "status": "read"}],
             }
         ],
@@ -496,12 +507,24 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
                 "id": 1,
                 "sender_id": 1,
                 "body": "@Ada Please handle this",
+                "references": [
+                    {
+                        "member_id": 2,
+                        "name": "Ada",
+                        "start": 0,
+                        "end": 4,
+                        "in_discussion": True,
+                        "notified": True,
+                        "deleted": False,
+                    }
+                ],
                 "mentions": [{"member_id": 2, "status": "acked"}],
             },
             {
                 "id": 2,
                 "sender_id": 2,
                 "body": "Handled immediately",
+                "references": [],
                 "mentions": [],
             },
         ]

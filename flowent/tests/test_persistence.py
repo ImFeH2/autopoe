@@ -220,6 +220,17 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
             "id": 1,
             "sender_id": 1,
             "body": "@Ada Continue after restart",
+            "references": [
+                {
+                    "member_id": 2,
+                    "name": "Ada",
+                    "start": 0,
+                    "end": 4,
+                    "in_discussion": True,
+                    "notified": True,
+                    "deleted": False,
+                }
+            ],
             "mentions": [{"member_id": 2, "status": "read"}],
         }
     ]
@@ -289,6 +300,7 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
                     "id": 1,
                     "sender_id": 2,
                     "body": "Keep this",
+                    "references": [],
                     "mentions": [],
                 }
             ],
@@ -458,6 +470,17 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
             "id": 1,
             "sender_id": 1,
             "body": "Continue globally",
+            "references": [
+                {
+                    "member_id": 2,
+                    "name": "Ada",
+                    "start": None,
+                    "end": None,
+                    "in_discussion": True,
+                    "notified": True,
+                    "deleted": False,
+                }
+            ],
             "mentions": [{"member_id": 2, "status": "read"}],
         }
     ]
@@ -634,3 +657,210 @@ def test_restricts_data_directory_and_database_permissions(tmp_path: Path) -> No
 
     assert stat.S_IMODE(data.stat().st_mode) == 0o700
     assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+
+
+def test_reference_send_time_facts_survive_delete_and_restart(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+    state.send_message(1, 1, "@Ada @Lin")
+    state.read_discussion(2, 1)
+    state.delete_agent(2)
+
+    restored = persisted_state(store, tmp_path)
+    message = restored.snapshot()["discussions"][0]["messages"][0]
+
+    assert message["references"] == [
+        {
+            "member_id": 2,
+            "name": "Ada",
+            "start": 0,
+            "end": 4,
+            "in_discussion": True,
+            "notified": True,
+            "deleted": True,
+        },
+        {
+            "member_id": 3,
+            "name": "Lin",
+            "start": 5,
+            "end": 9,
+            "in_discussion": True,
+            "notified": True,
+            "deleted": False,
+        },
+    ]
+    assert message["mentions"] == [
+        {"member_id": 2, "status": "read"},
+        {"member_id": 3, "status": "pending"},
+    ]
+
+
+def test_fresh_schema_creates_final_reference_table_before_version(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    connection = sqlite3.connect(store.path)
+    try:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'mention_references'"
+        ).fetchone() == ("mention_references",)
+    finally:
+        connection.close()
+
+
+def test_migrates_version_ten_and_backfills_all_reference_occurrences(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_agent("Grace")
+    state.create_discussion("Work", 1, [2, 3])
+    state.send_message(1, 2, "@Ada @Lin @Grace")
+
+    connection = sqlite3.connect(store.path)
+    connection.execute("DROP TABLE mention_references")
+    connection.execute("PRAGMA user_version = 10")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+    message = migrated.load_organization()["discussions"][0]["messages"][0]
+    assert [
+        (
+            item["member_id"],
+            item["name"],
+            item["in_discussion"],
+            item["notified"],
+            item["deleted"],
+        )
+        for item in message["references"]
+    ] == [
+        (2, "Ada", True, False, False),
+        (3, "Lin", True, True, False),
+        (4, "Grace", False, False, False),
+    ]
+
+
+def test_version_ten_migration_rolls_back_table_and_version_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    connection = sqlite3.connect(store.path)
+    connection.execute("DROP TABLE mention_references")
+    connection.execute("PRAGMA user_version = 10")
+    connection.commit()
+    connection.close()
+
+    original = SQLiteStore._backfill_mention_references
+
+    def fail_after_table_creation(connection: sqlite3.Connection) -> None:
+        SQLiteStore._create_mention_references_table(connection)
+        raise RuntimeError("simulated migration interruption")
+
+    monkeypatch.setattr(
+        SQLiteStore, "_backfill_mention_references", fail_after_table_creation
+    )
+    with pytest.raises(RuntimeError, match="simulated migration interruption"):
+        SQLiteStore(data)
+    monkeypatch.setattr(SQLiteStore, "_backfill_mention_references", original)
+
+    connection = sqlite3.connect(store.path)
+    try:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'mention_references'"
+            ).fetchone()
+            is None
+        )
+    finally:
+        connection.close()
+
+
+def test_reference_table_rejects_notified_group_out_occurrence(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "plain")
+
+    connection = sqlite3.connect(store.path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO mention_references
+                    (discussion_id, message_id, position, member_id, name, start,
+                     end, in_discussion, notified, deleted)
+                VALUES (1, 1, 0, 2, 'Ada', 0, 4, 0, 1, 0)
+                """
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO mention_references
+                    (discussion_id, message_id, position, member_id, name, start,
+                     end, in_discussion, notified, deleted)
+                VALUES (1, 1, 1, 2, 'Ada', NULL, 4, 1, 1, 0)
+                """
+            )
+    finally:
+        connection.close()
+
+
+def test_legacy_name_issue_disables_reference_backfill(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+    state.send_message(1, 1, "@Lin")
+
+    connection = sqlite3.connect(store.path)
+    connection.execute("UPDATE members SET name = 'Bad Name' WHERE id = 2")
+    connection.execute("UPDATE members SET deleted = 1 WHERE id = 3")
+    connection.execute(
+        "DELETE FROM discussion_members WHERE discussion_id = 1 AND member_id = 3"
+    )
+    connection.execute("DROP TABLE mention_references")
+    connection.execute("PRAGMA user_version = 10")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+    restored = persisted_state(migrated, tmp_path)
+    snapshot = restored.snapshot()
+    assert snapshot["mention_syntax"] == {
+        "enabled": False,
+        "issues": [
+            {
+                "code": "invalid_name",
+                "member_ids": [2],
+                "names": ["Bad Name"],
+            }
+        ],
+    }
+    assert snapshot["discussions"][0]["messages"][0]["references"] == [
+        {
+            "member_id": 3,
+            "name": "Lin",
+            "start": None,
+            "end": None,
+            "in_discussion": True,
+            "notified": True,
+            "deleted": True,
+        }
+    ]
+    assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 3, "status": "pending"}
+    ]

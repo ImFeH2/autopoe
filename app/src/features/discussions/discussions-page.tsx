@@ -15,7 +15,12 @@ import {
   Search,
   Trash2,
 } from "@/components/ui";
-import type { AgentMember, Discussion, Member } from "@/lib/backend";
+import type {
+  AgentMember,
+  Discussion,
+  Member,
+  MentionSyntax,
+} from "@/lib/backend";
 import { DiscussionMarkdown } from "./discussion-markdown";
 import { type DraftMention, MessageComposer } from "./message-composer";
 
@@ -46,6 +51,7 @@ type DiscussionsPageProps = {
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
   messageMentions: DraftMention[];
+  mentionSyntax: MentionSyntax;
   onCreateDiscussion: (event: FormEvent<HTMLFormElement>) => void;
   onDialogCloseAutoFocus: () => boolean;
   onDialogOpenChange: (open: boolean) => void;
@@ -71,6 +77,7 @@ export function DiscussionsPage({
   messageBody,
   messageInputRef,
   messageMentions,
+  mentionSyntax,
   onCreateAgent,
   onCreateDiscussion,
   onDialogCloseAutoFocus,
@@ -221,6 +228,7 @@ export function DiscussionsPage({
               messageBody={messageBody}
               messageInputRef={messageInputRef}
               messageMentions={messageMentions}
+              mentionSyntax={mentionSyntax}
               onMessageChange={onMessageChange}
               onSend={onSend}
             />
@@ -347,6 +355,7 @@ type DiscussionViewProps = {
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
   messageMentions: DraftMention[];
+  mentionSyntax: MentionSyntax;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
 };
@@ -358,6 +367,7 @@ function DiscussionView({
   messageBody,
   messageInputRef,
   messageMentions,
+  mentionSyntax,
   onMessageChange,
   onSend,
 }: DiscussionViewProps) {
@@ -368,9 +378,6 @@ function DiscussionView({
     .map((id) => membersById.get(id)?.name)
     .filter(Boolean)
     .join(", ");
-  const discussionAgents = discussion.member_ids
-    .map((id) => membersById.get(id))
-    .filter((member): member is AgentMember => member?.type === "agent");
 
   useEffect(() => {
     const log = messageLogRef.current;
@@ -443,20 +450,32 @@ function DiscussionView({
                       <strong>{sender?.name ?? "Unknown"}</strong>
                       <span className="font-mono">MESSAGE {message.id}</span>
                     </header>
-                    <DiscussionMarkdown body={message.body} />
+                    <DiscussionMarkdown
+                      body={message.body}
+                      references={message.references}
+                    />
                     {message.mentions.length > 0 ? (
                       <ul className="mention-statuses" aria-label="Mentions">
-                        {message.mentions.map((mention) => (
-                          <li
-                            className={`mention-status mention-status--${mention.status}`}
-                            key={mention.member_id}
-                          >
-                            @
-                            {membersById.get(mention.member_id)?.name ??
-                              mention.member_id}{" "}
-                            · {mention.status.toUpperCase()}
-                          </li>
-                        ))}
+                        {message.mentions.map((mention) => {
+                          const identity = message.references.find(
+                            (reference) =>
+                              reference.member_id === mention.member_id &&
+                              reference.notified,
+                          );
+                          const name =
+                            identity?.name ?? String(mention.member_id);
+                          return (
+                            <li
+                              className={`mention-status mention-status--${mention.status}`}
+                              key={mention.member_id}
+                              title={`@${name} · ${mention.status}${
+                                identity?.deleted ? " · Deleted Agent" : ""
+                              }`}
+                            >
+                              @{name} · {mention.status.toUpperCase()}
+                            </li>
+                          );
+                        })}
                       </ul>
                     ) : null}
                   </article>
@@ -467,12 +486,16 @@ function DiscussionView({
         )}
       </div>
       <MessageComposer
-        agents={discussionAgents}
+        agents={members.filter(
+          (member): member is AgentMember => member.type === "agent",
+        )}
         body={messageBody}
         disabled={disabled}
         discussionId={discussion.id}
+        discussionMemberIds={discussion.member_ids}
         inputRef={messageInputRef}
         mentions={messageMentions}
+        mentionSyntax={mentionSyntax}
         onChange={onMessageChange}
         onSend={handleSend}
       />

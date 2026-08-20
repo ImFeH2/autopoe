@@ -12,9 +12,10 @@ from typing import Any
 
 from flowent.diagnostics import log_event, log_exception
 from flowent.history import RunStatus
+from flowent.mentions import MentionName, find_mentions, mention_syntax_issues
 from flowent.todos import TodoStatus
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -66,6 +67,8 @@ class SQLiteStore:
                     self._migrate_version_eight(connection)
                 elif version == 9:
                     self._migrate_version_nine(connection)
+                elif version == 10:
+                    self._migrate_version_ten(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
@@ -103,12 +106,25 @@ class SQLiteStore:
         finally:
             connection.close()
 
+    @staticmethod
+    @contextmanager
+    def _migration_transaction(connection: sqlite3.Connection) -> Iterator[None]:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+
     def _create_schema(self, connection: sqlite3.Connection) -> None:
-        with connection:
+        with self._migration_transaction(connection):
             self._create_tables(connection)
             connection.execute(
                 "INSERT INTO application_state (id, organization_saved) VALUES (1, 0)"
             )
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -196,6 +212,141 @@ class SQLiteStore:
         SQLiteStore._create_model_settings_table(connection)
         SQLiteStore._create_agent_runs_table(connection)
         SQLiteStore._create_agent_todos_table(connection)
+        SQLiteStore._create_mention_references_table(connection)
+
+    @staticmethod
+    def _create_mention_references_table(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mention_references (
+                discussion_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                start INTEGER,
+                end INTEGER,
+                in_discussion INTEGER NOT NULL CHECK (in_discussion IN (0, 1)),
+                notified INTEGER NOT NULL CHECK (notified IN (0, 1)),
+                deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+                CHECK (notified = 0 OR in_discussion = 1),
+                CHECK (
+                    (start IS NULL AND end IS NULL)
+                    OR (start IS NOT NULL AND end IS NOT NULL AND start >= 0 AND end > start)
+                ),
+                PRIMARY KEY (discussion_id, message_id, position),
+                FOREIGN KEY (discussion_id, message_id)
+                    REFERENCES messages (discussion_id, id) ON DELETE CASCADE,
+                FOREIGN KEY (member_id) REFERENCES members (id)
+            )
+            """
+        )
+
+    @staticmethod
+    def _backfill_mention_references(connection: sqlite3.Connection) -> None:
+        SQLiteStore._create_mention_references_table(connection)
+        connection.execute("DELETE FROM mention_references")
+        member_rows = tuple(
+            connection.execute(
+                "SELECT id, name, deleted FROM members WHERE type = 'agent' ORDER BY id"
+            )
+        )
+        active_agent_names = tuple(
+            MentionName(row["id"], row["name"])
+            for row in member_rows
+            if not row["deleted"]
+        )
+        active_human_names = tuple(
+            MentionName(row["id"], row["name"])
+            for row in connection.execute(
+                "SELECT id, name FROM members WHERE type = 'human' AND deleted = 0"
+            )
+        )
+        syntax_enabled = not mention_syntax_issues(
+            active_agent_names, active_human_names
+        )
+        member_names = {row["id"]: row["name"] for row in member_rows}
+        deleted = {row["id"]: bool(row["deleted"]) for row in member_rows}
+        discussion_members = {
+            (row["discussion_id"], row["member_id"])
+            for row in connection.execute(
+                "SELECT discussion_id, member_id FROM discussion_members"
+            )
+        }
+        notified_members = {
+            (row["discussion_id"], row["message_id"], row["member_id"])
+            for row in connection.execute(
+                "SELECT discussion_id, message_id, member_id FROM mentions"
+            )
+        }
+        for message in connection.execute(
+            "SELECT discussion_id, id, sender_id, body FROM messages ORDER BY discussion_id, id"
+        ):
+            occurrences = (
+                find_mentions(message["body"], active_agent_names)
+                if syntax_enabled
+                else ()
+            )
+            notified_reference_members: set[int] = set()
+            for position, occurrence in enumerate(occurrences):
+                notified = (
+                    message["discussion_id"],
+                    message["id"],
+                    occurrence.member_id,
+                ) in notified_members
+                if notified:
+                    notified_reference_members.add(occurrence.member_id)
+                connection.execute(
+                    """
+                    INSERT INTO mention_references
+                        (discussion_id, message_id, position, member_id, name, start,
+                         end, in_discussion, notified, deleted)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        message["discussion_id"],
+                        message["id"],
+                        position,
+                        occurrence.member_id,
+                        member_names[occurrence.member_id],
+                        occurrence.start,
+                        occurrence.end,
+                        int(
+                            occurrence.member_id == message["sender_id"]
+                            or (message["discussion_id"], occurrence.member_id)
+                            in discussion_members
+                            or notified
+                        ),
+                        int(notified),
+                        int(deleted[occurrence.member_id]),
+                    ),
+                )
+            fallback_members = sorted(
+                member_id
+                for discussion_id, message_id, member_id in notified_members
+                if discussion_id == message["discussion_id"]
+                and message_id == message["id"]
+                and member_id not in notified_reference_members
+            )
+            for offset, member_id in enumerate(
+                fallback_members, start=len(occurrences)
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO mention_references
+                        (discussion_id, message_id, position, member_id, name, start,
+                         end, in_discussion, notified, deleted)
+                    VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, 1, ?)
+                    """,
+                    (
+                        message["discussion_id"],
+                        message["id"],
+                        offset,
+                        member_id,
+                        member_names[member_id],
+                        int(deleted[member_id]),
+                    ),
+                )
 
     @staticmethod
     def _create_agent_todos_table(connection: sqlite3.Connection) -> None:
@@ -316,7 +467,7 @@ class SQLiteStore:
             "model settings",
         )
 
-        with connection:
+        with self._migration_transaction(connection):
             for table in (
                 "model_settings",
                 "mentions",
@@ -336,10 +487,11 @@ class SQLiteStore:
                 self._write_organization(connection, organization)
             if model_config is not None:
                 self._write_model_config(connection, model_config)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_two(self, connection: sqlite3.Connection) -> None:
-        with connection:
+        with self._migration_transaction(connection):
             connection.execute(
                 """
                 CREATE TABLE observability_settings (
@@ -361,29 +513,32 @@ class SQLiteStore:
             self._add_member_deleted_column(connection)
             self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_three(self, connection: sqlite3.Connection) -> None:
-        with connection:
+        with self._migration_transaction(connection):
             self._migrate_model_api_type(connection)
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
             self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_four(self, connection: sqlite3.Connection) -> None:
-        with connection:
+        with self._migration_transaction(connection):
             self._create_agent_runs_table(connection)
             self._add_member_deleted_column(connection)
             self._add_member_paused_column(connection)
             self._add_model_context_window_column(connection)
             self._create_agent_todos_table(connection)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_five(connection: sqlite3.Connection) -> None:
-        with connection:
+        with SQLiteStore._migration_transaction(connection):
             connection.execute(
                 "ALTER TABLE mentions ADD COLUMN reminded INTEGER NOT NULL DEFAULT 0 CHECK (reminded IN (0, 1))"
             )
@@ -394,36 +549,47 @@ class SQLiteStore:
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_six(connection: sqlite3.Connection) -> None:
-        with connection:
+        with SQLiteStore._migration_transaction(connection):
             SQLiteStore._add_member_deleted_column(connection)
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_seven(connection: sqlite3.Connection) -> None:
-        with connection:
+        with SQLiteStore._migration_transaction(connection):
             SQLiteStore._create_agent_todos_table(connection)
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_eight(connection: sqlite3.Connection) -> None:
-        with connection:
+        with SQLiteStore._migration_transaction(connection):
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_nine(connection: sqlite3.Connection) -> None:
-        with connection:
+        with SQLiteStore._migration_transaction(connection):
             SQLiteStore._add_model_context_window_column(connection)
+            SQLiteStore._backfill_mention_references(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_ten(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            SQLiteStore._backfill_mention_references(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -638,6 +804,27 @@ class SQLiteStore:
                     """,
                     (discussion_id,),
                 ):
+                    references = [
+                        {
+                            "member_id": reference["member_id"],
+                            "name": reference["name"],
+                            "start": reference["start"],
+                            "end": reference["end"],
+                            "in_discussion": bool(reference["in_discussion"]),
+                            "notified": bool(reference["notified"]),
+                            "deleted": bool(reference["deleted"]),
+                        }
+                        for reference in connection.execute(
+                            """
+                            SELECT member_id, name, start, end, in_discussion, notified,
+                                deleted
+                            FROM mention_references
+                            WHERE discussion_id = ? AND message_id = ?
+                            ORDER BY position
+                            """,
+                            (discussion_id, message["id"]),
+                        )
+                    ]
                     mentions = [
                         {
                             "member_id": mention["member_id"],
@@ -659,6 +846,7 @@ class SQLiteStore:
                             "id": message["id"],
                             "sender_id": message["sender_id"],
                             "body": message["body"],
+                            "references": references,
                             "mentions": mentions,
                         }
                     )
@@ -740,6 +928,27 @@ class SQLiteStore:
                         message["body"],
                     ),
                 )
+                for position, reference in enumerate(message.get("references", [])):
+                    connection.execute(
+                        """
+                        INSERT INTO mention_references
+                            (discussion_id, message_id, position, member_id, name, start,
+                             end, in_discussion, notified, deleted)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            discussion_id,
+                            message["id"],
+                            position,
+                            reference["member_id"],
+                            reference["name"],
+                            reference["start"],
+                            reference["end"],
+                            int(reference["in_discussion"]),
+                            int(reference["notified"]),
+                            int(reference.get("deleted", False)),
+                        ),
+                    )
                 for position, mention in enumerate(message["mentions"]):
                     connection.execute(
                         """

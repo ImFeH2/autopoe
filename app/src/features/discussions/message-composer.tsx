@@ -9,7 +9,15 @@ import {
   useState,
 } from "react";
 import { Button, MenuOption, Textarea } from "@/components/ui";
-import type { AgentMember } from "@/lib/backend";
+import type { AgentMember, MentionSyntax } from "@/lib/backend";
+import {
+  isMentionBoundary,
+  isMentionNameCharacter,
+  looksLikeEmailAt,
+  normalizeMentionText,
+} from "@/lib/mention-normalization";
+
+export { normalizeMentionText } from "@/lib/mention-normalization";
 
 export type DraftMention = {
   end: number;
@@ -33,10 +41,6 @@ export function shouldSubmitMessage({
   shiftKey: boolean;
 }) {
   return key === "Enter" && !shiftKey && !isComposing;
-}
-
-function isMentionBoundary(value: string | undefined): boolean {
-  return value === undefined || !/[\p{L}\p{N}\p{M}_]/u.test(value);
 }
 
 export function reconcileDraftMentions(
@@ -102,12 +106,15 @@ export function findMentionQuery(
 
   const beforeCaret = body.slice(0, caret);
   const start = beforeCaret.lastIndexOf("@");
-  if (start < 0) {
+  if (start < 0 || looksLikeEmailAt(body, start)) {
     return null;
   }
 
   const query = body.slice(start + 1, caret);
-  if (/[\r\n@]/u.test(query)) {
+  if (
+    /[\r\n@]/u.test(query) ||
+    [...query].some((value) => !isMentionNameCharacter(value))
+  ) {
     return null;
   }
 
@@ -129,10 +136,6 @@ type MentionMatch = {
   rank: number;
   spread: number;
 };
-
-function normalizeMentionText(value: string): string {
-  return value.normalize("NFKC").trim().toLowerCase();
-}
 
 function findOrderedMatch(value: string, query: string) {
   let queryIndex = 0;
@@ -197,6 +200,15 @@ function getMentionMatch(
 
   const orderedMatch = findOrderedMatch(name, query);
   return orderedMatch ? { agent, index, rank: 5, ...orderedMatch } : null;
+}
+
+export function mentionAgentScopeLabel(
+  agentId: number,
+  discussionMemberIds: number[],
+): "In Discussion" | "Not in Discussion" {
+  return discussionMemberIds.includes(agentId)
+    ? "In Discussion"
+    : "Not in Discussion";
 }
 
 export function filterMentionAgents(
@@ -293,8 +305,10 @@ type MessageComposerProps = {
   body: string;
   disabled: boolean;
   discussionId: number;
+  discussionMemberIds: number[];
   inputRef: RefObject<HTMLTextAreaElement | null>;
   mentions: DraftMention[];
+  mentionSyntax: MentionSyntax;
   onChange: (body: string, mentions: DraftMention[]) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
 };
@@ -304,17 +318,20 @@ export function MessageComposer({
   body,
   disabled,
   discussionId,
+  discussionMemberIds,
   inputRef,
   mentions,
+  mentionSyntax,
   onChange,
   onSend,
 }: MessageComposerProps) {
   const isComposingRef = useRef(false);
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
-  const mentionCandidates = mentionQuery
-    ? filterMentionAgents(agents, mentionQuery.query)
-    : [];
+  const mentionCandidates =
+    mentionQuery && mentionSyntax.enabled
+      ? filterMentionAgents(agents, mentionQuery.query)
+      : [];
   const resolvedMentionIndex = Math.min(
     activeMentionIndex,
     Math.max(mentionCandidates.length - 1, 0),
@@ -446,12 +463,34 @@ export function MessageComposer({
     }
   }, [body, inputRef]);
 
+  useEffect(() => {
+    if (!mentionSyntax.enabled) {
+      setMentionQuery(null);
+    }
+  }, [mentionSyntax.enabled]);
+
   return (
     <form
       className="message-composer"
       aria-label="Send Message"
       onSubmit={handleSubmit}
     >
+      {!mentionSyntax.enabled ? (
+        <div className="mention-syntax-warning" role="status">
+          <strong>Mentions are unavailable.</strong>
+          <ul>
+            {mentionSyntax.issues.map((issue) => (
+              <li
+                key={`${issue.code}-${issue.member_ids.join("-")}-${issue.names.join("-")}`}
+              >
+                {issue.code === "duplicate_name"
+                  ? `Conflicting names: ${issue.names.join(", ")}`
+                  : `Invalid name: ${issue.names.join(", ")}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="message-composer-row">
         <div className="message-composer-input">
           {mentionMenuOpen ? (
@@ -468,7 +507,10 @@ export function MessageComposer({
                       aria-label={`Mention ${agent.name}`}
                       id={`${mentionListId}-${agent.id}`}
                       label={`@${agent.name}`}
-                      meta="Agent"
+                      meta={mentionAgentScopeLabel(
+                        agent.id,
+                        discussionMemberIds,
+                      )}
                       onClick={() => selectMention(agent)}
                       onMouseDown={(event) => event.preventDefault()}
                       onMouseEnter={() => setActiveMentionIndex(index)}

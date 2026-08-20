@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAgentHistoryEvent,
+  type OrganizationSnapshot,
   parseAgentHistory,
   parseAgentHistoryEvent,
   parseModelSettings,
@@ -8,9 +9,10 @@ import {
   parseOrganizationSnapshot,
 } from "@/lib/backend";
 
-const validSnapshot = {
+const validSnapshot: OrganizationSnapshot = {
   organization: { id: 1 },
   working_directory: "/project/flowent",
+  mention_syntax: { enabled: true, issues: [] },
   members: [
     { id: 1, type: "human", name: "You" },
     { id: 2, type: "agent", name: "Ada", status: "idle" },
@@ -25,6 +27,17 @@ const validSnapshot = {
           id: 1,
           sender_id: 1,
           body: "Begin.",
+          references: [
+            {
+              member_id: 2,
+              name: "Ada",
+              start: null,
+              end: null,
+              in_discussion: true,
+              notified: true,
+              deleted: false,
+            },
+          ],
           mentions: [{ member_id: 2, status: "pending" }],
         },
       ],
@@ -251,6 +264,9 @@ describe("parseOrganizationSnapshot", () => {
     "accepts the %s Agent status",
     (status) => {
       const value = structuredClone(validSnapshot);
+      if (value.members[1].type !== "agent") {
+        throw new Error("Expected Agent fixture");
+      }
       value.members[1].status = status;
 
       expect(parseOrganizationSnapshot(value).members[1]).toEqual({
@@ -286,6 +302,91 @@ describe("parseOrganizationSnapshot", () => {
 
     expect(() => parseOrganizationSnapshot(value)).toThrow(
       "must follow Discussion order",
+    );
+  });
+
+  it("validates code-point ranges, notification identity, and deleted history", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].messages[0].body = "😀 @Ada";
+    value.discussions[0].messages[0].references[0] = {
+      member_id: 99,
+      name: "Ada",
+      start: 2,
+      end: 6,
+      in_discussion: true,
+      notified: true,
+      deleted: true,
+    };
+    value.discussions[0].messages[0].mentions[0].member_id = 99;
+
+    expect(parseOrganizationSnapshot(value).discussions[0].messages[0]).toEqual(
+      value.discussions[0].messages[0],
+    );
+
+    const partial = structuredClone(value);
+    partial.discussions[0].messages[0].references[0].end = null;
+    expect(() => parseOrganizationSnapshot(partial)).toThrow(
+      "start and end must both be null or set",
+    );
+
+    const missingIdentity = structuredClone(value);
+    missingIdentity.discussions[0].messages[0].references[0].notified = false;
+    expect(() => parseOrganizationSnapshot(missingIdentity)).toThrow(
+      "requires a notified identity reference",
+    );
+  });
+
+  it("rejects a notified reference without a Mention status", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].messages[0].mentions = [];
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "notified identity requires a Mention status",
+    );
+  });
+
+  it("rejects overlapping or mismatched positioned references", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].messages[0].body = "@Ada @Ada";
+    value.discussions[0].messages[0].references = [
+      {
+        member_id: 2,
+        name: "Ada",
+        start: 0,
+        end: 4,
+        in_discussion: true,
+        notified: true,
+        deleted: false,
+      },
+      {
+        member_id: 2,
+        name: "Ada",
+        start: 3,
+        end: 9,
+        in_discussion: true,
+        notified: true,
+        deleted: false,
+      },
+    ];
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "ordered and non-overlapping",
+    );
+  });
+
+  it("requires mention_syntax enabled and issues to agree", () => {
+    const value = structuredClone(validSnapshot);
+    value.mention_syntax = {
+      enabled: true,
+      issues: [
+        {
+          code: "duplicate_name",
+          member_ids: [2, 1],
+          names: ["Ada", "You"],
+          normalized_name: "ada",
+        },
+      ],
+    };
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "enabled must match",
     );
   });
 

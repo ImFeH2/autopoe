@@ -171,6 +171,7 @@ describe("App", () => {
           messageBody=""
           messageInputRef={{ current: null }}
           messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
           onCreateAgent={() => undefined}
           onCreateDiscussion={() => undefined}
           onDeleteDiscussion={() => undefined}
@@ -212,6 +213,17 @@ describe("App", () => {
           id: 1,
           sender_id: 1,
           body: "**Bold request**\nnext line",
+          references: [
+            {
+              member_id: 2,
+              name: "Ada",
+              start: null,
+              end: null,
+              in_discussion: true,
+              notified: true,
+              deleted: true,
+            },
+          ],
           mentions: [{ member_id: 2, status: "read" as const }],
         },
       ],
@@ -228,6 +240,7 @@ describe("App", () => {
           messageBody="composer changes do not belong to sent Markdown"
           messageInputRef={{ current: null }}
           messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
           onCreateAgent={() => undefined}
           onCreateDiscussion={() => undefined}
           onDeleteDiscussion={() => undefined}

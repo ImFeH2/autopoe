@@ -417,6 +417,7 @@ function App() {
             messageBody={messageBody}
             messageInputRef={messageInputRef}
             messageMentions={messageMentions}
+            mentionSyntax={snapshot.mention_syntax}
             onCreateDiscussion={handleCreateDiscussion}
             onDialogCloseAutoFocus={focusAfterDiscussionDialogClose}
             onDialogOpenChange={changeDiscussionDialog}

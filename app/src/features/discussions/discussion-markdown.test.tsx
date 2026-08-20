@@ -6,8 +6,13 @@ import {
   safeDiscussionLink,
 } from "./discussion-markdown";
 
-function render(body: string) {
-  return renderToStaticMarkup(<DiscussionMarkdown body={body} />);
+function render(
+  body: string,
+  references: Parameters<typeof DiscussionMarkdown>[0]["references"] = [],
+) {
+  return renderToStaticMarkup(
+    <DiscussionMarkdown body={body} references={references} />,
+  );
 }
 
 describe("DiscussionMarkdown", () => {
@@ -130,12 +135,65 @@ describe("DiscussionMarkdown", () => {
     expect(safeDiscussionLink("//example.com")).toBeNull();
   });
 
+  it("highlights positioned references inside one Markdown parse with astral offsets", () => {
+    const body = "😀 **ask @Ada now**";
+    const markup = render(body, [
+      {
+        member_id: 2,
+        name: "Ada",
+        start: 8,
+        end: 12,
+        in_discussion: true,
+        notified: true,
+        deleted: false,
+      },
+    ]);
+
+    expect(markup).toContain("<strong>ask <mark");
+    expect(markup).toContain("mention-reference--notified");
+    expect(markup).toContain(">@Ada</mark> now</strong>");
+  });
+
+  it("does not fabricate a range for fallback or unsafe AST mappings", () => {
+    const fallback = render("@Ada", [
+      {
+        member_id: 2,
+        name: "Ada",
+        start: null,
+        end: null,
+        in_discussion: true,
+        notified: true,
+        deleted: true,
+      },
+    ]);
+    const escaped = render("\\@Ada", [
+      {
+        member_id: 2,
+        name: "Ada",
+        start: 1,
+        end: 5,
+        in_discussion: true,
+        notified: true,
+        deleted: false,
+      },
+    ]);
+
+    expect(fallback).not.toContain("mention-reference");
+    expect(escaped).not.toContain("mention-reference");
+  });
+
   it("memoizes sent message parsing by stable body content", () => {
     expect(
-      areDiscussionMarkdownPropsEqual({ body: "same" }, { body: "same" }),
+      areDiscussionMarkdownPropsEqual(
+        { body: "same", references: [] },
+        { body: "same", references: [] },
+      ),
     ).toBe(true);
     expect(
-      areDiscussionMarkdownPropsEqual({ body: "before" }, { body: "after" }),
+      areDiscussionMarkdownPropsEqual(
+        { body: "before", references: [] },
+        { body: "after", references: [] },
+      ),
     ).toBe(false);
   });
 });

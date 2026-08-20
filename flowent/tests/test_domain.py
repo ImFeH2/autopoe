@@ -17,6 +17,7 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
     assert snapshot == {
         "organization": {"id": 1},
         "working_directory": str(tmp_path),
+        "mention_syntax": {"enabled": True, "issues": []},
         "members": [
             {"id": 1, "type": "human", "name": "You"},
             {"id": 2, "type": "agent", "name": "Ada", "status": "idle"},
@@ -32,12 +33,14 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
                         "id": 1,
                         "sender_id": 1,
                         "body": "Start with the domain model.",
+                        "references": [],
                         "mentions": [],
                     },
                     {
                         "id": 2,
                         "sender_id": 2,
                         "body": "I will take it.",
+                        "references": [],
                         "mentions": [],
                     },
                 ],
@@ -66,25 +69,198 @@ def test_only_discussion_members_can_send() -> None:
         state.send_message(1, 3, "I should not be here.")
 
 
-def test_mentions_are_derived_from_longest_discussion_member_names() -> None:
+def test_references_cover_all_occurrences_but_notifications_only_target_peers() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
-    state.create_agent("Ada Lovelace")
-    state.create_agent("Ada")
+    state.create_agent("Ada-Lovelace")
     state.create_agent("Grace")
-    state.create_discussion("Work", 1, [2, 3, 4])
+    state.create_discussion("Work", 1, [2, 3])
 
     snapshot = state.send_message(
         1,
         1,
-        "Ask @Ada Lovelace, then @Ada. Ignore @Grace, @AdaX, and @ada.",
+        "Ask @Ada-Lovelace, then @ADA twice @Ada. Keep @Grace and ignore @AdaX.",
     )
+    message = snapshot["discussions"][0]["messages"][0]
 
-    assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
+    assert message["mentions"] == [
         {"member_id": 3, "status": "pending"},
         {"member_id": 2, "status": "pending"},
-        {"member_id": 4, "status": "pending"},
     ]
+    assert [
+        (
+            reference["member_id"],
+            reference["name"],
+            reference["in_discussion"],
+            reference["notified"],
+            reference["deleted"],
+        )
+        for reference in message["references"]
+    ] == [
+        (3, "Ada-Lovelace", True, True, False),
+        (2, "Ada", True, True, False),
+        (2, "Ada", True, True, False),
+        (4, "Grace", False, False, False),
+    ]
+
+
+def test_agent_names_are_legal_and_nfkc_casefold_unique() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+
+    with pytest.raises(DomainError, match="unique"):
+        state.create_agent("ADA")
+    with pytest.raises(DomainError, match="unique"):
+        state.create_agent("Ａｄａ")
+    with pytest.raises(DomainError, match="only Unicode"):
+        state.create_agent("Ada@Work")
+
+
+def test_legacy_name_issue_disables_syntax_but_restores_notification_identity() -> None:
+    state = OrganizationState(
+        persisted={
+            "members": [
+                {"id": 1, "type": "human", "name": "You"},
+                {"id": 2, "type": "agent", "name": "Bad Name"},
+                {"id": 3, "type": "agent", "name": "Lin"},
+            ],
+            "discussions": [
+                {
+                    "id": 1,
+                    "topic": "Legacy",
+                    "member_ids": [1, 2, 3],
+                    "messages": [
+                        {
+                            "id": 1,
+                            "sender_id": 1,
+                            "body": "legacy notification",
+                            "mentions": [
+                                {"member_id": 3, "read": False, "acked": False}
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    snapshot = state.send_message(1, 1, "@Lin must not partially resolve")
+
+    assert snapshot["mention_syntax"] == {
+        "enabled": False,
+        "issues": [
+            {
+                "code": "invalid_name",
+                "member_ids": [2],
+                "names": ["Bad Name"],
+            }
+        ],
+    }
+    legacy = snapshot["discussions"][0]["messages"][0]
+    assert legacy["references"] == [
+        {
+            "member_id": 3,
+            "name": "Lin",
+            "start": None,
+            "end": None,
+            "in_discussion": True,
+            "notified": True,
+            "deleted": False,
+        }
+    ]
+    assert legacy["mentions"] == [{"member_id": 3, "status": "pending"}]
+    current = snapshot["discussions"][0]["messages"][1]
+    assert current["references"] == []
+    assert current["mentions"] == []
+
+
+def test_active_agent_conflicting_with_human_name_disables_syntax() -> None:
+    state = OrganizationState(
+        persisted={
+            "members": [
+                {"id": 1, "type": "human", "name": "You"},
+                {"id": 2, "type": "agent", "name": "Ｙｏｕ"},
+            ],
+            "discussions": [
+                {
+                    "id": 1,
+                    "topic": "Legacy",
+                    "member_ids": [1, 2],
+                    "messages": [],
+                }
+            ],
+        }
+    )
+
+    snapshot = state.send_message(1, 1, "@You")
+
+    assert snapshot["mention_syntax"] == {
+        "enabled": False,
+        "issues": [
+            {
+                "code": "duplicate_name",
+                "member_ids": [2, 1],
+                "names": ["Ｙｏｕ", "You"],
+                "normalized_name": "you",
+            }
+        ],
+    }
+    assert snapshot["discussions"][0]["messages"][0]["references"] == []
+
+
+def test_deleting_legacy_invalid_agent_recovers_gate() -> None:
+    state = OrganizationState(
+        persisted={
+            "members": [
+                {"id": 1, "type": "human", "name": "You"},
+                {"id": 2, "type": "agent", "name": "Bad Name"},
+                {"id": 3, "type": "agent", "name": "Lin"},
+            ],
+            "discussions": [
+                {
+                    "id": 1,
+                    "topic": "Legacy",
+                    "member_ids": [1, 2, 3],
+                    "messages": [],
+                }
+            ],
+        }
+    )
+    assert state.snapshot()["mention_syntax"]["enabled"] is False
+
+    state.delete_agent(2)
+    snapshot = state.send_message(1, 1, "@Lin works again")
+
+    assert snapshot["mention_syntax"] == {"enabled": True, "issues": []}
+    assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
+        {"member_id": 3, "status": "pending"}
+    ]
+
+
+def test_deleted_name_can_be_safely_reused_without_rewriting_history() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+    state.send_message(1, 1, "@Ada old identity")
+    state.delete_agent(2)
+
+    snapshot = state.create_agent("Ada")
+    new_id = snapshot["members"][-1]["id"]
+    snapshot = state.send_message(1, 1, "@Ada new identity")
+    messages = snapshot["discussions"][0]["messages"]
+
+    assert messages[0]["references"][0] == {
+        "member_id": 2,
+        "name": "Ada",
+        "start": 0,
+        "end": 4,
+        "in_discussion": True,
+        "notified": True,
+        "deleted": True,
+    }
+    assert messages[1]["references"][0]["member_id"] == new_id
+    assert messages[1]["references"][0]["deleted"] is False
 
 
 def test_sender_cannot_mention_itself_by_name() -> None:
@@ -95,9 +271,12 @@ def test_sender_cannot_mention_itself_by_name() -> None:
 
     snapshot = state.send_message(1, 2, "@Ada handled this for @Lin")
 
-    assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
-        {"member_id": 3, "status": "pending"}
-    ]
+    message = snapshot["discussions"][0]["messages"][0]
+    assert message["mentions"] == [{"member_id": 3, "status": "pending"}]
+    assert [
+        (reference["member_id"], reference["in_discussion"], reference["notified"])
+        for reference in message["references"]
+    ] == [(2, True, False), (3, True, True)]
 
 
 def test_agent_can_create_a_discussion_with_another_agent() -> None:
@@ -230,6 +409,7 @@ def test_deleting_agent_preserves_discussions_and_messages() -> None:
             "id": 1,
             "sender_id": 2,
             "body": "Keep my message",
+            "references": [],
             "mentions": [],
         }
     ]
@@ -280,3 +460,30 @@ def test_paused_agent_keeps_pending_mentions_until_resumed() -> None:
     next_reminder, _ = state.claim_next_reminder()
     assert next_reminder is not None
     assert next_reminder.mentions[0].previously_reminded is True
+
+
+def test_deleting_agent_marks_references_without_removing_mention_status() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+    state.send_message(1, 1, "@Ada twice @Ada and @Lin")
+    state.read_discussion(2, 1)
+
+    snapshot = state.delete_agent(2)
+    message = snapshot["discussions"][0]["messages"][0]
+
+    assert [reference["deleted"] for reference in message["references"]] == [
+        True,
+        True,
+        False,
+    ]
+    assert message["mentions"] == [
+        {"member_id": 2, "status": "read"},
+        {"member_id": 3, "status": "pending"},
+    ]
+    reminder, _ = state.claim_next_reminder()
+    assert reminder is not None and reminder.agent_id == 3
+
+    later = state.send_message(1, 1, "Deleted @Ada is no longer resolvable")
+    assert later["discussions"][0]["messages"][1]["references"] == []

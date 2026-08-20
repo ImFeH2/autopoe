@@ -467,3 +467,40 @@
     padding-inline: 20px;
   }
 }
+
+.mention-reference {
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: inherit;
+  font-weight: 600;
+  padding-inline: 0.08em;
+}
+
+.mention-reference--in-discussion {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.18em;
+}
+
+.mention-reference--group-out {
+  background: color-mix(in srgb, var(--color-text-tertiary) 14%, transparent);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.18em;
+}
+
+.mention-reference--deleted {
+  opacity: 0.72;
+  text-decoration: line-through;
+}
+
+.mention-syntax-warning {
+  margin: 0 0 0.5rem;
+  border: 1px solid var(--color-accent-border);
+  border-radius: 0.375rem;
+  background: var(--color-accent-subtle);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  padding: 0.5rem 0.625rem;
+}

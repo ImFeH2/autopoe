@@ -1,4 +1,11 @@
 export {
+  codePointOffsetToUtf16,
+  codePointRangeToUtf16,
+  isMentionBoundary,
+  isMentionNameCharacter,
+  normalizeMentionText,
+} from "@/lib/mention-normalization";
+export {
   DiscussionsPage,
   filterDiscussions,
   formatMessageCount,
@@ -9,6 +16,7 @@ export {
   findMentionQuery,
   getMentionKeyAction,
   insertDraftMention,
+  mentionAgentScopeLabel,
   reconcileDraftMentions,
   shouldSubmitMessage,
 } from "./message-composer";

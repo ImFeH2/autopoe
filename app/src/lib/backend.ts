@@ -1,4 +1,8 @@
 import { flowent } from "@/lib/flowent";
+import {
+  codePointRangeToUtf16,
+  normalizeMentionText,
+} from "@/lib/mention-normalization";
 
 export type HumanMember = {
   id: number;
@@ -90,10 +94,33 @@ export type Mention = {
   status: "pending" | "read" | "acked";
 };
 
+export type MentionReference = {
+  member_id: number;
+  name: string;
+  start: number | null;
+  end: number | null;
+  in_discussion: boolean;
+  notified: boolean;
+  deleted: boolean;
+};
+
+export type MentionSyntaxIssue = {
+  code: "invalid_name" | "duplicate_name";
+  member_ids: number[];
+  names: string[];
+  normalized_name?: string;
+};
+
+export type MentionSyntax = {
+  enabled: boolean;
+  issues: MentionSyntaxIssue[];
+};
+
 export type Message = {
   id: number;
   sender_id: number;
   body: string;
+  references: MentionReference[];
   mentions: Mention[];
 };
 
@@ -107,6 +134,7 @@ export type Discussion = {
 export type OrganizationSnapshot = {
   organization: { id: 1 };
   working_directory: string;
+  mention_syntax: MentionSyntax;
   members: Member[];
   discussions: Discussion[];
 };
@@ -190,6 +218,75 @@ function mentionStatus(value: unknown, path: string): Mention["status"] {
   return invalidSnapshot(`${path} is invalid`);
 }
 
+function boolean(value: unknown, path: string): boolean {
+  return typeof value === "boolean"
+    ? value
+    : invalidSnapshot(`${path} must be a boolean`);
+}
+
+function nullableNonNegativeInteger(
+  value: unknown,
+  path: string,
+): number | null {
+  return value === null ? null : nonNegativeInteger(value, path);
+}
+
+function parseMentionSyntax(value: unknown): MentionSyntax {
+  const item = record(value, "mention_syntax");
+  const enabled = boolean(item.enabled, "mention_syntax.enabled");
+  const issues = array(item.issues, "mention_syntax.issues").map(
+    (issue, index) => {
+      const path = `mention_syntax.issues[${index}]`;
+      const issueItem = record(issue, path);
+      if (
+        issueItem.code !== "invalid_name" &&
+        issueItem.code !== "duplicate_name"
+      ) {
+        invalidSnapshot(`${path}.code is invalid`);
+      }
+      const memberIds = array(issueItem.member_ids, `${path}.member_ids`).map(
+        (memberId, memberIndex) =>
+          positiveInteger(memberId, `${path}.member_ids[${memberIndex}]`),
+      );
+      const names = array(issueItem.names, `${path}.names`).map(
+        (name, nameIndex) =>
+          nonEmptyString(name, `${path}.names[${nameIndex}]`),
+      );
+      if (
+        memberIds.length === 0 ||
+        memberIds.length !== names.length ||
+        new Set(memberIds).size !== memberIds.length
+      ) {
+        invalidSnapshot(`${path} must pair unique Member IDs and names`);
+      }
+      const parsed: MentionSyntaxIssue = {
+        code: issueItem.code,
+        member_ids: memberIds,
+        names,
+      };
+      if (issueItem.normalized_name !== undefined) {
+        parsed.normalized_name = nonEmptyString(
+          issueItem.normalized_name,
+          `${path}.normalized_name`,
+        );
+      }
+      if (parsed.code === "duplicate_name" && !parsed.normalized_name) {
+        invalidSnapshot(`${path}.normalized_name is required`);
+      }
+      if (parsed.code === "invalid_name" && parsed.normalized_name) {
+        invalidSnapshot(`${path}.normalized_name is not allowed`);
+      }
+      return parsed;
+    },
+  );
+  if (enabled !== (issues.length === 0)) {
+    invalidSnapshot(
+      "mention_syntax.enabled must match whether issues are empty",
+    );
+  }
+  return { enabled, issues };
+}
+
 function parseMember(value: unknown, index: number): Member {
   const item = record(value, `members[${index}]`);
   const id = positiveInteger(item.id, `members[${index}].id`);
@@ -227,6 +324,7 @@ function parseMessage(
   value: unknown,
   discussionIndex: number,
   messageIndex: number,
+  membersById: Map<number, Member>,
 ): Message {
   const path = `discussions[${discussionIndex}].messages[${messageIndex}]`;
   const item = record(value, path);
@@ -235,6 +333,83 @@ function parseMessage(
     invalidSnapshot(`${path}.id must follow Discussion order`);
   }
   const senderId = positiveInteger(item.sender_id, `${path}.sender_id`);
+  const body = nonEmptyString(item.body, `${path}.body`);
+  const bodyCodePoints = [...body];
+  let previousPositionedEnd = 0;
+  const references = array(item.references, `${path}.references`).map(
+    (reference, referenceIndex) => {
+      const referencePath = `${path}.references[${referenceIndex}]`;
+      const referenceItem = record(reference, referencePath);
+      const memberId = positiveInteger(
+        referenceItem.member_id,
+        `${referencePath}.member_id`,
+      );
+      const name = nonEmptyString(referenceItem.name, `${referencePath}.name`);
+      const start = nullableNonNegativeInteger(
+        referenceItem.start,
+        `${referencePath}.start`,
+      );
+      const end = nullableNonNegativeInteger(
+        referenceItem.end,
+        `${referencePath}.end`,
+      );
+      const inDiscussion = boolean(
+        referenceItem.in_discussion,
+        `${referencePath}.in_discussion`,
+      );
+      const notified = boolean(
+        referenceItem.notified,
+        `${referencePath}.notified`,
+      );
+      const deleted = boolean(
+        referenceItem.deleted,
+        `${referencePath}.deleted`,
+      );
+      if ((start === null) !== (end === null)) {
+        invalidSnapshot(
+          `${referencePath}.start and end must both be null or set`,
+        );
+      }
+      if (notified && !inDiscussion) {
+        invalidSnapshot(`${referencePath}.notified requires in_discussion`);
+      }
+      if (!deleted && !membersById.has(memberId)) {
+        invalidSnapshot(`${referencePath} targets an unknown active Member`);
+      }
+      if (start !== null && end !== null) {
+        if (end <= start || end > bodyCodePoints.length) {
+          invalidSnapshot(`${referencePath} range is outside the Message body`);
+        }
+        if (start < previousPositionedEnd) {
+          invalidSnapshot(
+            `${path}.references ranges must be ordered and non-overlapping`,
+          );
+        }
+        const source = bodyCodePoints.slice(start, end).join("");
+        if (
+          !source.startsWith("@") ||
+          normalizeMentionText(source.slice(1)) !== normalizeMentionText(name)
+        ) {
+          invalidSnapshot(
+            `${referencePath} range does not match its stable name`,
+          );
+        }
+        if (codePointRangeToUtf16(body, start, end) === null) {
+          invalidSnapshot(`${referencePath} range cannot be converted safely`);
+        }
+        previousPositionedEnd = end;
+      }
+      return {
+        member_id: memberId,
+        name,
+        start,
+        end,
+        in_discussion: inDiscussion,
+        notified,
+        deleted,
+      };
+    },
+  );
   const mentionedMemberIds = new Set<number>();
   const mentions = array(item.mentions, `${path}.mentions`).map(
     (mention, mentionIndex) => {
@@ -247,6 +422,15 @@ function parseMessage(
       if (mentionedMemberIds.has(memberId)) {
         invalidSnapshot(`${path}.mentions must target unique Members`);
       }
+      if (
+        !references.some(
+          (reference) => reference.member_id === memberId && reference.notified,
+        )
+      ) {
+        invalidSnapshot(
+          `${mentionPath} requires a notified identity reference`,
+        );
+      }
       mentionedMemberIds.add(memberId);
       return {
         member_id: memberId,
@@ -254,12 +438,14 @@ function parseMessage(
       };
     },
   );
-  return {
-    id,
-    sender_id: senderId,
-    body: nonEmptyString(item.body, `${path}.body`),
-    mentions,
-  };
+  for (const reference of references) {
+    if (reference.notified && !mentionedMemberIds.has(reference.member_id)) {
+      invalidSnapshot(
+        `${path}.references notified identity requires a Mention status`,
+      );
+    }
+  }
+  return { id, sender_id: senderId, body, references, mentions };
 }
 
 function parseDiscussion(
@@ -292,7 +478,8 @@ function parseDiscussion(
     topic: nonEmptyString(item.topic, `${path}.topic`),
     member_ids: discussionMemberIds,
     messages: array(item.messages, `${path}.messages`).map(
-      (message, messageIndex) => parseMessage(message, index, messageIndex),
+      (message, messageIndex) =>
+        parseMessage(message, index, messageIndex, membersById),
     ),
   };
 }
@@ -306,6 +493,7 @@ export function parseOrganizationSnapshot(
     invalidSnapshot("organization.id must be 1");
   }
 
+  const mentionSyntax = parseMentionSyntax(snapshot.mention_syntax);
   const members = array(snapshot.members, "members").map(parseMember);
   if (members.length === 0) {
     invalidSnapshot("members cannot be empty");
@@ -334,6 +522,7 @@ export function parseOrganizationSnapshot(
       snapshot.working_directory,
       "working_directory",
     ),
+    mention_syntax: mentionSyntax,
     members,
     discussions,
   };

@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Condition, Event, RLock
 from typing import Any, Literal
-from unicodedata import category
+
+from flowent.mentions import (
+    MentionName,
+    find_mentions,
+    mention_syntax_issues,
+    normalized_mention_name,
+    validate_mention_name,
+)
 
 
 class DomainError(Exception):
@@ -33,10 +40,22 @@ class Mention:
 
 
 @dataclass
+class MentionReference:
+    member_id: int
+    name: str
+    start: int | None
+    end: int | None
+    in_discussion: bool
+    notified: bool
+    deleted: bool = False
+
+
+@dataclass
 class Message:
     id: int
     sender_id: int
     body: str
+    references: list[MentionReference] = field(default_factory=list)
     mentions: dict[int, Mention] = field(default_factory=dict)
 
 
@@ -100,11 +119,19 @@ class OrganizationState:
         self._condition = Condition(RLock())
 
     def create_agent(self, name: str) -> dict[str, Any]:
-        normalized_name = name.strip()
-        if not normalized_name:
-            raise DomainError("invalid_name", "Agent name is required")
+        try:
+            normalized_name = validate_mention_name(name)
+        except ValueError as error:
+            raise DomainError("invalid_name", str(error)) from error
 
         with self._condition:
+            normalized_key = normalized_mention_name(normalized_name)
+            if any(
+                not member.deleted
+                and normalized_mention_name(member.name) == normalized_key
+                for member in self._members.values()
+            ):
+                raise DomainError("duplicate_name", "Member names must be unique")
             member_id = self._next_member_id
             self._next_member_id += 1
             self._members[member_id] = Member(
@@ -131,6 +158,10 @@ class OrganizationState:
                 paused=member.paused,
             )
             for discussion in self._discussions.values():
+                for message in discussion.messages:
+                    for reference in message.references:
+                        if reference.member_id == agent_id:
+                            reference.deleted = True
                 discussion.member_ids = tuple(
                     member_id
                     for member_id in discussion.member_ids
@@ -227,15 +258,37 @@ class OrganizationState:
                     "Only Discussion Members can send Messages",
                 )
 
-            targets = self._mentioned_agent_ids(
-                discussion,
-                sender_id,
-                normalized_body,
+            occurrences = (
+                find_mentions(normalized_body, self._mention_names(active_only=True))
+                if self._mention_syntax_data()["enabled"]
+                else ()
+            )
+            references = [
+                MentionReference(
+                    member_id=occurrence.member_id,
+                    name=self._members[occurrence.member_id].name,
+                    start=occurrence.start,
+                    end=occurrence.end,
+                    in_discussion=occurrence.member_id in discussion.member_ids,
+                    notified=(
+                        occurrence.member_id != sender_id
+                        and occurrence.member_id in discussion.member_ids
+                    ),
+                )
+                for occurrence in occurrences
+            ]
+            targets = tuple(
+                dict.fromkeys(
+                    reference.member_id
+                    for reference in references
+                    if reference.notified
+                )
             )
             message = Message(
                 id=len(discussion.messages) + 1,
                 sender_id=sender_id,
                 body=normalized_body,
+                references=references,
                 mentions={
                     target_id: Mention(member_id=target_id) for target_id in targets
                 },
@@ -248,46 +301,6 @@ class OrganizationState:
                     execution.error = None
             self._changed(persist=True)
             return self._snapshot()
-
-    def _mentioned_agent_ids(
-        self,
-        discussion: Discussion,
-        sender_id: int,
-        body: str,
-    ) -> tuple[int, ...]:
-        candidates = [
-            self._members[member_id]
-            for member_id in discussion.member_ids
-            if member_id != sender_id and self._members[member_id].type == "agent"
-        ]
-        targets: list[int] = []
-        seen: set[int] = set()
-        for start, character in enumerate(body):
-            if character != "@":
-                continue
-            longest = 0
-            matches: list[int] = []
-            for candidate in candidates:
-                end = start + 1 + len(candidate.name)
-                following = body[end] if end < len(body) else None
-                if not body.startswith(candidate.name, start + 1) or not (
-                    following is None
-                    or (
-                        following != "_"
-                        and category(following)[0] not in {"L", "M", "N"}
-                    )
-                ):
-                    continue
-                if len(candidate.name) > longest:
-                    longest = len(candidate.name)
-                    matches = [candidate.id]
-                elif len(candidate.name) == longest:
-                    matches.append(candidate.id)
-            for target_id in matches:
-                if target_id not in seen:
-                    seen.add(target_id)
-                    targets.append(target_id)
-        return tuple(targets)
 
     def list_members(self) -> list[dict[str, Any]]:
         with self._condition:
@@ -562,10 +575,46 @@ class OrganizationState:
             and not mention.acked
         )
 
+    def _mention_names(self, *, active_only: bool = False) -> tuple[MentionName, ...]:
+        return tuple(
+            MentionName(member.id, member.name)
+            for member in self._members.values()
+            if member.type == "agent" and (not active_only or not member.deleted)
+        )
+
+    def _human_names(self) -> tuple[MentionName, ...]:
+        return tuple(
+            MentionName(member.id, member.name)
+            for member in self._members.values()
+            if member.type == "human" and not member.deleted
+        )
+
+    def _mention_syntax_data(self) -> dict[str, Any]:
+        issues = mention_syntax_issues(
+            self._mention_names(active_only=True), self._human_names()
+        )
+        return {
+            "enabled": not issues,
+            "issues": [
+                {
+                    "code": issue.code,
+                    "member_ids": list(issue.member_ids),
+                    "names": list(issue.names),
+                    **(
+                        {"normalized_name": issue.normalized_name}
+                        if issue.normalized_name is not None
+                        else {}
+                    ),
+                }
+                for issue in issues
+            ],
+        }
+
     def _snapshot(self) -> dict[str, Any]:
         return {
             "organization": {"id": 1},
             "working_directory": self._working_directory,
+            "mention_syntax": self._mention_syntax_data(),
             "members": [
                 self._member_data(member)
                 for member in self._members.values()
@@ -651,6 +700,18 @@ class OrganizationState:
             "id": message.id,
             "sender_id": message.sender_id,
             "body": message.body,
+            "references": [
+                {
+                    "member_id": reference.member_id,
+                    "name": reference.name,
+                    "start": reference.start,
+                    "end": reference.end,
+                    "in_discussion": reference.in_discussion,
+                    "notified": reference.notified,
+                    "deleted": reference.deleted,
+                }
+                for reference in message.references
+            ],
             "mentions": [
                 {
                     "member_id": mention.member_id,
@@ -681,23 +742,60 @@ class OrganizationState:
         if self._members.get(1) != Member(id=1, type="human", name="You"):
             raise RuntimeError("Persisted Organization is missing its Human Member")
         for item in persisted["discussions"]:
-            messages = [
-                Message(
-                    id=message["id"],
-                    sender_id=message["sender_id"],
-                    body=message["body"],
-                    mentions={
-                        mention["member_id"]: Mention(
-                            member_id=mention["member_id"],
-                            read=mention["read"],
-                            acked=mention["acked"],
-                            reminded=mention.get("reminded", False),
+            messages: list[Message] = []
+            for message_data in item["messages"]:
+                references = [
+                    MentionReference(
+                        member_id=reference["member_id"],
+                        name=reference.get(
+                            "name", self._members[reference["member_id"]].name
+                        ),
+                        start=reference.get("start"),
+                        end=reference.get("end"),
+                        in_discussion=reference.get("in_discussion", True),
+                        notified=reference.get("notified", False),
+                        deleted=reference.get(
+                            "deleted",
+                            self._members[reference["member_id"]].deleted,
+                        ),
+                    )
+                    for reference in message_data.get("references", [])
+                ]
+                mentions = {
+                    mention["member_id"]: Mention(
+                        member_id=mention["member_id"],
+                        read=mention["read"],
+                        acked=mention["acked"],
+                        reminded=mention.get("reminded", False),
+                    )
+                    for mention in message_data["mentions"]
+                }
+                for member_id in mentions:
+                    if not any(
+                        reference.member_id == member_id and reference.notified
+                        for reference in references
+                    ):
+                        member = self._members[member_id]
+                        references.append(
+                            MentionReference(
+                                member_id=member_id,
+                                name=member.name,
+                                start=None,
+                                end=None,
+                                in_discussion=True,
+                                notified=True,
+                                deleted=member.deleted,
+                            )
                         )
-                        for mention in message["mentions"]
-                    },
+                messages.append(
+                    Message(
+                        id=message_data["id"],
+                        sender_id=message_data["sender_id"],
+                        body=message_data["body"],
+                        references=references,
+                        mentions=mentions,
+                    )
                 )
-                for message in item["messages"]
-            ]
             discussion = Discussion(
                 id=item["id"],
                 topic=item["topic"],
@@ -728,6 +826,18 @@ class OrganizationState:
                             "id": message.id,
                             "sender_id": message.sender_id,
                             "body": message.body,
+                            "references": [
+                                {
+                                    "member_id": reference.member_id,
+                                    "name": reference.name,
+                                    "start": reference.start,
+                                    "end": reference.end,
+                                    "in_discussion": reference.in_discussion,
+                                    "notified": reference.notified,
+                                    "deleted": reference.deleted,
+                                }
+                                for reference in message.references
+                            ],
                             "mentions": [
                                 {
                                     "member_id": mention.member_id,
