@@ -333,10 +333,16 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Pause Ada"');
     expect(markup).not.toContain('aria-label="Resume Ada"');
     expect(markup).toContain("Agent · IDLE");
+    expect(markup).toContain('aria-label="Agent details"');
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain(">Overview<");
+    expect(markup).toContain(">Memory<");
+    expect(markup).toContain(">History<");
     expect(markup).toContain(">Member ID<");
+    expect(markup).toContain("does not schedule a Turn");
   });
 
-  it("renders persistent Agent history as one continuous timeline", () => {
+  it("keeps persistent Agent history behind the History tab", () => {
     const agent = {
       id: 2,
       type: "agent" as const,
@@ -413,14 +419,13 @@ describe("App", () => {
       </TooltipProvider>,
     );
 
-    expect(markup).toContain('aria-label="Ada history"');
-    expect(markup).toContain("Discussion 1 · Message 3");
-    expect(markup).toContain("Tool call");
-    expect(markup).toContain("discussion");
-    expect(markup).toContain("Continuing the same context");
+    expect(markup).toContain('id="agent-2-history-tab"');
+    expect(markup).toContain('aria-controls="agent-2-history-panel"');
+    expect(markup).not.toContain('aria-label="Ada history"');
+    expect(markup).not.toContain("Continuing the same context");
     expect(markup).toContain('aria-label="Delete Ada"');
     expect(markup).not.toContain('aria-label="Delete You"');
-    expect(markup).toContain("Streaming");
+    expect(markup).toContain("Loading Todos");
   });
 
   it.each(["paused", "pausing"] as const)(

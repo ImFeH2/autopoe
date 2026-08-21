@@ -1172,6 +1172,32 @@ class SQLiteStore:
                 self._todo_data(row) for row in connection.execute(query, parameters)
             ]
 
+    def load_todos_page(
+        self,
+        agent_id: int,
+        status: TodoStatus,
+        limit: int,
+        cursor: int | None,
+    ) -> list[dict[str, Any]]:
+        comparison = "<" if status == "completed" else ">"
+        order = "DESC" if status == "completed" else "ASC"
+        query = """
+            SELECT id, subject, description, status, created_at, updated_at,
+                completed_at
+            FROM agent_todos WHERE agent_id = ? AND status = ?
+        """
+        parameters: list[Any] = [agent_id, status]
+        if cursor is not None:
+            query += f" AND id {comparison} ?"
+            parameters.append(cursor)
+        query += f" ORDER BY id {order} LIMIT ?"
+        parameters.append(limit)
+        with self._connect() as connection:
+            return [
+                self._todo_data(row)
+                for row in connection.execute(query, tuple(parameters))
+            ]
+
     def load_todo(self, agent_id: int, todo_id: int) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(

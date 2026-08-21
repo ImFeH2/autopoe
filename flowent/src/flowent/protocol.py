@@ -51,6 +51,8 @@ class Dispatcher:
         self._on_shutdown = on_shutdown
         self._model_runtime = model_runtime or ModelRuntime()
         self._history = history
+        self._todos = todos
+        self._memories = memories
         self._operations = operations or OrganizationOperations(
             state,
             history,
@@ -65,6 +67,10 @@ class Dispatcher:
             "organization.pause_agent": self._pause_agent,
             "organization.resume_agent": self._resume_agent,
             "agent.history.get": self._get_agent_history,
+            "agent.memory.list": self._list_agent_memory,
+            "agent.memory.read": self._read_agent_memory,
+            "agent.todo.list": self._list_agent_todos,
+            "agent.todo.read": self._read_agent_todo,
             "discussion.create": self._create_discussion,
             "discussion.delete": self._delete_discussion,
             "discussion.send": self._send_message,
@@ -89,7 +95,15 @@ class Dispatcher:
         )
         request_log_level = (
             logging.DEBUG
-            if diagnostic_method in ("organization.get", "agent.history.get")
+            if diagnostic_method
+            in (
+                "organization.get",
+                "agent.history.get",
+                "agent.memory.list",
+                "agent.memory.read",
+                "agent.todo.list",
+                "agent.todo.read",
+            )
             else logging.INFO
         )
         try:
@@ -233,6 +247,54 @@ class Dispatcher:
             raise RuntimeError("Agent history is unavailable")
         return self._history.snapshot(agent_id)
 
+    def _require_agent(self, agent_id: int) -> None:
+        member = self._state.member(agent_id)
+        if member["type"] != "agent":
+            raise DomainError("not_an_agent", "Member is not an Agent")
+
+    def _list_agent_memory(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        self._require_agent(agent_id)
+        if self._memories is None:
+            raise RuntimeError("Agent Memory is unavailable")
+        return self._memories.list_page(
+            agent_id,
+            offset=require_optional_integer(params, "offset", minimum=0) or 0,
+            limit=require_optional_integer(params, "limit", minimum=1) or 100,
+        )
+
+    def _read_agent_memory(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        self._require_agent(agent_id)
+        if self._memories is None:
+            raise RuntimeError("Agent Memory is unavailable")
+        return self._memories.read_for_human(
+            agent_id,
+            path=require_string(params, "path"),
+            offset=require_optional_integer(params, "offset", minimum=1) or 1,
+            limit=require_optional_integer(params, "limit", minimum=1) or 200,
+        )
+
+    def _list_agent_todos(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        self._require_agent(agent_id)
+        if self._todos is None:
+            raise RuntimeError("Agent Todos are unavailable")
+        status = require_string(params, "status")
+        return self._todos.list_page(
+            agent_id,
+            status=status,  # type: ignore[arg-type]
+            limit=require_optional_integer(params, "limit", minimum=1) or 50,
+            cursor=require_optional_integer(params, "cursor", minimum=1),
+        )
+
+    def _read_agent_todo(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        self._require_agent(agent_id)
+        if self._todos is None:
+            raise RuntimeError("Agent Todos are unavailable")
+        return self._todos.read(agent_id, require_integer(params, "todo_id"))
+
     def _create_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_discussion(
             topic=require_string(params, "topic"),
@@ -271,6 +333,17 @@ def require_integer(params: dict[str, Any], key: str) -> int:
     value = params.get(key)
     if type(value) is not int:
         raise ProtocolError(f"{key} must be an integer")
+    return value
+
+
+def require_optional_integer(
+    params: dict[str, Any], key: str, *, minimum: int
+) -> int | None:
+    value = params.get(key)
+    if value is None:
+        return None
+    if type(value) is not int or value < minimum:
+        raise ProtocolError(f"{key} must be an integer of at least {minimum} or null")
     return value
 
 

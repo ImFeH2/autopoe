@@ -475,3 +475,87 @@ def test_rejects_invalid_params_as_a_request_error() -> None:
     assert responses[2]["result"]["members"] == [
         {"id": 1, "type": "human", "name": "You"}
     ]
+
+
+def test_dispatches_human_only_agent_memory_and_todo_reads(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    store = SQLiteStore(tmp_path / "data")
+    memories = AgentMemory(tmp_path / "data")
+    memories.write(2, "topics/details.md", "private fixture details")
+    memories.write(2, "MEMORY.md", "# Fixture index")
+    todos = AgentTodos(store)
+    todos.create(2, "Fixture task", "fixture description")
+    dispatcher = Dispatcher(state, todos=todos, memories=memories)
+
+    memory_page = dispatcher.dispatch(
+        {
+            "id": 1,
+            "method": "agent.memory.list",
+            "params": {"agent_id": 2, "offset": 0, "limit": 1},
+        }
+    )
+    memory_file = dispatcher.dispatch(
+        {
+            "id": 2,
+            "method": "agent.memory.read",
+            "params": {"agent_id": 2, "path": "MEMORY.md", "limit": 10},
+        }
+    )
+    todo_page = dispatcher.dispatch(
+        {
+            "id": 3,
+            "method": "agent.todo.list",
+            "params": {"agent_id": 2, "status": "pending", "limit": 5},
+        }
+    )
+    todo = dispatcher.dispatch(
+        {
+            "id": 4,
+            "method": "agent.todo.read",
+            "params": {"agent_id": 2, "todo_id": 1},
+        }
+    )
+
+    assert memory_page["result"]["paths"] == ["MEMORY.md"]
+    assert memory_page["result"]["has_more"] is True
+    assert memory_file["result"]["content"] == "# Fixture index"
+    assert memory_file["result"]["max_bytes"] == 64 * 1024
+    assert todo_page["result"]["todos"][0]["subject"] == "Fixture task"
+    assert todo["result"]["todo"]["description"] == "fixture description"
+
+
+def test_agent_state_reads_validate_target_member_and_params(tmp_path: Path) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    dispatcher = Dispatcher(
+        state,
+        todos=AgentTodos(SQLiteStore(tmp_path / "data")),
+        memories=AgentMemory(tmp_path / "data"),
+    )
+
+    human = dispatcher.dispatch(
+        {
+            "id": 1,
+            "method": "agent.memory.list",
+            "params": {"agent_id": 1},
+        }
+    )
+    missing = dispatcher.dispatch(
+        {
+            "id": 2,
+            "method": "agent.todo.list",
+            "params": {"agent_id": 99, "status": "pending"},
+        }
+    )
+    invalid = dispatcher.dispatch(
+        {
+            "id": 3,
+            "method": "agent.memory.list",
+            "params": {"agent_id": 2, "offset": -1},
+        }
+    )
+
+    assert human["error"]["code"] == "not_an_agent"
+    assert missing["error"]["code"] == "member_not_found"
+    assert invalid["error"]["code"] == "invalid_request"

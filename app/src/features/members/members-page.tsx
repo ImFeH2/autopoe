@@ -14,6 +14,8 @@ import {
 } from "@/components/ui";
 import { agentStatusTone } from "@/features/agent-status";
 import type { AgentHistory, AgentMember, Member } from "@/lib/backend";
+import { AgentMemoryBrowser } from "./agent-memory-browser";
+import { AgentTodos } from "./agent-todos";
 import { HistoryBlock } from "./history-block";
 
 type AgentHistoryState =
@@ -62,6 +64,7 @@ export function MembersPage({
 }: MembersPageProps) {
   const agentNameInputRef = useRef<HTMLInputElement>(null);
   const [deletingAgentId, setDeletingAgentId] = useState<number | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
 
   return (
     <section className="members-workspace">
@@ -136,10 +139,11 @@ export function MembersPage({
               action={
                 member.type === "agent" ? (
                   <Dialog
-                    description={`Delete ${member.name}, remove them from Discussions, and delete their history.`}
-                    onOpenChange={(open) =>
-                      setDeletingAgentId(open ? member.id : null)
-                    }
+                    description={`Deleting ${member.name} will permanently delete its History, Memory, and Todos. Discussion messages will remain.`}
+                    onOpenChange={(open) => {
+                      setDeletingAgentId(open ? member.id : null);
+                      setDeleteConfirmation("");
+                    }}
                     open={deletingAgentId === member.id}
                     title="Delete Agent"
                     trigger={
@@ -164,9 +168,24 @@ export function MembersPage({
                   >
                     <div className="member-delete-confirmation">
                       <p>
-                        Delete this Agent, remove them from Discussions, and
-                        delete their history? Messages will be kept.
+                        Deleting this Agent will permanently delete its History,
+                        Memory, and Todos. Discussion messages will remain. This
+                        action cannot be undone.
                       </p>
+                      <label
+                        className="member-agent-field"
+                        htmlFor={`delete-agent-${member.id}-confirmation`}
+                      >
+                        <span>Type {member.name} to confirm</span>
+                        <Input
+                          autoComplete="off"
+                          id={`delete-agent-${member.id}-confirmation`}
+                          onChange={(event) =>
+                            setDeleteConfirmation(event.target.value)
+                          }
+                          value={deleteConfirmation}
+                        />
+                      </label>
                       <div className="member-agent-actions">
                         <Button
                           onClick={() => setDeletingAgentId(null)}
@@ -175,7 +194,9 @@ export function MembersPage({
                           Cancel
                         </Button>
                         <Button
-                          disabled={disabled}
+                          disabled={
+                            disabled || deleteConfirmation !== member.name
+                          }
                           onClick={() => {
                             onDeleteAgent(member.id);
                             setDeletingAgentId(null);
@@ -203,6 +224,7 @@ export function MembersPage({
         {selectedMember?.type === "agent" ? (
           <AgentDetails
             agent={selectedMember}
+            key={selectedMember.id}
             disabled={disabled}
             history={history ?? { status: "loading" }}
             onPause={onPauseAgent}
@@ -231,6 +253,7 @@ function AgentDetails({
   onPause: (agentId: number) => void;
   onResume: (agentId: number) => void;
 }) {
+  const [tab, setTab] = useState<"overview" | "memory" | "history">("overview");
   const paused = agent.status === "paused" || agent.status === "pausing";
   const action = paused ? "Resume" : "Pause";
 
@@ -268,27 +291,84 @@ function AgentDetails({
           </Tooltip>
         </div>
       </header>
+      <div
+        aria-label="Agent details"
+        className="member-detail-tabs"
+        role="tablist"
+      >
+        {(
+          [
+            ["overview", "Overview"],
+            ["memory", "Memory"],
+            ["history", "History"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            aria-controls={`agent-${agent.id}-${value}-panel`}
+            aria-selected={tab === value}
+            id={`agent-${agent.id}-${value}-tab`}
+            key={value}
+            onClick={() => setTab(value)}
+            role="tab"
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="member-detail-body">
-        <div className="member-detail-summary">
-          <dl className="member-detail-fields">
-            <div>
-              <dt>Type</dt>
-              <dd>Agent</dd>
+        {tab === "overview" ? (
+          <section
+            aria-labelledby={`agent-${agent.id}-overview-tab`}
+            className="member-detail-panel member-detail-overview"
+            id={`agent-${agent.id}-overview-panel`}
+            role="tabpanel"
+          >
+            <div className="member-detail-summary">
+              <dl className="member-detail-fields">
+                <div>
+                  <dt>Type</dt>
+                  <dd>Agent</dd>
+                </div>
+                <div>
+                  <dt>Member ID</dt>
+                  <dd>{agent.id}</dd>
+                </div>
+              </dl>
+              {agent.error ? (
+                <section
+                  className="member-detail-error"
+                  aria-label="Agent error"
+                >
+                  <p className="caption-text m-0 text-danger" role="alert">
+                    {agent.error}
+                  </p>
+                </section>
+              ) : null}
             </div>
-            <div>
-              <dt>Member ID</dt>
-              <dd>{agent.id}</dd>
-            </div>
-          </dl>
-          {agent.error ? (
-            <section className="member-detail-error" aria-label="Agent error">
-              <p className="caption-text m-0 text-danger" role="alert">
-                {agent.error}
-              </p>
-            </section>
-          ) : null}
-        </div>
-        <AgentHistoryView agent={agent} state={history} />
+            <AgentTodos agentId={agent.id} />
+          </section>
+        ) : null}
+        {tab === "memory" ? (
+          <section
+            aria-labelledby={`agent-${agent.id}-memory-tab`}
+            className="member-detail-panel"
+            id={`agent-${agent.id}-memory-panel`}
+            role="tabpanel"
+          >
+            <AgentMemoryBrowser agentId={agent.id} />
+          </section>
+        ) : null}
+        {tab === "history" ? (
+          <section
+            aria-labelledby={`agent-${agent.id}-history-tab`}
+            className="member-detail-panel"
+            id={`agent-${agent.id}-history-panel`}
+            role="tabpanel"
+          >
+            <AgentHistoryView agent={agent} state={history} />
+          </section>
+        ) : null}
       </div>
     </section>
   );

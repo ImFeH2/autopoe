@@ -16,6 +16,10 @@ INDEX_MAX_LINES = 200
 INDEX_MAX_BYTES = 25 * 1024
 READ_DEFAULT_LINES = 200
 READ_MAX_LINES = 2000
+MEMORY_PATH_MAX_LENGTH = 1024
+MEMORY_LIST_DEFAULT_LIMIT = 100
+MEMORY_LIST_MAX_LIMIT = 500
+HUMAN_READ_MAX_BYTES = 64 * 1024
 MEMORY_CONTEXT_START = "<memory>"
 MEMORY_CONTEXT_END = "</memory>"
 
@@ -34,6 +38,37 @@ class AgentMemory:
             else:
                 paths = sorted(self._list_paths(root))
         return {"paths": paths, "count": len(paths)}
+
+    def list_page(
+        self,
+        agent_id: int,
+        offset: int = 0,
+        limit: int = MEMORY_LIST_DEFAULT_LIMIT,
+    ) -> dict[str, Any]:
+        if type(offset) is not int or offset < 0:
+            raise DomainError(
+                "invalid_memory_offset", "Memory offset must be a non-negative integer"
+            )
+        if type(limit) is not int or not 1 <= limit <= MEMORY_LIST_MAX_LIMIT:
+            raise DomainError(
+                "invalid_memory_limit",
+                f"Memory limit must be between 1 and {MEMORY_LIST_MAX_LIMIT}",
+            )
+        with self._lock:
+            root = self._memory_root(agent_id, create=False)
+            paths = [] if root is None else self._list_paths(root)
+        ordered = sorted(paths, key=lambda path: (path != MEMORY_INDEX, path))
+        selected = ordered[offset : offset + limit]
+        next_offset = offset + len(selected)
+        return {
+            "paths": selected,
+            "count": len(selected),
+            "total": len(ordered),
+            "offset": offset,
+            "limit": limit,
+            "has_more": next_offset < len(ordered),
+            "next_offset": next_offset if next_offset < len(ordered) else None,
+        }
 
     def read(
         self,
@@ -64,6 +99,49 @@ class AgentMemory:
             "end_line": start + len(selected),
             "total_lines": len(lines),
             "truncated": start + len(selected) < len(lines),
+        }
+
+    def read_for_human(
+        self,
+        agent_id: int,
+        path: str,
+        offset: int = 1,
+        limit: int = READ_DEFAULT_LINES,
+        max_bytes: int = HUMAN_READ_MAX_BYTES,
+    ) -> dict[str, Any]:
+        if type(offset) is not int or offset < 1:
+            raise DomainError(
+                "invalid_memory_offset", "Memory offset must be a positive integer"
+            )
+        if type(limit) is not int or not 1 <= limit <= READ_MAX_LINES:
+            raise DomainError(
+                "invalid_memory_limit",
+                f"Memory limit must be between 1 and {READ_MAX_LINES}",
+            )
+        if type(max_bytes) is not int or max_bytes < 1:
+            raise DomainError(
+                "invalid_memory_limit", "Memory byte limit must be a positive integer"
+            )
+        with self._lock:
+            target = self._existing_file(agent_id, path)
+            content = self._read_text(target)
+        lines = content.splitlines(keepends=True)
+        start = min(offset - 1, len(lines))
+        selected_lines = lines[start : start + limit]
+        selected = "".join(selected_lines)
+        bounded, bytes_truncated = self._bounded_utf8(selected, max_bytes)
+        loaded_lines = len(bounded.splitlines())
+        end_line = start + loaded_lines
+        return {
+            "path": self._display_path(path),
+            "content": bounded,
+            "start_line": start + 1,
+            "end_line": end_line,
+            "total_lines": len(lines),
+            "bytes": len(bounded.encode("utf-8")),
+            "max_bytes": max_bytes,
+            "bytes_truncated": bytes_truncated,
+            "truncated": start + len(selected_lines) < len(lines) or bytes_truncated,
         }
 
     def write(self, agent_id: int, path: str, content: str) -> dict[str, Any]:
@@ -240,7 +318,8 @@ class AgentMemory:
             not isinstance(path, str)
             or not path
             or path != path.strip()
-            or "\0" in path
+            or len(path) > MEMORY_PATH_MAX_LENGTH
+            or any(ord(character) < 32 or ord(character) == 127 for character in path)
         ):
             raise DomainError("invalid_memory_path", "Memory path is invalid")
         if "\\" in path:
@@ -393,6 +472,21 @@ class AgentMemory:
         lines = text.splitlines(keepends=True)
         lines_truncated = len(lines) > INDEX_MAX_LINES
         return "".join(lines[:INDEX_MAX_LINES]), bytes_truncated or lines_truncated
+
+    @staticmethod
+    def _bounded_utf8(content: str, max_bytes: int) -> tuple[str, bool]:
+        encoded = content.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return content, False
+        prefix = encoded[:max_bytes]
+        while prefix:
+            try:
+                return prefix.decode("utf-8"), True
+            except UnicodeDecodeError as error:
+                if error.reason != "unexpected end of data" or error.end != len(prefix):
+                    raise
+                prefix = prefix[:-1]
+        return "", True
 
     @staticmethod
     def _remove_empty_parents(path: Path, stop: Path) -> None:

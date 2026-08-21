@@ -67,6 +67,50 @@ export type AgentHistory = {
   runs: AgentHistoryRun[];
 };
 
+export type AgentMemoryList = {
+  paths: string[];
+  count: number;
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  next_offset: number | null;
+};
+
+export type AgentMemoryFile = {
+  path: string;
+  content: string;
+  start_line: number;
+  end_line: number;
+  total_lines: number;
+  bytes: number;
+  max_bytes: number;
+  bytes_truncated: boolean;
+  truncated: boolean;
+};
+
+export type AgentTodoStatus = "pending" | "in_progress" | "completed";
+
+export type AgentTodo = {
+  id: number;
+  subject: string;
+  description: string;
+  status: AgentTodoStatus;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type AgentTodoPage = {
+  todos: AgentTodo[];
+  count: number;
+  status: AgentTodoStatus;
+  limit: number;
+  cursor: number | null;
+  has_more: boolean;
+  next_cursor: number | null;
+};
+
 export type AgentHistoryEvent = {
   agent_id: number;
   run_id: string;
@@ -883,6 +927,165 @@ export function parseObservabilitySettings(
   };
 }
 
+function memoryPath(value: unknown, path: string): string {
+  const parsed = nonEmptyString(value, path);
+  if (
+    parsed.startsWith("/") ||
+    parsed.includes("\\") ||
+    parsed.split("/").some((part) => !part || part === "." || part === "..") ||
+    !parsed.endsWith(".md")
+  ) {
+    invalidSnapshot(`${path} must be a relative Markdown path`);
+  }
+  return parsed;
+}
+
+function nullablePositiveInteger(value: unknown, path: string): number | null {
+  return value === null ? null : positiveInteger(value, path);
+}
+
+function todoStatus(value: unknown, path: string): AgentTodoStatus {
+  if (value === "pending" || value === "in_progress" || value === "completed") {
+    return value;
+  }
+  return invalidSnapshot(`${path} is invalid`);
+}
+
+function parseAgentTodo(value: unknown, path: string): AgentTodo {
+  const item = record(value, path);
+  const status = todoStatus(item.status, `${path}.status`);
+  const completedAt =
+    item.completed_at === null
+      ? null
+      : nonEmptyString(item.completed_at, `${path}.completed_at`);
+  if ((status === "completed") !== (completedAt !== null)) {
+    invalidSnapshot(`${path}.completed_at must match completed status`);
+  }
+  return {
+    id: positiveInteger(item.id, `${path}.id`),
+    subject: nonEmptyString(item.subject, `${path}.subject`),
+    description:
+      typeof item.description === "string"
+        ? item.description
+        : invalidSnapshot(`${path}.description must be a string`),
+    status,
+    created_at: nonEmptyString(item.created_at, `${path}.created_at`),
+    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
+    completed_at: completedAt,
+  };
+}
+
+export function parseAgentMemoryList(value: unknown): AgentMemoryList {
+  const item = record(value, "agent memory list");
+  const paths = array(item.paths, "agent memory list.paths").map(
+    (path, index) => memoryPath(path, `agent memory list.paths[${index}]`),
+  );
+  const count = nonNegativeInteger(item.count, "agent memory list.count");
+  const total = nonNegativeInteger(item.total, "agent memory list.total");
+  const offset = nonNegativeInteger(item.offset, "agent memory list.offset");
+  const limit = positiveInteger(item.limit, "agent memory list.limit");
+  const hasMore = boolean(item.has_more, "agent memory list.has_more");
+  const nextOffset =
+    item.next_offset === null
+      ? null
+      : nonNegativeInteger(item.next_offset, "agent memory list.next_offset");
+  if (count !== paths.length || total < offset + count) {
+    invalidSnapshot("agent memory list pagination is inconsistent");
+  }
+  if (
+    hasMore !== (nextOffset !== null) ||
+    (nextOffset !== null && nextOffset !== offset + count)
+  ) {
+    invalidSnapshot("agent memory list next_offset is inconsistent");
+  }
+  return {
+    paths,
+    count,
+    total,
+    offset,
+    limit,
+    has_more: hasMore,
+    next_offset: nextOffset,
+  };
+}
+
+export function parseAgentMemoryFile(value: unknown): AgentMemoryFile {
+  const item = record(value, "agent memory file");
+  const startLine = positiveInteger(
+    item.start_line,
+    "agent memory file.start_line",
+  );
+  const endLine = nonNegativeInteger(
+    item.end_line,
+    "agent memory file.end_line",
+  );
+  const totalLines = nonNegativeInteger(
+    item.total_lines,
+    "agent memory file.total_lines",
+  );
+  const bytes = nonNegativeInteger(item.bytes, "agent memory file.bytes");
+  const maxBytes = positiveInteger(
+    item.max_bytes,
+    "agent memory file.max_bytes",
+  );
+  if (endLine > totalLines || bytes > maxBytes) {
+    invalidSnapshot("agent memory file bounds are inconsistent");
+  }
+  return {
+    path: memoryPath(item.path, "agent memory file.path"),
+    content:
+      typeof item.content === "string"
+        ? item.content
+        : invalidSnapshot("agent memory file.content must be a string"),
+    start_line: startLine,
+    end_line: endLine,
+    total_lines: totalLines,
+    bytes,
+    max_bytes: maxBytes,
+    bytes_truncated: boolean(
+      item.bytes_truncated,
+      "agent memory file.bytes_truncated",
+    ),
+    truncated: boolean(item.truncated, "agent memory file.truncated"),
+  };
+}
+
+export function parseAgentTodoPage(value: unknown): AgentTodoPage {
+  const item = record(value, "agent todo page");
+  const status = todoStatus(item.status, "agent todo page.status");
+  const todos = array(item.todos, "agent todo page.todos").map((todo, index) =>
+    parseAgentTodo(todo, `agent todo page.todos[${index}]`),
+  );
+  const count = nonNegativeInteger(item.count, "agent todo page.count");
+  const limit = positiveInteger(item.limit, "agent todo page.limit");
+  const cursor = nullablePositiveInteger(item.cursor, "agent todo page.cursor");
+  const hasMore = boolean(item.has_more, "agent todo page.has_more");
+  const nextCursor = nullablePositiveInteger(
+    item.next_cursor,
+    "agent todo page.next_cursor",
+  );
+  if (count !== todos.length || todos.some((todo) => todo.status !== status)) {
+    invalidSnapshot("agent todo page contents are inconsistent");
+  }
+  if (hasMore !== (nextCursor !== null)) {
+    invalidSnapshot("agent todo page next_cursor is inconsistent");
+  }
+  return {
+    todos,
+    count,
+    status,
+    limit,
+    cursor,
+    has_more: hasMore,
+    next_cursor: nextCursor,
+  };
+}
+
+export function parseAgentTodoDetail(value: unknown): AgentTodo {
+  const item = record(value, "agent todo detail");
+  return parseAgentTodo(item.todo, "agent todo detail.todo");
+}
+
 export function parseModelSettings(value: unknown): ModelSettings {
   const settings = record(value, "model settings");
   if (
@@ -934,6 +1137,46 @@ export const backend = {
   getAgentHistory: async (agentId: number) =>
     parseAgentHistory(
       await request("agent.history.get", { agent_id: agentId }),
+    ),
+  listAgentMemory: async (agentId: number, offset = 0, limit = 100) =>
+    parseAgentMemoryList(
+      await request("agent.memory.list", {
+        agent_id: agentId,
+        offset,
+        limit,
+      }),
+    ),
+  readAgentMemory: async (
+    agentId: number,
+    path: string,
+    offset = 1,
+    limit = 200,
+  ) =>
+    parseAgentMemoryFile(
+      await request("agent.memory.read", {
+        agent_id: agentId,
+        path,
+        offset,
+        limit,
+      }),
+    ),
+  listAgentTodos: async (
+    agentId: number,
+    status: AgentTodoStatus,
+    limit = 50,
+    cursor: number | null = null,
+  ) =>
+    parseAgentTodoPage(
+      await request("agent.todo.list", {
+        agent_id: agentId,
+        status,
+        limit,
+        cursor,
+      }),
+    ),
+  readAgentTodo: async (agentId: number, todoId: number) =>
+    parseAgentTodoDetail(
+      await request("agent.todo.read", { agent_id: agentId, todo_id: todoId }),
     ),
   onAgentHistoryEvent: (listener: (event: AgentHistoryEvent) => void) =>
     flowent.onEvent((event, data) => {

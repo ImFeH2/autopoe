@@ -152,3 +152,39 @@ def test_completed_todos_do_not_produce_a_status_reminder(tmp_path: Path) -> Non
     todos.complete(2, 1)
 
     assert todos.status_reminder(2) is None
+
+
+def test_todo_pages_use_stable_status_specific_id_cursors(tmp_path: Path) -> None:
+    _store, _state, todos = todo_setup(tmp_path)
+    for index in range(1, 7):
+        todos.create(2, f"Task {index}")
+    for todo_id in (2, 4, 6):
+        todos.complete(2, todo_id)
+
+    pending_first = todos.list_page(2, "pending", limit=2)
+    pending_second = todos.list_page(
+        2, "pending", limit=2, cursor=pending_first["next_cursor"]
+    )
+    completed_first = todos.list_page(2, "completed", limit=2)
+    completed_second = todos.list_page(
+        2, "completed", limit=2, cursor=completed_first["next_cursor"]
+    )
+
+    assert [todo["id"] for todo in pending_first["todos"]] == [1, 3]
+    assert pending_first["next_cursor"] == 3
+    assert [todo["id"] for todo in pending_second["todos"]] == [5]
+    assert pending_second["has_more"] is False
+    assert [todo["id"] for todo in completed_first["todos"]] == [6, 4]
+    assert completed_first["next_cursor"] == 4
+    assert [todo["id"] for todo in completed_second["todos"]] == [2]
+
+
+def test_todo_page_rejects_invalid_limits_and_cursors(tmp_path: Path) -> None:
+    _store, _state, todos = todo_setup(tmp_path)
+
+    with pytest.raises(DomainError, match="Todo status is invalid"):
+        todos.list_page(2, "unknown")  # type: ignore[arg-type]
+    with pytest.raises(DomainError, match="Todo limit"):
+        todos.list_page(2, "pending", limit=0)
+    with pytest.raises(DomainError, match="Todo cursor"):
+        todos.list_page(2, "pending", cursor=0)

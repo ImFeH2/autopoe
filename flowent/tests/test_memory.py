@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from flowent.domain import DomainError
-from flowent.memory import INDEX_MAX_BYTES, INDEX_MAX_LINES, AgentMemory
+from flowent.memory import (
+    HUMAN_READ_MAX_BYTES,
+    INDEX_MAX_BYTES,
+    INDEX_MAX_LINES,
+    MEMORY_PATH_MAX_LENGTH,
+    AgentMemory,
+)
 
 
 def test_memory_crud_is_agent_private_and_outside_workspace(tmp_path: Path) -> None:
@@ -232,3 +238,46 @@ def test_memory_deletion_and_startup_cleanup_do_not_follow_symlinks(
 
     memory.delete_all(2)
     assert not (tmp_path / "data" / "agents" / "2").exists()
+
+
+def test_human_memory_listing_is_paged_and_pins_main_index(tmp_path: Path) -> None:
+    memory = AgentMemory(tmp_path)
+    for path in ("zeta.md", "topics/beta.md", "MEMORY.md", "alpha.md"):
+        memory.write(2, path, path)
+
+    first = memory.list_page(2, offset=0, limit=2)
+    second = memory.list_page(2, offset=2, limit=2)
+
+    assert first == {
+        "paths": ["MEMORY.md", "alpha.md"],
+        "count": 2,
+        "total": 4,
+        "offset": 0,
+        "limit": 2,
+        "has_more": True,
+        "next_offset": 2,
+    }
+    assert second["paths"] == ["topics/beta.md", "zeta.md"]
+    assert second["has_more"] is False
+    assert second["next_offset"] is None
+
+
+def test_human_memory_read_has_a_utf8_byte_ceiling(tmp_path: Path) -> None:
+    memory = AgentMemory(tmp_path)
+    memory.write(2, "large.md", "é" * (HUMAN_READ_MAX_BYTES + 10))
+
+    result = memory.read_for_human(2, "large.md")
+
+    assert result["bytes"] <= HUMAN_READ_MAX_BYTES
+    assert result["bytes_truncated"] is True
+    assert result["truncated"] is True
+    assert "�" not in result["content"]
+    assert result["path"] == "large.md"
+
+
+def test_memory_rejects_control_characters_and_overlong_paths(tmp_path: Path) -> None:
+    memory = AgentMemory(tmp_path)
+
+    for path in ("bad\nname.md", "bad\tname.md", "x" * MEMORY_PATH_MAX_LENGTH + ".md"):
+        with pytest.raises(DomainError, match="Memory path is invalid"):
+            memory.write(2, path, "content")

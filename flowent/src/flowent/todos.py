@@ -10,6 +10,8 @@ TodoStatus = Literal["pending", "in_progress", "completed"]
 MAX_ACTIVE_TODOS = 100
 MAX_SUBJECT_LENGTH = 160
 MAX_DESCRIPTION_LENGTH = 4000
+TODO_PAGE_DEFAULT_LIMIT = 50
+TODO_PAGE_MAX_LIMIT = 100
 STATUS_PENDING_LIMIT = 8
 TODO_STATUS_START = "<todo_status>"
 TODO_STATUS_END = "</todo_status>"
@@ -30,6 +32,14 @@ class AgentTodoRepository(Protocol):
         self,
         agent_id: int,
         status: TodoStatus | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def load_todos_page(
+        self,
+        agent_id: int,
+        status: TodoStatus,
+        limit: int,
+        cursor: int | None,
     ) -> list[dict[str, Any]]: ...
 
     def load_todo(self, agent_id: int, todo_id: int) -> dict[str, Any] | None: ...
@@ -105,6 +115,37 @@ class AgentTodos:
         else:
             todos = self._repository.load_todos(agent_id, status)
         return {"todos": todos, "count": len(todos)}
+
+    def list_page(
+        self,
+        agent_id: int,
+        status: TodoStatus,
+        limit: int = TODO_PAGE_DEFAULT_LIMIT,
+        cursor: int | None = None,
+    ) -> dict[str, Any]:
+        if status not in ("pending", "in_progress", "completed"):
+            raise DomainError("invalid_todo_status", "Todo status is invalid")
+        if type(limit) is not int or not 1 <= limit <= TODO_PAGE_MAX_LIMIT:
+            raise DomainError(
+                "invalid_todo_limit",
+                f"Todo limit must be between 1 and {TODO_PAGE_MAX_LIMIT}",
+            )
+        if cursor is not None and (type(cursor) is not int or cursor < 1):
+            raise DomainError(
+                "invalid_todo_cursor", "Todo cursor must be a positive integer"
+            )
+        rows = self._repository.load_todos_page(agent_id, status, limit + 1, cursor)
+        has_more = len(rows) > limit
+        todos = rows[:limit]
+        return {
+            "todos": todos,
+            "count": len(todos),
+            "status": status,
+            "limit": limit,
+            "cursor": cursor,
+            "has_more": has_more,
+            "next_cursor": todos[-1]["id"] if has_more and todos else None,
+        }
 
     def read(self, agent_id: int, todo_id: int) -> dict[str, Any]:
         return {"todo": self._require_todo(agent_id, todo_id)}

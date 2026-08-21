@@ -4,6 +4,10 @@ import {
   type OrganizationSnapshot,
   parseAgentHistory,
   parseAgentHistoryEvent,
+  parseAgentMemoryFile,
+  parseAgentMemoryList,
+  parseAgentTodoDetail,
+  parseAgentTodoPage,
   parseModelSettings,
   parseObservabilitySettings,
   parseOrganizationSnapshot,
@@ -409,5 +413,102 @@ describe("parseOrganizationSnapshot", () => {
     expect(() => parseOrganizationSnapshot(duplicateDiscussion)).toThrow(
       "Discussion IDs must be unique",
     );
+  });
+});
+
+describe("Agent Memory and Todo payloads", () => {
+  it("parses paged relative Memory paths and bounded file content", () => {
+    expect(
+      parseAgentMemoryList({
+        paths: ["MEMORY.md", "topics/release.md"],
+        count: 2,
+        total: 3,
+        offset: 0,
+        limit: 2,
+        has_more: true,
+        next_offset: 2,
+      }),
+    ).toEqual({
+      paths: ["MEMORY.md", "topics/release.md"],
+      count: 2,
+      total: 3,
+      offset: 0,
+      limit: 2,
+      has_more: true,
+      next_offset: 2,
+    });
+    expect(
+      parseAgentMemoryFile({
+        path: "MEMORY.md",
+        content: "# Index",
+        start_line: 1,
+        end_line: 1,
+        total_lines: 1,
+        bytes: 7,
+        max_bytes: 65536,
+        bytes_truncated: false,
+        truncated: false,
+      }).content,
+    ).toBe("# Index");
+  });
+
+  it("rejects unsafe Memory paths and inconsistent pagination", () => {
+    expect(() =>
+      parseAgentMemoryList({
+        paths: ["../secret.md"],
+        count: 1,
+        total: 1,
+        offset: 0,
+        limit: 10,
+        has_more: false,
+        next_offset: null,
+      }),
+    ).toThrow("relative Markdown path");
+    expect(() =>
+      parseAgentMemoryList({
+        paths: ["MEMORY.md"],
+        count: 2,
+        total: 2,
+        offset: 0,
+        limit: 10,
+        has_more: false,
+        next_offset: null,
+      }),
+    ).toThrow("pagination is inconsistent");
+  });
+
+  it("parses Todo pages and detail while enforcing status consistency", () => {
+    const todo = {
+      id: 3,
+      subject: "Review release",
+      description: "Check the fixture",
+      status: "completed",
+      created_at: "2026-08-20T00:00:00+00:00",
+      updated_at: "2026-08-21T00:00:00+00:00",
+      completed_at: "2026-08-21T00:00:00+00:00",
+    };
+    expect(
+      parseAgentTodoPage({
+        todos: [todo],
+        count: 1,
+        status: "completed",
+        limit: 50,
+        cursor: null,
+        has_more: true,
+        next_cursor: 3,
+      }).todos[0].subject,
+    ).toBe("Review release");
+    expect(parseAgentTodoDetail({ todo })).toMatchObject({ id: 3 });
+    expect(() =>
+      parseAgentTodoPage({
+        todos: [{ ...todo, status: "pending", completed_at: null }],
+        count: 1,
+        status: "completed",
+        limit: 50,
+        cursor: null,
+        has_more: false,
+        next_cursor: null,
+      }),
+    ).toThrow("contents are inconsistent");
   });
 });
