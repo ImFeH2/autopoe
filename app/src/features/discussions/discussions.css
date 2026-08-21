@@ -272,6 +272,14 @@
   padding-left: 22px;
 }
 
+.message-markdown ul {
+  list-style-type: disc;
+}
+
+.message-markdown ol {
+  list-style-type: decimal;
+}
+
 .message-markdown li + li {
   margin-top: 3px;
 }

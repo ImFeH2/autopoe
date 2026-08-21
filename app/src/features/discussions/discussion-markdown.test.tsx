@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
@@ -51,6 +52,38 @@ describe("DiscussionMarkdown", () => {
     expect(markup).toContain("<table");
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain('<code class="language-ts">');
+  });
+
+  it("renders list DOM with scoped unordered and ordered marker styles", () => {
+    const markup = render(
+      [
+        "- first item",
+        "- second item",
+        "",
+        "1. first item",
+        "2. second item",
+      ].join("\n"),
+    );
+    const styles = readFileSync(
+      new URL("./discussions.css", import.meta.url),
+      "utf8",
+    );
+
+    expect(markup).toContain(
+      "<ul>\n<li>first item</li>\n<li>second item</li>\n</ul>",
+    );
+    expect(markup).toContain(
+      "<ol>\n<li>first item</li>\n<li>second item</li>\n</ol>",
+    );
+    expect(styles).toMatch(
+      /\.message-markdown ul\s*\{\s*list-style-type:\s*disc;\s*\}/u,
+    );
+    expect(styles).toMatch(
+      /\.message-markdown ol\s*\{\s*list-style-type:\s*decimal;\s*\}/u,
+    );
+    expect(styles).toMatch(
+      /\.message-markdown ul,\s*\.message-markdown ol\s*\{\s*padding-left:\s*22px;\s*\}/u,
+    );
   });
 
   it("preserves chat line breaks including CRLF while keeping paragraphs", () => {
