@@ -15,6 +15,7 @@ import {
 } from "@/components/ui";
 import {
   DiscussionsPage,
+  discussionAgentStatus,
   filterDiscussions,
   formatMessageCount,
 } from "@/features/discussions";
@@ -144,6 +145,104 @@ describe("App", () => {
     ]);
     expect(filterDiscussions(discussions, " ")).toEqual(discussions);
     expect(filterDiscussions(discussions, "missing")).toEqual([]);
+  });
+
+  it("presents the transitional pausing state as Running in Discussions", () => {
+    expect(discussionAgentStatus("pausing")).toBe("running");
+    expect(discussionAgentStatus("paused")).toBe("paused");
+  });
+
+  it("renders accessible live Agent status marks only on Discussion member avatars", () => {
+    const agents = [
+      {
+        id: 2,
+        type: "agent" as const,
+        name: "Run",
+        status: "running" as const,
+      },
+      {
+        id: 3,
+        type: "agent" as const,
+        name: "Idle",
+        status: "idle" as const,
+      },
+      {
+        id: 4,
+        type: "agent" as const,
+        name: "Pause",
+        status: "paused" as const,
+      },
+      {
+        id: 5,
+        type: "agent" as const,
+        name: "Error",
+        status: "error" as const,
+        error: "Connection lost",
+      },
+      {
+        id: 6,
+        type: "agent" as const,
+        name: "Stopping",
+        status: "pausing" as const,
+      },
+    ];
+    const discussion = {
+      id: 1,
+      topic: "Live status",
+      member_ids: [1, 2, 3, 4, 5, 6],
+      messages: [
+        {
+          id: 1,
+          sender_id: 2,
+          body: "Historical message",
+          references: [],
+          mentions: [],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={agents}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, ...agents]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain("Discussion members:");
+    expect(markup).toContain("You, Human");
+    expect(markup).toContain('aria-label="Run, Agent status: Running"');
+    expect(markup).toContain('aria-label="Idle, Agent status: Idle"');
+    expect(markup).toContain('aria-label="Pause, Agent status: Paused"');
+    expect(markup).toContain('aria-label="Error, Agent status: Error"');
+    expect(markup).toContain('aria-label="Stopping, Agent status: Running"');
+    expect(markup.match(/data-agent-status="running"/g)).toHaveLength(2);
+    expect(markup.match(/data-agent-status="idle"/g)).toHaveLength(1);
+    expect(markup.match(/data-agent-status="paused"/g)).toHaveLength(1);
+    expect(markup.match(/data-agent-status="error"/g)).toHaveLength(1);
+    expect(markup).toContain('class="message-avatar" aria-hidden="true"');
+    expect(markup).not.toContain("message-avatar--running");
   });
 
   it("renders mention selection inside the Message combobox", () => {

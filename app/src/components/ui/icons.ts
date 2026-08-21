@@ -7,6 +7,7 @@ export {
   Search,
   Settings2,
   Trash2,
+  TriangleAlert,
   Users,
   X,
 } from "lucide-react";

@@ -54,7 +54,39 @@
   }
 }
 
+@keyframes discussion-agent-running-halo {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes discussion-agent-running-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(75 198 217 / 38%);
+  }
+
+  50% {
+    box-shadow: 0 0 0 4px rgb(75 198 217 / 0%);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  .discussion-member-avatar--running::before {
+    animation: discussion-agent-running-halo 1.8s ease-in-out infinite;
+  }
+
+  .discussion-member-avatar--running .discussion-member-status-mark {
+    animation: discussion-agent-running-pulse 1.8s ease-in-out infinite;
+  }
+
   .ui-button {
     transition:
       background-color var(--duration-fast) ease,

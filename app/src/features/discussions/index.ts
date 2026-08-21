@@ -7,6 +7,7 @@ export {
 } from "@/lib/mention-normalization";
 export {
   DiscussionsPage,
+  discussionAgentStatus,
   filterDiscussions,
   formatMessageCount,
 } from "./discussions-page";

@@ -11,9 +11,12 @@ import {
   Dialog,
   Input,
   ListButton,
+  Pause,
   Plus,
   Search,
+  Tooltip,
   Trash2,
+  TriangleAlert,
 } from "@/components/ui";
 import type {
   AgentMember,
@@ -348,6 +351,62 @@ function DiscussionForm({
   );
 }
 
+type DiscussionAgentStatus = "running" | "idle" | "paused" | "error";
+
+export function discussionAgentStatus(
+  status: AgentMember["status"],
+): DiscussionAgentStatus {
+  return status === "pausing" ? "running" : status;
+}
+
+const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
+  running: "Running",
+  idle: "Idle",
+  paused: "Paused",
+  error: "Error",
+};
+
+function DiscussionMemberAvatar({ member }: { member: Member }) {
+  const initial = member.name.slice(0, 1).toUpperCase();
+
+  if (member.type === "human") {
+    return (
+      <span className="discussion-member-avatar discussion-member-avatar--human">
+        <span aria-hidden="true">{initial}</span>
+        <span className="sr-only">{member.name}, Human</span>
+      </span>
+    );
+  }
+
+  const status = discussionAgentStatus(member.status);
+  const statusLabel = discussionAgentStatusLabels[status];
+
+  return (
+    <Tooltip
+      content={`${member.name} · Agent status: ${statusLabel}`}
+      side="bottom"
+    >
+      <button
+        aria-label={`${member.name}, Agent status: ${statusLabel}`}
+        className={`discussion-member-avatar discussion-member-avatar--agent discussion-member-avatar--${status}`}
+        data-agent-status={status}
+        type="button"
+      >
+        <span aria-hidden="true">{initial}</span>
+        <span className="discussion-member-status-mark" aria-hidden="true">
+          {status === "running" ? (
+            <span className="discussion-member-status-pulse" />
+          ) : status === "paused" ? (
+            <Pause size={9} strokeWidth={3} />
+          ) : status === "error" ? (
+            <TriangleAlert size={10} strokeWidth={2.6} />
+          ) : null}
+        </span>
+      </button>
+    </Tooltip>
+  );
+}
+
 type DiscussionViewProps = {
   discussion: Discussion;
   disabled: boolean;
@@ -375,9 +434,8 @@ function DiscussionView({
   const shouldFollowMessagesRef = useRef(true);
   const membersById = new Map(members.map((member) => [member.id, member]));
   const discussionMembers = discussion.member_ids
-    .map((id) => membersById.get(id)?.name)
-    .filter(Boolean)
-    .join(", ");
+    .map((id) => membersById.get(id))
+    .filter((member): member is Member => Boolean(member));
 
   useEffect(() => {
     const log = messageLogRef.current;
@@ -415,9 +473,12 @@ function DiscussionView({
             DISCUSSION {discussion.id}
           </span>
         </div>
-        <p className="caption-text mt-1 mb-0 text-text-secondary">
-          {discussionMembers}
-        </p>
+        <div className="discussion-member-avatars">
+          <span className="sr-only">Discussion members:</span>
+          {discussionMembers.map((member) => (
+            <DiscussionMemberAvatar key={member.id} member={member} />
+          ))}
+        </div>
       </header>
       <div
         className="message-log min-h-0 overflow-y-auto px-6 py-2"
