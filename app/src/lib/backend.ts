@@ -927,17 +927,84 @@ export function parseObservabilitySettings(
   };
 }
 
+const MEMORY_PATH_MAX_LENGTH = 1024;
+const MEMORY_LIST_MAX_LIMIT = 500;
+const MEMORY_READ_MAX_BYTES = 64 * 1024;
+const TODO_PAGE_MAX_LIMIT = 100;
+const MEMORY_INDEX_PATH = "MEMORY.md";
+const MEMORY_CONTROL_CHARACTER = /[\p{Cc}\p{Cf}]/u;
+
 function memoryPath(value: unknown, path: string): string {
   const parsed = nonEmptyString(value, path);
   if (
+    parsed !== parsed.trim() ||
+    [...parsed].length > MEMORY_PATH_MAX_LENGTH ||
+    MEMORY_CONTROL_CHARACTER.test(parsed) ||
     parsed.startsWith("/") ||
     parsed.includes("\\") ||
     parsed.split("/").some((part) => !part || part === "." || part === "..") ||
     !parsed.endsWith(".md")
   ) {
-    invalidSnapshot(`${path} must be a relative Markdown path`);
+    invalidSnapshot(`${path} must be a safe relative Markdown path`);
   }
   return parsed;
+}
+
+function compareCodePoints(left: string, right: string): number {
+  const leftPoints = [...left].map(
+    (character) => character.codePointAt(0) ?? 0,
+  );
+  const rightPoints = [...right].map(
+    (character) => character.codePointAt(0) ?? 0,
+  );
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) {
+      return leftPoints[index] - rightPoints[index];
+    }
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
+function compareMemoryPaths(left: string, right: string): number {
+  if (left === MEMORY_INDEX_PATH) {
+    return right === MEMORY_INDEX_PATH ? 0 : -1;
+  }
+  if (right === MEMORY_INDEX_PATH) {
+    return 1;
+  }
+  return compareCodePoints(left, right);
+}
+
+function isMemoryLineBreak(codePoint: number): boolean {
+  return (
+    (codePoint >= 10 && codePoint <= 13) ||
+    (codePoint >= 28 && codePoint <= 30) ||
+    codePoint === 133 ||
+    codePoint === 8232 ||
+    codePoint === 8233
+  );
+}
+
+function memoryContentLineCount(content: string): number {
+  if (!content) {
+    return 0;
+  }
+  let breaks = 0;
+  let endsWithBreak = false;
+  const points = [...content].map((character) => character.codePointAt(0) ?? 0);
+  for (let index = 0; index < points.length; index += 1) {
+    if (!isMemoryLineBreak(points[index])) {
+      endsWithBreak = false;
+      continue;
+    }
+    breaks += 1;
+    endsWithBreak = true;
+    if (points[index] === 13 && points[index + 1] === 10) {
+      index += 1;
+    }
+  }
+  return breaks + (endsWithBreak ? 0 : 1);
 }
 
 function nullablePositiveInteger(value: unknown, path: string): number | null {
@@ -989,12 +1056,29 @@ export function parseAgentMemoryList(value: unknown): AgentMemoryList {
     item.next_offset === null
       ? null
       : nonNegativeInteger(item.next_offset, "agent memory list.next_offset");
-  if (count !== paths.length || total < offset + count) {
-    invalidSnapshot("agent memory list pagination is inconsistent");
+  const returnedEnd = offset + count;
+  const expectedHasMore = returnedEnd < total;
+  if (
+    count !== paths.length ||
+    count > limit ||
+    limit > MEMORY_LIST_MAX_LIMIT ||
+    (hasMore && count !== limit) ||
+    returnedEnd > total ||
+    new Set(paths).size !== paths.length ||
+    paths.some(
+      (path, index) =>
+        index > 0 && compareMemoryPaths(paths[index - 1], path) >= 0,
+    ) ||
+    (paths.includes(MEMORY_INDEX_PATH) &&
+      (offset !== 0 || paths[0] !== MEMORY_INDEX_PATH))
+  ) {
+    invalidSnapshot(
+      "agent memory list contents or pagination are inconsistent",
+    );
   }
   if (
-    hasMore !== (nextOffset !== null) ||
-    (nextOffset !== null && nextOffset !== offset + count)
+    hasMore !== expectedHasMore ||
+    nextOffset !== (expectedHasMore ? returnedEnd : null)
   ) {
     invalidSnapshot("agent memory list next_offset is inconsistent");
   }
@@ -1011,6 +1095,10 @@ export function parseAgentMemoryList(value: unknown): AgentMemoryList {
 
 export function parseAgentMemoryFile(value: unknown): AgentMemoryFile {
   const item = record(value, "agent memory file");
+  const content =
+    typeof item.content === "string"
+      ? item.content
+      : invalidSnapshot("agent memory file.content must be a string");
   const startLine = positiveInteger(
     item.start_line,
     "agent memory file.start_line",
@@ -1028,25 +1116,38 @@ export function parseAgentMemoryFile(value: unknown): AgentMemoryFile {
     item.max_bytes,
     "agent memory file.max_bytes",
   );
-  if (endLine > totalLines || bytes > maxBytes) {
-    invalidSnapshot("agent memory file bounds are inconsistent");
+  const bytesTruncated = boolean(
+    item.bytes_truncated,
+    "agent memory file.bytes_truncated",
+  );
+  const truncated = boolean(item.truncated, "agent memory file.truncated");
+  const actualBytes = new TextEncoder().encode(content).byteLength;
+  const contentLines = memoryContentLineCount(content);
+  const expectedEndLine = startLine + contentLines - 1;
+  if (
+    actualBytes !== bytes ||
+    bytes > maxBytes ||
+    maxBytes > MEMORY_READ_MAX_BYTES ||
+    startLine > totalLines + 1 ||
+    endLine > totalLines ||
+    endLine !== expectedEndLine ||
+    (contentLines === 0 &&
+      (startLine !== totalLines + 1 || endLine !== totalLines)) ||
+    truncated !== (bytesTruncated || endLine < totalLines) ||
+    (bytesTruncated && (contentLines === 0 || maxBytes - bytes > 3))
+  ) {
+    invalidSnapshot("agent memory file bounds or truncation are inconsistent");
   }
   return {
     path: memoryPath(item.path, "agent memory file.path"),
-    content:
-      typeof item.content === "string"
-        ? item.content
-        : invalidSnapshot("agent memory file.content must be a string"),
+    content,
     start_line: startLine,
     end_line: endLine,
     total_lines: totalLines,
     bytes,
     max_bytes: maxBytes,
-    bytes_truncated: boolean(
-      item.bytes_truncated,
-      "agent memory file.bytes_truncated",
-    ),
-    truncated: boolean(item.truncated, "agent memory file.truncated"),
+    bytes_truncated: bytesTruncated,
+    truncated,
   };
 }
 
@@ -1064,11 +1165,30 @@ export function parseAgentTodoPage(value: unknown): AgentTodoPage {
     item.next_cursor,
     "agent todo page.next_cursor",
   );
-  if (count !== todos.length || todos.some((todo) => todo.status !== status)) {
-    invalidSnapshot("agent todo page contents are inconsistent");
-  }
-  if (hasMore !== (nextCursor !== null)) {
-    invalidSnapshot("agent todo page next_cursor is inconsistent");
+  const ids = todos.map((todo) => todo.id);
+  const ascending = status !== "completed";
+  const ordered = ids.every(
+    (id, index) =>
+      index === 0 || (ascending ? ids[index - 1] < id : ids[index - 1] > id),
+  );
+  const afterCursor =
+    cursor === null ||
+    ids.every((id) => (ascending ? id > cursor : id < cursor));
+  const expectedNextCursor =
+    hasMore && ids.length > 0 ? ids[ids.length - 1] : null;
+  if (
+    count !== todos.length ||
+    count > limit ||
+    limit > TODO_PAGE_MAX_LIMIT ||
+    (hasMore && (count !== limit || ids.length === 0)) ||
+    todos.some((todo) => todo.status !== status) ||
+    new Set(ids).size !== ids.length ||
+    !ordered ||
+    !afterCursor ||
+    (status === "in_progress" && count > 1) ||
+    nextCursor !== expectedNextCursor
+  ) {
+    invalidSnapshot("agent todo page contents or cursor are inconsistent");
   }
   return {
     todos,

@@ -131,6 +131,16 @@ type FileState =
   | { status: "ready"; file: AgentMemoryFile }
   | { status: "error"; message: string };
 
+export type MemoryViewState = {
+  selectedPath: string | null;
+  lineOffset: number;
+  mode: "source" | "preview";
+};
+
+export function resetMemoryView(selectedPath: string | null): MemoryViewState {
+  return { selectedPath, lineOffset: 1, mode: "source" };
+}
+
 export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
   const [paths, setPaths] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
@@ -139,10 +149,11 @@ export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
     "loading",
   );
   const [listError, setListError] = useState("");
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [lineOffset, setLineOffset] = useState(1);
+  const [view, setView] = useState<MemoryViewState>(() =>
+    resetMemoryView(null),
+  );
+  const { selectedPath, lineOffset, mode } = view;
   const [fileState, setFileState] = useState<FileState>({ status: "idle" });
-  const [mode, setMode] = useState<"source" | "preview">("source");
   const [refreshKey, setRefreshKey] = useState(0);
 
   const loadFiles = useCallback(
@@ -150,7 +161,7 @@ export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
       if (offset === 0) {
         setListState("loading");
         setPaths([]);
-        setSelectedPath(null);
+        setView(resetMemoryView(null));
       }
       try {
         const page = await backend.listAgentMemory(
@@ -165,7 +176,11 @@ export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
         setTotal(page.total);
         setNextOffset(page.next_offset);
         setListState("ready");
-        setSelectedPath((current) => current ?? page.paths[0] ?? null);
+        setView((current) =>
+          offset === 0 || current.selectedPath === null
+            ? resetMemoryView(page.paths[0] ?? null)
+            : current,
+        );
       } catch (error) {
         setListError(errorMessage(error));
         setListState("error");
@@ -212,9 +227,7 @@ export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
   const hasMainIndex = paths.includes("MEMORY.md");
 
   function selectFile(path: string) {
-    setSelectedPath(path);
-    setLineOffset(1);
-    setMode("source");
+    setView(resetMemoryView(path));
   }
 
   return (
@@ -323,7 +336,9 @@ export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
                     </div>
                     <SegmentedControl
                       aria-label="Memory view"
-                      onValueChange={setMode}
+                      onValueChange={(value) =>
+                        setView((current) => ({ ...current, mode: value }))
+                      }
                       options={[
                         { label: "Source", value: "source" },
                         { label: "Preview", value: "preview" },
@@ -351,9 +366,13 @@ export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
                     <Button
                       disabled={lineOffset === 1}
                       onClick={() =>
-                        setLineOffset((value) =>
-                          Math.max(1, value - FILE_CONTENT_PAGE_LINES),
-                        )
+                        setView((current) => ({
+                          ...current,
+                          lineOffset: Math.max(
+                            1,
+                            current.lineOffset - FILE_CONTENT_PAGE_LINES,
+                          ),
+                        }))
                       }
                       size="compact"
                       variant="quiet"
@@ -372,7 +391,12 @@ export function AgentMemoryBrowser({ agentId }: { agentId: number }) {
                         fileState.file.bytes_truncated ||
                         fileState.file.end_line >= fileState.file.total_lines
                       }
-                      onClick={() => setLineOffset(fileState.file.end_line + 1)}
+                      onClick={() =>
+                        setView((current) => ({
+                          ...current,
+                          lineOffset: fileState.file.end_line + 1,
+                        }))
+                      }
                       size="compact"
                       variant="quiet"
                     >

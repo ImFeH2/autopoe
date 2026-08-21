@@ -417,7 +417,20 @@ describe("parseOrganizationSnapshot", () => {
 });
 
 describe("Agent Memory and Todo payloads", () => {
-  it("parses paged relative Memory paths and bounded file content", () => {
+  const todo = (
+    id: number,
+    status: "pending" | "in_progress" | "completed",
+  ) => ({
+    id,
+    subject: `Todo ${id}`,
+    description: "Fixture",
+    status,
+    created_at: "2026-08-20T00:00:00+00:00",
+    updated_at: "2026-08-21T00:00:00+00:00",
+    completed_at: status === "completed" ? "2026-08-21T00:00:00+00:00" : null,
+  });
+
+  it("parses closed Memory pagination and bounded UTF-8 line ranges", () => {
     expect(
       parseAgentMemoryList({
         paths: ["MEMORY.md", "topics/release.md"],
@@ -428,87 +441,244 @@ describe("Agent Memory and Todo payloads", () => {
         has_more: true,
         next_offset: 2,
       }),
-    ).toEqual({
-      paths: ["MEMORY.md", "topics/release.md"],
-      count: 2,
-      total: 3,
-      offset: 0,
-      limit: 2,
-      has_more: true,
-      next_offset: 2,
-    });
+    ).toMatchObject({ count: 2, has_more: true, next_offset: 2 });
     expect(
       parseAgentMemoryFile({
         path: "MEMORY.md",
-        content: "# Index",
+        content: "é",
         start_line: 1,
         end_line: 1,
         total_lines: 1,
-        bytes: 7,
+        bytes: 2,
+        max_bytes: 3,
+        bytes_truncated: true,
+        truncated: true,
+      }).content,
+    ).toBe("é");
+    expect(
+      parseAgentMemoryFile({
+        path: "empty.md",
+        content: "",
+        start_line: 1,
+        end_line: 0,
+        total_lines: 0,
+        bytes: 0,
         max_bytes: 65536,
         bytes_truncated: false,
         truncated: false,
-      }).content,
-    ).toBe("# Index");
+      }).end_line,
+    ).toBe(0);
+    expect(
+      parseAgentMemoryFile({
+        path: "past-end.md",
+        content: "",
+        start_line: 4,
+        end_line: 3,
+        total_lines: 3,
+        bytes: 0,
+        max_bytes: 65536,
+        bytes_truncated: false,
+        truncated: false,
+      }).start_line,
+    ).toBe(4);
   });
 
-  it("rejects unsafe Memory paths and inconsistent pagination", () => {
+  it.each([
+    "../secret.md",
+    " bad.md",
+    "bad.md ",
+    "bad\nname.md",
+    "safe\u202eevil.md",
+    "safe\u200bevil.md",
+    `${"a".repeat(1022)}.md`,
+  ])("rejects unsafe Memory path %j", (path) => {
     expect(() =>
       parseAgentMemoryList({
-        paths: ["../secret.md"],
+        paths: [path],
         count: 1,
         total: 1,
         offset: 0,
-        limit: 10,
+        limit: 1,
         has_more: false,
         next_offset: null,
       }),
-    ).toThrow("relative Markdown path");
-    expect(() =>
-      parseAgentMemoryList({
-        paths: ["MEMORY.md"],
-        count: 2,
-        total: 2,
-        offset: 0,
-        limit: 10,
-        has_more: false,
-        next_offset: null,
-      }),
-    ).toThrow("pagination is inconsistent");
+    ).toThrow("safe relative Markdown path");
   });
 
-  it("parses Todo pages and detail while enforcing status consistency", () => {
-    const todo = {
-      id: 3,
-      subject: "Review release",
-      description: "Check the fixture",
-      status: "completed",
-      created_at: "2026-08-20T00:00:00+00:00",
-      updated_at: "2026-08-21T00:00:00+00:00",
-      completed_at: "2026-08-21T00:00:00+00:00",
-    };
+  it.each([
+    {
+      paths: ["MEMORY.md", "MEMORY.md"],
+      count: 2,
+      total: 2,
+      offset: 0,
+      limit: 2,
+      has_more: false,
+      next_offset: null,
+    },
+    {
+      paths: ["z.md", "a.md"],
+      count: 2,
+      total: 2,
+      offset: 0,
+      limit: 2,
+      has_more: false,
+      next_offset: null,
+    },
+    {
+      paths: ["bad.md"],
+      count: 1,
+      total: 2,
+      offset: 0,
+      limit: 1,
+      has_more: false,
+      next_offset: null,
+    },
+    {
+      paths: ["bad.md"],
+      count: 1,
+      total: 1,
+      offset: 0,
+      limit: 0,
+      has_more: false,
+      next_offset: null,
+    },
+    {
+      paths: ["MEMORY.md"],
+      count: 1,
+      total: 2,
+      offset: 1,
+      limit: 1,
+      has_more: false,
+      next_offset: null,
+    },
+  ])("rejects inconsistent Memory list payloads", (payload) => {
+    expect(() => parseAgentMemoryList(payload)).toThrow();
+  });
+
+  it.each([
+    {
+      content: "secret",
+      start_line: 10,
+      end_line: 1,
+      total_lines: 1,
+      bytes: 6,
+      max_bytes: 65536,
+      bytes_truncated: false,
+      truncated: false,
+    },
+    {
+      content: "é",
+      start_line: 1,
+      end_line: 1,
+      total_lines: 1,
+      bytes: 1,
+      max_bytes: 65536,
+      bytes_truncated: false,
+      truncated: false,
+    },
+    {
+      content: "line",
+      start_line: 1,
+      end_line: 1,
+      total_lines: 2,
+      bytes: 4,
+      max_bytes: 65536,
+      bytes_truncated: false,
+      truncated: false,
+    },
+    {
+      content: "",
+      start_line: 1,
+      end_line: 0,
+      total_lines: 1,
+      bytes: 0,
+      max_bytes: 65536,
+      bytes_truncated: true,
+      truncated: true,
+    },
+  ])("rejects inconsistent Memory file payloads", (payload) => {
+    expect(() =>
+      parseAgentMemoryFile({ path: "MEMORY.md", ...payload }),
+    ).toThrow("bounds or truncation are inconsistent");
+  });
+
+  it("parses status-specific Todo cursor pages and detail", () => {
     expect(
       parseAgentTodoPage({
-        todos: [todo],
-        count: 1,
-        status: "completed",
-        limit: 50,
-        cursor: null,
+        todos: [todo(11, "pending"), todo(12, "pending")],
+        count: 2,
+        status: "pending",
+        limit: 2,
+        cursor: 10,
         has_more: true,
-        next_cursor: 3,
-      }).todos[0].subject,
-    ).toBe("Review release");
-    expect(parseAgentTodoDetail({ todo })).toMatchObject({ id: 3 });
-    expect(() =>
+        next_cursor: 12,
+      }).next_cursor,
+    ).toBe(12);
+    expect(
       parseAgentTodoPage({
-        todos: [{ ...todo, status: "pending", completed_at: null }],
-        count: 1,
+        todos: [todo(9, "completed"), todo(7, "completed")],
+        count: 2,
         status: "completed",
         limit: 50,
-        cursor: null,
+        cursor: 10,
         has_more: false,
         next_cursor: null,
-      }),
-    ).toThrow("contents are inconsistent");
+      }).todos.map((item) => item.id),
+    ).toEqual([9, 7]);
+    expect(parseAgentTodoDetail({ todo: todo(3, "completed") })).toMatchObject({
+      id: 3,
+    });
+  });
+
+  it.each([
+    {
+      todos: [todo(3, "pending"), todo(3, "pending")],
+      count: 2,
+      status: "pending",
+      limit: 2,
+      cursor: null,
+      has_more: false,
+      next_cursor: null,
+    },
+    {
+      todos: [todo(12, "pending"), todo(11, "pending")],
+      count: 2,
+      status: "pending",
+      limit: 2,
+      cursor: 10,
+      has_more: false,
+      next_cursor: null,
+    },
+    {
+      todos: [todo(3, "pending")],
+      count: 1,
+      status: "pending",
+      limit: 1,
+      cursor: 10,
+      has_more: true,
+      next_cursor: 999,
+    },
+    {
+      todos: [todo(11, "completed")],
+      count: 1,
+      status: "completed",
+      limit: 1,
+      cursor: 10,
+      has_more: false,
+      next_cursor: null,
+    },
+    {
+      todos: [todo(1, "in_progress"), todo(2, "in_progress")],
+      count: 2,
+      status: "in_progress",
+      limit: 2,
+      cursor: null,
+      has_more: false,
+      next_cursor: null,
+    },
+  ])("rejects inconsistent Todo cursor payloads", (payload) => {
+    expect(() => parseAgentTodoPage(payload)).toThrow(
+      "contents or cursor are inconsistent",
+    );
   });
 });

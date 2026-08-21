@@ -260,6 +260,15 @@ def test_human_memory_listing_is_paged_and_pins_main_index(tmp_path: Path) -> No
     assert second["paths"] == ["topics/beta.md", "zeta.md"]
     assert second["has_more"] is False
     assert second["next_offset"] is None
+    assert memory.list_page(2, offset=99, limit=2) == {
+        "paths": [],
+        "count": 0,
+        "total": 4,
+        "offset": 4,
+        "limit": 2,
+        "has_more": False,
+        "next_offset": None,
+    }
 
 
 def test_human_memory_read_has_a_utf8_byte_ceiling(tmp_path: Path) -> None:
@@ -278,6 +287,19 @@ def test_human_memory_read_has_a_utf8_byte_ceiling(tmp_path: Path) -> None:
 def test_memory_rejects_control_characters_and_overlong_paths(tmp_path: Path) -> None:
     memory = AgentMemory(tmp_path)
 
-    for path in ("bad\nname.md", "bad\tname.md", "x" * MEMORY_PATH_MAX_LENGTH + ".md"):
+    invalid_paths = (
+        "bad\nname.md",
+        "bad\tname.md",
+        "safe\u202eevil.md",
+        "safe\u200bevil.md",
+        " notes.md",
+        "notes.md ",
+        "x" * MEMORY_PATH_MAX_LENGTH + ".md",
+    )
+    for path in invalid_paths:
         with pytest.raises(DomainError, match="Memory path is invalid"):
             memory.write(2, path, "content")
+
+    valid = "/".join(["x" * 200] * 5 + ["x" * 16 + ".md"])
+    assert len(valid) == MEMORY_PATH_MAX_LENGTH
+    assert memory.write(2, valid, "content")["path"] == valid

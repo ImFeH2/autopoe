@@ -4,6 +4,7 @@ import os
 import shutil
 import stat
 import tempfile
+import unicodedata
 from pathlib import Path, PurePosixPath
 from threading import RLock
 from typing import Any
@@ -58,13 +59,14 @@ class AgentMemory:
             root = self._memory_root(agent_id, create=False)
             paths = [] if root is None else self._list_paths(root)
         ordered = sorted(paths, key=lambda path: (path != MEMORY_INDEX, path))
-        selected = ordered[offset : offset + limit]
-        next_offset = offset + len(selected)
+        effective_offset = min(offset, len(ordered))
+        selected = ordered[effective_offset : effective_offset + limit]
+        next_offset = effective_offset + len(selected)
         return {
             "paths": selected,
             "count": len(selected),
             "total": len(ordered),
-            "offset": offset,
+            "offset": effective_offset,
             "limit": limit,
             "has_more": next_offset < len(ordered),
             "next_offset": next_offset if next_offset < len(ordered) else None,
@@ -319,7 +321,9 @@ class AgentMemory:
             or not path
             or path != path.strip()
             or len(path) > MEMORY_PATH_MAX_LENGTH
-            or any(ord(character) < 32 or ord(character) == 127 for character in path)
+            or any(
+                unicodedata.category(character) in ("Cc", "Cf") for character in path
+            )
         ):
             raise DomainError("invalid_memory_path", "Memory path is invalid")
         if "\\" in path:
