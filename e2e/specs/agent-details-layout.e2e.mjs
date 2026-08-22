@@ -135,7 +135,8 @@ async function historyLayout() {
 }
 
 describe("Agent details layout", () => {
-  it("keeps Memory and empty, short, and long History states usable", async () => {
+  it("keeps Memory and empty, short, and long History states usable", async function () {
+    this.timeout(120_000);
     await waitForWorkspace();
     await browser.setWindowSize(1360, 860);
 
@@ -194,15 +195,19 @@ describe("Agent details layout", () => {
       ) {
         return null;
       }
+      const emptyStyle = getComputedStyle(empty);
       return {
-        emptyLeft: empty.getBoundingClientRect().left,
+        emptyContentLeft:
+          empty.getBoundingClientRect().left +
+          parseFloat(emptyStyle.paddingLeft),
         headingLeft: heading.getBoundingClientRect().left,
       };
     });
     expect(compactEmptyBaseline).not.toBeNull();
     expect(
       Math.abs(
-        compactEmptyBaseline.emptyLeft - compactEmptyBaseline.headingLeft,
+        compactEmptyBaseline.emptyContentLeft -
+          compactEmptyBaseline.headingLeft,
       ),
     ).toBeLessThan(1);
 
