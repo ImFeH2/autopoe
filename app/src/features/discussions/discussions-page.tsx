@@ -32,6 +32,30 @@ export function formatMessageCount(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
 }
 
+export function formatMessageTimestamp(
+  createdAt: string,
+  now = new Date(),
+): { compact: string; full: string } {
+  const sentAt = new Date(createdAt);
+  const isToday =
+    sentAt.getFullYear() === now.getFullYear() &&
+    sentAt.getMonth() === now.getMonth() &&
+    sentAt.getDate() === now.getDate();
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(sentAt);
+  const compact = isToday
+    ? time
+    : `${new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(sentAt)} ${time}`;
+  const full = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "long",
+  }).format(sentAt);
+  return { compact, full };
+}
+
 export function filterDiscussions(
   discussions: Discussion[],
   query: string,
@@ -374,6 +398,20 @@ const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
   error: "Error",
 };
 
+function MessageTimestamp({ createdAt }: { createdAt: string }) {
+  const { compact, full } = formatMessageTimestamp(createdAt);
+  return (
+    <time
+      className="message-timestamp font-mono"
+      data-full-time={full}
+      dateTime={createdAt}
+    >
+      {compact}
+      <span className="sr-only">, sent {full}</span>
+    </time>
+  );
+}
+
 function DiscussionMemberAvatar({
   member,
   onOpenMember,
@@ -555,6 +593,9 @@ function DiscussionView({
                     <header className="message-meta">
                       <strong>{sender?.name ?? "Unknown"}</strong>
                       <span className="font-mono">MESSAGE {message.id}</span>
+                      {message.created_at ? (
+                        <MessageTimestamp createdAt={message.created_at} />
+                      ) : null}
                     </header>
                     <DiscussionMarkdown
                       body={message.body}

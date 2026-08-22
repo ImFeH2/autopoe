@@ -19,6 +19,7 @@ import {
   discussionAgentStatus,
   filterDiscussions,
   formatMessageCount,
+  formatMessageTimestamp,
 } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import {
@@ -125,6 +126,23 @@ describe("App", () => {
     expect(formatMessageCount(2)).toBe("2 messages");
   });
 
+  it("formats Message timestamps as stable local clock time", () => {
+    const sentAt = new Date("2026-08-22T12:34:56.789Z");
+    const today = formatMessageTimestamp(
+      sentAt.toISOString(),
+      new Date(sentAt),
+    );
+    expect(today.compact).toMatch(/^\d{2}:\d{2}$/);
+    expect(today.full).toMatch(/:\d{2}/);
+
+    const historical = formatMessageTimestamp(
+      "2026-07-21T12:34:56.789Z",
+      new Date(sentAt),
+    );
+    expect(historical.compact).toMatch(/\d{2}:\d{2}$/);
+    expect(historical.compact).not.toBe(today.compact);
+  });
+
   it("filters Discussions by topic without changing their order", () => {
     const discussions = [
       {
@@ -196,6 +214,7 @@ describe("App", () => {
           id: 1,
           sender_id: 2,
           body: "Historical message",
+          created_at: null,
           references: [],
           mentions: [],
         },
@@ -399,6 +418,7 @@ describe("App", () => {
           id: 1,
           sender_id: 1,
           body: "@OldName **Bold request**\nnext line",
+          created_at: "2026-08-22T12:34:56.789Z",
           references: [
             {
               member_id: 2,
@@ -416,6 +436,7 @@ describe("App", () => {
           id: 2,
           sender_id: 1,
           body: "@OldGone",
+          created_at: null,
           references: [
             {
               member_id: 3,

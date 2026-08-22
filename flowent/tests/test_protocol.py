@@ -1,6 +1,7 @@
 import io
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from threading import Thread
 
@@ -13,13 +14,19 @@ from flowent.protocol import Dispatcher, JsonLineWriter, serve
 from flowent.todos import AgentTodos
 
 
-def run_requests(*requests: object) -> list[dict[str, object]]:
+def run_requests(
+    *requests: object, message_clock: Callable[[], str] | None = None
+) -> list[dict[str, object]]:
     input_stream = io.StringIO(
         "".join(json.dumps(request) + "\n" for request in requests)
     )
     output_stream = io.StringIO()
 
-    serve(input_stream, output_stream, OrganizationState())
+    serve(
+        input_stream,
+        output_stream,
+        OrganizationState(message_clock=message_clock),
+    )
 
     return [json.loads(line) for line in output_stream.getvalue().splitlines()]
 
@@ -35,8 +42,14 @@ def test_dispatches_mutations_and_returns_complete_snapshot() -> None:
         {
             "id": 3,
             "method": "discussion.send",
-            "params": {"discussion_id": 1, "sender_id": 1, "body": "Begin."},
+            "params": {
+                "discussion_id": 1,
+                "sender_id": 1,
+                "body": "Begin.",
+                "created_at": "1900-01-01T00:00:00.000Z",
+            },
         },
+        message_clock=lambda: "2026-08-22T12:34:56.789Z",
     )
 
     snapshot = responses[-1]["result"]
@@ -47,6 +60,7 @@ def test_dispatches_mutations_and_returns_complete_snapshot() -> None:
             "id": 1,
             "sender_id": 1,
             "body": "Begin.",
+            "created_at": "2026-08-22T12:34:56.789Z",
             "references": [],
             "mentions": [],
         }
@@ -201,7 +215,11 @@ def test_returns_structured_errors_without_stopping_the_stream() -> None:
     )
     output_stream = io.StringIO()
 
-    serve(input_stream, output_stream, OrganizationState())
+    serve(
+        input_stream,
+        output_stream,
+        OrganizationState(),
+    )
 
     responses = [json.loads(line) for line in output_stream.getvalue().splitlines()]
     assert responses[0]["error"]["code"] == "invalid_json"

@@ -6,7 +6,9 @@ from flowent.domain import DomainError, OrganizationState
 
 
 def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
-    state = OrganizationState(tmp_path)
+    state = OrganizationState(
+        tmp_path, message_clock=lambda: "2026-08-22T12:34:56.789Z"
+    )
 
     state.create_agent("Ada")
     state.create_agent("Lin")
@@ -33,6 +35,7 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
                         "id": 1,
                         "sender_id": 1,
                         "body": "Start with the domain model.",
+                        "created_at": "2026-08-22T12:34:56.789Z",
                         "references": [],
                         "mentions": [],
                     },
@@ -40,6 +43,7 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
                         "id": 2,
                         "sender_id": 2,
                         "body": "I will take it.",
+                        "created_at": "2026-08-22T12:34:56.789Z",
                         "references": [],
                         "mentions": [],
                     },
@@ -47,6 +51,105 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
             }
         ],
     }
+
+
+def test_message_timestamps_are_created_only_for_successful_messages() -> None:
+    timestamps = iter(
+        [
+            "2026-08-22T12:00:00.123Z",
+            "2026-08-22T11:59:59.999Z",
+        ]
+    )
+    state = OrganizationState(message_clock=lambda: next(timestamps))
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2])
+
+    with pytest.raises(DomainError, match="Only Discussion Members"):
+        state.send_message(1, 3, "Rejected")
+
+    state.send_message(1, 1, "First")
+    snapshot = state.send_message(1, 2, "Second")
+    messages = snapshot["discussions"][0]["messages"]
+    assert [message["id"] for message in messages] == [1, 2]
+    assert [message["created_at"] for message in messages] == [
+        "2026-08-22T12:00:00.123Z",
+        "2026-08-22T11:59:59.999Z",
+    ]
+
+
+def test_failed_persistence_does_not_leave_a_message_or_consume_its_id() -> None:
+    persisted = {
+        "members": [
+            {"id": 1, "type": "human", "name": "You"},
+            {"id": 2, "type": "agent", "name": "Ada"},
+        ],
+        "discussions": [
+            {
+                "id": 1,
+                "topic": "Work",
+                "member_ids": [1, 2],
+                "messages": [],
+            }
+        ],
+    }
+    timestamps = iter(
+        [
+            "2026-08-22T12:00:00.123Z",
+            "2026-08-22T12:00:01.456Z",
+        ]
+    )
+
+    persistence_available = False
+
+    def persist(_snapshot: dict[str, object]) -> None:
+        if not persistence_available:
+            raise OSError("disk unavailable")
+
+    state = OrganizationState(
+        persisted=persisted,
+        on_persist=persist,
+        message_clock=lambda: next(timestamps),
+    )
+    with pytest.raises(OSError, match="disk unavailable"):
+        state.send_message(1, 1, "Failed")
+    assert state.snapshot()["discussions"][0]["messages"] == []
+
+    persistence_available = True
+    message = state.send_message(1, 1, "Retried")["discussions"][0]["messages"][0]
+    assert message["id"] == 1
+    assert message["created_at"] == "2026-08-22T12:00:01.456Z"
+
+
+def test_legacy_message_timestamp_can_be_missing_but_malformed_is_rejected() -> None:
+    persisted = {
+        "members": [
+            {"id": 1, "type": "human", "name": "You"},
+            {"id": 2, "type": "agent", "name": "Ada"},
+        ],
+        "discussions": [
+            {
+                "id": 1,
+                "topic": "Legacy",
+                "member_ids": [1, 2],
+                "messages": [
+                    {
+                        "id": 1,
+                        "sender_id": 1,
+                        "body": "No original timestamp",
+                        "mentions": [],
+                    }
+                ],
+            }
+        ],
+    }
+
+    restored = OrganizationState(persisted=persisted)
+    assert restored.snapshot()["discussions"][0]["messages"][0]["created_at"] is None
+
+    persisted["discussions"][0]["messages"][0]["created_at"] = "not-a-time"
+    with pytest.raises(RuntimeError, match="created_at is invalid"):
+        OrganizationState(persisted=persisted)
 
 
 def test_discussion_requires_another_existing_member() -> None:
@@ -388,7 +491,7 @@ def test_deleting_discussion_removes_its_messages() -> None:
 
 
 def test_deleting_agent_preserves_discussions_and_messages() -> None:
-    state = OrganizationState()
+    state = OrganizationState(message_clock=lambda: "2026-08-22T12:34:56.789Z")
     state.create_agent("Ada")
     state.create_agent("Lin")
     state.create_discussion("Shared", 1, [2, 3])
@@ -409,6 +512,7 @@ def test_deleting_agent_preserves_discussions_and_messages() -> None:
             "id": 1,
             "sender_id": 2,
             "body": "Keep my message",
+            "created_at": "2026-08-22T12:34:56.789Z",
             "references": [],
             "mentions": [],
         }

@@ -15,7 +15,7 @@ from flowent.history import RunStatus
 from flowent.mentions import MentionName, find_mentions, mention_syntax_issues
 from flowent.todos import TodoStatus
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -69,6 +69,8 @@ class SQLiteStore:
                     self._migrate_version_nine(connection)
                 elif version == 10:
                     self._migrate_version_ten(connection)
+                elif version == 11:
+                    self._migrate_version_eleven(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
@@ -125,6 +127,7 @@ class SQLiteStore:
                 "INSERT INTO application_state (id, organization_saved) VALUES (1, 0)"
             )
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -170,6 +173,7 @@ class SQLiteStore:
                 id INTEGER NOT NULL,
                 sender_id INTEGER NOT NULL,
                 body TEXT NOT NULL,
+                created_at TEXT,
                 PRIMARY KEY (discussion_id, id),
                 FOREIGN KEY (discussion_id) REFERENCES discussions (id)
                     ON DELETE CASCADE,
@@ -488,6 +492,7 @@ class SQLiteStore:
             if model_config is not None:
                 self._write_model_config(connection, model_config)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_two(self, connection: sqlite3.Connection) -> None:
@@ -514,6 +519,7 @@ class SQLiteStore:
             self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_three(self, connection: sqlite3.Connection) -> None:
@@ -524,6 +530,7 @@ class SQLiteStore:
             self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_four(self, connection: sqlite3.Connection) -> None:
@@ -534,6 +541,7 @@ class SQLiteStore:
             self._add_model_context_window_column(connection)
             self._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -550,6 +558,7 @@ class SQLiteStore:
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -560,6 +569,7 @@ class SQLiteStore:
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -569,6 +579,7 @@ class SQLiteStore:
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -577,6 +588,7 @@ class SQLiteStore:
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -584,13 +596,29 @@ class SQLiteStore:
         with SQLiteStore._migration_transaction(connection):
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_ten(connection: sqlite3.Connection) -> None:
         with SQLiteStore._migration_transaction(connection):
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._add_message_created_at_column(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_eleven(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            SQLiteStore._add_message_created_at_column(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _add_message_created_at_column(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(messages)")
+        }
+        if "created_at" not in columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN created_at TEXT")
 
     @staticmethod
     def _add_member_deleted_column(connection: sqlite3.Connection) -> None:
@@ -799,7 +827,7 @@ class SQLiteStore:
                 messages: list[dict[str, Any]] = []
                 for message in connection.execute(
                     """
-                    SELECT id, sender_id, body FROM messages
+                    SELECT id, sender_id, body, created_at FROM messages
                     WHERE discussion_id = ? ORDER BY id
                     """,
                     (discussion_id,),
@@ -846,6 +874,7 @@ class SQLiteStore:
                             "id": message["id"],
                             "sender_id": message["sender_id"],
                             "body": message["body"],
+                            "created_at": message["created_at"],
                             "references": references,
                             "mentions": mentions,
                         }
@@ -918,14 +947,15 @@ class SQLiteStore:
                 connection.execute(
                     """
                     INSERT INTO messages
-                        (discussion_id, id, sender_id, body)
-                    VALUES (?, ?, ?, ?)
+                        (discussion_id, id, sender_id, body, created_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         discussion_id,
                         message["id"],
                         message["sender_id"],
                         message["body"],
+                        message.get("created_at"),
                     ),
                 )
                 for position, reference in enumerate(message.get("references", [])):

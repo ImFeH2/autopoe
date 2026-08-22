@@ -207,6 +207,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
     state.create_agent("Ada")
     state.create_discussion("Persistent work", 1, [2])
     state.send_message(1, 1, "@Ada Continue after restart")
+    created_at = state.snapshot()["discussions"][0]["messages"][0]["created_at"]
     state.read_discussion(2, 1, end_message_id=1)
 
     restored = persisted_state(store, working_directory)
@@ -220,6 +221,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
             "id": 1,
             "sender_id": 1,
             "body": "@Ada Continue after restart",
+            "created_at": created_at,
             "references": [
                 {
                     "member_id": 2,
@@ -285,6 +287,7 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
     state.send_message(1, 2, "Keep this")
+    created_at = state.snapshot()["discussions"][0]["messages"][0]["created_at"]
 
     state.delete_agent(2)
     restored = persisted_state(store, tmp_path)
@@ -300,6 +303,7 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
                     "id": 1,
                     "sender_id": 2,
                     "body": "Keep this",
+                    "created_at": created_at,
                     "references": [],
                     "mentions": [],
                 }
@@ -470,6 +474,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
             "id": 1,
             "sender_id": 1,
             "body": "Continue globally",
+            "created_at": None,
             "references": [
                 {
                     "member_id": 2,
@@ -704,12 +709,42 @@ def test_fresh_schema_creates_final_reference_table_before_version(
     store = SQLiteStore(tmp_path / "data")
     connection = sqlite3.connect(store.path)
     try:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'mention_references'"
         ).fetchone() == ("mention_references",)
     finally:
         connection.close()
+
+
+def test_migrates_version_eleven_without_fabricating_legacy_timestamps(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Legacy")
+
+    connection = sqlite3.connect(store.path)
+    connection.execute("ALTER TABLE messages DROP COLUMN created_at")
+    connection.execute("PRAGMA user_version = 11")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+    restored = persisted_state(migrated, tmp_path)
+    legacy = restored.snapshot()["discussions"][0]["messages"][0]
+    assert legacy["created_at"] is None
+
+    snapshot = restored.send_message(1, 2, "New")
+    messages = snapshot["discussions"][0]["messages"]
+    assert [message["id"] for message in messages] == [1, 2]
+    assert messages[1]["created_at"].endswith("Z")
+
+    reloaded = persisted_state(SQLiteStore(data), tmp_path).snapshot()
+    assert reloaded["discussions"][0]["messages"] == messages
 
 
 def test_migrates_version_ten_and_backfills_all_reference_occurrences(

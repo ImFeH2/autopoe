@@ -657,3 +657,38 @@ button.mention-reference:focus-visible {
   line-height: 1.4;
   padding: 0.5rem 0.625rem;
 }
+
+.message-timestamp {
+  position: relative;
+  cursor: default;
+}
+
+.message-timestamp::after {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + 6px);
+  width: max-content;
+  max-width: min(320px, 80vw);
+  padding: 5px 7px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-subtle);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-text-primary);
+  content: attr(data-full-time);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.message-timestamp:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}
