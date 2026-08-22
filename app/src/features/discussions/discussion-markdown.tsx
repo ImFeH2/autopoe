@@ -91,21 +91,41 @@ function referenceClassName(reference: MentionReference): string {
     .join(" ");
 }
 
+export function mentionReferenceTriggerKey(
+  messageId: number,
+  referenceIndex: number,
+  start: number,
+  end: number,
+): string {
+  return `discussion-message:${messageId}:reference:${referenceIndex}:${start}:${end}`;
+}
+
 export function createMentionReferencePlugin(
   body: string,
   references: MentionReference[],
   members: readonly Pick<Member, "id" | "name">[],
+  messageId?: number,
 ) {
   const activeMembersById = new Map(
     members.map((member) => [member.id, member] as const),
   );
   const positioned = references
-    .flatMap((reference) => {
+    .flatMap((reference, referenceIndex) => {
       if (reference.start === null || reference.end === null) {
         return [];
       }
       const range = codePointRangeToUtf16(body, reference.start, reference.end);
-      return range ? [{ ...reference, ...range }] : [];
+      return range
+        ? [
+            {
+              ...reference,
+              ...range,
+              referenceEnd: reference.end,
+              referenceIndex,
+              referenceStart: reference.start,
+            },
+          ]
+        : [];
     })
     .sort((left, right) => left.start - right.start || left.end - right.end);
 
@@ -153,6 +173,15 @@ export function createMentionReferencePlugin(
           const activeMember = activeMembersById.get(reference.member_id);
           const active = !reference.deleted && Boolean(activeMember);
           const displayName = activeMember?.name ?? reference.name;
+          const triggerKey =
+            messageId === undefined
+              ? undefined
+              : mentionReferenceTriggerKey(
+                  messageId,
+                  reference.referenceIndex,
+                  reference.referenceStart,
+                  reference.referenceEnd,
+                );
           const stateLabel = reference.notified
             ? "Notified"
             : reference.in_discussion
@@ -180,6 +209,9 @@ export function createMentionReferencePlugin(
                   ? {
                       "aria-label": `Open ${displayName} in Members`,
                       "data-member-id": reference.member_id,
+                      ...(triggerKey
+                        ? { "data-member-navigation-key": triggerKey }
+                        : {}),
                       type: "button",
                     }
                   : reference.deleted
@@ -205,7 +237,8 @@ export function createMentionReferencePlugin(
 export type DiscussionMarkdownProps = {
   body: string;
   members?: readonly Pick<Member, "id" | "name">[];
-  onOpenMember?: (memberId: number) => void;
+  messageId?: number;
+  onOpenMember?: (memberId: number, triggerKey: string) => void;
   references: MentionReference[];
 };
 
@@ -216,6 +249,7 @@ export function areDiscussionMarkdownPropsEqual(
   return (
     previous.body === next.body &&
     previous.onOpenMember === next.onOpenMember &&
+    previous.messageId === next.messageId &&
     (previous.members?.length ?? 0) === (next.members?.length ?? 0) &&
     (previous.members ?? []).every((member, index) => {
       const candidate = next.members?.[index];
@@ -240,6 +274,7 @@ export function areDiscussionMarkdownPropsEqual(
 export const DiscussionMarkdown = memo(function DiscussionMarkdown({
   body,
   members = [],
+  messageId,
   onOpenMember,
   references,
 }: DiscussionMarkdownProps) {
@@ -253,12 +288,15 @@ export const DiscussionMarkdown = memo(function DiscussionMarkdown({
           ),
           button: ({ children, node, ...props }) => {
             const memberId = Number(node?.properties["data-member-id"]);
+            const triggerKey = String(
+              node?.properties["data-member-navigation-key"] ?? "",
+            );
             return (
               <button
                 {...props}
                 onClick={() => {
-                  if (Number.isSafeInteger(memberId)) {
-                    onOpenMember?.(memberId);
+                  if (Number.isSafeInteger(memberId) && triggerKey) {
+                    onOpenMember?.(memberId, triggerKey);
                   }
                 }}
               >
@@ -277,7 +315,7 @@ export const DiscussionMarkdown = memo(function DiscussionMarkdown({
         remarkPlugins={[
           remarkGfm,
           remarkBreaks,
-          createMentionReferencePlugin(body, references, members),
+          createMentionReferencePlugin(body, references, members, messageId),
         ]}
         skipHtml
         urlTransform={(value) => safeDiscussionLink(value) ?? ""}

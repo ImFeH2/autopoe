@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import App from "@/App";
@@ -233,6 +234,13 @@ describe("App", () => {
 
     expect(markup).toContain("Discussion members:");
     expect(markup).toContain('aria-label="You, Human"');
+    expect(markup).toContain(
+      'data-member-navigation-key="discussion:1:member:1"',
+    );
+    expect(markup).toContain(
+      'data-member-navigation-key="discussion:1:member:2"',
+    );
+    expect(markup).toContain('data-discussion-focus-id="1" tabindex="-1"');
     expect(markup).toMatch(
       /<button[^>]*aria-label="You, Human"[^>]*class="discussion-member-avatar discussion-member-avatar--human"/u,
     );
@@ -247,6 +255,13 @@ describe("App", () => {
     expect(markup.match(/data-agent-status="error"/g)).toHaveLength(1);
     expect(markup).toContain('class="message-avatar" aria-hidden="true"');
     expect(markup).not.toContain("message-avatar--running");
+    const styles = readFileSync(
+      new URL("./features/discussions/discussions.css", import.meta.url),
+      "utf8",
+    );
+    expect(styles).toMatch(/\.discussion-member-avatar:hover\s*\{/u);
+    expect(styles).toMatch(/\.discussion-member-avatar:focus-visible\s*\{/u);
+    expect(styles).toMatch(/\.discussion-title:focus-visible\s*\{/u);
   });
 
   it("renders every member and focusable Agent status in crowded Discussions", () => {
@@ -499,7 +514,9 @@ describe("App", () => {
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('aria-label="Ada details"');
     expect(markup).toContain('aria-label="Pause Ada"');
-    expect(markup).toContain('aria-label="Back to Discussion"');
+    expect(markup).toContain('aria-label="Back to Repository work discussion"');
+    expect(markup).toContain('data-member-return-focus="true"');
+    expect(markup).toContain('data-member-overview-focus=""');
     expect(markup).toContain('title="Return to Repository work"');
     expect(markup).not.toContain('aria-label="Resume Ada"');
     expect(markup).toContain("Agent · IDLE");
@@ -702,7 +719,9 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Open You"');
     expect(markup).toContain('aria-label="You details"');
     expect(markup).toContain('aria-label="Human details"');
-    expect(markup).toContain('aria-label="Back to Discussion"');
+    expect(markup).toContain('aria-label="Back to Repository work discussion"');
+    expect(markup).toContain('data-member-return-focus="true"');
+    expect(markup).toContain('data-member-overview-focus="true"');
     expect(markup).toContain('title="Return to Repository work"');
     expect(markup).toContain(">Overview<");
     expect(markup).toContain(">Human<");
@@ -712,6 +731,34 @@ describe("App", () => {
     expect(markup).not.toContain(">History<");
     expect(markup).not.toContain("StatusIndicator");
     expect(markup).not.toContain('aria-label="Delete You"');
+  });
+
+  it("uses a stable Back accessible-name fallback without a source topic", () => {
+    const human = { id: 1, type: "human" as const, name: "Current Viewer" };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <MembersPage
+          agentName=""
+          disabled={false}
+          error={null}
+          isCreatingAgent={false}
+          members={[human]}
+          onAgentDialogOpenChange={() => undefined}
+          onAgentNameChange={() => undefined}
+          onBackToDiscussion={() => undefined}
+          onCreateAgent={() => undefined}
+          onDeleteAgent={() => undefined}
+          onPauseAgent={() => undefined}
+          onResumeAgent={() => undefined}
+          onSelectMember={() => undefined}
+          selectedMember={human}
+          sourceDiscussionTopic="   "
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Back to source discussion"');
+    expect(markup).not.toContain('aria-label="Back to Discussion"');
   });
 
   it("renders production controls with accessible native semantics", () => {

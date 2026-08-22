@@ -1,21 +1,53 @@
 import { $, $$, browser, expect } from "@wdio/globals";
-import { describe, it } from "mocha";
-import { createAgent, waitForWorkspace } from "../support/app.mjs";
+import { before, beforeEach, describe, it } from "mocha";
 
-async function createCrowdAgent(name) {
+async function createLocalAgent(name) {
   await $("aria/Members").click();
-  await $("aria/New Agent").click();
-  const form = await $("aria/Create Agent");
+  const newAgent = await $('button[aria-label="New Agent"]');
+  await newAgent.waitForExist();
+  await newAgent.waitForDisplayed();
+  await newAgent.waitForEnabled();
+  await newAgent.click();
+  const form = await $('form[aria-label="Create Agent"]');
   await form.waitForDisplayed();
   await form.$("#agent-name").setValue(name);
   await form.$("button=Create").click();
   await $(`aria/${name} details`).waitForDisplayed();
 }
 
+async function readMemberNavigationKey(element) {
+  const key = await element.getAttribute("data-member-navigation-key");
+  expect(key).toBeTruthy();
+  return key;
+}
+
+async function findCurrentMemberNavigationTrigger(key) {
+  const trigger = await $(`[data-member-navigation-key="${key}"]`);
+  await trigger.waitForExist();
+  await trigger.waitForDisplayed();
+  return trigger;
+}
+
 describe("Discussions", () => {
+  before(async () => {
+    await expect($("aria/Workspace")).toBeDisplayed();
+    for (const selector of [
+      'button[aria-label="Members"]',
+      'button[aria-label="Discussions"]',
+    ]) {
+      const navigationButton = await $(selector);
+      await navigationButton.waitForExist();
+      await expect(navigationButton).toBeDisplayed();
+      await expect(navigationButton).toBeEnabled();
+    }
+  });
+
+  beforeEach(async () => {
+    await browser.setWindowSize(1440, 900);
+  });
+
   it("creates a Discussion and sends a message without activating an Agent", async () => {
-    await waitForWorkspace();
-    await createAgent("Ada");
+    await createLocalAgent("Ada");
     await $("aria/Discussions").click();
     await $("aria/New discussion").click();
 
@@ -46,14 +78,12 @@ describe("Discussions", () => {
   });
 
   it("keeps crowded member status avatars stable in a narrow viewport", async () => {
-    await waitForWorkspace();
-
     const agentNames = Array.from(
       { length: 24 },
       (_, index) => `Crowd${String(index + 1).padStart(2, "0")}`,
     );
     for (const name of agentNames) {
-      await createCrowdAgent(name);
+      await createLocalAgent(name);
     }
 
     await browser.setWindowSize(1200, 760);
@@ -164,8 +194,7 @@ describe("Discussions", () => {
   }).timeout(180_000);
 
   it("derives a Mention from manually typed exact @Name text", async () => {
-    await waitForWorkspace();
-    await createAgent("Lin");
+    await createLocalAgent("Lin");
     await $("aria/Discussions").click();
     await $("aria/New discussion").click();
 
@@ -185,10 +214,9 @@ describe("Discussions", () => {
     );
   });
   it("navigates structured identities and preserves unavailable references", async () => {
-    await waitForWorkspace();
-    await createCrowdAgent("NavAda");
-    await createCrowdAgent("NavLin");
-    await createCrowdAgent("NavGone");
+    await createLocalAgent("NavAda");
+    await createLocalAgent("NavLin");
+    await createLocalAgent("NavGone");
 
     await $("aria/Discussions").click();
     await $("aria/New discussion").click();
@@ -200,6 +228,7 @@ describe("Discussions", () => {
     await expect($("h2=Identity navigation")).toBeDisplayed();
 
     const humanAvatar = await $("aria/You, Human");
+    const humanNavigationKey = await readMemberNavigationKey(humanAvatar);
     await browser.execute(() => {
       document.querySelector('[aria-label="You, Human"]')?.focus();
     });
@@ -214,6 +243,7 @@ describe("Discussions", () => {
         );
       }),
     ).toBe(true);
+    // Click exercises navigation/focus state only; keyboard activation is reviewed physically.
     await humanAvatar.click();
     const humanDetails = await $("aria/You details");
     await humanDetails.waitForDisplayed();
@@ -222,10 +252,16 @@ describe("Discussions", () => {
     await expect(humanDetails).not.toHaveText(
       expect.stringContaining("Member ID"),
     );
-    await $("aria/Back to Discussion").click();
+    const humanBack = await $("aria/Back to Identity navigation discussion");
+    await expect(humanBack).toBeFocused();
+    await humanBack.click();
     await expect($("h2=Identity navigation")).toBeDisplayed();
+    const restoredHumanAvatar =
+      await findCurrentMemberNavigationTrigger(humanNavigationKey);
+    await expect(restoredHumanAvatar).toBeFocused();
 
     const agentAvatar = await $("aria/NavAda, Agent status: Idle");
+    const agentNavigationKey = await readMemberNavigationKey(agentAvatar);
     await browser.execute(() => {
       document
         .querySelector('[aria-label="NavAda, Agent status: Idle"]')
@@ -235,32 +271,78 @@ describe("Discussions", () => {
     await agentAvatar.click();
     await $("aria/NavAda details").waitForDisplayed();
     await expect($("[role=tab][aria-selected=true]")).toHaveText("Overview");
-    await $("aria/Back to Discussion").click();
+    const agentBack = await $("aria/Back to Identity navigation discussion");
+    await expect(agentBack).toBeFocused();
+    await agentBack.click();
+    await expect($("h2=Identity navigation")).toBeDisplayed();
+    const restoredAgentAvatar =
+      await findCurrentMemberNavigationTrigger(agentNavigationKey);
+    await expect(restoredAgentAvatar).toBeFocused();
 
     const composer = await $("aria/Send Message");
     await composer
       .$("aria/Message")
-      .setValue("@NavAda ask @NavLin and @NavGone; @Plain stays text.");
+      .setValue(
+        "@NavAda ask @NavLin and @NavLin with @NavGone; @Plain stays text.",
+      );
     await composer.$("button=Send").click();
 
     const adaReference = await $("aria/Open NavAda in Members");
-    const linReference = await $("aria/Open NavLin in Members");
+    const linReferences = await $$("aria/Open NavLin in Members");
+    const secondLinReference = linReferences[1];
     const goneReference = await $("aria/Open NavGone in Members");
     await adaReference.waitForDisplayed();
-    await linReference.waitForDisplayed();
+    const adaNavigationKey = await readMemberNavigationKey(adaReference);
+    await expect(linReferences).toBeElementsArrayOfSize(2);
+    await secondLinReference.waitForDisplayed();
+    const secondLinNavigationKey =
+      await readMemberNavigationKey(secondLinReference);
     await goneReference.waitForDisplayed();
     await expect($$("aria/Open Plain in Members")).toBeElementsArrayOfSize(0);
     await expect($("p*=Plain stays text")).toBeDisplayed();
     const mentionCount = (await $$(".mention-status")).length;
 
     await browser.execute(() => {
-      document.querySelector('[aria-label="Open NavLin in Members"]')?.focus();
+      document
+        .querySelectorAll('[aria-label="Open NavLin in Members"]')[1]
+        ?.focus();
     });
-    await expect(linReference).toBeFocused();
-    await linReference.click();
+    await expect(secondLinReference).toBeFocused();
+    await secondLinReference.click();
     await $("aria/NavLin details").waitForDisplayed();
-    await $("aria/Back to Discussion").click();
+    const mentionBack = await $("aria/Back to Identity navigation discussion");
+    await expect(mentionBack).toBeFocused();
+    await mentionBack.click();
+    await expect($("h2=Identity navigation")).toBeDisplayed();
+    const restoredSecondLinReference = await findCurrentMemberNavigationTrigger(
+      secondLinNavigationKey,
+    );
+    await expect(restoredSecondLinReference).toBeFocused();
     await expect($$(".mention-status")).toBeElementsArrayOfSize(mentionCount);
+
+    const currentAdaReference =
+      await findCurrentMemberNavigationTrigger(adaNavigationKey);
+    const currentAdaNavigationKey =
+      await readMemberNavigationKey(currentAdaReference);
+    expect(currentAdaNavigationKey).toBe(adaNavigationKey);
+    await currentAdaReference.click();
+    const fallbackBack = await $("aria/Back to Identity navigation discussion");
+    await expect(fallbackBack).toBeFocused();
+    await browser.execute(() => {
+      const observer = new MutationObserver(() => {
+        const trigger = document.querySelector(
+          '[aria-label="Open NavAda in Members"]',
+        );
+        if (trigger) {
+          trigger.remove();
+          observer.disconnect();
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    });
+    await fallbackBack.click();
+    const discussionTitle = await $("h2=Identity navigation");
+    await expect(discussionTitle).toBeFocused();
 
     await $("aria/Open NavGone in Members").click();
     await $("aria/NavGone details").waitForDisplayed();

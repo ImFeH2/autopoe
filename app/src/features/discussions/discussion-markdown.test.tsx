@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   areDiscussionMarkdownPropsEqual,
   DiscussionMarkdown,
+  mentionReferenceTriggerKey,
   safeDiscussionLink,
 } from "./discussion-markdown";
 
@@ -18,6 +19,7 @@ function render(
     <DiscussionMarkdown
       body={body}
       members={members}
+      messageId={7}
       onOpenMember={() => undefined}
       references={references}
     />,
@@ -194,6 +196,9 @@ describe("DiscussionMarkdown", () => {
     expect(markup).toContain("mention-reference--notified");
     expect(markup).toContain('aria-label="Open Ada in Members"');
     expect(markup).toContain('data-member-id="2"');
+    expect(markup).toContain(
+      `data-member-navigation-key="${mentionReferenceTriggerKey(7, 0, 8, 12)}"`,
+    );
     expect(markup).toContain(">@Ada</button> now</strong>");
   });
 
@@ -297,6 +302,13 @@ describe("DiscussionMarkdown", () => {
     );
 
     expect(markup.match(/data-member-id="2"/gu)).toHaveLength(2);
+    expect(markup.match(/data-member-navigation-key=/gu)).toHaveLength(2);
+    expect(markup).toContain(
+      `data-member-navigation-key="${mentionReferenceTriggerKey(7, 0, 0, 4)}"`,
+    );
+    expect(markup).toContain(
+      `data-member-navigation-key="${mentionReferenceTriggerKey(7, 1, 10, 14)}"`,
+    );
     expect(markup.match(/>@Current<\/button>/gu)).toHaveLength(2);
     expect(markup).toContain("@Current</button> then <button");
   });
@@ -360,12 +372,14 @@ describe("DiscussionMarkdown", () => {
         {
           body: "same",
           members: [{ id: 2, name: "Ada" }],
+          messageId: 7,
           onOpenMember,
           references: [],
         },
         {
           body: "same",
           members: [{ id: 2, name: "Ada" }],
+          messageId: 7,
           onOpenMember,
           references: [],
         },
@@ -376,12 +390,14 @@ describe("DiscussionMarkdown", () => {
         {
           body: "before",
           members: [{ id: 2, name: "Ada" }],
+          messageId: 7,
           onOpenMember,
           references: [],
         },
         {
           body: "after",
           members: [{ id: 2, name: "Ada" }],
+          messageId: 7,
           onOpenMember,
           references: [],
         },
@@ -392,10 +408,35 @@ describe("DiscussionMarkdown", () => {
         {
           body: "same",
           members: [{ id: 2, name: "Ada" }],
+          messageId: 7,
           onOpenMember,
           references: [],
         },
-        { body: "same", members: [], onOpenMember, references: [] },
+        {
+          body: "same",
+          members: [],
+          messageId: 7,
+          onOpenMember,
+          references: [],
+        },
+      ),
+    ).toBe(false);
+    expect(
+      areDiscussionMarkdownPropsEqual(
+        {
+          body: "same",
+          members: [],
+          messageId: 7,
+          onOpenMember,
+          references: [],
+        },
+        {
+          body: "same",
+          members: [],
+          messageId: 8,
+          onOpenMember,
+          references: [],
+        },
       ),
     ).toBe(false);
   });

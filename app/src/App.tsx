@@ -18,6 +18,11 @@ import {
   type OrganizationSnapshot,
 } from "@/lib/backend";
 
+type DiscussionSource = {
+  discussionId: number;
+  triggerKey: string;
+};
+
 type RequestState =
   | { status: "loading" }
   | { status: "ready"; snapshot: OrganizationSnapshot }
@@ -46,9 +51,8 @@ function App() {
     number | null
   >(null);
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null);
-  const [sourceDiscussionId, setSourceDiscussionId] = useState<number | null>(
-    null,
-  );
+  const [discussionSource, setDiscussionSource] =
+    useState<DiscussionSource | null>(null);
   const [workspaceView, setWorkspaceView] =
     useState<WorkspaceView>("discussions");
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
@@ -66,6 +70,8 @@ function App() {
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const restoreMessageFocusRef = useRef(false);
   const focusMessageAfterDialogRef = useRef(false);
+  const focusMemberDetailRef = useRef(false);
+  const restoreDiscussionFocusRef = useRef<DiscussionSource | null>(null);
   const selectedAgentId =
     requestState.status === "ready" &&
     requestState.snapshot.members.find(
@@ -74,8 +80,10 @@ function App() {
       ? selectedMemberId
       : null;
   const openMemberFromDiscussion = useCallback(
-    (memberId: number, discussionId: number) => {
-      setSourceDiscussionId(discussionId);
+    (memberId: number, discussionId: number, triggerKey: string) => {
+      focusMemberDetailRef.current = true;
+      restoreDiscussionFocusRef.current = null;
+      setDiscussionSource({ discussionId, triggerKey });
       setSelectedMemberId(memberId);
       setWorkspaceView("members");
       setIsCreatingAgent(false);
@@ -210,14 +218,67 @@ function App() {
   useEffect(() => {
     if (
       requestState.status === "ready" &&
-      sourceDiscussionId !== null &&
+      discussionSource !== null &&
       !requestState.snapshot.discussions.some(
-        (discussion) => discussion.id === sourceDiscussionId,
+        (discussion) => discussion.id === discussionSource.discussionId,
       )
     ) {
-      setSourceDiscussionId(null);
+      focusMemberDetailRef.current = workspaceView === "members";
+      setDiscussionSource(null);
     }
-  }, [requestState, sourceDiscussionId]);
+  }, [discussionSource, requestState, workspaceView]);
+
+  useEffect(() => {
+    if (
+      workspaceView !== "members" ||
+      selectedMemberId === null ||
+      !focusMemberDetailRef.current
+    ) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const back = discussionSource
+        ? document.querySelector<HTMLElement>("[data-member-return-focus]")
+        : null;
+      const target =
+        back ??
+        document.querySelector<HTMLElement>("[data-member-overview-focus]");
+      if (target) {
+        focusMemberDetailRef.current = false;
+        target.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [discussionSource, selectedMemberId, workspaceView]);
+
+  useEffect(() => {
+    const source = restoreDiscussionFocusRef.current;
+    if (
+      workspaceView !== "discussions" ||
+      source === null ||
+      selectedDiscussionId !== source.discussionId
+    ) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const trigger = [
+        ...document.querySelectorAll<HTMLElement>(
+          "[data-member-navigation-key]",
+        ),
+      ].find(
+        (element) => element.dataset.memberNavigationKey === source.triggerKey,
+      );
+      const fallback = document.querySelector<HTMLElement>(
+        `[data-discussion-focus-id="${source.discussionId}"]`,
+      );
+      const target = trigger ?? fallback;
+      if (target) {
+        restoreDiscussionFocusRef.current = null;
+        target.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedDiscussionId, workspaceView]);
 
   if (requestState.status === "loading") {
     return <StatusPage label="Starting Flowent" />;
@@ -235,7 +296,7 @@ function App() {
     (member) => member.id === selectedMemberId,
   );
   const sourceDiscussion = snapshot.discussions.find(
-    (discussion) => discussion.id === sourceDiscussionId,
+    (discussion) => discussion.id === discussionSource?.discussionId,
   );
 
   function commit(nextSnapshot: OrganizationSnapshot) {
@@ -328,8 +389,10 @@ function App() {
       setMessageBody("");
       setMessageMentions([]);
     }
-    if (nextSnapshot && sourceDiscussionId === discussionId) {
-      setSourceDiscussionId(null);
+    if (nextSnapshot && discussionSource?.discussionId === discussionId) {
+      focusMemberDetailRef.current = workspaceView === "members";
+      restoreDiscussionFocusRef.current = null;
+      setDiscussionSource(null);
     }
   }
 
@@ -386,7 +449,9 @@ function App() {
   }
 
   function selectDiscussion(discussionId: number) {
-    setSourceDiscussionId(null);
+    focusMemberDetailRef.current = false;
+    restoreDiscussionFocusRef.current = null;
+    setDiscussionSource(null);
     setSelectedDiscussionId(discussionId);
     setWorkspaceView("discussions");
     setIsCreatingDiscussion(false);
@@ -396,7 +461,9 @@ function App() {
   }
 
   function selectWorkspaceView(view: WorkspaceView) {
-    setSourceDiscussionId(null);
+    focusMemberDetailRef.current = false;
+    restoreDiscussionFocusRef.current = null;
+    setDiscussionSource(null);
     setWorkspaceView(view);
     setIsCreatingAgent(false);
     setIsCreatingDiscussion(false);
@@ -405,13 +472,15 @@ function App() {
   }
 
   function returnToSourceDiscussion() {
-    if (!sourceDiscussion) {
-      setSourceDiscussionId(null);
+    if (!sourceDiscussion || !discussionSource) {
+      focusMemberDetailRef.current = true;
+      setDiscussionSource(null);
       return;
     }
+    restoreDiscussionFocusRef.current = discussionSource;
     setSelectedDiscussionId(sourceDiscussion.id);
     setWorkspaceView("discussions");
-    setSourceDiscussionId(null);
+    setDiscussionSource(null);
     setIsCreatingAgent(false);
   }
 

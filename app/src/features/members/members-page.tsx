@@ -259,15 +259,15 @@ function DiscussionReturnButton({
   onBackToDiscussion?: () => void;
   sourceDiscussionTopic?: string;
 }) {
+  const topic = sourceDiscussionTopic?.trim();
   return onBackToDiscussion ? (
     <Button
-      aria-label="Back to Discussion"
-      onClick={onBackToDiscussion}
-      title={
-        sourceDiscussionTopic
-          ? `Return to ${sourceDiscussionTopic}`
-          : "Return to source Discussion"
+      aria-label={
+        topic ? `Back to ${topic} discussion` : "Back to source discussion"
       }
+      data-member-return-focus
+      onClick={onBackToDiscussion}
+      title={topic ? `Return to ${topic}` : "Return to source Discussion"}
       variant="quiet"
     >
       Back to Discussion
@@ -312,6 +312,7 @@ function HumanDetails({
         <button
           aria-controls={`human-${human.id}-overview-panel`}
           aria-selected="true"
+          data-member-overview-focus
           id={`human-${human.id}-overview-tab`}
           role="tab"
           type="button"
@@ -414,6 +415,7 @@ function AgentDetails({
           <button
             aria-controls={`agent-${agent.id}-${value}-panel`}
             aria-selected={tab === value}
+            data-member-overview-focus={value === "overview" ? "" : undefined}
             id={`agent-${agent.id}-${value}-tab`}
             key={value}
             onClick={() => setTab(value)}

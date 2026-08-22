@@ -161,6 +161,12 @@
   line-height: 26px;
 }
 
+.discussion-title:focus-visible {
+  border-radius: 4px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .discussion-member-avatars {
   display: flex;
   min-height: 36px;
@@ -195,6 +201,16 @@
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    filter 120ms ease;
+}
+
+.discussion-member-avatar:hover {
+  border-color: var(--color-accent-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 24%, transparent);
+  filter: brightness(1.08);
 }
 
 .discussion-member-avatar:focus-visible {

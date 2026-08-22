@@ -62,7 +62,11 @@ type DiscussionsPageProps = {
   onCreateAgent: () => void;
   onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
-  onOpenMember: (memberId: number, discussionId: number) => void;
+  onOpenMember: (
+    memberId: number,
+    discussionId: number,
+    triggerKey: string,
+  ) => void;
   onSelectDiscussion: (discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
@@ -373,22 +377,27 @@ const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
 function DiscussionMemberAvatar({
   member,
   onOpenMember,
+  triggerKey,
 }: {
   member: Member;
-  onOpenMember: (memberId: number) => void;
+  onOpenMember: (memberId: number, triggerKey: string) => void;
+  triggerKey: string;
 }) {
   const initial = member.name.slice(0, 1).toUpperCase();
 
   if (member.type === "human") {
     return (
-      <button
-        aria-label={`${member.name}, Human`}
-        className="discussion-member-avatar discussion-member-avatar--human"
-        onClick={() => onOpenMember(member.id)}
-        type="button"
-      >
-        <span aria-hidden="true">{initial}</span>
-      </button>
+      <Tooltip content={`${member.name} · Human`} side="bottom">
+        <button
+          aria-label={`${member.name}, Human`}
+          className="discussion-member-avatar discussion-member-avatar--human"
+          data-member-navigation-key={triggerKey}
+          onClick={() => onOpenMember(member.id, triggerKey)}
+          type="button"
+        >
+          <span aria-hidden="true">{initial}</span>
+        </button>
+      </Tooltip>
     );
   }
 
@@ -404,7 +413,8 @@ function DiscussionMemberAvatar({
         aria-label={`${member.name}, Agent status: ${statusLabel}`}
         className={`discussion-member-avatar discussion-member-avatar--agent discussion-member-avatar--${status}`}
         data-agent-status={status}
-        onClick={() => onOpenMember(member.id)}
+        data-member-navigation-key={triggerKey}
+        onClick={() => onOpenMember(member.id, triggerKey)}
         type="button"
       >
         <span aria-hidden="true">{initial}</span>
@@ -431,7 +441,11 @@ type DiscussionViewProps = {
   messageMentions: DraftMention[];
   mentionSyntax: MentionSyntax;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
-  onOpenMember: (memberId: number, discussionId: number) => void;
+  onOpenMember: (
+    memberId: number,
+    discussionId: number,
+    triggerKey: string,
+  ) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -454,7 +468,8 @@ function DiscussionView({
     .map((id) => membersById.get(id))
     .filter((member): member is Member => Boolean(member));
   const handleOpenMember = useCallback(
-    (memberId: number) => onOpenMember(memberId, discussion.id),
+    (memberId: number, triggerKey: string) =>
+      onOpenMember(memberId, discussion.id, triggerKey),
     [discussion.id, onOpenMember],
   );
 
@@ -487,7 +502,11 @@ function DiscussionView({
     <>
       <header className="border-border border-b px-6 py-4">
         <div className="flex items-baseline justify-between gap-6">
-          <h2 className="discussion-title m-0 font-semibold">
+          <h2
+            className="discussion-title m-0 font-semibold"
+            data-discussion-focus-id={discussion.id}
+            tabIndex={-1}
+          >
             {discussion.topic}
           </h2>
           <span className="meta-text font-mono text-text-tertiary">
@@ -501,6 +520,7 @@ function DiscussionView({
               key={member.id}
               member={member}
               onOpenMember={handleOpenMember}
+              triggerKey={`discussion:${discussion.id}:member:${member.id}`}
             />
           ))}
         </div>
@@ -539,6 +559,7 @@ function DiscussionView({
                     <DiscussionMarkdown
                       body={message.body}
                       members={members}
+                      messageId={message.id}
                       onOpenMember={handleOpenMember}
                       references={message.references}
                     />
