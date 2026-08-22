@@ -163,17 +163,28 @@
 
 .discussion-member-avatars {
   display: flex;
-  min-height: 32px;
+  min-height: 36px;
+  flex-wrap: wrap;
   align-items: center;
-  margin-top: 7px;
-  padding-left: 3px;
+  gap: 8px;
+  margin-top: 5px;
+  padding: 4px;
+}
+
+.discussion-member-avatar,
+.discussion-member-avatars > .ui-tooltip-trigger {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+}
+
+.discussion-member-avatars > .ui-tooltip-trigger {
+  display: inline-flex;
 }
 
 .discussion-member-avatar {
   position: relative;
   display: grid;
-  width: 28px;
-  height: 28px;
   place-items: center;
   border: 2px solid var(--color-surface);
   border-radius: 50%;
@@ -183,11 +194,6 @@
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
-}
-
-.discussion-member-avatar + .discussion-member-avatar,
-.discussion-member-avatars > .ui-tooltip-trigger + .ui-tooltip-trigger {
-  margin-left: -4px;
 }
 
 .discussion-member-avatar:focus-visible {

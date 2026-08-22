@@ -245,6 +245,66 @@ describe("App", () => {
     expect(markup).not.toContain("message-avatar--running");
   });
 
+  it("renders every member and focusable Agent status in crowded Discussions", () => {
+    const statuses = ["idle", "running", "paused", "pausing"] as const;
+    const agents = Array.from({ length: 24 }, (_, index) => ({
+      id: index + 2,
+      type: "agent" as const,
+      name: `Crowd ${String(index + 1).padStart(2, "0")}`,
+      status: statuses[index % statuses.length],
+    }));
+    const discussion = {
+      id: 1,
+      topic: "Crowded status",
+      member_ids: [1, ...agents.map((agent) => agent.id)],
+      messages: [],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={agents}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, ...agents]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain("You, Human");
+    for (const agent of agents) {
+      const status = discussionAgentStatus(agent.status);
+      const label = status[0].toUpperCase() + status.slice(1);
+      expect(markup).toContain(
+        `aria-label="${agent.name}, Agent status: ${label}"`,
+      );
+    }
+    expect(markup.match(/data-agent-status=/g)).toHaveLength(agents.length);
+    expect(
+      markup.match(
+        /<button[^>]*class="discussion-member-avatar[^>]*data-agent-status=[^>]*type="button"/g,
+      ),
+    ).toHaveLength(agents.length);
+  });
+
   it("renders mention selection inside the Message combobox", () => {
     const agent = {
       id: 2,
