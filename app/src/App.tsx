@@ -387,6 +387,7 @@ function App() {
           <MembersPage
             agentName={agentName}
             disabled={isSaving}
+            discussions={snapshot.discussions}
             error={isCreatingAgent ? mutationError : null}
             history={
               selectedMember?.type === "agent"

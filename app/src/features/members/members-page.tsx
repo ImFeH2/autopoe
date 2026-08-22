@@ -12,8 +12,14 @@ import {
   Tooltip,
   Trash2,
 } from "@/components/ui";
+import { TechnicalDetails } from "@/components/ui/technical-details";
 import { agentStatusTone } from "@/features/agent-status";
-import type { AgentHistory, AgentMember, Member } from "@/lib/backend";
+import type {
+  AgentHistory,
+  AgentMember,
+  Discussion,
+  Member,
+} from "@/lib/backend";
 import { AgentMemoryBrowser } from "./agent-memory-browser";
 import { AgentTodos } from "./agent-todos";
 import { HistoryBlock } from "./history-block";
@@ -26,6 +32,7 @@ type AgentHistoryState =
 type MembersPageProps = {
   agentName: string;
   disabled: boolean;
+  discussions?: Discussion[];
   error: string | null;
   history?: AgentHistoryState;
   isCreatingAgent: boolean;
@@ -49,6 +56,7 @@ function memberMeta(member: Member) {
 export function MembersPage({
   agentName,
   disabled,
+  discussions = [],
   error,
   history,
   isCreatingAgent,
@@ -226,11 +234,15 @@ export function MembersPage({
             agent={selectedMember}
             key={selectedMember.id}
             disabled={disabled}
+            discussions={discussions}
             history={history ?? { status: "loading" }}
+            members={members}
             onPause={onPauseAgent}
             onResume={onResumeAgent}
           />
-        ) : selectedMember ? null : (
+        ) : selectedMember ? (
+          <HumanDetails human={selectedMember} />
+        ) : (
           <div className="member-detail-empty">
             <p>Select a member</p>
           </div>
@@ -240,16 +252,58 @@ export function MembersPage({
   );
 }
 
+function HumanDetails({
+  human,
+}: {
+  human: Extract<Member, { type: "human" }>;
+}) {
+  return (
+    <section
+      className="member-agent-detail"
+      aria-label={`${human.name} details`}
+    >
+      <header className="member-detail-header">
+        <span className="member-detail-mark" aria-hidden="true">
+          {human.name.slice(0, 1).toUpperCase()}
+        </span>
+        <div className="member-detail-title">
+          <span>Human</span>
+          <h2>{human.name}</h2>
+        </div>
+      </header>
+      <div className="member-detail-body">
+        <section className="member-detail-panel member-detail-overview">
+          <div className="member-detail-summary">
+            <dl className="member-detail-fields">
+              <div>
+                <dt>Type</dt>
+                <dd>Human</dd>
+              </div>
+            </dl>
+            <TechnicalDetails
+              identifiers={[{ label: "Member", value: human.id }]}
+            />
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function AgentDetails({
   agent,
   disabled,
+  discussions,
   history,
+  members,
   onPause,
   onResume,
 }: {
   agent: AgentMember;
   disabled: boolean;
+  discussions: Discussion[];
   history: AgentHistoryState;
+  members: Member[];
   onPause: (agentId: number) => void;
   onResume: (agentId: number) => void;
 }) {
@@ -267,7 +321,7 @@ function AgentDetails({
           {agent.name.slice(0, 1).toUpperCase()}
         </span>
         <div className="member-detail-title">
-          <span>Agent {agent.id}</span>
+          <span>Agent</span>
           <h2>{agent.name}</h2>
         </div>
         <div className="member-detail-controls">
@@ -330,11 +384,10 @@ function AgentDetails({
                   <dt>Type</dt>
                   <dd>Agent</dd>
                 </div>
-                <div>
-                  <dt>Member ID</dt>
-                  <dd>{agent.id}</dd>
-                </div>
               </dl>
+              <TechnicalDetails
+                identifiers={[{ label: "Member", value: agent.id }]}
+              />
               {agent.error ? (
                 <section
                   className="member-detail-error"
@@ -366,7 +419,12 @@ function AgentDetails({
             id={`agent-${agent.id}-history-panel`}
             role="tabpanel"
           >
-            <AgentHistoryView agent={agent} state={history} />
+            <AgentHistoryView
+              agent={agent}
+              discussions={discussions}
+              members={members}
+              state={history}
+            />
           </section>
         ) : null}
       </div>
@@ -376,9 +434,13 @@ function AgentDetails({
 
 function AgentHistoryView({
   agent,
+  discussions,
+  members,
   state,
 }: {
   agent: AgentMember;
+  discussions: Discussion[];
+  members: Member[];
   state: AgentHistoryState;
 }) {
   const viewportRef = useRef<HTMLElement>(null);
@@ -438,7 +500,13 @@ function AgentHistoryView({
             {state.history.runs.map((run) => (
               <div className="agent-history-run" key={run.run_id}>
                 {run.entries.map((entry) => (
-                  <HistoryBlock entry={entry} key={entry.id} run={run} />
+                  <HistoryBlock
+                    discussions={discussions}
+                    entry={entry}
+                    key={entry.id}
+                    members={members}
+                    run={run}
+                  />
                 ))}
               </div>
             ))}

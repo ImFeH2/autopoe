@@ -18,12 +18,18 @@ import {
   Trash2,
   TriangleAlert,
 } from "@/components/ui";
+import { TechnicalDetails } from "@/components/ui/technical-details";
 import type {
   AgentMember,
   Discussion,
   Member,
   MentionSyntax,
 } from "@/lib/backend";
+import {
+  discussionLabel,
+  senderLabel,
+  shortMessageSummary,
+} from "@/lib/humanized-identifiers";
 import { DiscussionMarkdown } from "./discussion-markdown";
 import { type DraftMention, MessageComposer } from "./message-composer";
 
@@ -166,11 +172,11 @@ export function DiscussionsPage({
               return (
                 <ListButton
                   active={selected}
-                  aria-label={`Open ${discussion.topic}`}
+                  aria-label={`Open ${discussionLabel(discussion)}`}
                   key={discussion.id}
                   action={
                     <Dialog
-                      description={`Delete ${discussion.topic} and all of its messages.`}
+                      description={`Delete ${discussionLabel(discussion)} and all of its messages.`}
                       onOpenChange={(open) =>
                         setDeletingDiscussionId(open ? discussion.id : null)
                       }
@@ -178,7 +184,7 @@ export function DiscussionsPage({
                       title="Delete discussion"
                       trigger={
                         <Button
-                          aria-label={`Delete ${discussion.topic}`}
+                          aria-label={`Delete ${discussionLabel(discussion)}`}
                           disabled={disabled}
                           size="icon"
                           variant="quiet"
@@ -213,7 +219,7 @@ export function DiscussionsPage({
                   }
                   meta={formatMessageCount(discussion.messages.length)}
                   onClick={() => onSelectDiscussion(discussion.id)}
-                  title={discussion.topic}
+                  title={discussionLabel(discussion)}
                 />
               );
             })}
@@ -467,11 +473,11 @@ function DiscussionView({
       <header className="border-border border-b px-6 py-4">
         <div className="flex items-baseline justify-between gap-6">
           <h2 className="discussion-title m-0 font-semibold">
-            {discussion.topic}
+            {discussionLabel(discussion)}
           </h2>
-          <span className="meta-text font-mono text-text-tertiary">
-            DISCUSSION {discussion.id}
-          </span>
+          <TechnicalDetails
+            identifiers={[{ label: "Discussion", value: discussion.id }]}
+          />
         </div>
         <div className="discussion-member-avatars">
           <span className="sr-only">Discussion members:</span>
@@ -508,12 +514,19 @@ function DiscussionView({
                   </span>
                   <article className="message-bubble">
                     <header className="message-meta">
-                      <strong>{sender?.name ?? "Unknown"}</strong>
-                      <span className="font-mono">MESSAGE {message.id}</span>
+                      <strong>{senderLabel(message.sender_id, members)}</strong>
+                      <span>{shortMessageSummary(message.body)}</span>
                     </header>
                     <DiscussionMarkdown
                       body={message.body}
                       references={message.references}
+                    />
+                    <TechnicalDetails
+                      identifiers={[
+                        { label: "Discussion", value: discussion.id },
+                        { label: "Message", value: message.id },
+                        { label: "Sender", value: message.sender_id },
+                      ]}
                     />
                     {message.mentions.length > 0 ? (
                       <ul className="mention-statuses" aria-label="Mentions">
@@ -523,8 +536,7 @@ function DiscussionView({
                               reference.member_id === mention.member_id &&
                               reference.notified,
                           );
-                          const name =
-                            identity?.name ?? String(mention.member_id);
+                          const name = identity?.name ?? "Unavailable member";
                           return (
                             <li
                               className={`mention-status mention-status--${mention.status}`}

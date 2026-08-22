@@ -497,7 +497,9 @@ describe("App", () => {
     expect(markup).toContain(">Overview<");
     expect(markup).toContain(">Memory<");
     expect(markup).toContain(">History<");
-    expect(markup).toContain(">Member ID<");
+    expect(markup).not.toContain(">Member ID<");
+    expect(markup).toContain("<summary>Technical details</summary>");
+    expect(markup).toContain('aria-label="Copy Member ID"');
     expect(markup).toContain("does not schedule a Turn");
   });
 
@@ -664,7 +666,7 @@ describe("App", () => {
     expect(markup).not.toContain("Retry Ada");
   });
 
-  it("keeps Human Member details empty", () => {
+  it("renders readable Human details with the ID isolated technically", () => {
     const human = { id: 1, type: "human" as const, name: "You" };
     const markup = renderToStaticMarkup(
       <TooltipProvider>
@@ -688,8 +690,11 @@ describe("App", () => {
 
     expect(markup).toContain('aria-label="Open You"');
     expect(markup).not.toContain("Select a member");
-    expect(markup).not.toContain("member-agent-detail");
+    expect(markup).toContain('aria-label="You details"');
+    expect(markup).toContain(">Human<");
     expect(markup).not.toContain(">Member ID<");
+    expect(markup).toContain("<summary>Technical details</summary>");
+    expect(markup).toContain('aria-label="Copy Member ID"');
   });
 
   it("renders production controls with accessible native semantics", () => {
