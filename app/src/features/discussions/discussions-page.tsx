@@ -35,21 +35,21 @@ export function formatMessageCount(count: number): string {
 export function formatMessageTimestamp(
   createdAt: string,
   now = new Date(),
+  locales?: Intl.LocalesArgument,
 ): { compact: string; full: string } {
   const sentAt = new Date(createdAt);
   const isToday =
     sentAt.getFullYear() === now.getFullYear() &&
     sentAt.getMonth() === now.getMonth() &&
     sentAt.getDate() === now.getDate();
-  const time = new Intl.DateTimeFormat(undefined, {
+  const time = new Intl.DateTimeFormat(locales, {
     hour: "2-digit",
     minute: "2-digit",
-    hourCycle: "h23",
   }).format(sentAt);
   const compact = isToday
     ? time
-    : `${new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(sentAt)} ${time}`;
-  const full = new Intl.DateTimeFormat(undefined, {
+    : `${new Intl.DateTimeFormat(locales, { dateStyle: "short" }).format(sentAt)} ${time}`;
+  const full = new Intl.DateTimeFormat(locales, {
     dateStyle: "medium",
     timeStyle: "long",
   }).format(sentAt);
@@ -401,14 +401,12 @@ const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
 function MessageTimestamp({ createdAt }: { createdAt: string }) {
   const { compact, full } = formatMessageTimestamp(createdAt);
   return (
-    <time
-      className="message-timestamp font-mono"
-      data-full-time={full}
-      dateTime={createdAt}
-    >
-      {compact}
-      <span className="sr-only">, sent {full}</span>
-    </time>
+    <span className="message-timestamp font-mono" data-full-time={full}>
+      <time aria-hidden="true" dateTime={createdAt}>
+        {compact}
+      </time>
+      <span className="sr-only">Sent {full}</span>
+    </span>
   );
 }
 
