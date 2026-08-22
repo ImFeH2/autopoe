@@ -15,7 +15,7 @@ from flowent.history import RunStatus
 from flowent.mentions import MentionName, find_mentions, mention_syntax_issues
 from flowent.todos import TodoStatus
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -69,6 +69,8 @@ class SQLiteStore:
                     self._migrate_version_nine(connection)
                 elif version == 10:
                     self._migrate_version_ten(connection)
+                elif version == 11:
+                    self._migrate_version_eleven(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
@@ -125,6 +127,7 @@ class SQLiteStore:
                 "INSERT INTO application_state (id, organization_saved) VALUES (1, 0)"
             )
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -213,6 +216,38 @@ class SQLiteStore:
         SQLiteStore._create_agent_runs_table(connection)
         SQLiteStore._create_agent_todos_table(connection)
         SQLiteStore._create_mention_references_table(connection)
+        SQLiteStore._create_human_read_state_tables(connection)
+
+    @staticmethod
+    def _create_human_read_state_tables(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS human_discussion_read_states (
+                human_id INTEGER NOT NULL,
+                discussion_id INTEGER NOT NULL,
+                read_through_message_id INTEGER,
+                PRIMARY KEY (human_id, discussion_id),
+                FOREIGN KEY (discussion_id, human_id)
+                    REFERENCES discussion_members (discussion_id, member_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS human_discussion_seen_messages (
+                human_id INTEGER NOT NULL,
+                discussion_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                PRIMARY KEY (human_id, discussion_id, message_id),
+                FOREIGN KEY (human_id, discussion_id)
+                    REFERENCES human_discussion_read_states (human_id, discussion_id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (discussion_id, message_id)
+                    REFERENCES messages (discussion_id, id) ON DELETE CASCADE
+            )
+            """
+        )
 
     @staticmethod
     def _create_mention_references_table(connection: sqlite3.Connection) -> None:
@@ -488,6 +523,7 @@ class SQLiteStore:
             if model_config is not None:
                 self._write_model_config(connection, model_config)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_two(self, connection: sqlite3.Connection) -> None:
@@ -514,6 +550,7 @@ class SQLiteStore:
             self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_three(self, connection: sqlite3.Connection) -> None:
@@ -524,6 +561,7 @@ class SQLiteStore:
             self._add_member_paused_column(connection)
             self._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _migrate_version_four(self, connection: sqlite3.Connection) -> None:
@@ -534,6 +572,7 @@ class SQLiteStore:
             self._add_model_context_window_column(connection)
             self._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -550,6 +589,7 @@ class SQLiteStore:
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -560,6 +600,7 @@ class SQLiteStore:
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._create_agent_todos_table(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -569,6 +610,7 @@ class SQLiteStore:
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -577,6 +619,7 @@ class SQLiteStore:
             SQLiteStore._add_member_paused_column(connection)
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -584,12 +627,20 @@ class SQLiteStore:
         with SQLiteStore._migration_transaction(connection):
             SQLiteStore._add_model_context_window_column(connection)
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
     def _migrate_version_ten(connection: sqlite3.Connection) -> None:
         with SQLiteStore._migration_transaction(connection):
             SQLiteStore._backfill_mention_references(connection)
+            SQLiteStore._create_human_read_state_tables(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_eleven(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            SQLiteStore._create_human_read_state_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -850,12 +901,38 @@ class SQLiteStore:
                             "mentions": mentions,
                         }
                     )
+                human_read_states = [
+                    {
+                        "member_id": state["human_id"],
+                        "read_through_message_id": state["read_through_message_id"],
+                        "seen_message_ids": [
+                            seen["message_id"]
+                            for seen in connection.execute(
+                                """
+                                SELECT message_id FROM human_discussion_seen_messages
+                                WHERE human_id = ? AND discussion_id = ?
+                                ORDER BY message_id
+                                """,
+                                (state["human_id"], discussion_id),
+                            )
+                        ],
+                    }
+                    for state in connection.execute(
+                        """
+                        SELECT human_id, read_through_message_id
+                        FROM human_discussion_read_states
+                        WHERE discussion_id = ? ORDER BY human_id
+                        """,
+                        (discussion_id,),
+                    )
+                ]
                 discussions.append(
                     {
                         "id": discussion_id,
                         "topic": row["topic"],
                         "member_ids": member_ids,
                         "messages": messages,
+                        "human_read_states": human_read_states,
                     }
                 )
             organization = {"members": members, "discussions": discussions}
@@ -965,6 +1042,28 @@ class SQLiteStore:
                             int(mention["acked"]),
                             int(mention.get("reminded", False)),
                         ),
+                    )
+            for state in discussion.get("human_read_states", []):
+                connection.execute(
+                    """
+                    INSERT INTO human_discussion_read_states
+                        (human_id, discussion_id, read_through_message_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    (
+                        state["member_id"],
+                        discussion_id,
+                        state.get("read_through_message_id"),
+                    ),
+                )
+                for message_id in state.get("seen_message_ids", []):
+                    connection.execute(
+                        """
+                        INSERT INTO human_discussion_seen_messages
+                            (human_id, discussion_id, message_id)
+                        VALUES (?, ?, ?)
+                        """,
+                        (state["member_id"], discussion_id, message_id),
                     )
 
     def load_model_config(self) -> dict[str, Any] | None:

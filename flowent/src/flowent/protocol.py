@@ -74,6 +74,7 @@ class Dispatcher:
             "discussion.create": self._create_discussion,
             "discussion.delete": self._delete_discussion,
             "discussion.send": self._send_message,
+            "human.discussion.see_messages": self._see_human_messages,
             "settings.get_model": self._get_model_settings,
             "settings.update_model": self._update_model_settings,
             "settings.get_observability": self._get_observability_settings,
@@ -312,6 +313,13 @@ class Dispatcher:
             discussion_id=require_integer(params, "discussion_id"),
             sender_id=require_integer(params, "sender_id"),
             body=require_string(params, "body"),
+        )
+
+    def _see_human_messages(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.see_human_messages(
+            human_id=require_integer(params, "human_id"),
+            discussion_id=require_integer(params, "discussion_id"),
+            message_ids=require_integer_list(params, "message_ids"),
         )
 
 

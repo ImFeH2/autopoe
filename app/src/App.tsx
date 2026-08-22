@@ -396,6 +396,36 @@ function App() {
     }
   }
 
+  async function handleMessagesSeen(
+    discussionId: number,
+    messageIds: number[],
+  ) {
+    const discussion = snapshot.discussions.find(
+      (candidate) => candidate.id === discussionId,
+    );
+    const unreadMentionMessageIds = messageIds.filter((messageId) =>
+      discussion?.messages
+        .find((message) => message.id === messageId)
+        ?.human_mentions?.some(
+          (mention) => mention.member_id === 1 && mention.status === "unread",
+        ),
+    );
+    await mutate(async () => {
+      let nextSnapshot = await backend.seeHumanMessages(
+        discussionId,
+        messageIds,
+      );
+      for (const messageId of unreadMentionMessageIds) {
+        nextSnapshot = await backend.readHumanMention(
+          1,
+          discussionId,
+          messageId,
+        );
+      }
+      return nextSnapshot;
+    });
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedDiscussion) {
@@ -541,6 +571,9 @@ function App() {
             onDialogOpenChange={changeDiscussionDialog}
             onDeleteDiscussion={handleDeleteDiscussion}
             onMessageChange={changeMessageDraft}
+            onMessagesSeen={(discussionId, messageIds) =>
+              void handleMessagesSeen(discussionId, messageIds)
+            }
             onOpenMember={openMemberFromDiscussion}
             onCreateAgent={() => {
               selectWorkspaceView("members");

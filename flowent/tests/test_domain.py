@@ -28,6 +28,13 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
                 "id": 1,
                 "topic": "Ship the first slice",
                 "member_ids": [1, 2, 3],
+                "human_read_states": [
+                    {
+                        "member_id": 1,
+                        "read_through_message_id": 1,
+                        "seen_message_ids": [],
+                    }
+                ],
                 "messages": [
                     {
                         "id": 1,
@@ -487,3 +494,47 @@ def test_deleting_agent_marks_references_without_removing_mention_status() -> No
 
     later = state.send_message(1, 1, "Deleted @Ada is no longer resolvable")
     assert later["discussions"][0]["messages"][1]["references"] == []
+
+
+def test_human_seen_messages_advance_prefix_and_keep_sparse_state() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Unread", 1, [2])
+    state.send_message(1, 2, "First")
+    state.send_message(1, 2, "Second")
+    state.send_message(1, 2, "Third")
+
+    sparse = state.see_human_messages(1, 1, [3])
+    assert sparse["discussions"][0]["human_read_states"] == [
+        {
+            "member_id": 1,
+            "read_through_message_id": None,
+            "seen_message_ids": [3],
+        }
+    ]
+
+    advanced = state.see_human_messages(1, 1, [2, 1, 2])
+    assert advanced["discussions"][0]["human_read_states"] == [
+        {
+            "member_id": 1,
+            "read_through_message_id": 3,
+            "seen_message_ids": [],
+        }
+    ]
+
+
+def test_human_seen_messages_validate_identity_membership_and_ids() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Unread", 1, [2])
+    state.send_message(1, 2, "First")
+
+    with pytest.raises(DomainError, match="not a Human"):
+        state.see_human_messages(2, 1, [1])
+    with pytest.raises(DomainError, match="Discussion not found"):
+        state.see_human_messages(1, 99, [1])
+    with pytest.raises(DomainError, match="Message not found"):
+        state.see_human_messages(1, 1, [2])
+    with pytest.raises(DomainError, match="At least one"):
+        state.see_human_messages(1, 1, [])

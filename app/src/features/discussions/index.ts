@@ -10,6 +10,7 @@ export {
   discussionAgentStatus,
   filterDiscussions,
   formatMessageCount,
+  humanUnreadForDiscussion,
 } from "./discussions-page";
 export type { DraftMention, MentionQuery } from "./message-composer";
 export {

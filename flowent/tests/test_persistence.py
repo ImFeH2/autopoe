@@ -295,6 +295,13 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
             "id": 1,
             "topic": "Work",
             "member_ids": [1],
+            "human_read_states": [
+                {
+                    "member_id": 1,
+                    "read_through_message_id": None,
+                    "seen_message_ids": [],
+                }
+            ],
             "messages": [
                 {
                     "id": 1,
@@ -704,10 +711,16 @@ def test_fresh_schema_creates_final_reference_table_before_version(
     store = SQLiteStore(tmp_path / "data")
     connection = sqlite3.connect(store.path)
     try:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'mention_references'"
         ).fetchone() == ("mention_references",)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'human_discussion_read_states'"
+        ).fetchone() == ("human_discussion_read_states",)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'human_discussion_seen_messages'"
+        ).fetchone() == ("human_discussion_seen_messages",)
     finally:
         connection.close()
 
@@ -863,4 +876,24 @@ def test_legacy_name_issue_disables_reference_backfill(tmp_path: Path) -> None:
     ]
     assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
         {"member_id": 3, "status": "pending"}
+    ]
+
+
+def test_persists_human_prefix_and_sparse_seen_state(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Unread", 1, [2])
+    state.send_message(1, 2, "First")
+    state.send_message(1, 2, "Second")
+    state.send_message(1, 2, "Third")
+    state.see_human_messages(1, 1, [1, 3])
+
+    restored = persisted_state(store, tmp_path)
+    assert restored.snapshot()["discussions"][0]["human_read_states"] == [
+        {
+            "member_id": 1,
+            "read_through_message_id": 1,
+            "seen_message_ids": [3],
+        }
     ]

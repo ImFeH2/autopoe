@@ -19,6 +19,7 @@ import {
   discussionAgentStatus,
   filterDiscussions,
   formatMessageCount,
+  humanUnreadForDiscussion,
 } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import {
@@ -146,6 +147,43 @@ describe("App", () => {
     ]);
     expect(filterDiscussions(discussions, " ")).toEqual(discussions);
     expect(filterDiscussions(discussions, "missing")).toEqual([]);
+  });
+
+  it("derives unread and @Human counts from Human read state and subset truth", () => {
+    const discussion = {
+      id: 1,
+      topic: "Unread",
+      member_ids: [1, 2],
+      human_read_states: [
+        {
+          member_id: 1,
+          read_through_message_id: 1,
+          seen_message_ids: [3],
+        },
+      ],
+      messages: [
+        { id: 1, sender_id: 2, body: "Read", references: [], mentions: [] },
+        {
+          id: 2,
+          sender_id: 2,
+          body: "Mention",
+          references: [],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+        { id: 3, sender_id: 2, body: "Seen", references: [], mentions: [] },
+        { id: 4, sender_id: 1, body: "Own", references: [], mentions: [] },
+        { id: 5, sender_id: 2, body: "Unread", references: [], mentions: [] },
+      ],
+    };
+
+    expect(humanUnreadForDiscussion(discussion)).toEqual({
+      unreadMessageIds: [2, 5],
+      unreadHumanMentionMessageIds: [2],
+      unreadCount: 2,
+      unreadHumanMentionCount: 1,
+      firstUnreadMessageId: 2,
+    });
   });
 
   it("presents the transitional pausing state as Running in Discussions", () => {
@@ -477,6 +515,74 @@ describe("App", () => {
     expect(markup).toContain("@OldGone · PENDING");
     expect(markup).toContain('title="@OldGone · pending · Deleted Agent"');
     expect(markup).not.toContain('aria-label="Open OldGone in Members"');
+  });
+
+  it("renders unread badges, divider, and jump controls from props", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "idle" as const,
+    };
+    const discussion = {
+      id: 1,
+      topic: "Unread work",
+      member_ids: [1, 2],
+      human_read_states: [
+        {
+          member_id: 1,
+          read_through_message_id: null,
+          seen_message_ids: [],
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sender_id: 2,
+          body: "@You please review",
+          references: [],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="1 unread messages"');
+    expect(markup).toContain('aria-label="Unread message navigation"');
+    expect(markup).toContain("Jump to first unread message (1 unread)");
+    expect(markup).toContain("Jump to next unread mention (1 unread)");
+    expect(markup).toContain('<hr aria-label="New messages"');
+    expect(markup).toContain('data-message-id="1" tabindex="-1"');
   });
 
   it("keeps the sidebar focused on global destinations", () => {
