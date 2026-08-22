@@ -4,6 +4,7 @@ import "./unread-discussion-controls.css";
 export interface UnreadBadgeProps {
   count: number;
   label?: string;
+  variant?: "default" | "mention";
 }
 
 function visibleCount(count: number): string {
@@ -13,6 +14,7 @@ function visibleCount(count: number): string {
 export function UnreadBadge({
   count,
   label = "unread messages",
+  variant = "default",
 }: UnreadBadgeProps) {
   if (count <= 0) {
     return null;
@@ -21,9 +23,10 @@ export function UnreadBadge({
   return (
     <span
       aria-label={`${count} ${label}`}
-      className="human-unread-badge"
+      className={`human-unread-badge human-unread-badge--${variant}`}
       role="status"
     >
+      {variant === "mention" ? "@" : ""}
       {visibleCount(count)}
     </span>
   );
@@ -49,15 +52,15 @@ interface UnreadControlButtonProps {
   onActivate: () => void;
 }
 
-export interface NewMessageJumpButtonProps extends UnreadControlButtonProps {
+export interface FirstUnreadJumpButtonProps extends UnreadControlButtonProps {
   unreadCount: number;
 }
 
-export function NewMessageJumpButton({
+export function FirstUnreadJumpButton({
   disabled = false,
   onActivate,
   unreadCount,
-}: NewMessageJumpButtonProps) {
+}: FirstUnreadJumpButtonProps) {
   if (unreadCount <= 0) {
     return null;
   }
@@ -70,9 +73,35 @@ export function NewMessageJumpButton({
       onClick={onActivate}
       type="button"
     >
-      <span aria-hidden="true">↓</span>
-      <span>New messages</span>
+      <span>First unread</span>
       <UnreadBadge count={unreadCount} />
+    </button>
+  );
+}
+
+export interface NewMessageJumpButtonProps extends UnreadControlButtonProps {
+  newMessageCount: number;
+}
+
+export function NewMessageJumpButton({
+  disabled = false,
+  newMessageCount,
+  onActivate,
+}: NewMessageJumpButtonProps) {
+  if (newMessageCount <= 0) {
+    return null;
+  }
+
+  return (
+    <button
+      aria-label={`Jump to ${newMessageCount} new messages`}
+      className="human-unread-control"
+      disabled={disabled}
+      onClick={onActivate}
+      type="button"
+    >
+      <span aria-hidden="true">↓</span>
+      <span>{newMessageCount} new messages</span>
     </button>
   );
 }
@@ -100,7 +129,11 @@ export function NextHumanMentionButton({
     >
       <span aria-hidden="true">@</span>
       <span>Next mention</span>
-      <UnreadBadge count={unreadMentionCount} label="unread mentions" />
+      <UnreadBadge
+        count={unreadMentionCount}
+        label="unread mentions"
+        variant="mention"
+      />
     </button>
   );
 }

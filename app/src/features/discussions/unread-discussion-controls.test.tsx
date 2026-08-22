@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
   FirstUnreadDivider,
+  FirstUnreadJumpButton,
   NewMessageJumpButton,
   NextHumanMentionButton,
   UnreadBadge,
@@ -27,7 +28,7 @@ describe("unread discussion controls", () => {
 
   it("uses a native keyboard-operable button for the first unread jump", () => {
     const onActivate = vi.fn();
-    const element = NewMessageJumpButton({ onActivate, unreadCount: 3 });
+    const element = FirstUnreadJumpButton({ onActivate, unreadCount: 3 });
     if (element === null) {
       throw new Error("expected jump control");
     }
@@ -40,6 +41,16 @@ describe("unread discussion controls", () => {
       '<button aria-label="Jump to first unread message (3 unread)"',
     );
     expect(markup).toContain('type="button"');
+  });
+
+  it("renders a distinct incremental new-message jump", () => {
+    const markup = renderToStaticMarkup(
+      <NewMessageJumpButton newMessageCount={3} onActivate={() => undefined} />,
+    );
+
+    expect(markup).toContain('aria-label="Jump to 3 new messages"');
+    expect(markup).toContain(">3 new messages</span>");
+    expect(markup).not.toContain("First unread");
   });
 
   it("keeps the @next control props-driven and labels disabled state", () => {
@@ -58,13 +69,22 @@ describe("unread discussion controls", () => {
     expect(markup).toContain(
       'aria-label="Jump to next unread mention (2 unread)"',
     );
+    expect(markup).toContain("@2");
     expect(onActivate).not.toHaveBeenCalled();
   });
 
   it("omits jump controls when their caller-provided count is empty", () => {
     expect(
       renderToStaticMarkup(
-        <NewMessageJumpButton onActivate={() => undefined} unreadCount={0} />,
+        <FirstUnreadJumpButton onActivate={() => undefined} unreadCount={0} />,
+      ),
+    ).toBe("");
+    expect(
+      renderToStaticMarkup(
+        <NewMessageJumpButton
+          newMessageCount={0}
+          onActivate={() => undefined}
+        />,
       ),
     ).toBe("");
     expect(

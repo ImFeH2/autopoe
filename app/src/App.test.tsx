@@ -186,6 +186,104 @@ describe("App", () => {
     });
   });
 
+  it("shows total unread and a prominent @Human subset badge independently", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "idle" as const,
+    };
+    const message = (id: number, mentioned = false) => ({
+      id,
+      sender_id: 2,
+      body: `Message ${id}`,
+      references: [],
+      mentions: [],
+      ...(mentioned
+        ? {
+            human_mentions: [{ member_id: 1, status: "unread" as const }],
+          }
+        : {}),
+    });
+    const discussions = [
+      {
+        id: 1,
+        topic: "Both badges",
+        member_ids: [1, 2],
+        human_read_states: [
+          {
+            member_id: 1,
+            read_through_message_id: null,
+            seen_message_ids: [],
+          },
+        ],
+        messages: [message(1, true), message(2)],
+      },
+      {
+        id: 2,
+        topic: "Ordinary only",
+        member_ids: [1, 2],
+        human_read_states: [
+          {
+            member_id: 1,
+            read_through_message_id: null,
+            seen_message_ids: [],
+          },
+        ],
+        messages: [message(1)],
+      },
+      {
+        id: 3,
+        topic: "Seen mention",
+        member_ids: [1, 2],
+        human_read_states: [
+          {
+            member_id: 1,
+            read_through_message_id: null,
+            seen_message_ids: [1],
+          },
+        ],
+        messages: [message(1, true)],
+      },
+    ];
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={discussions}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup.match(/aria-label="2 unread messages"/gu)).toHaveLength(1);
+    expect(markup.match(/aria-label="1 unread messages"/gu)).toHaveLength(1);
+    expect(
+      markup.match(/aria-label="1 unread mentions for you"/gu),
+    ).toHaveLength(1);
+    expect(markup).toContain(">@1</span>");
+  });
+
   it("presents the transitional pausing state as Running in Discussions", () => {
     expect(discussionAgentStatus("pausing")).toBe("running");
     expect(discussionAgentStatus("paused")).toBe("paused");

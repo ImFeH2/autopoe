@@ -72,8 +72,11 @@
   opacity: 0.55;
 }
 
+.human-unread-badge--mention,
 .human-unread-control--mention .human-unread-badge {
   background: var(--color-mention, #7656d6);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-mention, #7656d6) 24%, transparent);
 }
 
 .human-unread-controls {

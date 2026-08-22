@@ -21,6 +21,49 @@ type IntersectionObserverFactory = (
   options: IntersectionObserverInit,
 ) => IntersectionObserverHandle;
 
+export interface SeenMessageBatch<MessageId extends MessageViewportMessageId> {
+  add: (messageId: MessageId) => void;
+  dispose: () => void;
+  flush: () => void;
+}
+
+type ScheduleSeenFlush = (callback: () => void) => number;
+type CancelSeenFlush = (handle: number) => void;
+
+export function createSeenMessageBatch<
+  MessageId extends MessageViewportMessageId,
+>(
+  onFlush: (messageIds: MessageId[]) => void,
+  schedule: ScheduleSeenFlush = (callback) => requestAnimationFrame(callback),
+  cancel: CancelSeenFlush = (handle) => cancelAnimationFrame(handle),
+): SeenMessageBatch<MessageId> {
+  const pendingMessageIds = new Set<MessageId>();
+  let scheduledHandle: number | null = null;
+
+  const flush = () => {
+    if (scheduledHandle !== null) {
+      cancel(scheduledHandle);
+      scheduledHandle = null;
+    }
+    const messageIds = [...pendingMessageIds];
+    pendingMessageIds.clear();
+    if (messageIds.length > 0) {
+      onFlush(messageIds);
+    }
+  };
+
+  return {
+    add: (messageId) => {
+      pendingMessageIds.add(messageId);
+      if (scheduledHandle === null) {
+        scheduledHandle = schedule(flush);
+      }
+    },
+    dispose: flush,
+    flush,
+  };
+}
+
 export interface MessageViewportTracker<
   MessageId extends MessageViewportMessageId,
 > {

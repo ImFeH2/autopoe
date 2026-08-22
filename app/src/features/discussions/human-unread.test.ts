@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { calculateHumanUnread, nextMessageId } from "./human-unread";
+import {
+  calculateHumanUnread,
+  clearNewMessageIndicator,
+  createNewMessageIndicatorState,
+  nextMessageId,
+  updateNewMessageIndicator,
+} from "./human-unread";
 
 const messages = [
   { id: "m1", authorMemberId: 7 },
@@ -73,5 +79,40 @@ describe("nextMessageId", () => {
   it("starts at the first target when the current message is outside the subset", () => {
     expect(nextMessageId(["m2", "m4"], "m3")).toBe("m2");
     expect(nextMessageId([], "m3")).toBeUndefined();
+  });
+});
+
+describe("new message indicator", () => {
+  it("does not report appends while the viewport follows the bottom", () => {
+    const initial = createNewMessageIndicatorState([1, 2]);
+    const updated = updateNewMessageIndicator(initial, [1, 2, 3], true);
+
+    expect(updated).toEqual({ latestMessageId: 3, pendingMessageIds: [] });
+  });
+
+  it("keeps an exact incremental count while the Human is away from bottom", () => {
+    const initial = createNewMessageIndicatorState([1, 2]);
+    const first = updateNewMessageIndicator(initial, [1, 2, 3], false);
+    const second = updateNewMessageIndicator(first, [1, 2, 3, 4, 5], false);
+
+    expect(first.pendingMessageIds).toEqual([3]);
+    expect(second).toEqual({
+      latestMessageId: 5,
+      pendingMessageIds: [3, 4, 5],
+    });
+  });
+
+  it("clears independently when the Human returns to bottom or jumps", () => {
+    const pending = updateNewMessageIndicator(
+      createNewMessageIndicatorState([1]),
+      [1, 2, 3],
+      false,
+    );
+
+    expect(clearNewMessageIndicator(pending).pendingMessageIds).toEqual([]);
+    expect(updateNewMessageIndicator(pending, [1, 2, 3], true)).toEqual({
+      latestMessageId: 3,
+      pendingMessageIds: [],
+    });
   });
 });

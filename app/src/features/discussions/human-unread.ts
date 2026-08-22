@@ -80,3 +80,48 @@ export function nextMessageId<MessageId extends HumanUnreadMessageId>(
     ? orderedMessageIds[0]
     : orderedMessageIds[currentIndex + 1];
 }
+
+export interface NewMessageIndicatorState {
+  latestMessageId: number;
+  pendingMessageIds: readonly number[];
+}
+
+export function createNewMessageIndicatorState(
+  orderedMessageIds: readonly number[],
+): NewMessageIndicatorState {
+  return {
+    latestMessageId: orderedMessageIds[orderedMessageIds.length - 1] ?? 0,
+    pendingMessageIds: [],
+  };
+}
+
+/** Tracks only messages appended while the Human is not following the bottom. */
+export function updateNewMessageIndicator(
+  state: NewMessageIndicatorState,
+  orderedMessageIds: readonly number[],
+  followingBottom: boolean,
+): NewMessageIndicatorState {
+  const latestMessageId =
+    orderedMessageIds[orderedMessageIds.length - 1] ?? state.latestMessageId;
+  if (followingBottom) {
+    return { latestMessageId, pendingMessageIds: [] };
+  }
+
+  const appendedMessageIds = orderedMessageIds.filter(
+    (messageId) => messageId > state.latestMessageId,
+  );
+  return {
+    latestMessageId,
+    pendingMessageIds: [
+      ...new Set([...state.pendingMessageIds, ...appendedMessageIds]),
+    ],
+  };
+}
+
+export function clearNewMessageIndicator(
+  state: NewMessageIndicatorState,
+): NewMessageIndicatorState {
+  return state.pendingMessageIds.length === 0
+    ? state
+    : { ...state, pendingMessageIds: [] };
+}

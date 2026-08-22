@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMessageViewportTracker } from "./use-message-viewport-tracker";
+import {
+  createMessageViewportTracker,
+  createSeenMessageBatch,
+} from "./use-message-viewport-tracker";
 
 function setup(minVisibleRatio = 0.5) {
   let notify: IntersectionObserverCallback = () => undefined;
@@ -124,5 +127,56 @@ describe("createMessageViewportTracker", () => {
 
   it("rejects an impossible visibility ratio", () => {
     expect(() => setup(1.1)).toThrow(RangeError);
+  });
+});
+
+describe("createSeenMessageBatch", () => {
+  it("flushes a real intersected message when navigation disposes before RAF", () => {
+    let scheduled: (() => void) | undefined;
+    let notify: IntersectionObserverCallback = () => undefined;
+    const cancel = vi.fn();
+    const onFlush = vi.fn();
+    const batch = createSeenMessageBatch(
+      onFlush,
+      (callback) => {
+        scheduled = callback;
+        return 17;
+      },
+      cancel,
+    );
+    const tracker = createMessageViewportTracker(
+      { minVisibleRatio: 0, onMessageSeen: batch.add },
+      (callback) => {
+        notify = callback;
+        return {
+          disconnect: vi.fn(),
+          observe: vi.fn(),
+          unobserve: vi.fn(),
+        };
+      },
+    );
+    const element = {} as Element;
+
+    tracker.track("m1", element);
+    notify(
+      [
+        {
+          target: element,
+          isIntersecting: true,
+          intersectionRatio: 1,
+        } as IntersectionObserverEntry,
+      ],
+      {} as IntersectionObserver,
+    );
+    expect(scheduled).toBeDefined();
+    expect(onFlush).not.toHaveBeenCalled();
+
+    batch.dispose();
+
+    expect(cancel).toHaveBeenCalledWith(17);
+    expect(onFlush).toHaveBeenCalledOnce();
+    expect(onFlush).toHaveBeenCalledWith(["m1"]);
+    scheduled?.();
+    expect(onFlush).toHaveBeenCalledOnce();
   });
 });

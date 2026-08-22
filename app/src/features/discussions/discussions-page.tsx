@@ -30,17 +30,25 @@ import type {
 import { DiscussionMarkdown } from "./discussion-markdown";
 import {
   calculateHumanUnread,
+  clearNewMessageIndicator,
+  createNewMessageIndicatorState,
   type HumanUnreadResult,
   nextMessageId,
+  updateNewMessageIndicator,
 } from "./human-unread";
 import { type DraftMention, MessageComposer } from "./message-composer";
 import {
   FirstUnreadDivider,
+  FirstUnreadJumpButton,
   NewMessageJumpButton,
   NextHumanMentionButton,
   UnreadBadge,
 } from "./unread-discussion-controls";
-import { useMessageViewportTracker } from "./use-message-viewport-tracker";
+import {
+  createSeenMessageBatch,
+  type SeenMessageBatch,
+  useMessageViewportTracker,
+} from "./use-message-viewport-tracker";
 
 export function formatMessageCount(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
@@ -277,6 +285,13 @@ export function DiscussionsPage({
                       {formatMessageCount(discussion.messages.length)}
                       {unread.unreadCount > 0 ? (
                         <UnreadBadge count={unread.unreadCount} />
+                      ) : null}
+                      {unread.unreadHumanMentionCount > 0 ? (
+                        <UnreadBadge
+                          count={unread.unreadHumanMentionCount}
+                          label="unread mentions for you"
+                          variant="mention"
+                        />
                       ) : null}
                     </>
                   }
@@ -527,9 +542,20 @@ function DiscussionView({
 }: DiscussionViewProps) {
   const messageLogRef = useRef<HTMLDivElement>(null);
   const shouldFollowMessagesRef = useRef(true);
-  const pendingSeenMessageIdsRef = useRef(new Set<number>());
-  const seenFrameRef = useRef<number | null>(null);
   const lastMentionTargetRef = useRef<number | undefined>(undefined);
+  const onMessagesSeenRef = useRef(onMessagesSeen);
+  onMessagesSeenRef.current = onMessagesSeen;
+  const seenBatchRef = useRef<SeenMessageBatch<number> | null>(null);
+  if (seenBatchRef.current === null) {
+    seenBatchRef.current = createSeenMessageBatch((messageIds) =>
+      onMessagesSeenRef.current(discussion.id, messageIds),
+    );
+  }
+  const [newMessageIndicator, setNewMessageIndicator] = useState(() =>
+    createNewMessageIndicatorState(
+      discussion.messages.map((message) => message.id),
+    ),
+  );
   const unread = useMemo(
     () => humanUnreadForDiscussion(discussion),
     [discussion],
@@ -538,23 +564,9 @@ function DiscussionView({
     () => new Set(unread.unreadMessageIds),
     [unread.unreadMessageIds],
   );
-  const reportMessageSeen = useCallback(
-    (messageId: number) => {
-      pendingSeenMessageIdsRef.current.add(messageId);
-      if (seenFrameRef.current !== null) {
-        return;
-      }
-      seenFrameRef.current = requestAnimationFrame(() => {
-        seenFrameRef.current = null;
-        const messageIds = [...pendingSeenMessageIdsRef.current];
-        pendingSeenMessageIdsRef.current.clear();
-        if (messageIds.length > 0) {
-          onMessagesSeen(discussion.id, messageIds);
-        }
-      });
-    },
-    [discussion.id, onMessagesSeen],
-  );
+  const reportMessageSeen = useCallback((messageId: number) => {
+    seenBatchRef.current?.add(messageId);
+  }, []);
   const trackMessage = useMessageViewportTracker({
     minVisibleRatio: 0,
     onMessageSeen: reportMessageSeen,
@@ -571,31 +583,38 @@ function DiscussionView({
 
   useEffect(
     () => () => {
-      if (seenFrameRef.current !== null) {
-        cancelAnimationFrame(seenFrameRef.current);
-      }
+      seenBatchRef.current?.dispose();
+      seenBatchRef.current = null;
     },
     [],
   );
 
   useEffect(() => {
+    const messageIds = discussion.messages.map((message) => message.id);
+    setNewMessageIndicator((current) =>
+      updateNewMessageIndicator(
+        current,
+        messageIds,
+        shouldFollowMessagesRef.current,
+      ),
+    );
     const log = messageLogRef.current;
-    if (
-      discussion.messages.length > 0 &&
-      log &&
-      shouldFollowMessagesRef.current
-    ) {
+    if (messageIds.length > 0 && log && shouldFollowMessagesRef.current) {
       log.scrollTop = log.scrollHeight;
     }
-  }, [discussion.messages.length]);
+  }, [discussion.messages]);
 
   function handleMessageScroll() {
     const log = messageLogRef.current;
     if (!log) {
       return;
     }
-    shouldFollowMessagesRef.current =
+    const followingBottom =
       log.scrollHeight - log.scrollTop - log.clientHeight <= 24;
+    shouldFollowMessagesRef.current = followingBottom;
+    if (followingBottom) {
+      setNewMessageIndicator(clearNewMessageIndicator);
+    }
   }
 
   function handleSend(event: FormEvent<HTMLFormElement>) {
@@ -612,6 +631,11 @@ function DiscussionView({
     );
     target?.scrollIntoView({ block: "center" });
     target?.focus();
+  }
+
+  function focusNewMessages() {
+    focusMessage(newMessageIndicator.pendingMessageIds[0]);
+    setNewMessageIndicator(clearNewMessageIndicator);
   }
 
   function focusNextMention() {
@@ -658,14 +682,19 @@ function DiscussionView({
         ref={messageLogRef}
         role="log"
       >
-        {unread.unreadCount > 0 ? (
+        {unread.unreadCount > 0 ||
+        newMessageIndicator.pendingMessageIds.length > 0 ? (
           <nav
             aria-label="Unread message navigation"
             className="human-unread-controls"
           >
-            <NewMessageJumpButton
+            <FirstUnreadJumpButton
               onActivate={() => focusMessage(unread.firstUnreadMessageId)}
               unreadCount={unread.unreadCount}
+            />
+            <NewMessageJumpButton
+              newMessageCount={newMessageIndicator.pendingMessageIds.length}
+              onActivate={focusNewMessages}
             />
             <NextHumanMentionButton
               onActivate={focusNextMention}
