@@ -12,13 +12,15 @@ import {
   Dialog,
   Input,
   ListButton,
-  Pause,
   Plus,
   Search,
   Tooltip,
   Trash2,
-  TriangleAlert,
 } from "@/components/ui";
+import {
+  getMemberStatusPresentation,
+  MemberStatusAvatar,
+} from "@/components/ui/member-status-avatar";
 import type {
   AgentMember,
   Discussion,
@@ -379,15 +381,9 @@ type DiscussionAgentStatus = "running" | "idle" | "paused" | "error";
 export function discussionAgentStatus(
   status: AgentMember["status"],
 ): DiscussionAgentStatus {
-  return status === "pausing" ? "running" : status;
+  const presentation = getMemberStatusPresentation(status);
+  return presentation?.status ?? "idle";
 }
-
-const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
-  running: "Running",
-  idle: "Idle",
-  paused: "Paused",
-  error: "Error",
-};
 
 function DiscussionMemberAvatar({
   member,
@@ -416,8 +412,9 @@ function DiscussionMemberAvatar({
     );
   }
 
+  const presentation = getMemberStatusPresentation(member.status);
   const status = discussionAgentStatus(member.status);
-  const statusLabel = discussionAgentStatusLabels[status];
+  const statusLabel = presentation?.label ?? "Idle";
 
   return (
     <Tooltip
@@ -433,15 +430,10 @@ function DiscussionMemberAvatar({
         type="button"
       >
         <span aria-hidden="true">{initial}</span>
-        <span className="discussion-member-status-mark" aria-hidden="true">
-          {status === "running" ? (
-            <span className="discussion-member-status-pulse" />
-          ) : status === "paused" ? (
-            <Pause size={9} strokeWidth={3} />
-          ) : status === "error" ? (
-            <TriangleAlert size={10} strokeWidth={2.6} />
-          ) : null}
-        </span>
+        <span
+          className={`discussion-member-status-mark discussion-member-status-mark--${presentation?.shape ?? "dot"}`}
+          aria-hidden="true"
+        />
       </button>
     </Tooltip>
   );
@@ -567,9 +559,14 @@ function DiscussionView({
                   key={message.id}
                   tabIndex={-1}
                 >
-                  <span className="message-avatar" aria-hidden="true">
-                    {(sender?.name ?? "Unknown").slice(0, 1).toUpperCase()}
-                  </span>
+                  <MemberStatusAvatar
+                    className="message-avatar"
+                    name={sender?.name ?? "Unknown"}
+                    status={
+                      sender?.type === "agent" ? sender.status : undefined
+                    }
+                    variant="message"
+                  />
                   <article className="message-bubble">
                     <header className="message-meta">
                       <strong>

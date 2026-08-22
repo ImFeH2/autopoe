@@ -250,7 +250,7 @@ describe("App", () => {
     expect(discussionAgentStatus("paused")).toBe("paused");
   });
 
-  it("renders accessible live Agent status marks only on Discussion member avatars", () => {
+  it("renders live Agent status marks on Discussion members and message avatars", () => {
     const agents = [
       {
         id: 2,
@@ -288,15 +288,13 @@ describe("App", () => {
       id: 1,
       topic: "Live status",
       member_ids: [1, 2, 3, 4, 5, 6],
-      messages: [
-        {
-          id: 1,
-          sender_id: 2,
-          body: "Historical message",
-          references: [],
-          mentions: [],
-        },
-      ],
+      messages: [1, 2, 3, 4, 5, 6].map((senderId) => ({
+        id: senderId,
+        sender_id: senderId,
+        body: `Message from ${senderId}`,
+        references: [],
+        mentions: [],
+      })),
     };
     const markup = renderToStaticMarkup(
       <TooltipProvider>
@@ -350,8 +348,17 @@ describe("App", () => {
     expect(markup.match(/data-agent-status="idle"/g)).toHaveLength(1);
     expect(markup.match(/data-agent-status="paused"/g)).toHaveLength(1);
     expect(markup.match(/data-agent-status="error"/g)).toHaveLength(1);
-    expect(markup).toContain('class="message-avatar" aria-hidden="true"');
-    expect(markup).not.toContain("message-avatar--running");
+    expect(markup.match(/data-variant="message"/g)).toHaveLength(6);
+    expect(markup.match(/data-member-status="running"/g)).toHaveLength(2);
+    expect(markup.match(/data-member-status="idle"/g)).toHaveLength(1);
+    expect(markup.match(/data-member-status="paused"/g)).toHaveLength(1);
+    expect(markup.match(/data-member-status="error"/g)).toHaveLength(1);
+    expect(markup.match(/data-member-status="none"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-label="Run, Running"');
+    expect(markup).toContain('aria-label="Stopping, Running"');
+    expect(markup).toContain('aria-label="You"');
+    expect(markup).not.toContain("aria-live=");
+    expect(markup).not.toMatch(/member-status-avatar[^>]*tabindex=/u);
     const styles = readFileSync(
       new URL("./features/discussions/discussions.css", import.meta.url),
       "utf8",

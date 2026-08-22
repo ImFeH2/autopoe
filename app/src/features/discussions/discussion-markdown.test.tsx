@@ -367,6 +367,22 @@ describe("DiscussionMarkdown", () => {
 
   it("memoizes sent message parsing by stable body content", () => {
     const onOpenMember = () => undefined;
+    const runningMembers = [
+      {
+        id: 2,
+        type: "agent" as const,
+        name: "Ada",
+        status: "running" as const,
+      },
+    ];
+    const pausedMembers = [
+      {
+        id: 2,
+        type: "agent" as const,
+        name: "Ada",
+        status: "paused" as const,
+      },
+    ];
     expect(
       areDiscussionMarkdownPropsEqual(
         {
@@ -379,6 +395,24 @@ describe("DiscussionMarkdown", () => {
         {
           body: "same",
           members: [{ id: 2, name: "Ada" }],
+          messageId: 7,
+          onOpenMember,
+          references: [],
+        },
+      ),
+    ).toBe(true);
+    expect(
+      areDiscussionMarkdownPropsEqual(
+        {
+          body: "same",
+          members: runningMembers,
+          messageId: 7,
+          onOpenMember,
+          references: [],
+        },
+        {
+          body: "same",
+          members: pausedMembers,
           messageId: 7,
           onOpenMember,
           references: [],
