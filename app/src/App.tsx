@@ -1,6 +1,7 @@
 import {
   type FormEvent,
   startTransition,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -45,6 +46,9 @@ function App() {
     number | null
   >(null);
   const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null);
+  const [sourceDiscussionId, setSourceDiscussionId] = useState<number | null>(
+    null,
+  );
   const [workspaceView, setWorkspaceView] =
     useState<WorkspaceView>("discussions");
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
@@ -69,6 +73,16 @@ function App() {
     )?.type === "agent"
       ? selectedMemberId
       : null;
+  const openMemberFromDiscussion = useCallback(
+    (memberId: number, discussionId: number) => {
+      setSourceDiscussionId(discussionId);
+      setSelectedMemberId(memberId);
+      setWorkspaceView("members");
+      setIsCreatingAgent(false);
+      setIsCreatingDiscussion(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -193,6 +207,18 @@ function App() {
     }
   }, [isSaving]);
 
+  useEffect(() => {
+    if (
+      requestState.status === "ready" &&
+      sourceDiscussionId !== null &&
+      !requestState.snapshot.discussions.some(
+        (discussion) => discussion.id === sourceDiscussionId,
+      )
+    ) {
+      setSourceDiscussionId(null);
+    }
+  }, [requestState, sourceDiscussionId]);
+
   if (requestState.status === "loading") {
     return <StatusPage label="Starting Flowent" />;
   }
@@ -207,6 +233,9 @@ function App() {
   );
   const selectedMember = snapshot.members.find(
     (member) => member.id === selectedMemberId,
+  );
+  const sourceDiscussion = snapshot.discussions.find(
+    (discussion) => discussion.id === sourceDiscussionId,
   );
 
   function commit(nextSnapshot: OrganizationSnapshot) {
@@ -299,6 +328,9 @@ function App() {
       setMessageBody("");
       setMessageMentions([]);
     }
+    if (nextSnapshot && sourceDiscussionId === discussionId) {
+      setSourceDiscussionId(null);
+    }
   }
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
@@ -354,6 +386,7 @@ function App() {
   }
 
   function selectDiscussion(discussionId: number) {
+    setSourceDiscussionId(null);
     setSelectedDiscussionId(discussionId);
     setWorkspaceView("discussions");
     setIsCreatingDiscussion(false);
@@ -363,11 +396,23 @@ function App() {
   }
 
   function selectWorkspaceView(view: WorkspaceView) {
+    setSourceDiscussionId(null);
     setWorkspaceView(view);
     setIsCreatingAgent(false);
     setIsCreatingDiscussion(false);
     setTopic("");
     setSelectedMemberIds([]);
+  }
+
+  function returnToSourceDiscussion() {
+    if (!sourceDiscussion) {
+      setSourceDiscussionId(null);
+      return;
+    }
+    setSelectedDiscussionId(sourceDiscussion.id);
+    setWorkspaceView("discussions");
+    setSourceDiscussionId(null);
+    setIsCreatingAgent(false);
   }
 
   const agents = snapshot.members.filter(
@@ -401,8 +446,12 @@ function App() {
             onDeleteAgent={handleDeleteAgent}
             onPauseAgent={handlePauseAgent}
             onResumeAgent={handleResumeAgent}
+            onBackToDiscussion={
+              sourceDiscussion ? returnToSourceDiscussion : undefined
+            }
             onSelectMember={setSelectedMemberId}
             selectedMember={selectedMember}
+            sourceDiscussionTopic={sourceDiscussion?.topic}
           />
         ) : null}
         {workspaceView === "settings" ? <SettingsPage /> : null}
@@ -423,6 +472,7 @@ function App() {
             onDialogOpenChange={changeDiscussionDialog}
             onDeleteDiscussion={handleDeleteDiscussion}
             onMessageChange={changeMessageDraft}
+            onOpenMember={openMemberFromDiscussion}
             onCreateAgent={() => {
               selectWorkspaceView("members");
               setIsCreatingAgent(true);

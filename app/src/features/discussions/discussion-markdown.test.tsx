@@ -10,9 +10,17 @@ import {
 function render(
   body: string,
   references: Parameters<typeof DiscussionMarkdown>[0]["references"] = [],
+  members: readonly { id: number; name: string }[] = references
+    .filter((reference) => !reference.deleted)
+    .map((reference) => ({ id: reference.member_id, name: reference.name })),
 ) {
   return renderToStaticMarkup(
-    <DiscussionMarkdown body={body} references={references} />,
+    <DiscussionMarkdown
+      body={body}
+      members={members}
+      onOpenMember={() => undefined}
+      references={references}
+    />,
   );
 }
 
@@ -182,9 +190,139 @@ describe("DiscussionMarkdown", () => {
       },
     ]);
 
-    expect(markup).toContain("<strong>ask <mark");
+    expect(markup).toContain("<strong>ask <button");
     expect(markup).toContain("mention-reference--notified");
-    expect(markup).toContain(">@Ada</mark> now</strong>");
+    expect(markup).toContain('aria-label="Open Ada in Members"');
+    expect(markup).toContain('data-member-id="2"');
+    expect(markup).toContain(">@Ada</button> now</strong>");
+  });
+
+  it("only links structured active identities, including members outside the Discussion", () => {
+    const body = "@Ada ask @Lin, not @Unknown or @Gone";
+    const markup = render(
+      body,
+      [
+        {
+          member_id: 2,
+          name: "Ada",
+          start: 0,
+          end: 4,
+          in_discussion: true,
+          notified: true,
+          deleted: false,
+        },
+        {
+          member_id: 3,
+          name: "Lin",
+          start: 9,
+          end: 13,
+          in_discussion: false,
+          notified: false,
+          deleted: false,
+        },
+        {
+          member_id: 4,
+          name: "Gone",
+          start: 31,
+          end: 36,
+          in_discussion: false,
+          notified: false,
+          deleted: true,
+        },
+      ],
+      [
+        { id: 2, name: "Ada" },
+        { id: 3, name: "Lin" },
+      ],
+    );
+
+    expect(markup.match(/<button/gu)).toHaveLength(2);
+    expect(markup).toContain('aria-label="Open Ada in Members"');
+    expect(markup).toContain('aria-label="Open Lin in Members"');
+    expect(markup).toContain("mention-reference--group-out");
+    expect(markup).toContain('aria-label="@Gone, Deleted member"');
+    expect(markup).toContain("Deleted member");
+    expect(markup).toContain("@Unknown");
+    expect(markup).not.toContain("Open Unknown in Members");
+    expect(markup).not.toContain("Open Gone in Members");
+  });
+
+  it("renders the current active member name by stable member ID", () => {
+    const markup = render(
+      "Ask @OldName",
+      [
+        {
+          member_id: 2,
+          name: "OldName",
+          start: 4,
+          end: 12,
+          in_discussion: true,
+          notified: true,
+          deleted: false,
+        },
+      ],
+      [{ id: 2, name: "CurrentName" }],
+    );
+
+    expect(markup).toContain(">@CurrentName</button>");
+    expect(markup).toContain('aria-label="Open CurrentName in Members"');
+    expect(markup).toContain("@CurrentName · Notified");
+    expect(markup).not.toContain(">@OldName</button>");
+  });
+
+  it("preserves repeated structured occurrences while resolving each by member ID", () => {
+    const markup = render(
+      "@Old then @Old",
+      [
+        {
+          member_id: 2,
+          name: "Old",
+          start: 0,
+          end: 4,
+          in_discussion: true,
+          notified: true,
+          deleted: false,
+        },
+        {
+          member_id: 2,
+          name: "Old",
+          start: 10,
+          end: 14,
+          in_discussion: true,
+          notified: true,
+          deleted: false,
+        },
+      ],
+      [{ id: 2, name: "Current" }],
+    );
+
+    expect(markup.match(/data-member-id="2"/gu)).toHaveLength(2);
+    expect(markup.match(/>@Current<\/button>/gu)).toHaveLength(2);
+    expect(markup).toContain("@Current</button> then <button");
+  });
+
+  it("keeps a structured identity non-interactive when its member is no longer active", () => {
+    const markup = render(
+      "@Ada",
+      [
+        {
+          member_id: 2,
+          name: "Ada",
+          start: 0,
+          end: 4,
+          in_discussion: true,
+          notified: false,
+          deleted: false,
+        },
+      ],
+      [],
+    );
+
+    expect(markup).toContain("<mark");
+    expect(markup).toContain("mention-reference--unavailable");
+    expect(markup).toContain('aria-label="@Ada, Member unavailable"');
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("data-member-id");
   });
 
   it("does not fabricate a range for fallback or unsafe AST mappings", () => {
@@ -216,16 +354,48 @@ describe("DiscussionMarkdown", () => {
   });
 
   it("memoizes sent message parsing by stable body content", () => {
+    const onOpenMember = () => undefined;
     expect(
       areDiscussionMarkdownPropsEqual(
-        { body: "same", references: [] },
-        { body: "same", references: [] },
+        {
+          body: "same",
+          members: [{ id: 2, name: "Ada" }],
+          onOpenMember,
+          references: [],
+        },
+        {
+          body: "same",
+          members: [{ id: 2, name: "Ada" }],
+          onOpenMember,
+          references: [],
+        },
       ),
     ).toBe(true);
     expect(
       areDiscussionMarkdownPropsEqual(
-        { body: "before", references: [] },
-        { body: "after", references: [] },
+        {
+          body: "before",
+          members: [{ id: 2, name: "Ada" }],
+          onOpenMember,
+          references: [],
+        },
+        {
+          body: "after",
+          members: [{ id: 2, name: "Ada" }],
+          onOpenMember,
+          references: [],
+        },
+      ),
+    ).toBe(false);
+    expect(
+      areDiscussionMarkdownPropsEqual(
+        {
+          body: "same",
+          members: [{ id: 2, name: "Ada" }],
+          onOpenMember,
+          references: [],
+        },
+        { body: "same", members: [], onOpenMember, references: [] },
       ),
     ).toBe(false);
   });

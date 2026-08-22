@@ -32,12 +32,14 @@ type MembersPageProps = {
   members: Member[];
   onAgentDialogOpenChange: (open: boolean) => void;
   onAgentNameChange: (name: string) => void;
+  onBackToDiscussion?: () => void;
   onCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
   onDeleteAgent: (agentId: number) => void;
   onPauseAgent: (agentId: number) => void;
   onResumeAgent: (agentId: number) => void;
   onSelectMember: (memberId: number) => void;
   selectedMember?: Member;
+  sourceDiscussionTopic?: string;
 };
 
 function memberMeta(member: Member) {
@@ -55,12 +57,14 @@ export function MembersPage({
   members,
   onAgentDialogOpenChange,
   onAgentNameChange,
+  onBackToDiscussion,
   onCreateAgent,
   onDeleteAgent,
   onPauseAgent,
   onResumeAgent,
   onSelectMember,
   selectedMember,
+  sourceDiscussionTopic,
 }: MembersPageProps) {
   const agentNameInputRef = useRef<HTMLInputElement>(null);
   const [deletingAgentId, setDeletingAgentId] = useState<number | null>(null);
@@ -227,10 +231,18 @@ export function MembersPage({
             key={selectedMember.id}
             disabled={disabled}
             history={history ?? { status: "loading" }}
+            onBackToDiscussion={onBackToDiscussion}
             onPause={onPauseAgent}
             onResume={onResumeAgent}
+            sourceDiscussionTopic={sourceDiscussionTopic}
           />
-        ) : selectedMember ? null : (
+        ) : selectedMember ? (
+          <HumanDetails
+            human={selectedMember}
+            onBackToDiscussion={onBackToDiscussion}
+            sourceDiscussionTopic={sourceDiscussionTopic}
+          />
+        ) : (
           <div className="member-detail-empty">
             <p>Select a member</p>
           </div>
@@ -240,18 +252,110 @@ export function MembersPage({
   );
 }
 
+function DiscussionReturnButton({
+  onBackToDiscussion,
+  sourceDiscussionTopic,
+}: {
+  onBackToDiscussion?: () => void;
+  sourceDiscussionTopic?: string;
+}) {
+  return onBackToDiscussion ? (
+    <Button
+      aria-label="Back to Discussion"
+      onClick={onBackToDiscussion}
+      title={
+        sourceDiscussionTopic
+          ? `Return to ${sourceDiscussionTopic}`
+          : "Return to source Discussion"
+      }
+      variant="quiet"
+    >
+      Back to Discussion
+    </Button>
+  ) : null;
+}
+
+function HumanDetails({
+  human,
+  onBackToDiscussion,
+  sourceDiscussionTopic,
+}: {
+  human: Extract<Member, { type: "human" }>;
+  onBackToDiscussion?: () => void;
+  sourceDiscussionTopic?: string;
+}) {
+  return (
+    <section
+      className="member-agent-detail"
+      aria-label={`${human.name} details`}
+    >
+      <header className="member-detail-header">
+        <span className="member-detail-mark" aria-hidden="true">
+          {human.name.slice(0, 1).toUpperCase()}
+        </span>
+        <div className="member-detail-title">
+          <span>Human</span>
+          <h2>{human.name}</h2>
+        </div>
+        <div className="member-detail-controls">
+          <DiscussionReturnButton
+            onBackToDiscussion={onBackToDiscussion}
+            sourceDiscussionTopic={sourceDiscussionTopic}
+          />
+        </div>
+      </header>
+      <div
+        aria-label="Human details"
+        className="member-detail-tabs"
+        role="tablist"
+      >
+        <button
+          aria-controls={`human-${human.id}-overview-panel`}
+          aria-selected="true"
+          id={`human-${human.id}-overview-tab`}
+          role="tab"
+          type="button"
+        >
+          Overview
+        </button>
+      </div>
+      <div className="member-detail-body">
+        <section
+          aria-labelledby={`human-${human.id}-overview-tab`}
+          className="member-detail-panel member-detail-overview"
+          id={`human-${human.id}-overview-panel`}
+          role="tabpanel"
+        >
+          <div className="member-detail-summary">
+            <dl className="member-detail-fields">
+              <div>
+                <dt>Type</dt>
+                <dd>Human</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function AgentDetails({
   agent,
   disabled,
   history,
+  onBackToDiscussion,
   onPause,
   onResume,
+  sourceDiscussionTopic,
 }: {
   agent: AgentMember;
   disabled: boolean;
   history: AgentHistoryState;
+  onBackToDiscussion?: () => void;
   onPause: (agentId: number) => void;
   onResume: (agentId: number) => void;
+  sourceDiscussionTopic?: string;
 }) {
   const [tab, setTab] = useState<"overview" | "memory" | "history">("overview");
   const paused = agent.status === "paused" || agent.status === "pausing";
@@ -271,6 +375,10 @@ function AgentDetails({
           <h2>{agent.name}</h2>
         </div>
         <div className="member-detail-controls">
+          <DiscussionReturnButton
+            onBackToDiscussion={onBackToDiscussion}
+            sourceDiscussionTopic={sourceDiscussionTopic}
+          />
           <StatusIndicator tone={agentStatusTone(agent.status)}>
             {agent.status.toUpperCase()}
           </StatusIndicator>

@@ -1,6 +1,7 @@
 import {
   type FormEvent,
   type RefObject,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -61,6 +62,7 @@ type DiscussionsPageProps = {
   onCreateAgent: () => void;
   onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
+  onOpenMember: (memberId: number, discussionId: number) => void;
   onSelectDiscussion: (discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
@@ -87,6 +89,7 @@ export function DiscussionsPage({
   onDialogOpenChange,
   onDeleteDiscussion,
   onMessageChange,
+  onOpenMember,
   onSelectDiscussion,
   onSend,
   onToggleMember,
@@ -233,6 +236,7 @@ export function DiscussionsPage({
               messageMentions={messageMentions}
               mentionSyntax={mentionSyntax}
               onMessageChange={onMessageChange}
+              onOpenMember={onOpenMember}
               onSend={onSend}
             />
           </section>
@@ -366,15 +370,25 @@ const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
   error: "Error",
 };
 
-function DiscussionMemberAvatar({ member }: { member: Member }) {
+function DiscussionMemberAvatar({
+  member,
+  onOpenMember,
+}: {
+  member: Member;
+  onOpenMember: (memberId: number) => void;
+}) {
   const initial = member.name.slice(0, 1).toUpperCase();
 
   if (member.type === "human") {
     return (
-      <span className="discussion-member-avatar discussion-member-avatar--human">
+      <button
+        aria-label={`${member.name}, Human`}
+        className="discussion-member-avatar discussion-member-avatar--human"
+        onClick={() => onOpenMember(member.id)}
+        type="button"
+      >
         <span aria-hidden="true">{initial}</span>
-        <span className="sr-only">{member.name}, Human</span>
-      </span>
+      </button>
     );
   }
 
@@ -390,6 +404,7 @@ function DiscussionMemberAvatar({ member }: { member: Member }) {
         aria-label={`${member.name}, Agent status: ${statusLabel}`}
         className={`discussion-member-avatar discussion-member-avatar--agent discussion-member-avatar--${status}`}
         data-agent-status={status}
+        onClick={() => onOpenMember(member.id)}
         type="button"
       >
         <span aria-hidden="true">{initial}</span>
@@ -416,6 +431,7 @@ type DiscussionViewProps = {
   messageMentions: DraftMention[];
   mentionSyntax: MentionSyntax;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
+  onOpenMember: (memberId: number, discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -428,6 +444,7 @@ function DiscussionView({
   messageMentions,
   mentionSyntax,
   onMessageChange,
+  onOpenMember,
   onSend,
 }: DiscussionViewProps) {
   const messageLogRef = useRef<HTMLDivElement>(null);
@@ -436,6 +453,10 @@ function DiscussionView({
   const discussionMembers = discussion.member_ids
     .map((id) => membersById.get(id))
     .filter((member): member is Member => Boolean(member));
+  const handleOpenMember = useCallback(
+    (memberId: number) => onOpenMember(memberId, discussion.id),
+    [discussion.id, onOpenMember],
+  );
 
   useEffect(() => {
     const log = messageLogRef.current;
@@ -476,7 +497,11 @@ function DiscussionView({
         <div className="discussion-member-avatars">
           <span className="sr-only">Discussion members:</span>
           {discussionMembers.map((member) => (
-            <DiscussionMemberAvatar key={member.id} member={member} />
+            <DiscussionMemberAvatar
+              key={member.id}
+              member={member}
+              onOpenMember={handleOpenMember}
+            />
           ))}
         </div>
       </header>
@@ -513,6 +538,8 @@ function DiscussionView({
                     </header>
                     <DiscussionMarkdown
                       body={message.body}
+                      members={members}
+                      onOpenMember={handleOpenMember}
                       references={message.references}
                     />
                     {message.mentions.length > 0 ? (

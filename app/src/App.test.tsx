@@ -219,6 +219,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -231,7 +232,10 @@ describe("App", () => {
     );
 
     expect(markup).toContain("Discussion members:");
-    expect(markup).toContain("You, Human");
+    expect(markup).toContain('aria-label="You, Human"');
+    expect(markup).toMatch(
+      /<button[^>]*aria-label="You, Human"[^>]*class="discussion-member-avatar discussion-member-avatar--human"/u,
+    );
     expect(markup).toContain('aria-label="Run, Agent status: Running"');
     expect(markup).toContain('aria-label="Idle, Agent status: Idle"');
     expect(markup).toContain('aria-label="Pause, Agent status: Paused"');
@@ -278,6 +282,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -337,6 +342,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -406,6 +412,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -473,12 +480,14 @@ describe("App", () => {
           members={[{ id: 1, type: "human", name: "You" }, agent]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
+          onBackToDiscussion={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
           onPauseAgent={() => undefined}
           onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
+          sourceDiscussionTopic="Repository work"
         />
       </TooltipProvider>,
     );
@@ -490,6 +499,8 @@ describe("App", () => {
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('aria-label="Ada details"');
     expect(markup).toContain('aria-label="Pause Ada"');
+    expect(markup).toContain('aria-label="Back to Discussion"');
+    expect(markup).toContain('title="Return to Repository work"');
     expect(markup).not.toContain('aria-label="Resume Ada"');
     expect(markup).toContain("Agent · IDLE");
     expect(markup).toContain('aria-label="Agent details"');
@@ -664,7 +675,7 @@ describe("App", () => {
     expect(markup).not.toContain("Retry Ada");
   });
 
-  it("keeps Human Member details empty", () => {
+  it("renders a minimal Human Overview with a source Discussion return", () => {
     const human = { id: 1, type: "human" as const, name: "You" };
     const markup = renderToStaticMarkup(
       <TooltipProvider>
@@ -676,20 +687,31 @@ describe("App", () => {
           members={[human]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
+          onBackToDiscussion={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
           onPauseAgent={() => undefined}
           onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={human}
+          sourceDiscussionTopic="Repository work"
         />
       </TooltipProvider>,
     );
 
     expect(markup).toContain('aria-label="Open You"');
-    expect(markup).not.toContain("Select a member");
-    expect(markup).not.toContain("member-agent-detail");
+    expect(markup).toContain('aria-label="You details"');
+    expect(markup).toContain('aria-label="Human details"');
+    expect(markup).toContain('aria-label="Back to Discussion"');
+    expect(markup).toContain('title="Return to Repository work"');
+    expect(markup).toContain(">Overview<");
+    expect(markup).toContain(">Human<");
     expect(markup).not.toContain(">Member ID<");
+    expect(markup).not.toContain("Human 1");
+    expect(markup).not.toContain(">Memory<");
+    expect(markup).not.toContain(">History<");
+    expect(markup).not.toContain("StatusIndicator");
+    expect(markup).not.toContain('aria-label="Delete You"');
   });
 
   it("renders production controls with accessible native semantics", () => {

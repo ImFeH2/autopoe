@@ -194,6 +194,7 @@
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
+  cursor: pointer;
 }
 
 .discussion-member-avatar:focus-visible {
@@ -209,7 +210,6 @@
 .discussion-member-avatar--agent {
   background: var(--color-accent);
   color: var(--color-text-inverse);
-  cursor: help;
 }
 
 .discussion-member-status-mark {
@@ -594,6 +594,21 @@
   padding-inline: 0.08em;
 }
 
+button.mention-reference {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+button.mention-reference:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .mention-reference--in-discussion {
   background: var(--color-accent-subtle);
   color: var(--color-accent-text);
@@ -605,6 +620,10 @@
   background: color-mix(in srgb, var(--color-text-tertiary) 14%, transparent);
   text-decoration: underline dotted;
   text-underline-offset: 0.18em;
+}
+
+.mention-reference--unavailable {
+  opacity: 0.82;
 }
 
 .mention-reference--deleted {

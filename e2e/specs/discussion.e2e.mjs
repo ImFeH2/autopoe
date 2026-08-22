@@ -58,7 +58,9 @@ describe("Discussions", () => {
 
     await browser.setWindowSize(1200, 760);
     await $("aria/Discussions").click();
-    await $("aria/New discussion").click();
+    const newDiscussion = await $("aria/New discussion");
+    await newDiscussion.waitForEnabled();
+    await newDiscussion.click();
     const form = await $("aria/Create Discussion");
     await form.waitForDisplayed();
     await form.$("#discussion-topic").setValue("Crowded layout");
@@ -181,5 +183,102 @@ describe("Discussions", () => {
     await expect($(".mention-status")).toHaveText(
       expect.stringContaining("@Lin"),
     );
+  });
+  it("navigates structured identities and preserves unavailable references", async () => {
+    await waitForWorkspace();
+    await createCrowdAgent("NavAda");
+    await createCrowdAgent("NavLin");
+    await createCrowdAgent("NavGone");
+
+    await $("aria/Discussions").click();
+    await $("aria/New discussion").click();
+    const form = await $("aria/Create Discussion");
+    await form.waitForDisplayed();
+    await form.$("#discussion-topic").setValue("Identity navigation");
+    await form.$("aria/NavAda").click();
+    await form.$("button=Create").click();
+    await expect($("h2=Identity navigation")).toBeDisplayed();
+
+    const humanAvatar = await $("aria/You, Human");
+    await browser.execute(() => {
+      document.querySelector('[aria-label="You, Human"]')?.focus();
+    });
+    await expect(humanAvatar).toBeFocused();
+    expect(
+      await browser.execute(() => {
+        const target = document.querySelector('[aria-label="You, Human"]');
+        return (
+          target instanceof HTMLButtonElement &&
+          target.tabIndex === 0 &&
+          !target.disabled
+        );
+      }),
+    ).toBe(true);
+    await humanAvatar.click();
+    const humanDetails = await $("aria/You details");
+    await humanDetails.waitForDisplayed();
+    await expect(humanDetails).toHaveText(expect.stringContaining("Overview"));
+    await expect(humanDetails).toHaveText(expect.stringContaining("Human"));
+    await expect(humanDetails).not.toHaveText(
+      expect.stringContaining("Member ID"),
+    );
+    await $("aria/Back to Discussion").click();
+    await expect($("h2=Identity navigation")).toBeDisplayed();
+
+    const agentAvatar = await $("aria/NavAda, Agent status: Idle");
+    await browser.execute(() => {
+      document
+        .querySelector('[aria-label="NavAda, Agent status: Idle"]')
+        ?.focus();
+    });
+    await expect(agentAvatar).toBeFocused();
+    await agentAvatar.click();
+    await $("aria/NavAda details").waitForDisplayed();
+    await expect($("[role=tab][aria-selected=true]")).toHaveText("Overview");
+    await $("aria/Back to Discussion").click();
+
+    const composer = await $("aria/Send Message");
+    await composer
+      .$("aria/Message")
+      .setValue("@NavAda ask @NavLin and @NavGone; @Plain stays text.");
+    await composer.$("button=Send").click();
+
+    const adaReference = await $("aria/Open NavAda in Members");
+    const linReference = await $("aria/Open NavLin in Members");
+    const goneReference = await $("aria/Open NavGone in Members");
+    await adaReference.waitForDisplayed();
+    await linReference.waitForDisplayed();
+    await goneReference.waitForDisplayed();
+    await expect($$("aria/Open Plain in Members")).toBeElementsArrayOfSize(0);
+    await expect($("p*=Plain stays text")).toBeDisplayed();
+    const mentionCount = (await $$(".mention-status")).length;
+
+    await browser.execute(() => {
+      document.querySelector('[aria-label="Open NavLin in Members"]')?.focus();
+    });
+    await expect(linReference).toBeFocused();
+    await linReference.click();
+    await $("aria/NavLin details").waitForDisplayed();
+    await $("aria/Back to Discussion").click();
+    await expect($$(".mention-status")).toBeElementsArrayOfSize(mentionCount);
+
+    await $("aria/Open NavGone in Members").click();
+    await $("aria/NavGone details").waitForDisplayed();
+    await $("aria/Delete NavGone").click();
+    const deleteDialog = await $("aria/Delete Agent");
+    await deleteDialog.waitForDisplayed();
+    await deleteDialog.$("input").setValue("NavGone");
+    await deleteDialog.$("button=Delete").click();
+
+    await $("aria/Discussions").click();
+    await $("aria/Open Identity navigation").click();
+    const deletedReference = await $(".mention-reference--deleted");
+    await deletedReference.waitForDisplayed();
+    await expect(deletedReference).toHaveAttribute(
+      "aria-label",
+      "@NavGone, Deleted member",
+    );
+    await expect($$("aria/Open NavGone in Members")).toBeElementsArrayOfSize(0);
+    await expect($$(".message-avatar button")).toBeElementsArrayOfSize(0);
   });
 });

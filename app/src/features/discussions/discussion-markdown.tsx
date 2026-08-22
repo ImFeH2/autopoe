@@ -2,7 +2,7 @@ import { memo, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import type { MentionReference } from "@/lib/backend";
+import type { Member, MentionReference } from "@/lib/backend";
 import { codePointRangeToUtf16 } from "@/lib/mention-normalization";
 
 function isUnsafeUrlCharacter(character: string): boolean {
@@ -94,14 +94,20 @@ function referenceClassName(reference: MentionReference): string {
 export function createMentionReferencePlugin(
   body: string,
   references: MentionReference[],
+  members: readonly Pick<Member, "id" | "name">[],
 ) {
-  const positioned = references.flatMap((reference) => {
-    if (reference.start === null || reference.end === null) {
-      return [];
-    }
-    const range = codePointRangeToUtf16(body, reference.start, reference.end);
-    return range ? [{ ...reference, ...range }] : [];
-  });
+  const activeMembersById = new Map(
+    members.map((member) => [member.id, member] as const),
+  );
+  const positioned = references
+    .flatMap((reference) => {
+      if (reference.start === null || reference.end === null) {
+        return [];
+      }
+      const range = codePointRangeToUtf16(body, reference.start, reference.end);
+      return range ? [{ ...reference, ...range }] : [];
+    })
+    .sort((left, right) => left.start - right.start || left.end - right.end);
 
   return () => (tree: MdastNode) => {
     function visit(node: MdastNode) {
@@ -144,20 +150,43 @@ export function createMentionReferencePlugin(
               value: child.value.slice(cursor, start),
             });
           }
+          const activeMember = activeMembersById.get(reference.member_id);
+          const active = !reference.deleted && Boolean(activeMember);
+          const displayName = activeMember?.name ?? reference.name;
+          const stateLabel = reference.notified
+            ? "Notified"
+            : reference.in_discussion
+              ? "In Discussion · Not notified"
+              : "Not in Discussion · Not notified";
           nextChildren.push({
             type: "text",
-            value: child.value.slice(start, end),
+            value: active ? `@${displayName}` : child.value.slice(start, end),
             data: {
-              hName: "mark",
+              hName: active ? "button" : "mark",
               hProperties: {
-                className: referenceClassName(reference),
-                title: `@${reference.name} · ${
-                  reference.notified
-                    ? "Notified"
-                    : reference.in_discussion
-                      ? "In Discussion · Not notified"
-                      : "Not in Discussion · Not notified"
-                }${reference.deleted ? " · Deleted Agent" : ""}`,
+                className: `${referenceClassName(reference)}${
+                  !active && !reference.deleted
+                    ? " mention-reference--unavailable"
+                    : ""
+                }`,
+                title: `@${displayName} · ${stateLabel}${
+                  reference.deleted
+                    ? " · Deleted member"
+                    : !active
+                      ? " · Member unavailable"
+                      : ""
+                }`,
+                ...(active
+                  ? {
+                      "aria-label": `Open ${displayName} in Members`,
+                      "data-member-id": reference.member_id,
+                      type: "button",
+                    }
+                  : reference.deleted
+                    ? { "aria-label": `@${reference.name}, Deleted member` }
+                    : {
+                        "aria-label": `@${reference.name}, Member unavailable`,
+                      }),
               },
             },
           });
@@ -175,6 +204,8 @@ export function createMentionReferencePlugin(
 
 export type DiscussionMarkdownProps = {
   body: string;
+  members?: readonly Pick<Member, "id" | "name">[];
+  onOpenMember?: (memberId: number) => void;
   references: MentionReference[];
 };
 
@@ -184,6 +215,12 @@ export function areDiscussionMarkdownPropsEqual(
 ) {
   return (
     previous.body === next.body &&
+    previous.onOpenMember === next.onOpenMember &&
+    (previous.members?.length ?? 0) === (next.members?.length ?? 0) &&
+    (previous.members ?? []).every((member, index) => {
+      const candidate = next.members?.[index];
+      return member.id === candidate?.id && member.name === candidate?.name;
+    }) &&
     previous.references.length === next.references.length &&
     previous.references.every((reference, index) => {
       const candidate = next.references[index];
@@ -202,6 +239,8 @@ export function areDiscussionMarkdownPropsEqual(
 
 export const DiscussionMarkdown = memo(function DiscussionMarkdown({
   body,
+  members = [],
+  onOpenMember,
   references,
 }: DiscussionMarkdownProps) {
   return (
@@ -212,6 +251,21 @@ export const DiscussionMarkdown = memo(function DiscussionMarkdown({
           a: ({ children, href }) => (
             <SafeLink href={href}>{children}</SafeLink>
           ),
+          button: ({ children, node, ...props }) => {
+            const memberId = Number(node?.properties["data-member-id"]);
+            return (
+              <button
+                {...props}
+                onClick={() => {
+                  if (Number.isSafeInteger(memberId)) {
+                    onOpenMember?.(memberId);
+                  }
+                }}
+              >
+                {children}
+              </button>
+            );
+          },
           img: ({ alt }) => <OmittedImage alt={alt} />,
           table: ({ children, node: _node, ...props }) => (
             <div className="message-markdown-table-scroll">
@@ -223,7 +277,7 @@ export const DiscussionMarkdown = memo(function DiscussionMarkdown({
         remarkPlugins={[
           remarkGfm,
           remarkBreaks,
-          createMentionReferencePlugin(body, references),
+          createMentionReferencePlugin(body, references, members),
         ]}
         skipHtml
         urlTransform={(value) => safeDiscussionLink(value) ?? ""}
