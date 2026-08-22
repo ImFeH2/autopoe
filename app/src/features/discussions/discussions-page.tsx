@@ -571,8 +571,15 @@ function DiscussionView({
                               reference.member_id === mention.member_id &&
                               reference.notified,
                           );
+                          const activeMember = membersById.get(
+                            mention.member_id,
+                          );
                           const name =
-                            identity?.name ?? String(mention.member_id);
+                            (identity?.deleted
+                              ? undefined
+                              : activeMember?.name) ??
+                            identity?.name ??
+                            String(mention.member_id);
                           return (
                             <li
                               className={`mention-status mention-status--${mention.status}`}

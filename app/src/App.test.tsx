@@ -377,11 +377,17 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Delete Repository work"');
   });
 
-  it("renders Markdown before structured Mention statuses", () => {
-    const agent = {
+  it("keeps active Mention body and status names current", () => {
+    const renamedAgent = {
       id: 2,
       type: "agent" as const,
-      name: "Ada",
+      name: "NewName",
+      status: "idle" as const,
+    };
+    const laterSameNameAgent = {
+      id: 4,
+      type: "agent" as const,
+      name: "OldGone",
       status: "idle" as const,
     };
     const discussion = {
@@ -392,31 +398,52 @@ describe("App", () => {
         {
           id: 1,
           sender_id: 1,
-          body: "**Bold request**\nnext line",
+          body: "@OldName **Bold request**\nnext line",
           references: [
             {
               member_id: 2,
-              name: "Ada",
-              start: null,
-              end: null,
+              name: "OldName",
+              start: 0,
+              end: 8,
+              in_discussion: true,
+              notified: true,
+              deleted: false,
+            },
+          ],
+          mentions: [{ member_id: 2, status: "read" as const }],
+        },
+        {
+          id: 2,
+          sender_id: 1,
+          body: "@OldGone",
+          references: [
+            {
+              member_id: 3,
+              name: "OldGone",
+              start: 0,
+              end: 8,
               in_discussion: true,
               notified: true,
               deleted: true,
             },
           ],
-          mentions: [{ member_id: 2, status: "read" as const }],
+          mentions: [{ member_id: 3, status: "pending" as const }],
         },
       ],
     };
     const markup = renderToStaticMarkup(
       <TooltipProvider>
         <DiscussionsPage
-          agents={[agent]}
+          agents={[renamedAgent, laterSameNameAgent]}
           disabled={false}
           discussions={[discussion]}
           error={null}
           isCreating={false}
-          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          members={[
+            { id: 1, type: "human", name: "You" },
+            renamedAgent,
+            laterSameNameAgent,
+          ]}
           messageBody="composer changes do not belong to sent Markdown"
           messageInputRef={{ current: null }}
           messageMentions={[]}
@@ -444,7 +471,12 @@ describe("App", () => {
     expect(markdownIndex).toBeGreaterThan(-1);
     expect(markup).toContain("<br/>\nnext line");
     expect(mentionIndex).toBeGreaterThan(markdownIndex);
-    expect(markup).toContain("@Ada · READ");
+    expect(markup).toContain("@NewName · READ");
+    expect(markup).toContain('title="@NewName · read"');
+    expect(markup).not.toContain("@OldName");
+    expect(markup).toContain("@OldGone · PENDING");
+    expect(markup).toContain('title="@OldGone · pending · Deleted Agent"');
+    expect(markup).not.toContain('aria-label="Open OldGone in Members"');
   });
 
   it("keeps the sidebar focused on global destinations", () => {
