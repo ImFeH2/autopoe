@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { Button, MenuOption, Textarea } from "@/components/ui";
-import type { AgentMember, MentionSyntax } from "@/lib/backend";
+import type { Member, MentionSyntax } from "@/lib/backend";
 import {
   isMentionBoundary,
   isMentionNameCharacter,
@@ -130,7 +130,7 @@ export function findMentionQuery(
 }
 
 type MentionMatch = {
-  agent: AgentMember;
+  agent: Member;
   index: number;
   position: number;
   rank: number;
@@ -158,7 +158,7 @@ function findOrderedMatch(value: string, query: string) {
 }
 
 function getMentionMatch(
-  agent: AgentMember,
+  agent: Member,
   query: string,
   index: number,
 ): MentionMatch | null {
@@ -203,18 +203,26 @@ function getMentionMatch(
 }
 
 export function mentionAgentScopeLabel(
-  agentId: number,
+  memberId: number,
   discussionMemberIds: number[],
 ): "In Discussion" | "Not in Discussion" {
-  return discussionMemberIds.includes(agentId)
+  return discussionMemberIds.includes(memberId)
     ? "In Discussion"
     : "Not in Discussion";
 }
 
-export function filterMentionAgents(
-  agents: AgentMember[],
-  query: string,
-): AgentMember[] {
+export function mentionMemberMeta(
+  member: Pick<Member, "id" | "type">,
+  discussionMemberIds: number[],
+): string {
+  const typeLabel = member.type === "human" ? "Human" : "Agent";
+  return `${typeLabel} · ${mentionAgentScopeLabel(
+    member.id,
+    discussionMemberIds,
+  )}`;
+}
+
+export function filterMentionAgents(agents: Member[], query: string): Member[] {
   const normalizedQuery = normalizeMentionText(query);
   if (!normalizedQuery) {
     return agents;
@@ -238,7 +246,7 @@ export function insertDraftMention({
   mentions,
   query,
 }: {
-  agent: Pick<AgentMember, "name">;
+  agent: Pick<Member, "name">;
   body: string;
   mentions: DraftMention[];
   query: MentionQuery;
@@ -301,7 +309,7 @@ export function getMentionKeyAction({
 }
 
 type MessageComposerProps = {
-  agents: AgentMember[];
+  agents: Member[];
   body: string;
   disabled: boolean;
   discussionId: number;
@@ -437,7 +445,7 @@ export function MessageComposer({
     setMentionQuery(nextQuery);
   }
 
-  function selectMention(agent: AgentMember) {
+  function selectMention(agent: Member) {
     if (!mentionQuery) {
       return;
     }
@@ -495,7 +503,7 @@ export function MessageComposer({
         <div className="message-composer-input">
           {mentionMenuOpen ? (
             <div
-              aria-label="Agents"
+              aria-label="Members"
               className="mention-suggestions"
               id={mentionListId}
               role="listbox"
@@ -507,10 +515,7 @@ export function MessageComposer({
                       aria-label={`Mention ${agent.name}`}
                       id={`${mentionListId}-${agent.id}`}
                       label={`@${agent.name}`}
-                      meta={mentionAgentScopeLabel(
-                        agent.id,
-                        discussionMemberIds,
-                      )}
+                      meta={mentionMemberMeta(agent, discussionMemberIds)}
                       onClick={() => selectMention(agent)}
                       onMouseDown={(event) => event.preventDefault()}
                       onMouseEnter={() => setActiveMentionIndex(index)}

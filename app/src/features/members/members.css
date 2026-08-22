@@ -847,3 +847,39 @@
     grid-template-columns: 190px minmax(0, 1fr);
   }
 }
+
+.human-rename-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.human-rename-section h3,
+.human-rename-section p {
+  margin: 0;
+}
+
+.human-rename-section h3 {
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.human-rename-section p {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.human-rename-section form {
+  display: grid;
+  max-width: 360px;
+  gap: 8px;
+}
+
+.human-rename-section label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.human-rename-section button {
+  justify-self: start;
+}

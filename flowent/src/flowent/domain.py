@@ -40,6 +40,12 @@ class Mention:
 
 
 @dataclass
+class HumanMentionNotification:
+    member_id: int
+    read: bool = False
+
+
+@dataclass
 class MentionReference:
     member_id: int
     name: str
@@ -54,9 +60,11 @@ class MentionReference:
 class Message:
     id: int
     sender_id: int
+    sender_name: str
     body: str
     references: list[MentionReference] = field(default_factory=list)
     mentions: dict[int, Mention] = field(default_factory=dict)
+    human_mentions: dict[int, HumanMentionNotification] = field(default_factory=dict)
 
 
 @dataclass
@@ -140,6 +148,34 @@ class OrganizationState:
                 name=normalized_name,
             )
             self._agent_execution[member_id] = AgentExecution()
+            self._changed(persist=True)
+            return self._snapshot()
+
+    def rename_member(self, member_id: int, new_name: str) -> dict[str, Any]:
+        try:
+            normalized_name = validate_mention_name(new_name)
+        except ValueError as error:
+            raise DomainError("invalid_name", str(error)) from error
+
+        with self._condition:
+            member = self._require_member(member_id)
+            normalized_key = normalized_mention_name(normalized_name)
+            if any(
+                candidate.id != member_id
+                and not candidate.deleted
+                and normalized_mention_name(candidate.name) == normalized_key
+                for candidate in self._members.values()
+            ):
+                raise DomainError("duplicate_name", "Member names must be unique")
+            if member.name == normalized_name:
+                return self._snapshot()
+            self._members[member_id] = Member(
+                id=member.id,
+                type=member.type,
+                name=normalized_name,
+                deleted=member.deleted,
+                paused=member.paused,
+            )
             self._changed(persist=True)
             return self._snapshot()
 
@@ -284,17 +320,33 @@ class OrganizationState:
                     if reference.notified
                 )
             )
+            agent_targets = tuple(
+                target_id
+                for target_id in targets
+                if self._members[target_id].type == "agent"
+            )
+            human_targets = tuple(
+                target_id
+                for target_id in targets
+                if self._members[target_id].type == "human"
+            )
             message = Message(
                 id=len(discussion.messages) + 1,
                 sender_id=sender_id,
+                sender_name=self._members[sender_id].name,
                 body=normalized_body,
                 references=references,
                 mentions={
-                    target_id: Mention(member_id=target_id) for target_id in targets
+                    target_id: Mention(member_id=target_id)
+                    for target_id in agent_targets
+                },
+                human_mentions={
+                    target_id: HumanMentionNotification(member_id=target_id)
+                    for target_id in human_targets
                 },
             )
             discussion.messages.append(message)
-            for target_id in targets:
+            for target_id in agent_targets:
                 execution = self._agent_execution[target_id]
                 if execution.status == "error":
                     execution.status = "idle"
@@ -382,6 +434,31 @@ class OrganizationState:
             if changed:
                 self._changed(persist=True)
             return self._discussion_selection_data(discussion, selected_messages)
+
+    def read_human_mention(
+        self,
+        member_id: int,
+        discussion_id: int,
+        message_id: int,
+    ) -> dict[str, Any]:
+        with self._condition:
+            member = self._require_member(member_id)
+            if member.type != "human":
+                raise DomainError("not_a_human", "Member is not a Human")
+            discussion = self._require_discussion_member(member_id, discussion_id)
+            if message_id < 1 or message_id > len(discussion.messages):
+                raise DomainError("message_not_found", "Message not found")
+            notification = discussion.messages[message_id - 1].human_mentions.get(
+                member_id
+            )
+            if notification is None:
+                raise DomainError(
+                    "invalid_human_mention", "Message did not notify this Human"
+                )
+            if not notification.read:
+                notification.read = True
+                self._changed(persist=True)
+            return self._snapshot()
 
     def ack_messages(
         self,
@@ -579,7 +656,7 @@ class OrganizationState:
         return tuple(
             MentionName(member.id, member.name)
             for member in self._members.values()
-            if member.type == "agent" and (not active_only or not member.deleted)
+            if not active_only or not member.deleted
         )
 
     def _human_names(self) -> tuple[MentionName, ...]:
@@ -590,9 +667,7 @@ class OrganizationState:
         )
 
     def _mention_syntax_data(self) -> dict[str, Any]:
-        issues = mention_syntax_issues(
-            self._mention_names(active_only=True), self._human_names()
-        )
+        issues = mention_syntax_issues(self._mention_names(active_only=True))
         return {
             "enabled": not issues,
             "issues": [
@@ -699,6 +774,13 @@ class OrganizationState:
         return {
             "id": message.id,
             "sender_id": message.sender_id,
+            **(
+                {"sender_name": message.sender_name}
+                if (sender := self._members.get(message.sender_id)) is None
+                or sender.deleted
+                or sender.name != message.sender_name
+                else {}
+            ),
             "body": message.body,
             "references": [
                 {
@@ -725,6 +807,19 @@ class OrganizationState:
                 }
                 for mention in message.mentions.values()
             ],
+            **(
+                {
+                    "human_mentions": [
+                        {
+                            "member_id": notification.member_id,
+                            "status": "read" if notification.read else "unread",
+                        }
+                        for notification in message.human_mentions.values()
+                    ]
+                }
+                if message.human_mentions
+                else {}
+            ),
         }
 
     def _restore(self, persisted: dict[str, Any]) -> None:
@@ -739,7 +834,12 @@ class OrganizationState:
             self._members[member.id] = member
             if member.type == "agent" and not member.deleted:
                 self._agent_execution[member.id] = AgentExecution()
-        if self._members.get(1) != Member(id=1, type="human", name="You"):
+        current_human = self._members.get(1)
+        if (
+            current_human is None
+            or current_human.type != "human"
+            or current_human.deleted
+        ):
             raise RuntimeError("Persisted Organization is missing its Human Member")
         for item in persisted["discussions"]:
             messages: list[Message] = []
@@ -787,13 +887,25 @@ class OrganizationState:
                                 deleted=member.deleted,
                             )
                         )
+                human_mentions = {
+                    notification["member_id"]: HumanMentionNotification(
+                        member_id=notification["member_id"],
+                        read=notification.get("read", False),
+                    )
+                    for notification in message_data.get("human_mentions", [])
+                }
                 messages.append(
                     Message(
                         id=message_data["id"],
                         sender_id=message_data["sender_id"],
+                        sender_name=message_data.get(
+                            "sender_name",
+                            self._members[message_data["sender_id"]].name,
+                        ),
                         body=message_data["body"],
                         references=references,
                         mentions=mentions,
+                        human_mentions=human_mentions,
                     )
                 )
             discussion = Discussion(
@@ -825,6 +937,7 @@ class OrganizationState:
                         {
                             "id": message.id,
                             "sender_id": message.sender_id,
+                            "sender_name": message.sender_name,
                             "body": message.body,
                             "references": [
                                 {
@@ -846,6 +959,13 @@ class OrganizationState:
                                     "reminded": mention.reminded,
                                 }
                                 for mention in message.mentions.values()
+                            ],
+                            "human_mentions": [
+                                {
+                                    "member_id": notification.member_id,
+                                    "read": notification.read,
+                                }
+                                for notification in message.human_mentions.values()
                             ],
                         }
                         for message in discussion.messages

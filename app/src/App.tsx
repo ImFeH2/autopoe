@@ -8,6 +8,7 @@ import {
 } from "react";
 import { AppSidebar, type WorkspaceView } from "@/components/layout";
 import { DiscussionsPage, type DraftMention } from "@/features/discussions";
+import type { HumanMentionNotificationItem } from "@/features/discussions/human-mention-notifications";
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
 import {
@@ -72,6 +73,10 @@ function App() {
   const focusMessageAfterDialogRef = useRef(false);
   const focusMemberDetailRef = useRef(false);
   const restoreDiscussionFocusRef = useRef<DiscussionSource | null>(null);
+  const pendingMessageFocusRef = useRef<{
+    discussionId: number;
+    messageId: number;
+  } | null>(null);
   const selectedAgentId =
     requestState.status === "ready" &&
     requestState.snapshot.members.find(
@@ -280,6 +285,28 @@ function App() {
     return () => cancelAnimationFrame(frame);
   }, [selectedDiscussionId, workspaceView]);
 
+  useEffect(() => {
+    const target = pendingMessageFocusRef.current;
+    if (
+      workspaceView !== "discussions" ||
+      target === null ||
+      selectedDiscussionId !== target.discussionId
+    ) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const message = document.querySelector<HTMLElement>(
+        `[data-message-id="${target.messageId}"]`,
+      );
+      if (message) {
+        pendingMessageFocusRef.current = null;
+        message.scrollIntoView({ block: "center" });
+        message.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedDiscussionId, workspaceView]);
+
   if (requestState.status === "loading") {
     return <StatusPage label="Starting Flowent" />;
   }
@@ -328,6 +355,19 @@ function App() {
       setAgentName("");
       setSelectedMemberId(created?.type === "agent" ? created.id : null);
       setIsCreatingAgent(false);
+    }
+  }
+
+  async function handleRenameMember(memberId: number, name: string) {
+    setIsSaving(true);
+    setMutationError(null);
+    try {
+      commit(await backend.renameMember(memberId, name));
+    } catch (error) {
+      setMutationError(errorMessage(error));
+      throw error;
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -411,6 +451,28 @@ function App() {
     }
   }
 
+  async function openHumanMention(discussionId: number, messageId: number) {
+    pendingMessageFocusRef.current = { discussionId, messageId };
+    selectDiscussion(discussionId);
+    const currentHuman = snapshot.members.find(
+      (member) => member.id === 1 && member.type === "human",
+    );
+    if (!currentHuman) {
+      return;
+    }
+    const message = snapshot.discussions
+      .find((discussion) => discussion.id === discussionId)
+      ?.messages.find((candidate) => candidate.id === messageId);
+    const notification = message?.human_mentions?.find(
+      (candidate) => candidate.member_id === currentHuman.id,
+    );
+    if (notification?.status === "unread") {
+      await mutate(() =>
+        backend.readHumanMention(currentHuman.id, discussionId, messageId),
+      );
+    }
+  }
+
   function toggleMember(memberId: number) {
     setSelectedMemberIds((current) => toggleId(current, memberId));
   }
@@ -487,6 +549,34 @@ function App() {
   const agents = snapshot.members.filter(
     (member): member is AgentMember => member.type === "agent",
   );
+  const currentHuman = snapshot.members.find(
+    (member) => member.id === 1 && member.type === "human",
+  );
+  const humanMentionNotifications: HumanMentionNotificationItem[] = currentHuman
+    ? snapshot.discussions.flatMap((discussion) =>
+        discussion.messages.flatMap((message) => {
+          const notification = message.human_mentions?.find(
+            (candidate) => candidate.member_id === currentHuman.id,
+          );
+          return notification
+            ? [
+                {
+                  discussionId: discussion.id,
+                  discussionTopic: discussion.topic,
+                  messageId: message.id,
+                  senderName:
+                    message.sender_name ??
+                    snapshot.members.find(
+                      (member) => member.id === message.sender_id,
+                    )?.name ??
+                    "Unknown",
+                  unread: notification.status === "unread",
+                },
+              ]
+            : [];
+        }),
+      )
+    : [];
   return (
     <main className="app-shell bg-canvas text-text-primary">
       <AppSidebar
@@ -514,6 +604,7 @@ function App() {
             onCreateAgent={handleCreateAgent}
             onDeleteAgent={handleDeleteAgent}
             onPauseAgent={handlePauseAgent}
+            onRenameMember={handleRenameMember}
             onResumeAgent={handleResumeAgent}
             onBackToDiscussion={
               sourceDiscussion ? returnToSourceDiscussion : undefined
@@ -531,6 +622,7 @@ function App() {
             discussions={snapshot.discussions}
             error={mutationError}
             isCreating={isCreatingDiscussion}
+            humanMentionNotifications={humanMentionNotifications}
             members={snapshot.members}
             messageBody={messageBody}
             messageInputRef={messageInputRef}
@@ -541,6 +633,9 @@ function App() {
             onDialogOpenChange={changeDiscussionDialog}
             onDeleteDiscussion={handleDeleteDiscussion}
             onMessageChange={changeMessageDraft}
+            onOpenHumanMention={(discussionId, messageId) =>
+              void openHumanMention(discussionId, messageId)
+            }
             onOpenMember={openMemberFromDiscussion}
             onCreateAgent={() => {
               selectWorkspaceView("members");

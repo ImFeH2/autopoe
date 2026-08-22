@@ -17,6 +17,7 @@ import type { AgentHistory, AgentMember, Member } from "@/lib/backend";
 import { AgentMemoryBrowser } from "./agent-memory-browser";
 import { AgentTodos } from "./agent-todos";
 import { HistoryBlock } from "./history-block";
+import { HumanRenameEditor } from "./human-rename-editor";
 
 type AgentHistoryState =
   | { status: "loading" }
@@ -36,6 +37,7 @@ type MembersPageProps = {
   onCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
   onDeleteAgent: (agentId: number) => void;
   onPauseAgent: (agentId: number) => void;
+  onRenameMember?: (memberId: number, name: string) => Promise<void>;
   onResumeAgent: (agentId: number) => void;
   onSelectMember: (memberId: number) => void;
   selectedMember?: Member;
@@ -61,6 +63,7 @@ export function MembersPage({
   onCreateAgent,
   onDeleteAgent,
   onPauseAgent,
+  onRenameMember = async () => undefined,
   onResumeAgent,
   onSelectMember,
   selectedMember,
@@ -238,8 +241,10 @@ export function MembersPage({
           />
         ) : selectedMember ? (
           <HumanDetails
+            disabled={disabled}
             human={selectedMember}
             onBackToDiscussion={onBackToDiscussion}
+            onRename={onRenameMember}
             sourceDiscussionTopic={sourceDiscussionTopic}
           />
         ) : (
@@ -276,12 +281,16 @@ function DiscussionReturnButton({
 }
 
 function HumanDetails({
+  disabled,
   human,
   onBackToDiscussion,
+  onRename,
   sourceDiscussionTopic,
 }: {
+  disabled: boolean;
   human: Extract<Member, { type: "human" }>;
   onBackToDiscussion?: () => void;
+  onRename: (memberId: number, name: string) => Promise<void>;
   sourceDiscussionTopic?: string;
 }) {
   return (
@@ -333,7 +342,24 @@ function HumanDetails({
                 <dt>Type</dt>
                 <dd>Human</dd>
               </div>
+              {human.id === 1 ? (
+                <div>
+                  <dt>Current viewer</dt>
+                  <dd>You</dd>
+                </div>
+              ) : null}
             </dl>
+            {human.id === 1 ? (
+              <div className="human-rename-section">
+                <h3>Formal name</h3>
+                <p>Used for message authors, Members, mentions, and search.</p>
+                <HumanRenameEditor
+                  disabled={disabled}
+                  human={human}
+                  onRename={onRename}
+                />
+              </div>
+            ) : null}
           </div>
         </section>
       </div>

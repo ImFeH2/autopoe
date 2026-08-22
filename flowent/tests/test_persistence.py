@@ -299,6 +299,7 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
                 {
                     "id": 1,
                     "sender_id": 2,
+                    "sender_name": "Ada",
                     "body": "Keep this",
                     "references": [],
                     "mentions": [],
@@ -704,10 +705,13 @@ def test_fresh_schema_creates_final_reference_table_before_version(
     store = SQLiteStore(tmp_path / "data")
     connection = sqlite3.connect(store.path)
     try:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'mention_references'"
         ).fetchone() == ("mention_references",)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'human_mention_notifications'"
+        ).fetchone() == ("human_mention_notifications",)
     finally:
         connection.close()
 
@@ -864,3 +868,100 @@ def test_legacy_name_issue_disables_reference_backfill(tmp_path: Path) -> None:
     assert snapshot["discussions"][0]["messages"][0]["mentions"] == [
         {"member_id": 3, "status": "pending"}
     ]
+
+
+def test_persists_member_rename_and_human_notification_read_state(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 2, "@You review")
+    state.rename_member(1, "Owner")
+    state.read_human_mention(1, 1, 1)
+
+    restored = persisted_state(store, tmp_path)
+    snapshot = restored.snapshot()
+    assert snapshot["members"][0]["name"] == "Owner"
+    message = snapshot["discussions"][0]["messages"][0]
+    assert message["references"][0]["name"] == "You"
+    assert message["human_mentions"] == [{"member_id": 1, "status": "read"}]
+
+
+def test_schema_eleven_to_twelve_preserves_occurrences_without_backfill(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "@Ada twice @Ada")
+
+    connection = sqlite3.connect(store.path)
+    before = connection.execute(
+        "SELECT * FROM mention_references ORDER BY discussion_id, message_id, position"
+    ).fetchall()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute("PRAGMA legacy_alter_table = ON")
+    connection.execute("ALTER TABLE messages RENAME TO messages_schema_twelve")
+    connection.execute(
+        """
+        CREATE TABLE messages (
+            discussion_id INTEGER NOT NULL,
+            id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            PRIMARY KEY (discussion_id, id),
+            FOREIGN KEY (discussion_id) REFERENCES discussions (id)
+                ON DELETE CASCADE,
+            FOREIGN KEY (sender_id) REFERENCES members (id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO messages (discussion_id, id, sender_id, body)
+        SELECT discussion_id, id, sender_id, body FROM messages_schema_twelve
+        """
+    )
+    connection.execute("DROP TABLE messages_schema_twelve")
+    connection.execute("DROP TABLE human_mention_notifications")
+    connection.execute("PRAGMA user_version = 11")
+    connection.commit()
+    connection.close()
+
+    SQLiteStore(data)
+    connection = sqlite3.connect(store.path)
+    after = connection.execute(
+        "SELECT * FROM mention_references ORDER BY discussion_id, message_id, position"
+    ).fetchall()
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    sender_name = connection.execute(
+        "SELECT sender_name FROM messages WHERE discussion_id = 1 AND id = 1"
+    ).fetchone()[0]
+    table = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'human_mention_notifications'"
+    ).fetchone()
+    connection.close()
+
+    assert after == before
+    assert version == 12
+    assert sender_name == "You"
+    assert table is not None
+
+
+def test_rename_restart_preserves_historical_author_snapshot(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Before rename")
+    state.rename_member(1, "Owner")
+
+    restored = persisted_state(store, tmp_path).snapshot()
+    message = restored["discussions"][0]["messages"][0]
+
+    assert restored["members"][0]["name"] == "Owner"
+    assert message["sender_name"] == "You"

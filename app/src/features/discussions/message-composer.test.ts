@@ -5,6 +5,7 @@ import {
   getMentionKeyAction,
   insertDraftMention,
   mentionAgentScopeLabel,
+  mentionMemberMeta,
   normalizeMentionText,
   reconcileDraftMentions,
   shouldSubmitMessage,
@@ -14,6 +15,12 @@ describe("MessageComposer", () => {
   it("labels all-Organization candidates by Discussion membership", () => {
     expect(mentionAgentScopeLabel(2, [1, 2])).toBe("In Discussion");
     expect(mentionAgentScopeLabel(3, [1, 2])).toBe("Not in Discussion");
+    expect(mentionMemberMeta({ id: 1, type: "human" }, [1, 2])).toBe(
+      "Human · In Discussion",
+    );
+    expect(mentionMemberMeta({ id: 3, type: "agent" }, [1, 2])).toBe(
+      "Agent · Not in Discussion",
+    );
   });
 
   it("uses NFKC and full casefold-style expansion", () => {
@@ -98,6 +105,8 @@ describe("MessageComposer", () => {
     ]);
     expect(filterMentionAgents(agents, "GH")).toEqual([agents[4]]);
     expect(filterMentionAgents(agents, "ABCDEF")).toEqual([]);
+    const human = { id: 1, type: "human" as const, name: "Owner" };
+    expect(filterMentionAgents([human, ...agents], "own")).toEqual([human]);
   });
 
   it("inserts the selected Agent at the caret", () => {

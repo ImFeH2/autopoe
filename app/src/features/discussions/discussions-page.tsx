@@ -26,6 +26,10 @@ import type {
   MentionSyntax,
 } from "@/lib/backend";
 import { DiscussionMarkdown } from "./discussion-markdown";
+import {
+  type HumanMentionNotificationItem,
+  HumanMentionNotifications,
+} from "./human-mention-notifications";
 import { type DraftMention, MessageComposer } from "./message-composer";
 
 export function formatMessageCount(count: number): string {
@@ -51,6 +55,7 @@ type DiscussionsPageProps = {
   discussions: Discussion[];
   error: string | null;
   isCreating: boolean;
+  humanMentionNotifications?: HumanMentionNotificationItem[];
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -62,6 +67,7 @@ type DiscussionsPageProps = {
   onCreateAgent: () => void;
   onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
+  onOpenHumanMention?: (discussionId: number, messageId: number) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -82,6 +88,7 @@ export function DiscussionsPage({
   discussions,
   error,
   isCreating,
+  humanMentionNotifications = [],
   members,
   messageBody,
   messageInputRef,
@@ -93,6 +100,7 @@ export function DiscussionsPage({
   onDialogOpenChange,
   onDeleteDiscussion,
   onMessageChange,
+  onOpenHumanMention = () => undefined,
   onOpenMember,
   onSelectDiscussion,
   onSend,
@@ -162,6 +170,10 @@ export function DiscussionsPage({
             />
           </Dialog>
         </div>
+        <HumanMentionNotifications
+          notifications={humanMentionNotifications}
+          onOpen={onOpenHumanMention}
+        />
         {discussions.length === 0 ? (
           <p className="discussion-list-empty">No discussions</p>
         ) : filteredDiscussions.length === 0 ? (
@@ -546,14 +558,18 @@ function DiscussionView({
               return (
                 <li
                   className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}`}
+                  data-message-id={message.id}
                   key={message.id}
+                  tabIndex={-1}
                 >
                   <span className="message-avatar" aria-hidden="true">
                     {(sender?.name ?? "Unknown").slice(0, 1).toUpperCase()}
                   </span>
                   <article className="message-bubble">
                     <header className="message-meta">
-                      <strong>{sender?.name ?? "Unknown"}</strong>
+                      <strong>
+                        {message.sender_name ?? sender?.name ?? "Unknown"}
+                      </strong>
                       <span className="font-mono">MESSAGE {message.id}</span>
                     </header>
                     <DiscussionMarkdown
@@ -602,9 +618,7 @@ function DiscussionView({
         )}
       </div>
       <MessageComposer
-        agents={members.filter(
-          (member): member is AgentMember => member.type === "agent",
-        )}
+        agents={members}
         body={messageBody}
         disabled={disabled}
         discussionId={discussion.id}

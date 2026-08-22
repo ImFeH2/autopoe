@@ -479,6 +479,90 @@ describe("App", () => {
     expect(markup).not.toContain('aria-label="Open OldGone in Members"');
   });
 
+  it("renders Human mention notifications and historical author snapshots", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "RenamedAgent",
+      status: "idle" as const,
+    };
+    const discussion = {
+      id: 1,
+      topic: "Human review",
+      member_ids: [1, 2],
+      messages: [
+        {
+          id: 1,
+          sender_id: 2,
+          sender_name: "OriginalAgent",
+          body: "@Owner review",
+          references: [
+            {
+              member_id: 1,
+              name: "Owner",
+              start: 0,
+              end: 6,
+              in_discussion: true,
+              notified: true,
+              deleted: false,
+            },
+          ],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          humanMentionNotifications={[
+            {
+              discussionId: 1,
+              discussionTopic: "Human review",
+              messageId: 1,
+              senderName: "OriginalAgent",
+              unread: true,
+            },
+          ]}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "Owner" }, agent]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onOpenHumanMention={() => undefined}
+          onOpenMember={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Human mention notifications"');
+    expect(markup).toContain("1 unread");
+    expect(markup).toContain(
+      "<strong>OriginalAgent</strong> in Human review · Unread",
+    );
+    expect(markup).toContain('data-message-id="1"');
+    expect(markup).toContain("<strong>OriginalAgent</strong>");
+    expect(markup).toContain('aria-label="Open Owner in Members"');
+  });
+
   it("keeps the sidebar focused on global destinations", () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>
@@ -757,6 +841,9 @@ describe("App", () => {
     expect(markup).toContain('title="Return to Repository work"');
     expect(markup).toContain(">Overview<");
     expect(markup).toContain(">Human<");
+    expect(markup).toContain(">Formal name<");
+    expect(markup).toContain('aria-label="Rename current Human"');
+    expect(markup).toContain('id="human-formal-name"');
     expect(markup).not.toContain(">Member ID<");
     expect(markup).not.toContain("Human 1");
     expect(markup).not.toContain(">Memory<");
