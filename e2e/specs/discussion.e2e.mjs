@@ -14,24 +14,30 @@ async function createCrowdAgent(name) {
 
 describe("Discussions", () => {
   beforeEach(async () => {
-    await browser.setWindowSize(1440, 900);
+    const workspace = await $("aria/Workspace");
+    await workspace.waitForDisplayed({ timeout: 10_000 });
     await browser.waitUntil(
-      async () =>
-        browser.execute(() => {
-          const workspace = document.querySelector('[aria-label="Workspace"]');
-          if (!(workspace instanceof HTMLElement)) {
+      async () => {
+        await browser.setWindowSize(1440, 900);
+        return browser.execute(() => {
+          const workspaceElement = document.querySelector(
+            '[aria-label="Workspace"]',
+          );
+          if (!(workspaceElement instanceof HTMLElement)) {
             return false;
           }
-          const bounds = workspace.getBoundingClientRect();
+          const bounds = workspaceElement.getBoundingClientRect();
           return (
             window.innerWidth > 1100 &&
-            getComputedStyle(workspace).display !== "none" &&
+            getComputedStyle(workspaceElement).display !== "none" &&
             bounds.width > 0 &&
             bounds.height > 0
           );
-        }),
+        });
+      },
       {
-        timeout: 5_000,
+        interval: 100,
+        timeout: 10_000,
         timeoutMsg: "Normal viewport did not finish applying",
       },
     );
