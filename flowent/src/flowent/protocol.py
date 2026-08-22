@@ -63,6 +63,7 @@ class Dispatcher:
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
+            "organization.rename_member": self._rename_member,
             "organization.delete_agent": self._delete_agent,
             "organization.pause_agent": self._pause_agent,
             "organization.resume_agent": self._resume_agent,
@@ -228,6 +229,12 @@ class Dispatcher:
 
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
+
+    def _rename_member(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.rename_member(
+            member_id=require_integer(params, "member_id"),
+            new_name=require_string(params, "name"),
+        )
 
     def _delete_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._operations.delete_agent(require_integer(params, "agent_id"))

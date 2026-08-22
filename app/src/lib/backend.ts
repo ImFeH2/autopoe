@@ -1306,6 +1306,11 @@ export const backend = {
     }),
   createAgent: (name: string) =>
     organizationRequest("organization.create_agent", { name }),
+  renameMember: (memberId: number, name: string) =>
+    organizationRequest("organization.rename_member", {
+      member_id: memberId,
+      name,
+    }),
   deleteAgent: (agentId: number) =>
     organizationRequest("organization.delete_agent", { agent_id: agentId }),
   pauseAgent: (agentId: number) =>

@@ -143,6 +143,49 @@ class OrganizationState:
             self._changed(persist=True)
             return self._snapshot()
 
+    def rename_member(self, member_id: int, new_name: str) -> dict[str, Any]:
+        if new_name != new_name.strip():
+            raise DomainError(
+                "invalid_name", "Member name cannot start or end with whitespace"
+            )
+        try:
+            normalized_name = validate_mention_name(new_name)
+        except ValueError as error:
+            raise DomainError("invalid_name", str(error)) from error
+
+        with self._condition:
+            member = self._members.get(member_id)
+            if member is None:
+                raise DomainError("member_not_found", "Member not found")
+            if member.deleted:
+                raise DomainError("member_deleted", "Deleted Members cannot be renamed")
+            if (
+                member.type == "agent"
+                and self._agent_execution[member_id].status == "running"
+            ):
+                raise DomainError(
+                    "agent_busy", "Running or pausing Agents cannot be renamed"
+                )
+            normalized_key = normalized_mention_name(normalized_name)
+            if any(
+                candidate.id != member_id
+                and not candidate.deleted
+                and normalized_mention_name(candidate.name) == normalized_key
+                for candidate in self._members.values()
+            ):
+                raise DomainError("duplicate_name", "Member names must be unique")
+            if member.name == normalized_name:
+                return self._snapshot()
+            self._members[member_id] = Member(
+                id=member.id,
+                type=member.type,
+                name=normalized_name,
+                deleted=member.deleted,
+                paused=member.paused,
+            )
+            self._changed(persist=True)
+            return self._snapshot()
+
     def delete_agent(self, agent_id: int) -> dict[str, Any]:
         with self._condition:
             self._require_agent(agent_id)
