@@ -558,7 +558,8 @@
 
   .member-detail-summary,
   .agent-history-header,
-  .agent-history-timeline {
+  .agent-history-timeline,
+  .agent-history-empty {
     padding-inline: 24px;
   }
 }

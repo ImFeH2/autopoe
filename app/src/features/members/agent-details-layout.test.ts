@@ -28,6 +28,10 @@ describe("Agent details layout contracts", () => {
       /outline-offset:\s*-2px;/u,
     );
     expect(rule(".member-detail-body")).toMatch(/overflow:\s*hidden;/u);
+    expect(rule(".agent-history-empty")).toMatch(/padding:\s*30px;/u);
+    expect(styles).toMatch(
+      /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.agent-history-empty\s*\{[\s\S]*?padding-inline:\s*24px;/u,
+    );
     expect(membersPage).toMatch(
       /className="agent-history-viewport"[\s\S]{0,180}tabIndex=\{0\}/u,
     );

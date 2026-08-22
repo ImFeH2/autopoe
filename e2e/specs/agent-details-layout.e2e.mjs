@@ -183,6 +183,29 @@ describe("Agent details layout", () => {
       await compactMemoryEmpty.getCSSProperty("padding-left");
     expect(compactPadding.value).toBe("30px");
 
+    const compactEmptyHistory = await openHistory("LayoutEmpty");
+    await expect(compactEmptyHistory.viewport).toHaveText("No history");
+    const compactEmptyBaseline = await browser.execute(() => {
+      const heading = document.querySelector(".agent-history-header h3");
+      const empty = document.querySelector(".agent-history-empty");
+      if (
+        !(heading instanceof HTMLElement) ||
+        !(empty instanceof HTMLElement)
+      ) {
+        return null;
+      }
+      return {
+        emptyLeft: empty.getBoundingClientRect().left,
+        headingLeft: heading.getBoundingClientRect().left,
+      };
+    });
+    expect(compactEmptyBaseline).not.toBeNull();
+    expect(
+      Math.abs(
+        compactEmptyBaseline.emptyLeft - compactEmptyBaseline.headingLeft,
+      ),
+    ).toBeLessThan(1);
+
     const shortHistory = await openHistory("LayoutShort");
     await expect(
       shortHistory.details.$(".agent-history-block--assistant"),
@@ -192,6 +215,27 @@ describe("Agent details layout", () => {
     expect(shortLayout.viewportScrollHeight).toBeLessThanOrEqual(
       shortLayout.viewportClientHeight + 1,
     );
+    const compactTimelineBaseline = await browser.execute(() => {
+      const heading = document.querySelector(".agent-history-header h3");
+      const firstBlock = document.querySelector(".agent-history-block");
+      if (
+        !(heading instanceof HTMLElement) ||
+        !(firstBlock instanceof HTMLElement)
+      ) {
+        return null;
+      }
+      return {
+        headingLeft: heading.getBoundingClientRect().left,
+        timelineLeft: firstBlock.getBoundingClientRect().left,
+      };
+    });
+    expect(compactTimelineBaseline).not.toBeNull();
+    expect(
+      Math.abs(
+        compactTimelineBaseline.timelineLeft -
+          compactTimelineBaseline.headingLeft,
+      ),
+    ).toBeLessThan(1);
 
     const longHistory = await openHistory("LayoutLong");
     await browser.waitUntil(
