@@ -782,7 +782,12 @@ class OrganizationState:
             self._members[member.id] = member
             if member.type == "agent" and not member.deleted:
                 self._agent_execution[member.id] = AgentExecution()
-        if self._members.get(1) != Member(id=1, type="human", name="You"):
+        current_human = self._members.get(1)
+        if (
+            current_human is None
+            or current_human.type != "human"
+            or current_human.deleted
+        ):
             raise RuntimeError("Persisted Organization is missing its Human Member")
         for item in persisted["discussions"]:
             messages: list[Message] = []

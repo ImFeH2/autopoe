@@ -555,3 +555,18 @@ def test_rename_member_rejects_running_pausing_and_deleted_agents() -> None:
     with pytest.raises(DomainError) as deleted:
         state.rename_member(2, "Later")
     assert deleted.value.code == "member_deleted"
+
+
+@pytest.mark.parametrize(
+    "members",
+    [
+        [],
+        [{"id": 1, "type": "agent", "name": "Ada"}],
+        [{"id": 1, "type": "human", "name": "Owner", "deleted": True}],
+    ],
+)
+def test_restore_requires_active_human_member_one(
+    members: list[dict[str, object]],
+) -> None:
+    with pytest.raises(RuntimeError, match="missing its Human Member"):
+        OrganizationState(persisted={"members": members, "discussions": []})
