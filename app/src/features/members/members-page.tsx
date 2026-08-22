@@ -527,6 +527,8 @@ function AgentHistoryView({
         aria-busy={state.status === "loading"}
         aria-label={`${agent.name} history`}
         className="agent-history-viewport"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: The scroll viewport must be keyboard reachable for PageDown and PageUp.
+        tabIndex={0}
         onScroll={(event) => {
           const viewport = event.currentTarget;
           followsLatestRef.current =
