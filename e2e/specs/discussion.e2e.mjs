@@ -1,5 +1,5 @@
 import { $, $$, browser, expect } from "@wdio/globals";
-import { describe, it } from "mocha";
+import { beforeEach, describe, it } from "mocha";
 import { createAgent, waitForWorkspace } from "../support/app.mjs";
 
 async function createCrowdAgent(name) {
@@ -13,6 +13,10 @@ async function createCrowdAgent(name) {
 }
 
 describe("Discussions", () => {
+  beforeEach(async () => {
+    await browser.setWindowSize(1440, 900);
+  });
+
   it("creates a Discussion and sends a message without activating an Agent", async () => {
     await waitForWorkspace();
     await createAgent("Ada");
