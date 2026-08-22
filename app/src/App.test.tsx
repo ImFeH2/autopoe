@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import App, { focusHumanMentionMessage } from "@/App";
+import App, {
+  completeHumanMentionNavigation,
+  createHumanMentionFocusRequest,
+  focusHumanMentionMessage,
+} from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
   Badge,
@@ -53,6 +57,56 @@ describe("App", () => {
     expect(add).toHaveBeenCalledWith("human-mention-target");
     clearHighlight?.();
     expect(remove).toHaveBeenCalledWith("human-mention-target");
+  });
+
+  it("issues distinct focus requests for current and cross-Discussion mentions", () => {
+    expect(createHumanMentionFocusRequest(1, 10, 1, true, 1)).toEqual({
+      discussionId: 1,
+      humanId: 1,
+      messageId: 10,
+      token: 1,
+      unread: true,
+    });
+    expect(createHumanMentionFocusRequest(1, 10, 1, false, 2)).toEqual({
+      discussionId: 1,
+      humanId: 1,
+      messageId: 10,
+      token: 2,
+      unread: false,
+    });
+    expect(createHumanMentionFocusRequest(2, 20, 1, true, 3)).toEqual({
+      discussionId: 2,
+      humanId: 1,
+      messageId: 20,
+      token: 3,
+      unread: true,
+    });
+  });
+
+  it("marks unread only after the target is focused and skips read work for read items", async () => {
+    const events: string[] = [];
+    const message = {
+      classList: {
+        add: () => events.push("highlight"),
+        remove: vi.fn(),
+      },
+      focus: () => events.push("focus"),
+      scrollIntoView: () => events.push("scroll"),
+    } as unknown as HTMLElement;
+    const scheduleClear = vi.fn(() => 1);
+
+    await completeHumanMentionNavigation(
+      message,
+      async () => {
+        events.push("read");
+      },
+      scheduleClear,
+    );
+    expect(events).toEqual(["scroll", "focus", "highlight", "read"]);
+
+    events.length = 0;
+    await completeHumanMentionNavigation(message, undefined, scheduleClear);
+    expect(events).toEqual(["scroll", "focus", "highlight"]);
   });
 
   it("renders a clear startup state before the backend responds", () => {

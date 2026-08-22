@@ -44,6 +44,24 @@ function toggleId(ids: number[], id: number) {
     : [...ids, id];
 }
 
+export type HumanMentionFocusRequest = {
+  discussionId: number;
+  humanId: number | null;
+  messageId: number;
+  token: number;
+  unread: boolean;
+};
+
+export function createHumanMentionFocusRequest(
+  discussionId: number,
+  messageId: number,
+  humanId: number | null,
+  unread: boolean,
+  token: number,
+): HumanMentionFocusRequest {
+  return { discussionId, humanId, messageId, token, unread };
+}
+
 export function focusHumanMentionMessage(
   message: HTMLElement,
   scheduleClear: (
@@ -57,6 +75,15 @@ export function focusHumanMentionMessage(
   return scheduleClear(() => {
     message.classList.remove("human-mention-target");
   }, 2_500);
+}
+
+export async function completeHumanMentionNavigation(
+  message: HTMLElement,
+  markRead?: () => Promise<unknown>,
+  scheduleClear?: (callback: () => void, delay: number) => number,
+): Promise<void> {
+  focusHumanMentionMessage(message, scheduleClear);
+  await markRead?.();
 }
 
 function App() {
@@ -88,10 +115,9 @@ function App() {
   const focusMessageAfterDialogRef = useRef(false);
   const focusMemberDetailRef = useRef(false);
   const restoreDiscussionFocusRef = useRef<DiscussionSource | null>(null);
-  const pendingMessageFocusRef = useRef<{
-    discussionId: number;
-    messageId: number;
-  } | null>(null);
+  const nextHumanMentionFocusTokenRef = useRef(1);
+  const [humanMentionFocusRequest, setHumanMentionFocusRequest] =
+    useState<HumanMentionFocusRequest | null>(null);
   const selectedAgentId =
     requestState.status === "ready" &&
     requestState.snapshot.members.find(
@@ -301,7 +327,7 @@ function App() {
   }, [selectedDiscussionId, workspaceView]);
 
   useEffect(() => {
-    const target = pendingMessageFocusRef.current;
+    const target = humanMentionFocusRequest;
     if (
       workspaceView !== "discussions" ||
       target === null ||
@@ -309,17 +335,59 @@ function App() {
     ) {
       return;
     }
-    const frame = requestAnimationFrame(() => {
+
+    let frame = 0;
+    let cancelled = false;
+    const deadline = performance.now() + 2_500;
+    const locate = () => {
+      if (cancelled) {
+        return;
+      }
       const message = document.querySelector<HTMLElement>(
         `[data-message-id="${target.messageId}"]`,
       );
       if (message) {
-        pendingMessageFocusRef.current = null;
-        focusHumanMentionMessage(message);
+        const humanId = target.humanId;
+        const markRead =
+          target.unread && humanId !== null
+            ? async () => {
+                setIsSaving(true);
+                setMutationError(null);
+                try {
+                  const nextSnapshot = await backend.readHumanMention(
+                    humanId,
+                    target.discussionId,
+                    target.messageId,
+                  );
+                  startTransition(() => {
+                    setRequestState({
+                      status: "ready",
+                      snapshot: nextSnapshot,
+                    });
+                  });
+                } catch (error) {
+                  setMutationError(errorMessage(error));
+                } finally {
+                  setIsSaving(false);
+                }
+              }
+            : undefined;
+        void completeHumanMentionNavigation(message, markRead);
+        setHumanMentionFocusRequest((current) =>
+          current?.token === target.token ? null : current,
+        );
+        return;
       }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [selectedDiscussionId, workspaceView]);
+      if (performance.now() < deadline) {
+        frame = requestAnimationFrame(locate);
+      }
+    };
+    frame = requestAnimationFrame(locate);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [humanMentionFocusRequest, selectedDiscussionId, workspaceView]);
 
   if (requestState.status === "loading") {
     return <StatusPage label="Starting Flowent" />;
@@ -465,26 +533,27 @@ function App() {
     }
   }
 
-  async function openHumanMention(discussionId: number, messageId: number) {
-    pendingMessageFocusRef.current = { discussionId, messageId };
-    selectDiscussion(discussionId);
+  function openHumanMention(discussionId: number, messageId: number) {
     const currentHuman = snapshot.members.find(
       (member) => member.id === 1 && member.type === "human",
     );
-    if (!currentHuman) {
-      return;
-    }
     const message = snapshot.discussions
       .find((discussion) => discussion.id === discussionId)
       ?.messages.find((candidate) => candidate.id === messageId);
     const notification = message?.human_mentions?.find(
-      (candidate) => candidate.member_id === currentHuman.id,
+      (candidate) => candidate.member_id === currentHuman?.id,
     );
-    if (notification?.status === "unread") {
-      await mutate(() =>
-        backend.readHumanMention(currentHuman.id, discussionId, messageId),
-      );
-    }
+    setHumanMentionFocusRequest(
+      createHumanMentionFocusRequest(
+        discussionId,
+        messageId,
+        currentHuman?.id ?? null,
+        notification?.status === "unread",
+        nextHumanMentionFocusTokenRef.current,
+      ),
+    );
+    nextHumanMentionFocusTokenRef.current += 1;
+    selectDiscussion(discussionId, false);
   }
 
   function toggleMember(memberId: number) {
@@ -524,7 +593,7 @@ function App() {
     setMessageMentions(mentions);
   }
 
-  function selectDiscussion(discussionId: number) {
+  function selectDiscussion(discussionId: number, focusComposer = true) {
     focusMemberDetailRef.current = false;
     restoreDiscussionFocusRef.current = null;
     setDiscussionSource(null);
@@ -533,7 +602,9 @@ function App() {
     setIsCreatingDiscussion(false);
     setMessageBody("");
     setMessageMentions([]);
-    requestAnimationFrame(() => messageInputRef.current?.focus());
+    if (focusComposer) {
+      requestAnimationFrame(() => messageInputRef.current?.focus());
+    }
   }
 
   function selectWorkspaceView(view: WorkspaceView) {
