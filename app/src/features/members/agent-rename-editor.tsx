@@ -1,4 +1,10 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button, Dialog, Input } from "@/components/ui";
 import type { AgentMember } from "@/lib/backend";
 import { FlowentRequestError } from "@/lib/flowent";
@@ -10,6 +16,30 @@ import {
   canRenameAgent,
   hasAgentRenameBoundaryWhitespace,
 } from "./agent-rename-policy";
+
+type AgentRenameInput = Pick<HTMLInputElement, "focus" | "select">;
+type ScheduleFrame = (callback: FrameRequestCallback) => number;
+
+export function shouldReturnToAgentRenameEditor(
+  confirming: boolean,
+  saving: boolean,
+  status: AgentMember["status"],
+) {
+  return confirming && !saving && !canRenameAgent(status);
+}
+
+export function returnToAgentRenameEditor(
+  setConfirming: (confirming: false) => void,
+  getInput: () => AgentRenameInput | null,
+  scheduleFrame: ScheduleFrame = requestAnimationFrame,
+) {
+  setConfirming(false);
+  scheduleFrame(() => {
+    const input = getInput();
+    input?.focus();
+    input?.select();
+  });
+}
 
 type AgentRenameEditorProps = {
   agent: AgentMember;
@@ -34,11 +64,15 @@ export function AgentRenameEditor({
   const changed = draft !== agent.name;
   const confirmation = agentRenameConfirmationCopy(agent.name, draft);
 
+  const returnToEditor = useCallback(() => {
+    returnToAgentRenameEditor(setConfirming, () => inputRef.current);
+  }, []);
+
   useEffect(() => {
-    if (!saving && !canRenameAgent(agent.status)) {
-      setConfirming(false);
+    if (shouldReturnToAgentRenameEditor(confirming, saving, agent.status)) {
+      returnToEditor();
     }
-  }, [agent.status, saving]);
+  }, [agent.status, confirming, returnToEditor, saving]);
 
   function changeOpen(nextOpen: boolean) {
     if (saving) {
@@ -86,8 +120,7 @@ export function AgentRenameEditor({
           reason instanceof FlowentRequestError ? reason.code : "unknown",
         ),
       );
-      setConfirming(false);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      returnToEditor();
     } finally {
       setSaving(false);
     }
@@ -129,7 +162,7 @@ export function AgentRenameEditor({
             <div className="member-agent-actions">
               <Button
                 disabled={saving}
-                onClick={() => setConfirming(false)}
+                onClick={returnToEditor}
                 variant="quiet"
               >
                 Back
