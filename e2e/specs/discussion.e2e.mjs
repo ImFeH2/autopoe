@@ -15,6 +15,26 @@ async function createCrowdAgent(name) {
 describe("Discussions", () => {
   beforeEach(async () => {
     await browser.setWindowSize(1440, 900);
+    await browser.waitUntil(
+      async () =>
+        browser.execute(() => {
+          const workspace = document.querySelector('[aria-label="Workspace"]');
+          if (!(workspace instanceof HTMLElement)) {
+            return false;
+          }
+          const bounds = workspace.getBoundingClientRect();
+          return (
+            window.innerWidth > 1100 &&
+            getComputedStyle(workspace).display !== "none" &&
+            bounds.width > 0 &&
+            bounds.height > 0
+          );
+        }),
+      {
+        timeout: 5_000,
+        timeoutMsg: "Normal viewport did not finish applying",
+      },
+    );
   });
 
   it("creates a Discussion and sends a message without activating an Agent", async () => {
