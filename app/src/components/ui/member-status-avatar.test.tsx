@@ -60,7 +60,9 @@ describe("MemberStatusAvatar", () => {
 
     expect(markup).toContain("member-status-avatar--message");
     expect(markup).toContain('data-member-status="running"');
-    expect(markup).toContain('aria-label="Ada Lovelace, Running"');
+    expect(markup).toContain('aria-hidden="true"');
+    expect(markup).not.toContain("aria-label=");
+    expect(markup).not.toContain('role="img"');
     expect(markup).not.toContain("tabindex=");
     expect(markup).not.toContain("aria-live=");
     expect(markup).not.toContain("member-status-avatar__label");
@@ -71,8 +73,10 @@ describe("MemberStatusAvatar", () => {
     const unknown = render("future-status", "message");
 
     for (const markup of [human, unknown]) {
-      expect(markup).toContain('aria-label="Ada Lovelace"');
+      expect(markup).toContain('aria-hidden="true"');
       expect(markup).toContain('data-member-status="none"');
+      expect(markup).not.toContain("aria-label=");
+      expect(markup).not.toContain('role="img"');
       expect(markup).not.toContain("member-status-avatar__mark");
       expect(markup).not.toContain("data-status-label");
     }

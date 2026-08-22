@@ -70,18 +70,8 @@ export function MemberStatusAvatar({
     .filter(Boolean)
     .join(" ");
 
-  return (
-    <span
-      aria-label={
-        presentation
-          ? `${accessibleName}, ${presentation.label}`
-          : accessibleName
-      }
-      className={classes}
-      data-member-status={presentation?.status ?? "none"}
-      data-variant={variant}
-      role="img"
-    >
+  const content = (
+    <>
       <span aria-hidden="true" className="member-status-avatar__identity">
         {memberInitials(name)}
       </span>
@@ -104,6 +94,35 @@ export function MemberStatusAvatar({
           {presentation.label}
         </span>
       ) : null}
+    </>
+  );
+
+  if (variant === "message") {
+    return (
+      <span
+        aria-hidden="true"
+        className={classes}
+        data-member-status={presentation?.status ?? "none"}
+        data-variant={variant}
+      >
+        {content}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      aria-label={
+        presentation
+          ? `${accessibleName}, ${presentation.label}`
+          : accessibleName
+      }
+      className={classes}
+      data-member-status={presentation?.status ?? "none"}
+      data-variant={variant}
+      role="img"
+    >
+      {content}
     </span>
   );
 }

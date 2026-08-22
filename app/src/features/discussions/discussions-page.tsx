@@ -551,7 +551,13 @@ function DiscussionView({
           <ol className="m-0 list-none p-0">
             {discussion.messages.map((message) => {
               const sender = membersById.get(message.sender_id);
+              const senderName =
+                message.sender_name ?? sender?.name ?? "Unknown";
               const isHuman = sender?.type === "human";
+              const senderStatus =
+                sender?.type === "agent"
+                  ? getMemberStatusPresentation(sender.status)
+                  : null;
               return (
                 <li
                   className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}${highlightedMessageId === message.id ? " human-mention-target" : ""}`}
@@ -561,7 +567,7 @@ function DiscussionView({
                 >
                   <MemberStatusAvatar
                     className="message-avatar"
-                    name={sender?.name ?? "Unknown"}
+                    name={senderName}
                     status={
                       sender?.type === "agent" ? sender.status : undefined
                     }
@@ -570,7 +576,16 @@ function DiscussionView({
                   <article className="message-bubble">
                     <header className="message-meta">
                       <strong>
-                        {message.sender_name ?? sender?.name ?? "Unknown"}
+                        {senderStatus ? (
+                          <>
+                            <span className="sr-only">
+                              {senderName}, Agent status: {senderStatus.label}
+                            </span>
+                            <span aria-hidden="true">{senderName}</span>
+                          </>
+                        ) : (
+                          senderName
+                        )}
                       </strong>
                       <span className="font-mono">MESSAGE {message.id}</span>
                     </header>
