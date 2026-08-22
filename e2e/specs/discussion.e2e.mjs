@@ -1,5 +1,5 @@
 import { $, $$, browser, expect } from "@wdio/globals";
-import { beforeEach, describe, it } from "mocha";
+import { describe, it } from "mocha";
 import { createAgent, waitForWorkspace } from "../support/app.mjs";
 
 async function createCrowdAgent(name) {
@@ -13,36 +13,6 @@ async function createCrowdAgent(name) {
 }
 
 describe("Discussions", () => {
-  beforeEach(async () => {
-    const workspace = await $("aria/Workspace");
-    await workspace.waitForDisplayed({ timeout: 10_000 });
-    await browser.waitUntil(
-      async () => {
-        await browser.setWindowSize(1440, 900);
-        return browser.execute(() => {
-          const workspaceElement = document.querySelector(
-            '[aria-label="Workspace"]',
-          );
-          if (!(workspaceElement instanceof HTMLElement)) {
-            return false;
-          }
-          const bounds = workspaceElement.getBoundingClientRect();
-          return (
-            window.innerWidth > 1100 &&
-            getComputedStyle(workspaceElement).display !== "none" &&
-            bounds.width > 0 &&
-            bounds.height > 0
-          );
-        });
-      },
-      {
-        interval: 100,
-        timeout: 10_000,
-        timeoutMsg: "Normal viewport did not finish applying",
-      },
-    );
-  });
-
   it("creates a Discussion and sends a message without activating an Agent", async () => {
     await waitForWorkspace();
     await createAgent("Ada");
