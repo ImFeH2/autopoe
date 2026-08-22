@@ -5,6 +5,7 @@ import {
   getMentionKeyAction,
   insertDraftMention,
   mentionAgentScopeLabel,
+  mentionMemberAccessibleLabel,
   mentionMemberMeta,
   normalizeMentionText,
   reconcileDraftMentions,
@@ -21,6 +22,30 @@ describe("MessageComposer", () => {
     expect(mentionMemberMeta({ id: 3, type: "agent" }, [1, 2])).toBe(
       "Agent · Not in Discussion",
     );
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 1, name: "Owner", type: "human" },
+        [1, 2],
+      ),
+    ).toBe("Mention Owner, Human, In Discussion");
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 2, name: "Ada", type: "agent" },
+        [1, 2],
+      ),
+    ).toBe("Mention Ada, Agent, In Discussion");
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 3, name: "Lin", type: "human" },
+        [1, 2],
+      ),
+    ).toBe("Mention Lin, Human, Not in Discussion");
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 4, name: "Grace", type: "agent" },
+        [1, 2],
+      ),
+    ).toBe("Mention Grace, Agent, Not in Discussion");
   });
 
   it("uses NFKC and full casefold-style expansion", () => {

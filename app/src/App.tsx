@@ -44,6 +44,21 @@ function toggleId(ids: number[], id: number) {
     : [...ids, id];
 }
 
+export function focusHumanMentionMessage(
+  message: HTMLElement,
+  scheduleClear: (
+    callback: () => void,
+    delay: number,
+  ) => number = window.setTimeout,
+): number {
+  message.scrollIntoView({ block: "center" });
+  message.focus();
+  message.classList.add("human-mention-target");
+  return scheduleClear(() => {
+    message.classList.remove("human-mention-target");
+  }, 2_500);
+}
+
 function App() {
   const [requestState, setRequestState] = useState<RequestState>({
     status: "loading",
@@ -300,8 +315,7 @@ function App() {
       );
       if (message) {
         pendingMessageFocusRef.current = null;
-        message.scrollIntoView({ block: "center" });
-        message.focus();
+        focusHumanMentionMessage(message);
       }
     });
     return () => cancelAnimationFrame(frame);

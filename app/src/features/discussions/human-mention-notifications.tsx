@@ -17,6 +17,13 @@ export function unreadHumanMentionCount(
   return notifications.filter((notification) => notification.unread).length;
 }
 
+export function humanMentionNotificationAccessibleLabel(
+  notification: HumanMentionNotificationItem,
+): string {
+  const status = notification.unread ? "Unread" : "Read";
+  return `${status} mention from ${notification.senderName} in ${notification.discussionTopic}`;
+}
+
 export function HumanMentionNotifications({
   notifications,
   onOpen,
@@ -37,7 +44,7 @@ export function HumanMentionNotifications({
             <button
               className={notification.unread ? "is-unread" : undefined}
               type="button"
-              aria-label={`Open mention from ${notification.senderName} in ${notification.discussionTopic}`}
+              aria-label={humanMentionNotificationAccessibleLabel(notification)}
               onClick={() =>
                 onOpen(notification.discussionId, notification.messageId)
               }

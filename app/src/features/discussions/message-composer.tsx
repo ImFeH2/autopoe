@@ -222,6 +222,16 @@ export function mentionMemberMeta(
   )}`;
 }
 
+export function mentionMemberAccessibleLabel(
+  member: Pick<Member, "id" | "name" | "type">,
+  discussionMemberIds: number[],
+): string {
+  return `Mention ${member.name}, ${mentionMemberMeta(
+    member,
+    discussionMemberIds,
+  ).replace(" · ", ", ")}`;
+}
+
 export function filterMentionAgents(agents: Member[], query: string): Member[] {
   const normalizedQuery = normalizeMentionText(query);
   if (!normalizedQuery) {
@@ -512,7 +522,10 @@ export function MessageComposer({
                 {mentionCandidates.map((agent, index) => (
                   <li key={agent.id} role="none">
                     <MenuOption
-                      aria-label={`Mention ${agent.name}`}
+                      aria-label={mentionMemberAccessibleLabel(
+                        agent,
+                        discussionMemberIds,
+                      )}
                       id={`${mentionListId}-${agent.id}`}
                       label={`@${agent.name}`}
                       meta={mentionMemberMeta(agent, discussionMemberIds)}

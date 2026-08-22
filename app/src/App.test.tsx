@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import App from "@/App";
+import { describe, expect, it, vi } from "vitest";
+import App, { focusHumanMentionMessage } from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
   Badge,
@@ -29,6 +29,32 @@ import {
 } from "@/features/settings";
 
 describe("App", () => {
+  it("gives pointer and keyboard notification activation a visible message target", () => {
+    const add = vi.fn();
+    const remove = vi.fn();
+    const focus = vi.fn();
+    const scrollIntoView = vi.fn();
+    let clearHighlight: (() => void) | undefined;
+    const scheduleClear = vi.fn((callback: () => void, delay: number) => {
+      clearHighlight = callback;
+      expect(delay).toBe(2_500);
+      return 1;
+    });
+    const message = {
+      classList: { add, remove },
+      focus,
+      scrollIntoView,
+    } as unknown as HTMLElement;
+
+    focusHumanMentionMessage(message, scheduleClear);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(focus).toHaveBeenCalledOnce();
+    expect(add).toHaveBeenCalledWith("human-mention-target");
+    clearHighlight?.();
+    expect(remove).toHaveBeenCalledWith("human-mention-target");
+  });
+
   it("renders a clear startup state before the backend responds", () => {
     const markup = renderToStaticMarkup(<App />);
 

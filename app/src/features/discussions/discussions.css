@@ -711,6 +711,12 @@ button.mention-reference:focus-visible {
   box-shadow: var(--focus-ring);
 }
 
+.message-row.human-mention-target {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: -2px;
+  background: var(--color-accent-subtle);
+}
+
 .human-mention-notification-list button.is-unread {
   background: var(--color-accent-subtle);
   color: var(--color-text-primary);

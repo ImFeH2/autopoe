@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useReducer, useState } from "react";
 import { Button, Input } from "@/components/ui";
 import type { HumanMember } from "@/lib/backend";
 
@@ -7,6 +7,38 @@ export function humanRenameChanged(
   draft: string,
 ): boolean {
   return draft.trim() !== currentName;
+}
+
+export type HumanRenameFeedbackState = {
+  draft: string;
+  error: string | null;
+  success: string | null;
+};
+
+type HumanRenameFeedbackAction =
+  | { type: "edit"; value: string }
+  | { type: "error"; message: string }
+  | { type: "success"; name: string }
+  | { type: "sync"; name: string };
+
+export function reduceHumanRenameFeedback(
+  state: HumanRenameFeedbackState,
+  action: HumanRenameFeedbackAction,
+): HumanRenameFeedbackState {
+  switch (action.type) {
+    case "edit":
+      return { draft: action.value, error: null, success: null };
+    case "error":
+      return { ...state, error: action.message, success: null };
+    case "success":
+      return {
+        draft: action.name,
+        error: null,
+        success: `Name changed to ${action.name}`,
+      };
+    case "sync":
+      return { ...state, draft: action.name };
+  }
 }
 
 type HumanRenameEditorProps = {
@@ -20,43 +52,71 @@ export function HumanRenameEditor({
   human,
   onRename,
 }: HumanRenameEditorProps) {
-  const [name, setName] = useState(human.name);
-  const [error, setError] = useState<string | null>(null);
+  const [feedback, dispatch] = useReducer(reduceHumanRenameFeedback, {
+    draft: human.name,
+    error: null,
+    success: null,
+  });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setName(human.name), [human.name]);
+  useEffect(() => dispatch({ type: "sync", name: human.name }), [human.name]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!humanRenameChanged(human.name, name)) {
+    const nextName = feedback.draft.trim();
+    if (!humanRenameChanged(human.name, feedback.draft)) {
       return;
     }
     setSaving(true);
-    setError(null);
     try {
-      await onRename(human.id, name);
+      await onRename(human.id, feedback.draft);
+      dispatch({ type: "success", name: nextName });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Rename failed");
+      dispatch({
+        type: "error",
+        message: reason instanceof Error ? reason.message : "Rename failed",
+      });
     } finally {
       setSaving(false);
     }
   }
 
+  const describedBy = feedback.error
+    ? "human-formal-name-error"
+    : feedback.success
+      ? "human-formal-name-success"
+      : undefined;
+
   return (
     <form aria-label="Rename current Human" onSubmit={submit}>
       <label htmlFor="human-formal-name">Formal name</label>
       <Input
+        aria-describedby={describedBy}
+        aria-invalid={feedback.error ? true : undefined}
         id="human-formal-name"
-        value={name}
+        value={feedback.draft}
         disabled={disabled || saving}
-        onChange={(event) => setName(event.currentTarget.value)}
+        onChange={(event) =>
+          dispatch({ type: "edit", value: event.currentTarget.value })
+        }
         autoComplete="off"
         required
       />
-      {error ? <p role="alert">{error}</p> : null}
+      {feedback.error ? (
+        <p id="human-formal-name-error" role="alert">
+          {feedback.error}
+        </p>
+      ) : null}
+      {feedback.success ? (
+        <p id="human-formal-name-success" role="status" aria-live="polite">
+          {feedback.success}
+        </p>
+      ) : null}
       <Button
         type="submit"
-        disabled={disabled || saving || !humanRenameChanged(human.name, name)}
+        disabled={
+          disabled || saving || !humanRenameChanged(human.name, feedback.draft)
+        }
       >
         {saving ? "Saving…" : "Save name"}
       </Button>
