@@ -1,8 +1,9 @@
 .human-unread-badge {
   align-items: center;
-  background: var(--color-accent, #315efb);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-accent-border);
   border-radius: 999px;
-  color: var(--color-on-accent, #fff);
+  color: var(--color-accent-text);
   display: inline-flex;
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
@@ -16,7 +17,7 @@
 
 .human-unread-divider {
   align-items: center;
-  color: var(--color-accent, #315efb);
+  color: var(--color-accent-text);
   display: flex;
   font-size: 0.75rem;
   font-weight: 700;
@@ -43,16 +44,16 @@
 
 .human-unread-divider hr:focus-visible,
 .human-unread-control:focus-visible {
-  outline: 2px solid var(--color-focus, #315efb);
-  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+  outline: none;
 }
 
 .human-unread-control {
   align-items: center;
-  background: var(--color-surface, #fff);
-  border: 1px solid var(--color-border, #ccd2e0);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
   border-radius: 999px;
-  color: var(--color-text, #182033);
+  color: var(--color-text-primary);
   cursor: pointer;
   display: inline-flex;
   font: inherit;
@@ -64,7 +65,7 @@
 }
 
 .human-unread-control:hover:not(:disabled) {
-  background: var(--color-surface-hover, #f3f5f9);
+  background: var(--color-surface-hover);
 }
 
 .human-unread-control:disabled {
@@ -74,15 +75,16 @@
 
 .human-unread-badge--mention,
 .human-unread-control--mention .human-unread-badge {
-  background: var(--color-mention, #7656d6);
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--color-mention, #7656d6) 24%, transparent);
+  background: var(--color-accent);
+  border-color: var(--color-accent-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 24%, transparent);
+  color: var(--color-text-inverse);
 }
 
 .human-unread-controls {
   align-items: center;
-  background: var(--color-surface, #fff);
-  border-block-end: 1px solid var(--color-border, #ccd2e0);
+  background: var(--color-surface);
+  border-block-end: 1px solid var(--color-border);
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;

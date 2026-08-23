@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -9,6 +10,29 @@ import {
 } from "./unread-discussion-controls";
 
 describe("unread discussion controls", () => {
+  it("uses only defined dark-theme tokens with readable control text and focus", () => {
+    const styles = readFileSync(
+      new URL("./unread-discussion-controls.css", import.meta.url),
+      "utf8",
+    );
+    const tokens = readFileSync(
+      new URL("../../styles/tokens.css", import.meta.url),
+      "utf8",
+    );
+    const usedTokens = new Set(
+      [...styles.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1]),
+    );
+    const definedTokens = new Set(
+      [...tokens.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]),
+    );
+
+    expect(styles).toContain("color: var(--color-text-primary);");
+    expect(styles).toContain("box-shadow: var(--focus-ring);");
+    expect(
+      [...usedTokens].filter((token) => !definedTokens.has(token)),
+    ).toEqual([]);
+    expect(styles).not.toMatch(/var\(--[^,)]+,/);
+  });
   it("renders a bounded badge with an explicit accessible count", () => {
     const markup = renderToStaticMarkup(<UnreadBadge count={120} />);
 
