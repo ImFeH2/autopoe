@@ -686,6 +686,12 @@ describe("App", () => {
     );
     expect(markup).toContain('data-message-id="1"');
     expect(markup).toContain("<strong>OriginalAgent</strong>");
+    expect(markup).toContain(
+      '<span class="sr-only">OriginalAgent, Agent status: Idle</span><span aria-hidden="true">OriginalAgent</span>',
+    );
+    expect(markup).not.toContain(
+      '<span class="sr-only">RenamedAgent, Agent status: Idle</span>',
+    );
     expect(markup).toContain('aria-label="Open Owner in Members"');
   });
 
