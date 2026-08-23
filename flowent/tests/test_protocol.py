@@ -138,6 +138,13 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
             "topic": "Lin work",
             "member_ids": [1],
             "messages": [],
+            "human_read_states": [
+                {
+                    "member_id": 1,
+                    "read_through_message_id": None,
+                    "seen_message_ids": [],
+                }
+            ],
         }
     ]
     assert todos.list(3)["todos"] == []
@@ -559,6 +566,30 @@ def test_agent_state_reads_validate_target_member_and_params(tmp_path: Path) -> 
     assert human["error"]["code"] == "not_an_agent"
     assert missing["error"]["code"] == "member_not_found"
     assert invalid["error"]["code"] == "invalid_request"
+
+
+def test_dispatches_human_message_seen_updates() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Unread", 1, [2])
+    state.send_message(1, 2, "First")
+    dispatcher = Dispatcher(state)
+
+    response = dispatcher.dispatch(
+        {
+            "id": 1,
+            "method": "human.discussion.see_messages",
+            "params": {"human_id": 1, "discussion_id": 1, "message_ids": [1]},
+        }
+    )
+
+    assert response["result"]["discussions"][0]["human_read_states"] == [
+        {
+            "member_id": 1,
+            "read_through_message_id": 1,
+            "seen_message_ids": [],
+        }
+    ]
 
 
 def test_dispatches_general_member_rename_and_human_mention_read() -> None:

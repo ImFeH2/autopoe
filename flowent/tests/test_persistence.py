@@ -352,6 +352,13 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
             "id": 1,
             "topic": "Work",
             "member_ids": [1],
+            "human_read_states": [
+                {
+                    "member_id": 1,
+                    "read_through_message_id": None,
+                    "seen_message_ids": [],
+                }
+            ],
             "messages": [
                 {
                     "id": 1,
@@ -762,10 +769,16 @@ def test_fresh_schema_creates_final_reference_table_before_version(
     store = SQLiteStore(tmp_path / "data")
     connection = sqlite3.connect(store.path)
     try:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'mention_references'"
         ).fetchone() == ("mention_references",)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'human_discussion_read_states'"
+        ).fetchone() == ("human_discussion_read_states",)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'human_discussion_seen_messages'"
+        ).fetchone() == ("human_discussion_seen_messages",)
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'human_mention_notifications'"
         ).fetchone() == ("human_mention_notifications",)
@@ -927,6 +940,26 @@ def test_legacy_name_issue_disables_reference_backfill(tmp_path: Path) -> None:
     ]
 
 
+def test_persists_human_prefix_and_sparse_seen_state(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Unread", 1, [2])
+    state.send_message(1, 2, "First")
+    state.send_message(1, 2, "Second")
+    state.send_message(1, 2, "Third")
+    state.see_human_messages(1, 1, [1, 3])
+
+    restored = persisted_state(store, tmp_path)
+    assert restored.snapshot()["discussions"][0]["human_read_states"] == [
+        {
+            "member_id": 1,
+            "read_through_message_id": 1,
+            "seen_message_ids": [3],
+        }
+    ]
+
+
 def test_persists_member_rename_and_human_notification_read_state(
     tmp_path: Path,
 ) -> None:
@@ -946,7 +979,47 @@ def test_persists_member_rename_and_human_notification_read_state(
     assert message["human_mentions"] == [{"member_id": 1, "status": "read"}]
 
 
-def test_schema_eleven_to_twelve_preserves_occurrences_without_backfill(
+def test_schema_twelve_to_thirteen_adds_human_read_state_without_losing_mentions(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 2, "@You review")
+
+    connection = sqlite3.connect(store.path)
+    before = connection.execute(
+        "SELECT human_id, discussion_id, message_id, read FROM human_mention_notifications"
+    ).fetchall()
+    connection.execute("DROP TABLE human_discussion_seen_messages")
+    connection.execute("DROP TABLE human_discussion_read_states")
+    connection.execute("PRAGMA user_version = 12")
+    connection.commit()
+    connection.close()
+
+    migrated = SQLiteStore(data)
+    connection = sqlite3.connect(migrated.path)
+    after = connection.execute(
+        "SELECT human_id, discussion_id, message_id, read FROM human_mention_notifications"
+    ).fetchall()
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    read_table = connection.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'human_discussion_read_states'"
+    ).fetchone()
+    seen_table = connection.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'human_discussion_seen_messages'"
+    ).fetchone()
+    connection.close()
+
+    assert after == before
+    assert version == SCHEMA_VERSION
+    assert read_table == ("human_discussion_read_states",)
+    assert seen_table == ("human_discussion_seen_messages",)
+
+
+def test_schema_eleven_to_thirteen_preserves_occurrences_without_backfill(
     tmp_path: Path,
 ) -> None:
     data = tmp_path / "data"
@@ -1004,7 +1077,7 @@ def test_schema_eleven_to_twelve_preserves_occurrences_without_backfill(
     connection.close()
 
     assert after == before
-    assert version == 12
+    assert version == SCHEMA_VERSION
     assert sender_name == "You"
     assert table is not None
 

@@ -17,7 +17,12 @@
         "height": 860,
         "minWidth": 960,
         "minHeight": 680,
-        "maximized": true
+        "maximized": false,
+        "visible": false,
+        "focus": false,
+        "focusable": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false
       }
     ],
     "security": {
