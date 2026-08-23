@@ -61,6 +61,30 @@ export function formatMessageCount(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
 }
 
+export function formatMessageTimestamp(
+  createdAt: string,
+  now = new Date(),
+  locales?: Intl.LocalesArgument,
+): { compact: string; full: string } {
+  const sentAt = new Date(createdAt);
+  const isToday =
+    sentAt.getFullYear() === now.getFullYear() &&
+    sentAt.getMonth() === now.getMonth() &&
+    sentAt.getDate() === now.getDate();
+  const time = new Intl.DateTimeFormat(locales, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(sentAt);
+  const compact = isToday
+    ? time
+    : `${new Intl.DateTimeFormat(locales, { dateStyle: "short" }).format(sentAt)} ${time}`;
+  const full = new Intl.DateTimeFormat(locales, {
+    dateStyle: "medium",
+    timeStyle: "long",
+  }).format(sentAt);
+  return { compact, full };
+}
+
 export function discussionEntryAccessibleLabel(
   topic: string,
   unreadCount: number,
@@ -498,6 +522,18 @@ const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
   error: "Error",
 };
 
+function MessageTimestamp({ createdAt }: { createdAt: string }) {
+  const { compact, full } = formatMessageTimestamp(createdAt);
+  return (
+    <span className="message-timestamp font-mono" data-full-time={full}>
+      <time aria-hidden="true" dateTime={createdAt}>
+        {compact}
+      </time>
+      <span className="sr-only">Sent {full}</span>
+    </span>
+  );
+}
+
 function DiscussionMemberAvatar({
   member,
   onOpenMember,
@@ -813,6 +849,9 @@ function DiscussionView({
                             members,
                           )}
                         </span>
+                        {message.created_at ? (
+                          <MessageTimestamp createdAt={message.created_at} />
+                        ) : null}
                       </header>
                       <DiscussionMarkdown
                         body={message.body}

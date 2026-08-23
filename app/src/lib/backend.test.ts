@@ -31,6 +31,7 @@ const validSnapshot: OrganizationSnapshot = {
           id: 1,
           sender_id: 1,
           body: "Begin.",
+          created_at: "2026-08-22T12:34:56.789Z",
           references: [
             {
               member_id: 2,
@@ -281,6 +282,27 @@ describe("parseOrganizationSnapshot", () => {
       });
     },
   );
+
+  it("accepts missing legacy timestamps and rejects malformed timestamps", () => {
+    const legacy = structuredClone(validSnapshot) as unknown as {
+      discussions: Array<{ messages: Array<Record<string, unknown>> }>;
+    };
+    delete legacy.discussions[0].messages[0].created_at;
+    expect(
+      parseOrganizationSnapshot(legacy).discussions[0].messages[0].created_at,
+    ).toBeNull();
+
+    for (const createdAt of [
+      "2026-08-22T12:34:56Z",
+      "2026-08-22T12:34:56.789+00:00",
+      "2026-02-30T12:34:56.789Z",
+      "not-a-time",
+    ]) {
+      const malformed = structuredClone(validSnapshot);
+      malformed.discussions[0].messages[0].created_at = createdAt;
+      expect(() => parseOrganizationSnapshot(malformed)).toThrow("created_at");
+    }
+  });
 
   it("rejects Discussion references to unknown Members", () => {
     const value = structuredClone(validSnapshot);
