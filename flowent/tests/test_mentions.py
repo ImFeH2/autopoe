@@ -26,6 +26,19 @@ def test_matches_nfkc_casefold_names_and_preserves_unicode_offsets() -> None:
     assert normalized_mention_name("Ａda") == "ada"
 
 
+def test_excludes_sender_by_stable_member_id_before_parsing() -> None:
+    names = (MentionName(1, "Renamed-Owner"), MentionName(2, "Owner"))
+
+    occurrences = find_mentions(
+        "@Renamed-Owner asks @Owner",
+        names,
+        excluded_member_ids=(1,),
+    )
+    assert [(item.member_id, item.start, item.end) for item in occurrences] == [
+        (2, 20, 26)
+    ]
+
+
 def test_requires_complete_hyphen_and_underscore_tokens_with_longest_name() -> None:
     body = "@Ada-Lovelace, @Ada, @AdaX, @Ada_2, @Ada-foo"
     assert refs(

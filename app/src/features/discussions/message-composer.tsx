@@ -232,12 +232,19 @@ export function mentionMemberAccessibleLabel(
   ).replace(" · ", ", ")}`;
 }
 
-export function filterMentionAgents(agents: Member[], query: string): Member[] {
+export function filterMentionAgents(
+  agents: Member[],
+  query: string,
+  currentHumanMemberId: number,
+): Member[] {
+  const mentionableMembers = agents.filter(
+    (member) => member.id !== currentHumanMemberId,
+  );
   const normalizedQuery = normalizeMentionText(query);
   if (!normalizedQuery) {
-    return agents;
+    return mentionableMembers;
   }
-  return agents
+  return mentionableMembers
     .map((agent, index) => getMentionMatch(agent, normalizedQuery, index))
     .filter((match): match is MentionMatch => match !== null)
     .sort(
@@ -322,6 +329,7 @@ type MessageComposerProps = {
   agents: Member[];
   body: string;
   disabled: boolean;
+  currentHumanMemberId: number;
   discussionId: number;
   discussionMemberIds: number[];
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -334,6 +342,7 @@ type MessageComposerProps = {
 export function MessageComposer({
   agents,
   body,
+  currentHumanMemberId,
   disabled,
   discussionId,
   discussionMemberIds,
@@ -348,7 +357,7 @@ export function MessageComposer({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const mentionCandidates =
     mentionQuery && mentionSyntax.enabled
-      ? filterMentionAgents(agents, mentionQuery.query)
+      ? filterMentionAgents(agents, mentionQuery.query, currentHumanMemberId)
       : [];
   const resolvedMentionIndex = Math.min(
     activeMentionIndex,
@@ -456,7 +465,7 @@ export function MessageComposer({
   }
 
   function selectMention(agent: Member) {
-    if (!mentionQuery) {
+    if (!mentionQuery || agent.id === currentHumanMemberId) {
       return;
     }
     const nextDraft = insertDraftMention({

@@ -181,6 +181,67 @@ def test_legacy_name_issue_disables_syntax_but_restores_notification_identity() 
     assert current["mentions"] == []
 
 
+def test_restore_keeps_historical_self_reference_display_without_status() -> None:
+    state = OrganizationState(
+        persisted={
+            "members": [
+                {"id": 1, "type": "human", "name": "Owner"},
+                {"id": 2, "type": "agent", "name": "Ada"},
+            ],
+            "discussions": [
+                {
+                    "id": 1,
+                    "topic": "Legacy",
+                    "member_ids": [1, 2],
+                    "messages": [
+                        {
+                            "id": 1,
+                            "sender_id": 1,
+                            "body": "@Owner historical",
+                            "references": [
+                                {
+                                    "member_id": 1,
+                                    "name": "Owner",
+                                    "start": 0,
+                                    "end": 6,
+                                    "in_discussion": True,
+                                    "notified": True,
+                                }
+                            ],
+                            "mentions": [],
+                            "human_mentions": [{"member_id": 1, "read": False}],
+                        },
+                        {
+                            "id": 2,
+                            "sender_id": 2,
+                            "body": "@Ada historical",
+                            "references": [
+                                {
+                                    "member_id": 2,
+                                    "name": "Ada",
+                                    "start": 0,
+                                    "end": 4,
+                                    "in_discussion": True,
+                                    "notified": True,
+                                }
+                            ],
+                            "mentions": [
+                                {"member_id": 2, "read": False, "acked": False}
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    messages = state.snapshot()["discussions"][0]["messages"]
+    assert messages[0]["references"][0]["notified"] is False
+    assert "human_mentions" not in messages[0]
+    assert messages[1]["references"][0]["notified"] is False
+    assert messages[1]["mentions"] == []
+
+
 def test_active_agent_conflicting_with_human_name_disables_syntax() -> None:
     state = OrganizationState(
         persisted={
@@ -283,7 +344,7 @@ def test_sender_cannot_mention_itself_by_name() -> None:
     assert [
         (reference["member_id"], reference["in_discussion"], reference["notified"])
         for reference in message["references"]
-    ] == [(2, True, False), (3, True, True)]
+    ] == [(3, True, True)]
 
 
 def test_agent_can_create_a_discussion_with_another_agent() -> None:
@@ -587,13 +648,33 @@ def test_human_self_and_out_of_discussion_mentions_never_notify() -> None:
     state.create_agent("Lin")
     state.create_discussion("Human present", 1, [2])
     own = state.send_message(1, 1, "@You note")
-    assert "human_mentions" not in own["discussions"][0]["messages"][0]
+    own_message = own["discussions"][0]["messages"][0]
+    assert own_message["references"] == []
+    assert "human_mentions" not in own_message
 
     state.create_discussion("Agents only", 2, [3])
     outside = state.send_message(2, 2, "@You heads up")
     message = outside["discussions"][1]["messages"][0]
     assert message["references"][0]["in_discussion"] is False
     assert message["references"][0]["notified"] is False
+    assert "human_mentions" not in message
+
+
+def test_human_self_mention_uses_stable_id_after_rename_and_deleted_name_reuse() -> (
+    None
+):
+    state = OrganizationState()
+    state.create_agent("Owner")
+    state.create_discussion("Work", 1, [2])
+    state.delete_agent(2)
+    state.rename_member(1, "Owner")
+
+    snapshot = state.send_message(1, 1, "@Owner remains ordinary text")
+    message = snapshot["discussions"][0]["messages"][0]
+
+    assert message["body"] == "@Owner remains ordinary text"
+    assert message["references"] == []
+    assert message["mentions"] == []
     assert "human_mentions" not in message
 
 

@@ -110,9 +110,13 @@ def mention_syntax_issues(
 
 
 def find_mentions(
-    body: str, names: Iterable[MentionName]
+    body: str,
+    names: Iterable[MentionName],
+    *,
+    excluded_member_ids: Iterable[int] = (),
 ) -> tuple[MentionOccurrence, ...]:
-    items = tuple(names)
+    excluded = frozenset(excluded_member_ids)
+    items = tuple(item for item in names if item.member_id not in excluded)
     if mention_name_issues(items):
         return ()
     candidates = tuple(

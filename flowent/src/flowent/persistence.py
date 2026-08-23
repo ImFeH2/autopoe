@@ -1081,11 +1081,18 @@ class SQLiteStore:
                             reference["start"],
                             reference["end"],
                             int(reference["in_discussion"]),
-                            int(reference["notified"]),
+                            int(
+                                reference["notified"]
+                                and reference["member_id"] != message["sender_id"]
+                            ),
                             int(reference.get("deleted", False)),
                         ),
                     )
-                for position, mention in enumerate(message["mentions"]):
+                for position, mention in enumerate(
+                    item
+                    for item in message["mentions"]
+                    if item["member_id"] != message["sender_id"]
+                ):
                     connection.execute(
                         """
                         INSERT INTO mentions
@@ -1102,7 +1109,11 @@ class SQLiteStore:
                             int(mention.get("reminded", False)),
                         ),
                     )
-                for notification in message.get("human_mentions", []):
+                for notification in (
+                    item
+                    for item in message.get("human_mentions", [])
+                    if item["member_id"] != message["sender_id"]
+                ):
                     connection.execute(
                         """
                         INSERT INTO human_mention_notifications
