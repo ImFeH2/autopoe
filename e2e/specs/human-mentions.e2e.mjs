@@ -35,7 +35,7 @@ describe("Human mentions", () => {
     const composer = await $("aria/Send Message");
     const message = await composer.$("aria/Message");
     await message.setValue("@Own");
-    const ownerCandidate = await $("aria/Mention Owner");
+    const ownerCandidate = await $("aria/Mention Owner, Human, In Discussion");
     await ownerCandidate.waitForDisplayed();
     await expect(ownerCandidate).toHaveText(expect.stringContaining("Human"));
     await expect(ownerCandidate).toHaveText(
@@ -47,9 +47,17 @@ describe("Human mentions", () => {
       expect.stringContaining("0 unread"),
     );
 
-    await message.setValue(
-      "@HumanPingAgent Reply with exactly @Owner and no other words.",
+    await message.setValue("@HumanPing");
+    const agentCandidate = await $(
+      "aria/Mention HumanPingAgent, Agent, In Discussion",
     );
+    await agentCandidate.waitForDisplayed();
+    await expect(agentCandidate).toHaveText(expect.stringContaining("Agent"));
+    await expect(agentCandidate).toHaveText(
+      expect.stringContaining("In Discussion"),
+    );
+    await agentCandidate.click();
+    await message.addValue("Reply with exactly @Owner and no other words.");
     await composer.$("button=Send").click();
     const notification = await $(
       'section[aria-label="Human mention notifications"] button.is-unread',
