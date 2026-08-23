@@ -2,6 +2,22 @@ import { createServer } from "node:http";
 import { $, browser, expect } from "@wdio/globals";
 import { after, before, beforeEach, describe, it } from "mocha";
 
+const mockActivationContracts = new Map();
+
+function mockActivationContract(messageId) {
+  let contract = mockActivationContracts.get(messageId);
+  if (!contract) {
+    contract = {
+      ackRequests: 0,
+      ackResults: 0,
+      sendRequests: 0,
+      sendResults: 0,
+    };
+    mockActivationContracts.set(messageId, contract);
+  }
+  return contract;
+}
+
 const mockModelServer = createServer((request, response) => {
   let rawBody = "";
   request.setEncoding("utf8");
@@ -27,12 +43,19 @@ const mockModelServer = createServer((request, response) => {
     const discussionId = Number(reminderTarget[1]);
     const messageId = Number(reminderTarget[2]);
     const lastToolCallId = payload.messages.at(-1)?.tool_call_id;
-    const nextTool =
-      lastToolCallId === `call-ack-${messageId}`
-        ? "send"
-        : lastToolCallId === `call-send-${messageId}`
-          ? null
-          : "ack";
+    const contract = mockActivationContract(messageId);
+    let nextTool;
+    if (lastToolCallId === `call-ack-${messageId}`) {
+      contract.ackResults += 1;
+      contract.sendRequests += 1;
+      nextTool = "send";
+    } else if (lastToolCallId === `call-send-${messageId}`) {
+      contract.sendResults += 1;
+      nextTool = null;
+    } else {
+      contract.ackRequests += 1;
+      nextTool = "ack";
+    }
     const finishReason = nextTool === null ? "stop" : "tool_calls";
     const argumentsByTool = {
       ack: {
@@ -198,6 +221,57 @@ async function latestAgentMentionMessageId() {
   return messageId;
 }
 
+async function latestHumanMessageId() {
+  return browser.execute(() => {
+    const messages = document.querySelectorAll(
+      ".message-row--human[data-message-id]",
+    );
+    return Number(
+      messages.item(messages.length - 1)?.getAttribute("data-message-id"),
+    );
+  });
+}
+
+async function waitForNewHumanMessageId(previousMessageId) {
+  let messageId = 0;
+  await browser.waitUntil(
+    async () => {
+      messageId = await latestHumanMessageId();
+      return messageId > previousMessageId;
+    },
+    {
+      timeout: 10_000,
+      timeoutMsg: "Expected a new Human message to trigger the Agent",
+    },
+  );
+  return messageId;
+}
+
+async function expectMockActivationContract(messageId) {
+  const expected = {
+    ackRequests: 1,
+    ackResults: 1,
+    sendRequests: 1,
+    sendResults: 1,
+  };
+  await browser.waitUntil(
+    () => {
+      const contract = mockActivationContracts.get(messageId);
+      return (
+        contract !== undefined &&
+        Object.entries(expected).every(
+          ([key, value]) => contract[key] === value,
+        )
+      );
+    },
+    {
+      timeout: 10_000,
+      timeoutMsg: `Expected one ack and one send for activation ${messageId}`,
+    },
+  );
+  expect(mockActivationContracts.get(messageId)).toEqual(expected);
+}
+
 async function requestAgentMention(expectedUnread) {
   const composer = await $("aria/Send Message");
   const message = await composer.$("aria/Message");
@@ -212,8 +286,11 @@ async function requestAgentMention(expectedUnread) {
   );
   await agentCandidate.click();
   await message.addValue("Reply with exactly @Owner and no other words.");
+  const previousMessageId = await latestHumanMessageId();
   await composer.$("button=Send").click();
+  const triggeringMessageId = await waitForNewHumanMessageId(previousMessageId);
   await waitForUnreadCount(expectedUnread);
+  await expectMockActivationContract(triggeringMessageId);
   return latestAgentMentionMessageId();
 }
 
