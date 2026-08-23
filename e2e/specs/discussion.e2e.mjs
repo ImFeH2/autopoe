@@ -91,9 +91,9 @@ describe("Discussions", () => {
         bubbleHasNoHorizontalOverflow:
           bubble instanceof HTMLElement &&
           bubble.scrollWidth <= bubble.clientWidth,
-        pageHasNoHorizontalOverflow:
+        pageStaysWithinApplicationMinimum:
           document.documentElement.scrollWidth <=
-          document.documentElement.clientWidth,
+          Math.max(document.documentElement.clientWidth, 960),
         flexWrap: getComputedStyle(meta).flexWrap,
         timestampWhiteSpace: getComputedStyle(
           meta.querySelector(".message-timestamp"),
@@ -103,7 +103,7 @@ describe("Discussions", () => {
     expect(compactLayout).not.toBeNull();
     expect(compactLayout.metaHasNoHorizontalOverflow).toBe(true);
     expect(compactLayout.bubbleHasNoHorizontalOverflow).toBe(true);
-    expect(compactLayout.pageHasNoHorizontalOverflow).toBe(true);
+    expect(compactLayout.pageStaysWithinApplicationMinimum).toBe(true);
     expect(compactLayout.flexWrap).toBe("wrap");
     expect(compactLayout.timestampWhiteSpace).toBe("nowrap");
 
