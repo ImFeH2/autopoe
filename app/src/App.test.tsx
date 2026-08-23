@@ -20,6 +20,7 @@ import {
   discussionEntryAccessibleLabel,
   filterDiscussions,
   formatMessageCount,
+  formatMessageTimestamp,
   humanUnreadForDiscussion,
   positionInitialDiscussionMessages,
 } from "@/features/discussions";
@@ -128,6 +129,31 @@ describe("App", () => {
     expect(formatMessageCount(2)).toBe("2 messages");
   });
 
+  it("formats Message timestamps as stable local clock time", () => {
+    const sentAt = new Date("2026-08-22T12:34:56.789Z");
+    const todayUs = formatMessageTimestamp(
+      sentAt.toISOString(),
+      new Date(sentAt),
+      "en-US",
+    );
+    const todayGb = formatMessageTimestamp(
+      sentAt.toISOString(),
+      new Date(sentAt),
+      "en-GB",
+    );
+    expect(todayUs.compact).toMatch(/(?:AM|PM)$/);
+    expect(todayGb.compact).toMatch(/^\d{2}:\d{2}$/);
+    expect(todayUs.full).toMatch(/:\d{2}/);
+
+    const historical = formatMessageTimestamp(
+      "2026-07-21T12:34:56.789Z",
+      new Date(sentAt),
+      "en-GB",
+    );
+    expect(historical.compact).toMatch(/\d{2}:\d{2}$/);
+    expect(historical.compact).not.toBe(todayGb.compact);
+  });
+
   it("filters Discussions by topic without changing their order", () => {
     const discussions = [
       {
@@ -164,18 +190,47 @@ describe("App", () => {
         },
       ],
       messages: [
-        { id: 1, sender_id: 2, body: "Read", references: [], mentions: [] },
+        {
+          id: 1,
+          sender_id: 2,
+          body: "Read",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
         {
           id: 2,
           sender_id: 2,
           body: "Mention",
+          created_at: null,
           references: [],
           mentions: [],
           human_mentions: [{ member_id: 1, status: "unread" as const }],
         },
-        { id: 3, sender_id: 2, body: "Seen", references: [], mentions: [] },
-        { id: 4, sender_id: 1, body: "Own", references: [], mentions: [] },
-        { id: 5, sender_id: 2, body: "Unread", references: [], mentions: [] },
+        {
+          id: 3,
+          sender_id: 2,
+          body: "Seen",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
+        {
+          id: 4,
+          sender_id: 1,
+          body: "Own",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
+        {
+          id: 5,
+          sender_id: 2,
+          body: "Unread",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
       ],
     };
 
@@ -199,6 +254,7 @@ describe("App", () => {
       id,
       sender_id: 2,
       body: `Message ${id}`,
+      created_at: null,
       references: [],
       mentions: [],
       ...(mentioned
@@ -334,6 +390,7 @@ describe("App", () => {
           id: 1,
           sender_id: 2,
           body: "Historical message",
+          created_at: null,
           references: [],
           mentions: [],
         },
@@ -400,6 +457,13 @@ describe("App", () => {
     expect(styles).toMatch(/\.discussion-member-avatar:hover\s*\{/u);
     expect(styles).toMatch(/\.discussion-member-avatar:focus-visible\s*\{/u);
     expect(styles).toMatch(/\.discussion-title:focus-visible\s*\{/u);
+    expect(styles).toMatch(/\.message-meta\s*\{[^}]*flex-wrap:\s*wrap;/su);
+    expect(styles).toMatch(
+      /\.message-meta span\s*\{[^}]*white-space:\s*nowrap;/su,
+    );
+    expect(styles).toMatch(
+      /\.message-meta strong\s*\{[^}]*overflow-wrap:\s*anywhere;/su,
+    );
   });
 
   it("renders every member and focusable Agent status in crowded Discussions", () => {
@@ -537,6 +601,7 @@ describe("App", () => {
           id: 1,
           sender_id: 1,
           body: "@OldName **Bold request**\nnext line",
+          created_at: "2026-08-22T12:34:56.789Z",
           references: [
             {
               member_id: 2,
@@ -552,8 +617,9 @@ describe("App", () => {
         },
         {
           id: 2,
-          sender_id: 1,
+          sender_id: 2,
           body: "@OldGone",
+          created_at: "2026-07-21T12:34:56.789Z",
           references: [
             {
               member_id: 3,
@@ -615,6 +681,14 @@ describe("App", () => {
     expect(markup).toContain("@OldGone · PENDING");
     expect(markup).toContain('title="@OldGone · pending · Deleted Agent"');
     expect(markup).not.toContain('aria-label="Open OldGone in Members"');
+    expect(markup.match(/class="message-timestamp font-mono"/g)).toHaveLength(
+      2,
+    );
+    expect(markup.match(/<time aria-hidden="true" dateTime=/g)).toHaveLength(2);
+    expect(markup.match(/<span class="sr-only">Sent /g)).toHaveLength(2);
+    expect(markup).not.toContain(", sent ");
+    expect(markup).toContain("message-row--human");
+    expect(markup).toContain("message-row--agent");
   });
 
   it("includes total unread and the @me subset in the discussion entry name", () => {
@@ -687,6 +761,7 @@ describe("App", () => {
           id: 1,
           sender_id: 2,
           body: "@You please review",
+          created_at: null,
           references: [],
           mentions: [],
           human_mentions: [{ member_id: 1, status: "unread" as const }],
@@ -752,6 +827,7 @@ describe("App", () => {
           sender_id: 2,
           sender_name: "OriginalAgent",
           body: "@Owner review",
+          created_at: null,
           references: [
             {
               member_id: 1,
@@ -805,7 +881,7 @@ describe("App", () => {
       'aria-label="Open Human review. 1 unread message, including 1 unread mention for you."',
     );
     expect(markup).toContain("Jump to next unread mention (1 unread)");
-    expect(markup).toContain("<strong>OriginalAgent</strong>");
+    expect(markup).toContain("<strong>RenamedAgent</strong>");
     expect(markup).toContain('aria-label="Open Owner in Members"');
   });
 
@@ -889,7 +965,9 @@ describe("App", () => {
     expect(markup).toContain(">Overview<");
     expect(markup).toContain(">Memory<");
     expect(markup).toContain(">History<");
-    expect(markup).toContain(">Member ID<");
+    expect(markup).not.toContain(">Member ID<");
+    expect(markup).toContain("<summary>Technical details</summary>");
+    expect(markup).toContain('aria-label="Copy Member ID"');
     expect(markup).toContain("does not schedule a Turn");
   });
 
@@ -1093,6 +1171,8 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Rename current Human"');
     expect(markup).toContain('id="human-formal-name"');
     expect(markup).not.toContain(">Member ID<");
+    expect(markup).toContain("<summary>Technical details</summary>");
+    expect(markup).toContain('aria-label="Copy Member ID"');
     expect(markup).not.toContain("Human 1");
     expect(markup).not.toContain(">Memory<");
     expect(markup).not.toContain(">History<");

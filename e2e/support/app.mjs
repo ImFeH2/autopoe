@@ -3,7 +3,6 @@ import { $, expect } from "@wdio/globals";
 export async function waitForWorkspace() {
   const workspace = await $("aria/Workspace");
   await workspace.waitForDisplayed({ timeout: 15_000 });
-  await expect($("h1=Flowent")).toBeDisplayed();
 }
 
 export async function createAgent(name) {

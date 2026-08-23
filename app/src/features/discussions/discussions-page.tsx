@@ -22,12 +22,18 @@ import {
   Trash2,
   TriangleAlert,
 } from "@/components/ui";
+import { TechnicalDetails } from "@/components/ui/technical-details";
 import type {
   AgentMember,
   Discussion,
   Member,
   MentionSyntax,
 } from "@/lib/backend";
+import {
+  discussionLabel,
+  senderLabel,
+  shortMessageSummary,
+} from "@/lib/humanized-identifiers";
 import { DiscussionMarkdown } from "./discussion-markdown";
 import {
   calculateHumanUnread,
@@ -53,6 +59,30 @@ import {
 
 export function formatMessageCount(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
+}
+
+export function formatMessageTimestamp(
+  createdAt: string,
+  now = new Date(),
+  locales?: Intl.LocalesArgument,
+): { compact: string; full: string } {
+  const sentAt = new Date(createdAt);
+  const isToday =
+    sentAt.getFullYear() === now.getFullYear() &&
+    sentAt.getMonth() === now.getMonth() &&
+    sentAt.getDate() === now.getDate();
+  const time = new Intl.DateTimeFormat(locales, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(sentAt);
+  const compact = isToday
+    ? time
+    : `${new Intl.DateTimeFormat(locales, { dateStyle: "short" }).format(sentAt)} ${time}`;
+  const full = new Intl.DateTimeFormat(locales, {
+    dateStyle: "medium",
+    timeStyle: "long",
+  }).format(sentAt);
+  return { compact, full };
 }
 
 export function discussionEntryAccessibleLabel(
@@ -492,6 +522,18 @@ const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
   error: "Error",
 };
 
+function MessageTimestamp({ createdAt }: { createdAt: string }) {
+  const { compact, full } = formatMessageTimestamp(createdAt);
+  return (
+    <span className="message-timestamp font-mono" data-full-time={full}>
+      <time aria-hidden="true" dateTime={createdAt}>
+        {compact}
+      </time>
+      <span className="sr-only">Sent {full}</span>
+    </span>
+  );
+}
+
 function DiscussionMemberAvatar({
   member,
   onOpenMember,
@@ -719,11 +761,11 @@ function DiscussionView({
             data-discussion-focus-id={discussion.id}
             tabIndex={-1}
           >
-            {discussion.topic}
+            {discussionLabel(discussion)}
           </h2>
-          <span className="meta-text font-mono text-text-tertiary">
-            DISCUSSION {discussion.id}
-          </span>
+          <TechnicalDetails
+            identifiers={[{ label: "Discussion", value: discussion.id }]}
+          />
         </div>
         <div className="discussion-member-avatars">
           <span className="sr-only">Discussion members:</span>
@@ -799,9 +841,23 @@ function DiscussionView({
                     <article className="message-bubble">
                       <header className="message-meta">
                         <strong>
-                          {message.sender_name ?? sender?.name ?? "Unknown"}
+                          {senderLabel(
+                            message.sender_id,
+                            members,
+                            message.sender_name,
+                          )}
                         </strong>
-                        <span className="font-mono">MESSAGE {message.id}</span>
+                        <span>
+                          {shortMessageSummary(
+                            message.body,
+                            96,
+                            message.references,
+                            members,
+                          )}
+                        </span>
+                        {message.created_at ? (
+                          <MessageTimestamp createdAt={message.created_at} />
+                        ) : null}
                       </header>
                       <DiscussionMarkdown
                         body={message.body}
@@ -809,6 +865,13 @@ function DiscussionView({
                         messageId={message.id}
                         onOpenMember={handleOpenMember}
                         references={message.references}
+                      />
+                      <TechnicalDetails
+                        identifiers={[
+                          { label: "Discussion", value: discussion.id },
+                          { label: "Message", value: message.id },
+                          { label: "Sender", value: message.sender_id },
+                        ]}
                       />
                       {message.mentions.length > 0 ? (
                         <ul className="mention-statuses" aria-label="Mentions">
@@ -826,7 +889,7 @@ function DiscussionView({
                                 ? undefined
                                 : activeMember?.name) ??
                               identity?.name ??
-                              String(mention.member_id);
+                              "Unavailable member";
                             return (
                               <li
                                 className={`mention-status mention-status--${mention.status}`}

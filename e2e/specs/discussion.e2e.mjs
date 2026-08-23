@@ -58,6 +58,9 @@ describe("Discussions", () => {
     await form.$("button=Create").click();
 
     await expect($("h2=Repository work")).toBeDisplayed();
+    const discussionTechnicalDetails = await $("summary=Technical details");
+    await discussionTechnicalDetails.click();
+    await expect($("aria/Copy Discussion ID")).toBeDisplayed();
     await expect($("aria/Messages")).toHaveText("No messages yet");
     const composer = await $("aria/Send Message");
     const message = await composer.$("aria/Message");
@@ -66,11 +69,50 @@ describe("Discussions", () => {
     await composer.$("button=Send").click();
 
     await expect($("p=Document the release checklist.")).toBeDisplayed();
+    const technicalDetails = await $$("summary=Technical details");
+    await technicalDetails[1].click();
+    await expect($("aria/Copy Message ID")).toBeDisplayed();
     const discussion = await $("aria/Open Repository work");
     await browser.waitUntil(async () =>
       (await discussion.getText()).includes("1 message"),
     );
     await expect($$(".mention-status")).toBeElementsArrayOfSize(0);
+    const persistedTimestamp = await $(".message-timestamp time").getAttribute(
+      "datetime",
+    );
+    expect(persistedTimestamp).toMatch(/Z$/);
+
+    await browser.setWindowSize(960, 760);
+    const compactLayout = await browser.execute(() => {
+      const meta = document.querySelector(".message-meta");
+      const sender = meta?.querySelector("strong");
+      const bubble = document.querySelector(".message-bubble");
+      if (!(meta instanceof HTMLElement) || !(sender instanceof HTMLElement)) {
+        return null;
+      }
+      sender.textContent =
+        "Extremely Long Sender Identity That Must Wrap Without Horizontal Overflow";
+      return {
+        metaHasNoHorizontalOverflow: meta.scrollWidth <= meta.clientWidth,
+        bubbleHasNoHorizontalOverflow:
+          bubble instanceof HTMLElement &&
+          bubble.scrollWidth <= bubble.clientWidth,
+        pageStaysWithinApplicationMinimum:
+          document.documentElement.scrollWidth <=
+          Math.max(document.documentElement.clientWidth, 960),
+        flexWrap: getComputedStyle(meta).flexWrap,
+        timestampWhiteSpace: getComputedStyle(
+          meta.querySelector(".message-timestamp"),
+        ).whiteSpace,
+      };
+    });
+    expect(compactLayout).not.toBeNull();
+    expect(compactLayout.metaHasNoHorizontalOverflow).toBe(true);
+    expect(compactLayout.bubbleHasNoHorizontalOverflow).toBe(true);
+    expect(compactLayout.pageStaysWithinApplicationMinimum).toBe(true);
+    expect(compactLayout.flexWrap).toBe("wrap");
+    expect(compactLayout.timestampWhiteSpace).toBe("nowrap");
+
     await $("aria/Members").click();
     await expect($("aria/Open Ada")).toHaveText(
       expect.stringContaining("IDLE"),

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Condition, Event, RLock
 from typing import Any, Literal
@@ -18,6 +20,31 @@ from flowent.mentions import (
     normalized_mention_name,
     validate_mention_name,
 )
+
+MESSAGE_CREATED_AT_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,}Z$"
+)
+
+
+def message_created_at() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def validate_message_created_at(value: object) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or MESSAGE_CREATED_AT_PATTERN.fullmatch(value) is None
+    ):
+        raise RuntimeError("Persisted Message created_at is invalid")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise RuntimeError("Persisted Message created_at is invalid") from error
+    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise RuntimeError("Persisted Message created_at must be UTC")
+    return value
 
 
 class DomainError(Exception):
@@ -67,6 +94,7 @@ class Message:
     sender_id: int
     sender_name: str
     body: str
+    created_at: str | None = None
     references: list[MentionReference] = field(default_factory=list)
     mentions: dict[int, Mention] = field(default_factory=dict)
     human_mentions: dict[int, HumanMentionNotification] = field(default_factory=dict)
@@ -110,6 +138,7 @@ class OrganizationState:
         working_directory: Path | str | None = None,
         persisted: dict[str, Any] | None = None,
         on_persist: Callable[[dict[str, Any]], None] | None = None,
+        message_clock: Callable[[], str] | None = None,
     ) -> None:
         if working_directory is None:
             self._working_directory = str(Path.cwd().resolve())
@@ -120,6 +149,7 @@ class OrganizationState:
         else:
             raise ValueError("working_directory must be a non-empty path")
         self._on_persist = on_persist
+        self._message_clock = message_clock or message_created_at
         self._members: dict[int, Member] = {}
         self._discussions: dict[int, Discussion] = {}
         self._agent_execution: dict[int, AgentExecution] = {}
@@ -365,6 +395,7 @@ class OrganizationState:
                 sender_id=sender_id,
                 sender_name=self._members[sender_id].name,
                 body=normalized_body,
+                created_at=validate_message_created_at(self._message_clock()),
                 references=references,
                 mentions={
                     target_id: Mention(member_id=target_id)
@@ -376,7 +407,16 @@ class OrganizationState:
                 },
             )
             discussion.messages.append(message)
+            previous_execution = {
+                target_id: (
+                    self._agent_execution[target_id].status,
+                    self._agent_execution[target_id].error,
+                )
+                for target_id in agent_targets
+            }
+            previous_human_read_state = None
             if self._members[sender_id].type == "human":
+                previous_human_read_state = discussion.human_read_states.get(sender_id)
                 state = discussion.human_read_states.setdefault(
                     sender_id, HumanReadState(sender_id)
                 )
@@ -391,7 +431,22 @@ class OrganizationState:
                 if execution.status == "error":
                     execution.status = "idle"
                     execution.error = None
-            self._changed(persist=True)
+            try:
+                self._changed(persist=True)
+            except BaseException:
+                discussion.messages.pop()
+                if self._members[sender_id].type == "human":
+                    if previous_human_read_state is None:
+                        discussion.human_read_states.pop(sender_id, None)
+                    else:
+                        discussion.human_read_states[sender_id] = (
+                            previous_human_read_state
+                        )
+                for target_id, (status, error) in previous_execution.items():
+                    execution = self._agent_execution[target_id]
+                    execution.status = status
+                    execution.error = error
+                raise
             return self._snapshot()
 
     def list_members(self) -> list[dict[str, Any]]:
@@ -863,6 +918,7 @@ class OrganizationState:
                 else {}
             ),
             "body": message.body,
+            "created_at": message.created_at,
             "references": [
                 {
                     "member_id": reference.member_id,
@@ -989,6 +1045,9 @@ class OrganizationState:
                             self._members[message_data["sender_id"]].name,
                         ),
                         body=message_data["body"],
+                        created_at=validate_message_created_at(
+                            message_data.get("created_at")
+                        ),
                         references=references,
                         mentions=mentions,
                         human_mentions=human_mentions,
@@ -1057,6 +1116,7 @@ class OrganizationState:
                             "sender_id": message.sender_id,
                             "sender_name": message.sender_name,
                             "body": message.body,
+                            "created_at": message.created_at,
                             "references": [
                                 {
                                     "member_id": reference.member_id,

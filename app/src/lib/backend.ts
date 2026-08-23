@@ -176,6 +176,7 @@ export type Message = {
   sender_id: number;
   sender_name?: string;
   body: string;
+  created_at: string | null;
   references: MentionReference[];
   mentions: Mention[];
   human_mentions?: HumanMention[];
@@ -378,6 +379,34 @@ function parseMember(value: unknown, index: number): Member {
   return invalidSnapshot(`members[${index}] has an invalid type or status`);
 }
 
+function optionalMessageCreatedAt(value: unknown, path: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return invalidSnapshot(`${path} must be a UTC RFC 3339 timestamp or null`);
+  }
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3,})Z$/.exec(value);
+  if (!match) {
+    return invalidSnapshot(`${path} must be a UTC RFC 3339 timestamp or null`);
+  }
+  const [, year, month, day, hour, minute, second] = match;
+  const parsed = new Date(value);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getUTCFullYear() !== Number(year) ||
+    parsed.getUTCMonth() + 1 !== Number(month) ||
+    parsed.getUTCDate() !== Number(day) ||
+    parsed.getUTCHours() !== Number(hour) ||
+    parsed.getUTCMinutes() !== Number(minute) ||
+    parsed.getUTCSeconds() !== Number(second)
+  ) {
+    return invalidSnapshot(`${path} must be a valid UTC RFC 3339 timestamp`);
+  }
+  return value;
+}
+
 function parseMessage(
   value: unknown,
   discussionIndex: number,
@@ -396,6 +425,10 @@ function parseMessage(
       ? undefined
       : nonEmptyString(item.sender_name, `${path}.sender_name`);
   const body = nonEmptyString(item.body, `${path}.body`);
+  const createdAt = optionalMessageCreatedAt(
+    item.created_at,
+    `${path}.created_at`,
+  );
   const bodyCodePoints = [...body];
   let previousPositionedEnd = 0;
   const references = array(item.references, `${path}.references`).map(
@@ -579,6 +612,7 @@ function parseMessage(
     sender_id: senderId,
     ...(senderName === undefined ? {} : { sender_name: senderName }),
     body,
+    created_at: createdAt,
     references,
     mentions,
     ...(item.human_mentions === undefined
