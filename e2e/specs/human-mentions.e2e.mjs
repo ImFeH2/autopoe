@@ -1,5 +1,105 @@
+import { createServer } from "node:http";
 import { $, browser, expect } from "@wdio/globals";
-import { beforeEach, describe, it } from "mocha";
+import { after, before, beforeEach, describe, it } from "mocha";
+
+const mockModelServer = createServer((request, response) => {
+  let rawBody = "";
+  request.setEncoding("utf8");
+  request.on("data", (chunk) => {
+    rawBody += chunk;
+  });
+  request.on("end", () => {
+    const payload = JSON.parse(rawBody);
+    const hasToolResult = payload.messages.some(
+      (message) => message.role === "tool",
+    );
+    const finishReason = hasToolResult ? "stop" : "tool_calls";
+    const delta = hasToolResult
+      ? { role: "assistant", content: "Done" }
+      : {
+          role: "assistant",
+          tool_calls: [
+            {
+              index: 0,
+              id: "call-human-mention",
+              type: "function",
+              function: {
+                name: "discussion",
+                arguments: JSON.stringify({
+                  action: "send",
+                  discussion_id: 1,
+                  body: "@Owner",
+                }),
+              },
+            },
+          ],
+        };
+
+    if (payload.stream) {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        connection: "keep-alive",
+      });
+      response.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-human-mention",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "flowent-e2e-model",
+          choices: [{ index: 0, delta, finish_reason: null }],
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-human-mention",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "flowent-e2e-model",
+          choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+        })}\n\n`,
+      );
+      response.end("data: [DONE]\n\n");
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        id: "chatcmpl-human-mention",
+        object: "chat.completion",
+        created: 1,
+        model: "flowent-e2e-model",
+        choices: [
+          {
+            index: 0,
+            message: delta,
+            finish_reason: finishReason,
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+    );
+  });
+});
+
+let mockModelBaseUrl;
+
+async function configureMockModel() {
+  await $("aria/Settings").click();
+  const form = await $("aria/Model settings");
+  await form.waitForDisplayed();
+  const baseUrl = await form.$("#model-base-url");
+  const apiKey = await form.$("#model-api-key");
+  const model = await form.$("#model-name");
+  await baseUrl.waitForEnabled();
+  await baseUrl.setValue(mockModelBaseUrl);
+  await apiKey.setValue("flowent-e2e-key");
+  await model.setValue("flowent-e2e-model");
+  const save = await form.$("button=Save model");
+  await save.waitForEnabled();
+  await save.click();
+  await form.$("[role=status]").waitForDisplayed();
+}
 
 async function createAgent(name) {
   await $("aria/Members").click();
@@ -12,11 +112,30 @@ async function createAgent(name) {
 }
 
 describe("Human mentions", () => {
+  before(async () => {
+    await new Promise((resolve, reject) => {
+      mockModelServer.once("error", reject);
+      mockModelServer.listen(0, "127.0.0.1", resolve);
+    });
+    const address = mockModelServer.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Mock model server did not bind a TCP port");
+    }
+    mockModelBaseUrl = `http://127.0.0.1:${address.port}/v1`;
+  });
+
+  after(async () => {
+    await new Promise((resolve, reject) => {
+      mockModelServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+
   beforeEach(async () => {
     await browser.setWindowSize(1440, 900);
   });
 
   it("renames the current Human and keeps Human delivery outside Agent state", async () => {
+    await configureMockModel();
     await $("aria/Members").click();
     await $("aria/Open You").click();
     const rename = await $("aria/Rename current Human");
