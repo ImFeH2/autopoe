@@ -468,6 +468,9 @@ function parseMessage(
       if (notified && !inDiscussion) {
         invalidSnapshot(`${referencePath}.notified requires in_discussion`);
       }
+      if (memberId === senderId && notified) {
+        invalidSnapshot(`${referencePath} cannot notify its sender`);
+      }
       if (!deleted && !membersById.has(memberId)) {
         invalidSnapshot(`${referencePath} targets an unknown active Member`);
       }
@@ -517,6 +520,9 @@ function parseMessage(
       if (mentionedMemberIds.has(memberId)) {
         invalidSnapshot(`${path}.mentions must target unique Members`);
       }
+      if (memberId === senderId) {
+        invalidSnapshot(`${mentionPath} cannot target its sender`);
+      }
       const member = membersById.get(memberId);
       if (member && member.type !== "agent") {
         invalidSnapshot(`${mentionPath} must target an Agent`);
@@ -550,6 +556,9 @@ function parseMessage(
     );
     if (humanMentionIds.has(memberId)) {
       invalidSnapshot(`${path}.human_mentions must target unique Humans`);
+    }
+    if (memberId === senderId) {
+      invalidSnapshot(`${notificationPath} cannot target its sender`);
     }
     const member = membersById.get(memberId);
     if (member?.type !== "human") {

@@ -351,7 +351,11 @@ class OrganizationState:
                 )
 
             occurrences = (
-                find_mentions(normalized_body, self._mention_names(active_only=True))
+                find_mentions(
+                    normalized_body,
+                    self._mention_names(active_only=True),
+                    excluded_member_ids=(sender_id,),
+                )
                 if self._mention_syntax_data()["enabled"]
                 else ()
             )
@@ -986,7 +990,10 @@ class OrganizationState:
                         start=reference.get("start"),
                         end=reference.get("end"),
                         in_discussion=reference.get("in_discussion", True),
-                        notified=reference.get("notified", False),
+                        notified=(
+                            reference.get("notified", False)
+                            and reference["member_id"] != message_data["sender_id"]
+                        ),
                         deleted=reference.get(
                             "deleted",
                             self._members[reference["member_id"]].deleted,
@@ -1002,6 +1009,7 @@ class OrganizationState:
                         reminded=mention.get("reminded", False),
                     )
                     for mention in message_data["mentions"]
+                    if mention["member_id"] != message_data["sender_id"]
                 }
                 for member_id in mentions:
                     if not any(
@@ -1026,6 +1034,7 @@ class OrganizationState:
                         read=notification.get("read", False),
                     )
                     for notification in message_data.get("human_mentions", [])
+                    if notification["member_id"] != message_data["sender_id"]
                 }
                 messages.append(
                     Message(

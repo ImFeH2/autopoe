@@ -1044,6 +1044,33 @@ def test_persists_human_prefix_and_sparse_seen_state(tmp_path: Path) -> None:
     ]
 
 
+def test_self_mention_text_persists_without_structured_or_notification_rows(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.rename_member(1, "Owner")
+    state.send_message(1, 1, "@Owner remains ordinary text")
+
+    restored = persisted_state(store, tmp_path).snapshot()
+    message = restored["discussions"][0]["messages"][0]
+    assert message["references"] == []
+    assert message["mentions"] == []
+    assert "human_mentions" not in message
+
+    connection = sqlite3.connect(store.path)
+    assert connection.execute("SELECT COUNT(*) FROM mention_references").fetchone() == (
+        0,
+    )
+    assert connection.execute("SELECT COUNT(*) FROM mentions").fetchone() == (0,)
+    assert connection.execute(
+        "SELECT COUNT(*) FROM human_mention_notifications"
+    ).fetchone() == (0,)
+    connection.close()
+
+
 def test_persists_member_rename_and_human_notification_read_state(
     tmp_path: Path,
 ) -> None:

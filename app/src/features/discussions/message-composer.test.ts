@@ -121,17 +121,29 @@ describe("MessageComposer", () => {
       },
     ];
 
-    expect(filterMentionAgents(agents, "abc")).toEqual([
+    expect(filterMentionAgents(agents, "abc", 1)).toEqual([
       agents[1],
       agents[0],
       agents[2],
       agents[3],
       agents[5],
     ]);
-    expect(filterMentionAgents(agents, "GH")).toEqual([agents[4]]);
-    expect(filterMentionAgents(agents, "ABCDEF")).toEqual([]);
+    expect(filterMentionAgents(agents, "GH", 1)).toEqual([agents[4]]);
+    expect(filterMentionAgents(agents, "ABCDEF", 1)).toEqual([]);
     const human = { id: 1, type: "human" as const, name: "Owner" };
-    expect(filterMentionAgents([human, ...agents], "own")).toEqual([human]);
+    expect(filterMentionAgents([human, ...agents], "", human.id)).toEqual(
+      agents,
+    );
+    expect(filterMentionAgents([human, ...agents], "own", human.id)).toEqual(
+      [],
+    );
+    expect(
+      filterMentionAgents(
+        [{ ...human, name: "Renamed-Owner" }, ...agents],
+        "renamed",
+        human.id,
+      ),
+    ).toEqual([]);
   });
 
   it("inserts the selected Agent at the caret", () => {

@@ -589,6 +589,12 @@ function DiscussionView({
   onOpenMember,
   onSend,
 }: DiscussionViewProps) {
+  const currentHumanMemberId = members.find(
+    (member) => member.type === "human",
+  )?.id;
+  if (currentHumanMemberId === undefined) {
+    throw new Error("Discussion composer requires the current Human Member");
+  }
   const messageLogRef = useRef<HTMLDivElement>(null);
   const unread = useMemo(
     () => humanUnreadForDiscussion(discussion),
@@ -919,6 +925,7 @@ function DiscussionView({
       <MessageComposer
         agents={members}
         body={messageBody}
+        currentHumanMemberId={currentHumanMemberId}
         disabled={disabled}
         discussionId={discussion.id}
         discussionMemberIds={discussion.member_ids}

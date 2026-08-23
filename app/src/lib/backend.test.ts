@@ -313,9 +313,14 @@ describe("parseOrganizationSnapshot", () => {
 
   it("accepts historical sender and Mention IDs no longer in the Discussion", () => {
     const value = structuredClone(validSnapshot);
+    value.members.push({
+      id: 3,
+      type: "agent",
+      name: "Lin",
+      status: "idle",
+    });
     value.discussions[0].member_ids = [1];
-    value.discussions[0].messages[0].sender_id = 2;
-    value.discussions[0].messages[0].mentions[0].member_id = 2;
+    value.discussions[0].messages[0].sender_id = 3;
 
     expect(parseOrganizationSnapshot(value).discussions[0]).toEqual(
       value.discussions[0],
@@ -436,8 +441,47 @@ describe("parseOrganizationSnapshot", () => {
     expect(parseOrganizationSnapshot(value).members[0].name).toBe("Owner");
   });
 
+  it("keeps historical self-reference display but rejects self delivery state", () => {
+    const historical = structuredClone(validSnapshot);
+    const message = historical.discussions[0].messages[0];
+    message.body = "@You historical";
+    message.references = [
+      {
+        member_id: 1,
+        name: "You",
+        start: 0,
+        end: 4,
+        in_discussion: true,
+        notified: false,
+        deleted: false,
+      },
+    ];
+    message.mentions = [];
+
+    expect(
+      parseOrganizationSnapshot(historical).discussions[0].messages[0]
+        .references,
+    ).toEqual(message.references);
+
+    const forgedHuman = structuredClone(historical);
+    forgedHuman.discussions[0].messages[0].references[0].notified = true;
+    forgedHuman.discussions[0].messages[0].human_mentions = [
+      { member_id: 1, status: "unread" },
+    ];
+    expect(() => parseOrganizationSnapshot(forgedHuman)).toThrow(
+      "cannot notify its sender",
+    );
+
+    const forgedAgent = structuredClone(validSnapshot);
+    forgedAgent.discussions[0].messages[0].sender_id = 2;
+    expect(() => parseOrganizationSnapshot(forgedAgent)).toThrow(
+      "cannot notify its sender",
+    );
+  });
+
   it("rejects Human delivery in Agent Mention state", () => {
     const value = structuredClone(validSnapshot);
+    value.discussions[0].messages[0].sender_id = 2;
     value.discussions[0].messages[0].references[0].member_id = 1;
     value.discussions[0].messages[0].mentions[0].member_id = 1;
     expect(() => parseOrganizationSnapshot(value)).toThrow(
