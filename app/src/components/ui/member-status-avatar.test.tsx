@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   getMemberStatusPresentation,
   MemberStatusAvatar,
@@ -107,6 +107,22 @@ describe("MemberStatusAvatar", () => {
       'data-member-navigation-key="discussion:1:message:7:member:2"',
     );
     expect(message).not.toContain("aria-live=");
+  });
+
+  it("forwards keyboard and pointer button activation through the shared contract", () => {
+    const onActivate = vi.fn();
+    const avatar = MemberStatusAvatar({
+      identity: "agent",
+      name: "Ada Lovelace",
+      navigationKey: "discussion:1:message:7:member:2",
+      onActivate,
+      status: "running",
+      variant: "message",
+    });
+
+    expect(avatar.type).toBe("button");
+    avatar.props.onClick();
+    expect(onActivate).toHaveBeenCalledOnce();
   });
 
   it("renders identity without a fabricated status for human, deleted, or unknown members", () => {
