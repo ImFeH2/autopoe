@@ -10,9 +10,7 @@ const mockModelServer = createServer((request, response) => {
   });
   request.on("end", () => {
     const payload = JSON.parse(rawBody);
-    const hasToolResult = payload.messages.some(
-      (message) => message.role === "tool",
-    );
+    const hasToolResult = payload.messages.at(-1)?.role === "tool";
     const finishReason = hasToolResult ? "stop" : "tool_calls";
     const delta = hasToolResult
       ? { role: "assistant", content: "Done" }
@@ -111,6 +109,138 @@ async function createAgent(name) {
   await $(`aria/${name} details`).waitForDisplayed();
 }
 
+async function waitForUnreadCount(expected, timeout = 120_000) {
+  const notifications = await $("aria/Human mention notifications");
+  await browser.waitUntil(
+    async () => (await notifications.getText()).includes(`${expected} unread`),
+    {
+      timeout,
+      timeoutMsg: `Expected ${expected} unread Human mentions`,
+    },
+  );
+  return notifications;
+}
+
+async function waitForFocusedHighlightedMessage(messageId, timeout = 10_000) {
+  await browser.waitUntil(
+    async () =>
+      browser.execute((expectedMessageId) => {
+        const active = document.activeElement;
+        return (
+          active instanceof HTMLElement &&
+          active.dataset.messageId === String(expectedMessageId) &&
+          active.classList.contains("human-mention-target")
+        );
+      }, messageId),
+    {
+      timeout,
+      timeoutMsg: `Expected message ${messageId} to be focused and highlighted`,
+    },
+  );
+  return $(`[data-message-id="${messageId}"]`);
+}
+
+async function waitForMessageHighlightToClear(messageId) {
+  await browser.waitUntil(
+    async () =>
+      browser.execute((expectedMessageId) => {
+        const message = document.querySelector(
+          `[data-message-id="${expectedMessageId}"]`,
+        );
+        return !message?.classList.contains("human-mention-target");
+      }, messageId),
+    {
+      timeout: 5_000,
+      timeoutMsg: `Expected message ${messageId} highlight to clear`,
+    },
+  );
+}
+
+async function latestAgentMentionMessageId() {
+  const messageId = await browser.execute(() => {
+    const messages = [
+      ...document.querySelectorAll(".message-row--agent[data-message-id]"),
+    ].filter((message) => message.textContent?.includes("@Owner"));
+    return Number(messages.at(-1)?.getAttribute("data-message-id"));
+  });
+  expect(messageId).toBeGreaterThan(0);
+  return messageId;
+}
+
+async function requestAgentMention(expectedUnread) {
+  const composer = await $("aria/Send Message");
+  const message = await composer.$("aria/Message");
+  await message.setValue("@HumanPing");
+  const agentCandidate = await $(
+    "aria/Mention HumanPingAgent, Agent, In Discussion",
+  );
+  await agentCandidate.waitForDisplayed();
+  await expect(agentCandidate).toHaveText(expect.stringContaining("Agent"));
+  await expect(agentCandidate).toHaveText(
+    expect.stringContaining("In Discussion"),
+  );
+  await agentCandidate.click();
+  await message.addValue("Reply with exactly @Owner and no other words.");
+  await composer.$("button=Send").click();
+  await waitForUnreadCount(expectedUnread);
+  return latestAgentMentionMessageId();
+}
+
+async function installHumanMentionReadDelayFixture() {
+  await browser.execute(() => {
+    const internals = window.__TAURI_INTERNALS__;
+    if (!internals || window.__flowentHumanMentionReadDelay) {
+      return;
+    }
+    const originalInvoke = internals.invoke.bind(internals);
+    const fixture = { delayMs: 0, messageId: null, started: [] };
+    window.__flowentHumanMentionReadDelay = fixture;
+    internals.invoke = async (command, args, options) => {
+      const request = args?.message;
+      const messageId = request?.params?.message_id;
+      if (
+        command === "send" &&
+        request?.method === "human.mention.read" &&
+        messageId === fixture.messageId
+      ) {
+        fixture.started.push(messageId);
+        await new Promise((resolve) => setTimeout(resolve, fixture.delayMs));
+      }
+      return originalInvoke(command, args, options);
+    };
+  });
+}
+
+async function delayHumanMentionRead(messageId, delayMs = 1_500) {
+  await installHumanMentionReadDelayFixture();
+  await browser.execute(
+    ({ expectedMessageId, expectedDelayMs }) => {
+      const fixture = window.__flowentHumanMentionReadDelay;
+      fixture.messageId = expectedMessageId;
+      fixture.delayMs = expectedDelayMs;
+      fixture.started = [];
+    },
+    { expectedMessageId: messageId, expectedDelayMs: delayMs },
+  );
+}
+
+async function waitForDelayedReadToStart(messageId) {
+  await browser.waitUntil(
+    async () =>
+      browser.execute(
+        (expectedMessageId) =>
+          window.__flowentHumanMentionReadDelay?.started.includes(
+            expectedMessageId,
+          ) ?? false,
+        messageId,
+      ),
+    {
+      timeout: 5_000,
+      timeoutMsg: `Expected delayed read for message ${messageId} to start`,
+    },
+  );
+}
+
 describe("Human mentions", () => {
   before(async () => {
     await new Promise((resolve, reject) => {
@@ -166,30 +296,53 @@ describe("Human mentions", () => {
       expect.stringContaining("0 unread"),
     );
 
-    await message.setValue("@HumanPing");
-    const agentCandidate = await $(
-      "aria/Mention HumanPingAgent, Agent, In Discussion",
-    );
-    await agentCandidate.waitForDisplayed();
-    await expect(agentCandidate).toHaveText(expect.stringContaining("Agent"));
-    await expect(agentCandidate).toHaveText(
-      expect.stringContaining("In Discussion"),
-    );
-    await agentCandidate.click();
-    await message.addValue("Reply with exactly @Owner and no other words.");
-    await composer.$("button=Send").click();
+    const initialMessageId = await requestAgentMention(1);
     const notification = await $(
       'section[aria-label="Human mention notifications"] button.is-unread',
     );
-    await notification.waitForDisplayed({ timeout: 120_000 });
     await expect(notification).toHaveText(expect.stringContaining("Unread"));
     await notification.click();
 
-    const notifiedMessage = await $("[data-message-id]:focus");
-    await notifiedMessage.waitForExist();
+    const notifiedMessage =
+      await waitForFocusedHighlightedMessage(initialMessageId);
     await expect(notifiedMessage).toHaveText(expect.stringContaining("@Owner"));
-    await expect($("aria/Human mention notifications")).toHaveText(
-      expect.stringContaining("0 unread"),
+    await waitForUnreadCount(0);
+
+    const messageA = await requestAgentMention(1);
+    const messageB = await requestAgentMention(2);
+    await delayHumanMentionRead(messageA);
+    let unreadNotifications = await $$(
+      'section[aria-label="Human mention notifications"] button.is-unread',
     );
-  }).timeout(180_000);
+    await expect(unreadNotifications).toBeElementsArrayOfSize(2);
+    await unreadNotifications[0].click();
+    await waitForDelayedReadToStart(messageA);
+    await waitForFocusedHighlightedMessage(messageA);
+
+    unreadNotifications = await $$(
+      'section[aria-label="Human mention notifications"] button.is-unread',
+    );
+    await unreadNotifications.at(-1).click();
+    await waitForFocusedHighlightedMessage(messageB);
+    await waitForUnreadCount(0);
+    await waitForFocusedHighlightedMessage(messageB);
+
+    const messageC = await requestAgentMention(1);
+    await delayHumanMentionRead(messageC);
+    await $(
+      'section[aria-label="Human mention notifications"] button.is-unread',
+    ).click();
+    await waitForDelayedReadToStart(messageC);
+    await waitForFocusedHighlightedMessage(messageC);
+    await $("aria/Members").click();
+    await $("aria/Discussions").click();
+    const returnedComposer = await $("aria/Send Message");
+    await returnedComposer.waitForDisplayed();
+    await returnedComposer.$("aria/Message").click();
+    await waitForUnreadCount(0);
+    await waitForMessageHighlightToClear(messageC);
+    await expect(returnedComposer.$("aria/Message")).toBeFocused();
+    const staleTarget = await $(`[data-message-id="${messageC}"]`);
+    await expect(staleTarget).not.toHaveElementClass("human-mention-target");
+  }).timeout(300_000);
 });
