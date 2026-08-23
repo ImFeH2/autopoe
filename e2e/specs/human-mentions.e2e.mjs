@@ -294,59 +294,145 @@ async function requestAgentMention(expectedUnread) {
   return latestAgentMentionMessageId();
 }
 
-async function installHumanMentionReadDelayFixture() {
-  await browser.execute(() => {
-    const internals = window.__TAURI_INTERNALS__;
-    if (!internals || window.__flowentHumanMentionReadDelay) {
-      return;
-    }
-    const originalInvoke = internals.invoke.bind(internals);
-    const fixture = { delayMs: 0, messageId: null, started: [] };
-    window.__flowentHumanMentionReadDelay = fixture;
-    internals.invoke = async (command, args, options) => {
-      const request = args?.message;
-      const messageId = request?.params?.message_id;
-      if (
-        command === "send" &&
-        request?.method === "human.mention.read" &&
-        messageId === fixture.messageId
-      ) {
-        fixture.started.push(messageId);
-        await new Promise((resolve) => setTimeout(resolve, fixture.delayMs));
-      }
-      return originalInvoke(command, args, options);
-    };
+async function clickUnreadAThenBWhileAIsPending(messageA, messageB) {
+  const overlap = await browser.executeAsync(
+    (expectedA, expectedB, done) => {
+      const unreadSelector =
+        'section[aria-label="Human mention notifications"] button.is-unread';
+      const initialButtons = [...document.querySelectorAll(unreadSelector)];
+      const first = initialButtons[0];
+      let settled = false;
+      const finish = (result) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timeout);
+        done(result);
+      };
+      const observeA = () => {
+        const target = document.querySelector(
+          `[data-message-id="${expectedA}"]`,
+        );
+        if (
+          document.activeElement !== target ||
+          !target?.classList.contains("human-mention-target")
+        ) {
+          return;
+        }
+        const unreadButtons = [...document.querySelectorAll(unreadSelector)];
+        const second = unreadButtons.at(-1);
+        const aStillUnread = unreadButtons.length === 2;
+        if (!aStillUnread || !second) {
+          finish({
+            aStillUnread,
+            focusedMessageId: target?.getAttribute("data-message-id"),
+            overlap: false,
+            unreadCount: unreadButtons.length,
+          });
+          return;
+        }
+        second.click();
+        finish({
+          aStillUnread,
+          focusedMessageId: target.getAttribute("data-message-id"),
+          overlap: true,
+          requestedMessageId: String(expectedB),
+          unreadCount: unreadButtons.length,
+        });
+      };
+      const observer = new MutationObserver(observeA);
+      const timeout = setTimeout(
+        () =>
+          finish({ overlap: false, reason: "A never focused while unread" }),
+        5_000,
+      );
+      observer.observe(document.body, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+      first?.click();
+      observeA();
+    },
+    messageA,
+    messageB,
+  );
+  expect(overlap).toEqual({
+    aStillUnread: true,
+    focusedMessageId: String(messageA),
+    overlap: true,
+    requestedMessageId: String(messageB),
+    unreadCount: 2,
   });
 }
 
-async function delayHumanMentionRead(messageId, delayMs = 1_500) {
-  await installHumanMentionReadDelayFixture();
-  await browser.execute(
-    ({ expectedMessageId, expectedDelayMs }) => {
-      const fixture = window.__flowentHumanMentionReadDelay;
-      fixture.messageId = expectedMessageId;
-      fixture.delayMs = expectedDelayMs;
-      fixture.started = [];
-    },
-    { expectedMessageId: messageId, expectedDelayMs: delayMs },
-  );
-}
-
-async function waitForDelayedReadToStart(messageId) {
-  await browser.waitUntil(
-    async () =>
-      browser.execute(
-        (expectedMessageId) =>
-          window.__flowentHumanMentionReadDelay?.started.includes(
-            expectedMessageId,
-          ) ?? false,
-        messageId,
-      ),
-    {
-      timeout: 5_000,
-      timeoutMsg: `Expected delayed read for message ${messageId} to start`,
-    },
-  );
+async function clickUnreadThenLeaveWhileReadIsPending(messageId) {
+  const overlap = await browser.executeAsync((expectedMessageId, done) => {
+    const unreadSelector =
+      'section[aria-label="Human mention notifications"] button.is-unread';
+    const notification = document.querySelector(unreadSelector);
+    let settled = false;
+    const finish = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      observer.disconnect();
+      clearTimeout(timeout);
+      done(result);
+    };
+    const leaveAfterFocus = () => {
+      const target = document.querySelector(
+        `[data-message-id="${expectedMessageId}"]`,
+      );
+      if (
+        document.activeElement !== target ||
+        !target?.classList.contains("human-mention-target")
+      ) {
+        return;
+      }
+      const stillUnread =
+        document.querySelectorAll(unreadSelector).length === 1;
+      const members = document.querySelector('button[aria-label="Members"]');
+      if (!stillUnread || !(members instanceof HTMLButtonElement)) {
+        finish({
+          focusedMessageId: target?.getAttribute("data-message-id"),
+          navigated: false,
+          stillUnread,
+        });
+        return;
+      }
+      members.click();
+      finish({
+        focusedMessageId: target.getAttribute("data-message-id"),
+        navigated: true,
+        stillUnread,
+      });
+    };
+    const observer = new MutationObserver(leaveAfterFocus);
+    const timeout = setTimeout(
+      () =>
+        finish({
+          navigated: false,
+          reason: "Message never focused while unread",
+        }),
+      5_000,
+    );
+    observer.observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
+    notification?.click();
+    leaveAfterFocus();
+  }, messageId);
+  expect(overlap).toEqual({
+    focusedMessageId: String(messageId),
+    navigated: true,
+    stillUnread: true,
+  });
 }
 
 describe("Human mentions", () => {
@@ -418,31 +504,18 @@ describe("Human mentions", () => {
 
     const messageA = await requestAgentMention(1);
     const messageB = await requestAgentMention(2);
-    await delayHumanMentionRead(messageA);
-    let unreadNotifications = await $$(
+    const unreadNotifications = await $$(
       'section[aria-label="Human mention notifications"] button.is-unread',
     );
     await expect(unreadNotifications).toBeElementsArrayOfSize(2);
-    await unreadNotifications[0].click();
-    await waitForDelayedReadToStart(messageA);
-    await waitForFocusedHighlightedMessage(messageA);
-
-    unreadNotifications = await $$(
-      'section[aria-label="Human mention notifications"] button.is-unread',
-    );
-    await unreadNotifications.at(-1).click();
+    await clickUnreadAThenBWhileAIsPending(messageA, messageB);
     await waitForFocusedHighlightedMessage(messageB);
     await waitForUnreadCount(0);
     await waitForFocusedHighlightedMessage(messageB);
 
     const messageC = await requestAgentMention(1);
-    await delayHumanMentionRead(messageC);
-    await $(
-      'section[aria-label="Human mention notifications"] button.is-unread',
-    ).click();
-    await waitForDelayedReadToStart(messageC);
-    await waitForFocusedHighlightedMessage(messageC);
-    await $("aria/Members").click();
+    await clickUnreadThenLeaveWhileReadIsPending(messageC);
+    await $("aria/Open Owner").waitForDisplayed();
     await $("aria/Discussions").click();
     const returnedComposer = await $("aria/Send Message");
     await returnedComposer.waitForDisplayed();
