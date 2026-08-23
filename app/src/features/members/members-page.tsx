@@ -15,6 +15,7 @@ import {
 import { agentStatusTone } from "@/features/agent-status";
 import type { AgentHistory, AgentMember, Member } from "@/lib/backend";
 import { AgentMemoryBrowser } from "./agent-memory-browser";
+import { AgentRenameEditor } from "./agent-rename-editor";
 import { AgentTodos } from "./agent-todos";
 import { HistoryBlock } from "./history-block";
 import { HumanRenameEditor } from "./human-rename-editor";
@@ -37,6 +38,7 @@ type MembersPageProps = {
   onCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
   onDeleteAgent: (agentId: number) => void;
   onPauseAgent: (agentId: number) => void;
+  onRenameAgent?: (memberId: number, name: string) => Promise<void>;
   onRenameMember?: (memberId: number, name: string) => Promise<void>;
   onResumeAgent: (agentId: number) => void;
   onSelectMember: (memberId: number) => void;
@@ -63,6 +65,7 @@ export function MembersPage({
   onCreateAgent,
   onDeleteAgent,
   onPauseAgent,
+  onRenameAgent = async () => undefined,
   onRenameMember = async () => undefined,
   onResumeAgent,
   onSelectMember,
@@ -236,6 +239,7 @@ export function MembersPage({
             history={history ?? { status: "loading" }}
             onBackToDiscussion={onBackToDiscussion}
             onPause={onPauseAgent}
+            onRename={onRenameAgent}
             onResume={onResumeAgent}
             sourceDiscussionTopic={sourceDiscussionTopic}
           />
@@ -373,6 +377,7 @@ function AgentDetails({
   history,
   onBackToDiscussion,
   onPause,
+  onRename,
   onResume,
   sourceDiscussionTopic,
 }: {
@@ -381,6 +386,7 @@ function AgentDetails({
   history: AgentHistoryState;
   onBackToDiscussion?: () => void;
   onPause: (agentId: number) => void;
+  onRename: (memberId: number, name: string) => Promise<void>;
   onResume: (agentId: number) => void;
   sourceDiscussionTopic?: string;
 }) {
@@ -469,6 +475,16 @@ function AgentDetails({
                 <div>
                   <dt>Member ID</dt>
                   <dd>{agent.id}</dd>
+                </div>
+                <div>
+                  <dt>Name</dt>
+                  <dd>
+                    <AgentRenameEditor
+                      agent={agent}
+                      disabled={disabled}
+                      onRename={onRename}
+                    />
+                  </dd>
                 </div>
               </dl>
               {agent.error ? (

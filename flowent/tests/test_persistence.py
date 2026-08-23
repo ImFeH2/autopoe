@@ -199,6 +199,63 @@ def test_uses_flowent_directory_under_home(monkeypatch, tmp_path: Path) -> None:
     assert data_directory() == home / ".flowent"
 
 
+def test_restores_renamed_human_identity_and_historical_notification_facts(
+    tmp_path: Path,
+) -> None:
+    working_directory = tmp_path / "project"
+    working_directory.mkdir()
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, working_directory)
+    state.create_agent("Ada")
+    state.create_discussion("Human rename", 1, [2])
+    state.send_message(1, 1, "@Ada review")
+    state.rename_member(1, "Owner")
+
+    restored = persisted_state(store, working_directory).snapshot()
+
+    assert restored["members"][0] == {
+        "id": 1,
+        "type": "human",
+        "name": "Owner",
+    }
+    message = restored["discussions"][0]["messages"][0]
+    assert message["sender_id"] == 1
+    assert message["body"] == "@Ada review"
+    assert message["references"] == [
+        {
+            "member_id": 2,
+            "name": "Ada",
+            "start": 0,
+            "end": 4,
+            "in_discussion": True,
+            "notified": True,
+            "deleted": False,
+        }
+    ]
+    assert message["mentions"] == [{"member_id": 2, "status": "pending"}]
+
+
+def test_restores_renamed_agent_without_rewriting_reference_snapshot(
+    tmp_path: Path,
+) -> None:
+    working_directory = tmp_path / "project"
+    working_directory.mkdir()
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, working_directory)
+    state.create_agent("Ada")
+    state.create_discussion("Persistent rename", 1, [2])
+    state.send_message(1, 1, "@Ada review")
+    state.rename_member(2, "Grace")
+
+    restored = persisted_state(store, working_directory).snapshot()
+
+    assert restored["members"][1]["name"] == "Grace"
+    message = restored["discussions"][0]["messages"][0]
+    assert message["body"] == "@Ada review"
+    assert message["references"][0]["member_id"] == 2
+    assert message["references"][0]["name"] == "Ada"
+
+
 def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
     working_directory = tmp_path / "project"
     working_directory.mkdir()

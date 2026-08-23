@@ -584,6 +584,16 @@ function App() {
     }
   }
 
+  async function handleRenameAgent(memberId: number, name: string) {
+    setIsSaving(true);
+    setMutationError(null);
+    try {
+      commit(await backend.renameMember(memberId, name));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function handlePauseAgent(agentId: number) {
     await mutate(() => backend.pauseAgent(agentId));
   }
@@ -787,6 +797,7 @@ function App() {
             onCreateAgent={handleCreateAgent}
             onDeleteAgent={handleDeleteAgent}
             onPauseAgent={handlePauseAgent}
+            onRenameAgent={handleRenameAgent}
             onRenameMember={handleRenameMember}
             onResumeAgent={handleResumeAgent}
             onBackToDiscussion={

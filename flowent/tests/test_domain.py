@@ -559,3 +559,86 @@ def test_member_rename_preserves_historical_author_name_snapshot() -> None:
     assert message["sender_id"] == 1
     assert message["sender_name"] == "You"
     assert message["body"] == "Before rename"
+
+
+def test_rename_member_preserves_identity_and_structured_reference_snapshot() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "@Ada review")
+
+    renamed = state.rename_member(2, "Grace")
+
+    assert renamed["members"][1] == {
+        "id": 2,
+        "type": "agent",
+        "name": "Grace",
+        "status": "idle",
+    }
+    message = renamed["discussions"][0]["messages"][0]
+    assert message["body"] == "@Ada review"
+    assert message["references"][0]["member_id"] == 2
+    assert message["references"][0]["name"] == "Ada"
+    assert message["mentions"] == [{"member_id": 2, "status": "pending"}]
+
+
+def test_rename_member_enforces_shared_validation_and_active_uniqueness() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Grace")
+
+    with pytest.raises(DomainError) as whitespace:
+        state.rename_member(2, " Ada")
+    assert whitespace.value.code == "invalid_name"
+    with pytest.raises(DomainError) as invalid:
+        state.rename_member(2, "Bad Name")
+    assert invalid.value.code == "invalid_name"
+    with pytest.raises(DomainError) as duplicate:
+        state.rename_member(2, "ＧＲＡＣＥ")
+    assert duplicate.value.code == "duplicate_name"
+
+    renamed = state.rename_member(2, "ADA")
+    assert renamed["members"][1]["name"] == "ADA"
+
+
+def test_rename_member_rejects_running_pausing_and_deleted_agents() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "@Ada run")
+    reminder, _revision = state.claim_next_reminder()
+    assert reminder is not None
+
+    with pytest.raises(DomainError) as running:
+        state.rename_member(2, "Grace")
+    assert running.value.code == "agent_busy"
+
+    state.pause_agent(2)
+    with pytest.raises(DomainError) as pausing:
+        state.rename_member(2, "Grace")
+    assert pausing.value.code == "agent_busy"
+
+    state.complete_turn(2)
+    paused = state.rename_member(2, "Grace")
+    assert paused["members"][1]["status"] == "paused"
+
+    state.resume_agent(2)
+    state.delete_agent(2)
+    with pytest.raises(DomainError) as deleted:
+        state.rename_member(2, "Later")
+    assert deleted.value.code == "member_deleted"
+
+
+@pytest.mark.parametrize(
+    "members",
+    [
+        [],
+        [{"id": 1, "type": "agent", "name": "Ada"}],
+        [{"id": 1, "type": "human", "name": "Owner", "deleted": True}],
+    ],
+)
+def test_restore_requires_active_human_member_one(
+    members: list[dict[str, object]],
+) -> None:
+    with pytest.raises(RuntimeError, match="missing its Human Member"):
+        OrganizationState(persisted={"members": members, "discussions": []})

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { type FlowentChannel, FlowentClient } from "@/lib/flowent";
+import {
+  type FlowentChannel,
+  FlowentClient,
+  FlowentRequestError,
+} from "@/lib/flowent";
 
 function createHarness() {
   const channel: FlowentChannel = { onmessage: () => undefined };
@@ -95,7 +99,9 @@ describe("FlowentClient", () => {
       error: { code: "invalid_name", message: "Agent name is required" },
     });
 
-    await expect(response).rejects.toThrow("Agent name is required");
+    await expect(response).rejects.toEqual(
+      new FlowentRequestError("invalid_name", "Agent name is required"),
+    );
   });
 
   it("rejects a request when the Rust send command fails", async () => {

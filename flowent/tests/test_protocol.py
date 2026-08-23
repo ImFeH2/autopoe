@@ -589,3 +589,22 @@ def test_dispatches_general_member_rename_and_human_mention_read() -> None:
     message = responses[4]["result"]["discussions"][0]["messages"][0]
     assert message["references"][0]["name"] == "You"
     assert message["human_mentions"] == [{"member_id": 1, "status": "read"}]
+
+
+def test_dispatches_member_rename_and_returns_stable_error_codes() -> None:
+    responses = run_requests(
+        {"id": 1, "method": "organization.create_agent", "params": {"name": "Ada"}},
+        {
+            "id": 2,
+            "method": "organization.rename_member",
+            "params": {"member_id": 2, "name": "Grace"},
+        },
+        {
+            "id": 3,
+            "method": "organization.rename_member",
+            "params": {"member_id": 2, "name": " Grace"},
+        },
+    )
+
+    assert responses[1]["result"]["members"][1]["name"] == "Grace"
+    assert responses[2]["error"]["code"] == "invalid_name"
