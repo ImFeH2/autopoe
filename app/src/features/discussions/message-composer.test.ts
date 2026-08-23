@@ -5,6 +5,8 @@ import {
   getMentionKeyAction,
   insertDraftMention,
   mentionAgentScopeLabel,
+  mentionMemberAccessibleLabel,
+  mentionMemberMeta,
   normalizeMentionText,
   reconcileDraftMentions,
   shouldSubmitMessage,
@@ -14,6 +16,36 @@ describe("MessageComposer", () => {
   it("labels all-Organization candidates by Discussion membership", () => {
     expect(mentionAgentScopeLabel(2, [1, 2])).toBe("In Discussion");
     expect(mentionAgentScopeLabel(3, [1, 2])).toBe("Not in Discussion");
+    expect(mentionMemberMeta({ id: 1, type: "human" }, [1, 2])).toBe(
+      "Human · In Discussion",
+    );
+    expect(mentionMemberMeta({ id: 3, type: "agent" }, [1, 2])).toBe(
+      "Agent · Not in Discussion",
+    );
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 1, name: "Owner", type: "human" },
+        [1, 2],
+      ),
+    ).toBe("Mention Owner, Human, In Discussion");
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 2, name: "Ada", type: "agent" },
+        [1, 2],
+      ),
+    ).toBe("Mention Ada, Agent, In Discussion");
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 3, name: "Lin", type: "human" },
+        [1, 2],
+      ),
+    ).toBe("Mention Lin, Human, Not in Discussion");
+    expect(
+      mentionMemberAccessibleLabel(
+        { id: 4, name: "Grace", type: "agent" },
+        [1, 2],
+      ),
+    ).toBe("Mention Grace, Agent, Not in Discussion");
   });
 
   it("uses NFKC and full casefold-style expansion", () => {
@@ -98,6 +130,8 @@ describe("MessageComposer", () => {
     ]);
     expect(filterMentionAgents(agents, "GH")).toEqual([agents[4]]);
     expect(filterMentionAgents(agents, "ABCDEF")).toEqual([]);
+    const human = { id: 1, type: "human" as const, name: "Owner" };
+    expect(filterMentionAgents([human, ...agents], "own")).toEqual([human]);
   });
 
   it("inserts the selected Agent at the caret", () => {

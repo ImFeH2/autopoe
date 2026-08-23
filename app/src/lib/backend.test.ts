@@ -362,11 +362,53 @@ describe("parseOrganizationSnapshot", () => {
     );
   });
 
+  it("accepts a historical sender name snapshot after rename", () => {
+    const value = structuredClone(validSnapshot);
+    value.members[0].name = "Owner";
+    value.discussions[0].messages[0].sender_name = "You";
+
+    expect(
+      parseOrganizationSnapshot(value).discussions[0].messages[0].sender_name,
+    ).toBe("You");
+  });
+
+  it("accepts renamed current Human and separate Human notification state", () => {
+    const value = structuredClone(validSnapshot);
+    value.members[0].name = "Owner";
+    const message = value.discussions[0].messages[0];
+    message.sender_id = 2;
+    message.body = "@Owner review";
+    message.references = [
+      {
+        member_id: 1,
+        name: "Owner",
+        start: 0,
+        end: 6,
+        in_discussion: true,
+        notified: true,
+        deleted: false,
+      },
+    ];
+    message.mentions = [];
+    message.human_mentions = [{ member_id: 1, status: "unread" }];
+
+    expect(parseOrganizationSnapshot(value).members[0].name).toBe("Owner");
+  });
+
+  it("rejects Human delivery in Agent Mention state", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].messages[0].references[0].member_id = 1;
+    value.discussions[0].messages[0].mentions[0].member_id = 1;
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "must target an Agent",
+    );
+  });
+
   it("rejects a notified reference without a Mention status", () => {
     const value = structuredClone(validSnapshot);
     value.discussions[0].messages[0].mentions = [];
     expect(() => parseOrganizationSnapshot(value)).toThrow(
-      "notified identity requires a Mention status",
+      "notified Agent identity requires a Mention status",
     );
   });
 

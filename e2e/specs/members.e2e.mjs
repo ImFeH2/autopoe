@@ -65,6 +65,29 @@ describe("Members", () => {
     await expect(details.$("aria/Ada history")).toHaveText("No history");
   });
 
+  it("returns from rename confirmation to the focused preserved draft", async () => {
+    await waitForWorkspace();
+    const details = await createAgent("FocusAgent");
+
+    await details.$("button=Rename").click();
+    const dialog = await $("aria/Rename Agent");
+    await dialog.waitForDisplayed();
+    const input = await dialog.$('input[id^="agent-"][id$="-rename"]');
+    await expect(input).toBeFocused();
+    await input.setValue("FocusDraft");
+    await dialog.$("button=Review rename").click();
+    await expect(
+      dialog.$("h3=Rename FocusAgent to FocusDraft?"),
+    ).toBeDisplayed();
+
+    await dialog.$("button=Back").click();
+
+    const returnedInput = await dialog.$('input[id^="agent-"][id$="-rename"]');
+    await expect(returnedInput).toBeDisplayed();
+    await expect(returnedInput).toBeFocused();
+    await expect(returnedInput).toHaveValue("FocusDraft");
+  });
+
   it("requires the exact Agent name before permanent deletion", async () => {
     await waitForWorkspace();
     await createAgent("DeleteMe");
@@ -78,7 +101,9 @@ describe("Members", () => {
     await expect(dialog).toHaveText(
       expect.stringContaining("Discussion messages will remain"),
     );
-    const confirm = await dialog.$("#delete-agent-3-confirmation");
+    const confirm = await dialog.$(
+      'input[id^="delete-agent-"][id$="-confirmation"]',
+    );
     const deleteButton = await dialog.$("button=Delete");
     await expect(deleteButton).toBeDisabled();
     await confirm.setValue("deleteme");

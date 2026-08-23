@@ -138,6 +138,11 @@ export type Mention = {
   status: "pending" | "read" | "acked";
 };
 
+export type HumanMention = {
+  member_id: number;
+  status: "unread" | "read";
+};
+
 export type MentionReference = {
   member_id: number;
   name: string;
@@ -163,10 +168,12 @@ export type MentionSyntax = {
 export type Message = {
   id: number;
   sender_id: number;
+  sender_name?: string;
   body: string;
   created_at: string | null;
   references: MentionReference[];
   mentions: Mention[];
+  human_mentions?: HumanMention[];
 };
 
 export type Discussion = {
@@ -406,6 +413,10 @@ function parseMessage(
     invalidSnapshot(`${path}.id must follow Discussion order`);
   }
   const senderId = positiveInteger(item.sender_id, `${path}.sender_id`);
+  const senderName =
+    item.sender_name === undefined
+      ? undefined
+      : nonEmptyString(item.sender_name, `${path}.sender_name`);
   const body = nonEmptyString(item.body, `${path}.body`);
   const createdAt = optionalMessageCreatedAt(
     item.created_at,
@@ -499,6 +510,10 @@ function parseMessage(
       if (mentionedMemberIds.has(memberId)) {
         invalidSnapshot(`${path}.mentions must target unique Members`);
       }
+      const member = membersById.get(memberId);
+      if (member && member.type !== "agent") {
+        invalidSnapshot(`${mentionPath} must target an Agent`);
+      }
       if (
         !references.some(
           (reference) => reference.member_id === memberId && reference.notified,
@@ -515,20 +530,78 @@ function parseMessage(
       };
     },
   );
-  for (const reference of references) {
-    if (reference.notified && !mentionedMemberIds.has(reference.member_id)) {
+  const humanMentionIds = new Set<number>();
+  const humanMentions = array(
+    item.human_mentions ?? [],
+    `${path}.human_mentions`,
+  ).map((notification, notificationIndex) => {
+    const notificationPath = `${path}.human_mentions[${notificationIndex}]`;
+    const notificationItem = record(notification, notificationPath);
+    const memberId = positiveInteger(
+      notificationItem.member_id,
+      `${notificationPath}.member_id`,
+    );
+    if (humanMentionIds.has(memberId)) {
+      invalidSnapshot(`${path}.human_mentions must target unique Humans`);
+    }
+    const member = membersById.get(memberId);
+    if (member?.type !== "human") {
+      invalidSnapshot(`${notificationPath} must target an active Human`);
+    }
+    if (
+      notificationItem.status !== "unread" &&
+      notificationItem.status !== "read"
+    ) {
+      invalidSnapshot(`${notificationPath}.status is invalid`);
+    }
+    if (
+      !references.some(
+        (reference) => reference.member_id === memberId && reference.notified,
+      )
+    ) {
       invalidSnapshot(
-        `${path}.references notified identity requires a Mention status`,
+        `${notificationPath} requires a notified identity reference`,
+      );
+    }
+    const status: HumanMention["status"] = notificationItem.status;
+    humanMentionIds.add(memberId);
+    return { member_id: memberId, status };
+  });
+  for (const reference of references) {
+    if (!reference.notified) {
+      continue;
+    }
+    const member = membersById.get(reference.member_id);
+    if (member?.type === "human" && !humanMentionIds.has(reference.member_id)) {
+      invalidSnapshot(
+        `${path}.references notified Human identity requires a Human notification`,
+      );
+    }
+    if (
+      member?.type === "agent" &&
+      !mentionedMemberIds.has(reference.member_id)
+    ) {
+      invalidSnapshot(
+        `${path}.references notified Agent identity requires a Mention status`,
+      );
+    }
+    if (!member && !mentionedMemberIds.has(reference.member_id)) {
+      invalidSnapshot(
+        `${path}.references deleted notified identity requires a Mention status`,
       );
     }
   }
   return {
     id,
     sender_id: senderId,
+    ...(senderName === undefined ? {} : { sender_name: senderName }),
     body,
     created_at: createdAt,
     references,
     mentions,
+    ...(item.human_mentions === undefined
+      ? {}
+      : { human_mentions: humanMentions }),
   };
 }
 
@@ -587,8 +660,8 @@ export function parseOrganizationSnapshot(
     invalidSnapshot("Member IDs must be unique");
   }
   const currentHuman = members.find((member) => member.id === 1);
-  if (currentHuman?.type !== "human" || currentHuman.name !== "You") {
-    invalidSnapshot('Member 1 must be the current Human "You"');
+  if (currentHuman?.type !== "human") {
+    invalidSnapshot("Member 1 must be the current Human");
   }
 
   const membersById = new Map(members.map((member) => [member.id, member]));
@@ -1346,6 +1419,11 @@ export const backend = {
     }),
   createAgent: (name: string) =>
     organizationRequest("organization.create_agent", { name }),
+  renameMember: (memberId: number, name: string) =>
+    organizationRequest("organization.rename_member", {
+      member_id: memberId,
+      name,
+    }),
   deleteAgent: (agentId: number) =>
     organizationRequest("organization.delete_agent", { agent_id: agentId }),
   pauseAgent: (agentId: number) =>
@@ -1365,6 +1443,16 @@ export const backend = {
       discussion_id: discussionId,
       sender_id: 1,
       body,
+    }),
+  readHumanMention: (
+    memberId: number,
+    discussionId: number,
+    messageId: number,
+  ) =>
+    organizationRequest("human.mention.read", {
+      member_id: memberId,
+      discussion_id: discussionId,
+      message_id: messageId,
     }),
   getModelSettings: async () =>
     parseModelSettings(await request("settings.get_model")),
