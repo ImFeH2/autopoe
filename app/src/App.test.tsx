@@ -5,6 +5,7 @@ import App, {
   completeHumanMentionNavigation,
   createHumanMentionFocusRequest,
   focusHumanMentionMessage,
+  shouldRefocusHumanMention,
 } from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
@@ -60,27 +61,43 @@ describe("App", () => {
   });
 
   it("issues distinct focus requests for current and cross-Discussion mentions", () => {
-    expect(createHumanMentionFocusRequest(1, 10, 1, true, 1)).toEqual({
+    expect(createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7)).toEqual({
       discussionId: 1,
       humanId: 1,
       messageId: 10,
+      navigationGeneration: 7,
       token: 1,
       unread: true,
+      userGeneration: 4,
     });
-    expect(createHumanMentionFocusRequest(1, 10, 1, false, 2)).toEqual({
+    expect(createHumanMentionFocusRequest(1, 10, 1, false, 2, 5, 7)).toEqual({
       discussionId: 1,
       humanId: 1,
       messageId: 10,
+      navigationGeneration: 7,
       token: 2,
       unread: false,
+      userGeneration: 5,
     });
-    expect(createHumanMentionFocusRequest(2, 20, 1, true, 3)).toEqual({
+    expect(createHumanMentionFocusRequest(2, 20, 1, true, 3, 6, 7)).toEqual({
       discussionId: 2,
       humanId: 1,
       messageId: 20,
+      navigationGeneration: 7,
       token: 3,
       unread: true,
+      userGeneration: 6,
     });
+  });
+
+  it("drops stale refocus after a newer mention or normal navigation wins", () => {
+    const delayedA = createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7);
+    expect(shouldRefocusHumanMention(delayedA, 4, 7)).toBe(true);
+
+    // B has already completed and cleared its request, but its user generation remains latest.
+    expect(shouldRefocusHumanMention(delayedA, 5, 7)).toBe(false);
+    // Leaving Discussions invalidates A even when no newer notification was clicked.
+    expect(shouldRefocusHumanMention(delayedA, 4, 8)).toBe(false);
   });
 
   it("marks unread only after the target is focused and skips read work for read items", async () => {

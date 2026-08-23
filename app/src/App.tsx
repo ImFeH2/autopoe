@@ -48,8 +48,10 @@ export type HumanMentionFocusRequest = {
   discussionId: number;
   humanId: number | null;
   messageId: number;
+  navigationGeneration: number;
   token: number;
   unread: boolean;
+  userGeneration: number;
 };
 
 export function createHumanMentionFocusRequest(
@@ -58,8 +60,29 @@ export function createHumanMentionFocusRequest(
   humanId: number | null,
   unread: boolean,
   token: number,
+  userGeneration: number,
+  navigationGeneration: number,
 ): HumanMentionFocusRequest {
-  return { discussionId, humanId, messageId, token, unread };
+  return {
+    discussionId,
+    humanId,
+    messageId,
+    navigationGeneration,
+    token,
+    unread,
+    userGeneration,
+  };
+}
+
+export function shouldRefocusHumanMention(
+  request: HumanMentionFocusRequest,
+  latestUserGeneration: number,
+  latestNavigationGeneration: number,
+): boolean {
+  return (
+    request.userGeneration === latestUserGeneration &&
+    request.navigationGeneration === latestNavigationGeneration
+  );
 }
 
 export function focusHumanMentionMessage(
@@ -116,6 +139,8 @@ function App() {
   const focusMemberDetailRef = useRef(false);
   const restoreDiscussionFocusRef = useRef<DiscussionSource | null>(null);
   const nextHumanMentionFocusTokenRef = useRef(1);
+  const latestHumanMentionUserGenerationRef = useRef(0);
+  const humanMentionNavigationGenerationRef = useRef(0);
   const humanMentionHighlightTimerRef = useRef<number | null>(null);
   const [humanMentionFocusRequest, setHumanMentionFocusRequest] =
     useState<HumanMentionFocusRequest | null>(null);
@@ -133,6 +158,7 @@ function App() {
       : null;
   const openMemberFromDiscussion = useCallback(
     (memberId: number, discussionId: number, triggerKey: string) => {
+      humanMentionNavigationGenerationRef.current += 1;
       focusMemberDetailRef.current = true;
       restoreDiscussionFocusRef.current = null;
       setDiscussionSource({ discussionId, triggerKey });
@@ -343,9 +369,23 @@ function App() {
 
   useEffect(() => {
     const target = humanMentionFocusRequest;
+    if (target === null) {
+      return;
+    }
+    if (
+      !shouldRefocusHumanMention(
+        target,
+        latestHumanMentionUserGenerationRef.current,
+        humanMentionNavigationGenerationRef.current,
+      )
+    ) {
+      setHumanMentionFocusRequest((current) =>
+        current?.token === target.token ? null : current,
+      );
+      return;
+    }
     if (
       workspaceView !== "discussions" ||
-      target === null ||
       selectedDiscussionId !== target.discussionId
     ) {
       return;
@@ -400,15 +440,27 @@ function App() {
                   setMutationError(errorMessage(error));
                 } finally {
                   setIsSaving(false);
-                  const refocus = createHumanMentionFocusRequest(
-                    target.discussionId,
-                    target.messageId,
-                    humanId,
-                    false,
-                    nextHumanMentionFocusTokenRef.current,
-                  );
-                  nextHumanMentionFocusTokenRef.current += 1;
-                  setHumanMentionFocusRequest((current) => current ?? refocus);
+                  if (
+                    shouldRefocusHumanMention(
+                      target,
+                      latestHumanMentionUserGenerationRef.current,
+                      humanMentionNavigationGenerationRef.current,
+                    )
+                  ) {
+                    const refocus = createHumanMentionFocusRequest(
+                      target.discussionId,
+                      target.messageId,
+                      humanId,
+                      false,
+                      nextHumanMentionFocusTokenRef.current,
+                      target.userGeneration,
+                      target.navigationGeneration,
+                    );
+                    nextHumanMentionFocusTokenRef.current += 1;
+                    setHumanMentionFocusRequest(
+                      (current) => current ?? refocus,
+                    );
+                  }
                 }
               }
             : undefined;
@@ -583,6 +635,7 @@ function App() {
     const notification = message?.human_mentions?.find(
       (candidate) => candidate.member_id === currentHuman?.id,
     );
+    latestHumanMentionUserGenerationRef.current += 1;
     setHumanMentionFocusRequest(
       createHumanMentionFocusRequest(
         discussionId,
@@ -590,6 +643,8 @@ function App() {
         currentHuman?.id ?? null,
         notification?.status === "unread",
         nextHumanMentionFocusTokenRef.current,
+        latestHumanMentionUserGenerationRef.current,
+        humanMentionNavigationGenerationRef.current,
       ),
     );
     nextHumanMentionFocusTokenRef.current += 1;
@@ -634,6 +689,9 @@ function App() {
   }
 
   function selectDiscussion(discussionId: number, focusComposer = true) {
+    if (focusComposer) {
+      humanMentionNavigationGenerationRef.current += 1;
+    }
     focusMemberDetailRef.current = false;
     restoreDiscussionFocusRef.current = null;
     setDiscussionSource(null);
@@ -648,6 +706,7 @@ function App() {
   }
 
   function selectWorkspaceView(view: WorkspaceView) {
+    humanMentionNavigationGenerationRef.current += 1;
     focusMemberDetailRef.current = false;
     restoreDiscussionFocusRef.current = null;
     setDiscussionSource(null);
@@ -659,6 +718,7 @@ function App() {
   }
 
   function returnToSourceDiscussion() {
+    humanMentionNavigationGenerationRef.current += 1;
     if (!sourceDiscussion || !discussionSource) {
       focusMemberDetailRef.current = true;
       setDiscussionSource(null);
