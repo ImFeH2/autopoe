@@ -608,6 +608,7 @@ describe("App", () => {
               unread: true,
             },
           ]}
+          highlightedMessageId={1}
           isCreating={false}
           members={[{ id: 1, type: "human", name: "Owner" }, agent]}
           messageBody=""
@@ -634,6 +635,9 @@ describe("App", () => {
     );
 
     expect(markup).toContain('aria-label="Human mention notifications"');
+    expect(markup).toContain(
+      'class="message-row message-row--agent human-mention-target"',
+    );
     expect(markup).toContain("1 unread");
     expect(markup).toContain(
       "<strong>OriginalAgent</strong> in Human review · Unread",

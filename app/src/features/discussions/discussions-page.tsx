@@ -56,6 +56,7 @@ type DiscussionsPageProps = {
   error: string | null;
   isCreating: boolean;
   humanMentionNotifications?: HumanMentionNotificationItem[];
+  highlightedMessageId?: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -89,6 +90,7 @@ export function DiscussionsPage({
   error,
   isCreating,
   humanMentionNotifications = [],
+  highlightedMessageId = null,
   members,
   messageBody,
   messageInputRef,
@@ -246,6 +248,7 @@ export function DiscussionsPage({
               discussion={selectedDiscussion}
               key={selectedDiscussion.id}
               disabled={disabled}
+              highlightedMessageId={highlightedMessageId}
               members={members}
               messageBody={messageBody}
               messageInputRef={messageInputRef}
@@ -447,6 +450,7 @@ function DiscussionMemberAvatar({
 type DiscussionViewProps = {
   discussion: Discussion;
   disabled: boolean;
+  highlightedMessageId: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -464,6 +468,7 @@ type DiscussionViewProps = {
 function DiscussionView({
   discussion,
   disabled,
+  highlightedMessageId,
   members,
   messageBody,
   messageInputRef,
@@ -557,7 +562,7 @@ function DiscussionView({
               const isHuman = sender?.type === "human";
               return (
                 <li
-                  className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}`}
+                  className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}${highlightedMessageId === message.id ? " human-mention-target" : ""}`}
                   data-message-id={message.id}
                   key={message.id}
                   tabIndex={-1}

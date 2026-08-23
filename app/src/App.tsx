@@ -116,8 +116,14 @@ function App() {
   const focusMemberDetailRef = useRef(false);
   const restoreDiscussionFocusRef = useRef<DiscussionSource | null>(null);
   const nextHumanMentionFocusTokenRef = useRef(1);
+  const humanMentionHighlightTimerRef = useRef<number | null>(null);
   const [humanMentionFocusRequest, setHumanMentionFocusRequest] =
     useState<HumanMentionFocusRequest | null>(null);
+  const [highlightedHumanMention, setHighlightedHumanMention] = useState<{
+    discussionId: number;
+    messageId: number;
+    token: number;
+  } | null>(null);
   const selectedAgentId =
     requestState.status === "ready" &&
     requestState.snapshot.members.find(
@@ -326,6 +332,15 @@ function App() {
     return () => cancelAnimationFrame(frame);
   }, [selectedDiscussionId, workspaceView]);
 
+  useEffect(
+    () => () => {
+      if (humanMentionHighlightTimerRef.current !== null) {
+        window.clearTimeout(humanMentionHighlightTimerRef.current);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     const target = humanMentionFocusRequest;
     if (
@@ -347,6 +362,22 @@ function App() {
         `[data-message-id="${target.messageId}"]`,
       );
       if (message) {
+        const highlight = {
+          discussionId: target.discussionId,
+          messageId: target.messageId,
+          token: target.token,
+        };
+        setHighlightedHumanMention(highlight);
+        if (humanMentionHighlightTimerRef.current !== null) {
+          window.clearTimeout(humanMentionHighlightTimerRef.current);
+        }
+        humanMentionHighlightTimerRef.current = window.setTimeout(() => {
+          setHighlightedHumanMention((current) =>
+            current?.token === highlight.token ? null : current,
+          );
+          humanMentionHighlightTimerRef.current = null;
+        }, 2_500);
+
         const humanId = target.humanId;
         const markRead =
           target.unread && humanId !== null
@@ -369,10 +400,19 @@ function App() {
                   setMutationError(errorMessage(error));
                 } finally {
                   setIsSaving(false);
+                  const refocus = createHumanMentionFocusRequest(
+                    target.discussionId,
+                    target.messageId,
+                    humanId,
+                    false,
+                    nextHumanMentionFocusTokenRef.current,
+                  );
+                  nextHumanMentionFocusTokenRef.current += 1;
+                  setHumanMentionFocusRequest((current) => current ?? refocus);
                 }
               }
             : undefined;
-        void completeHumanMentionNavigation(message, markRead);
+        void completeHumanMentionNavigation(message, markRead, () => 0);
         setHumanMentionFocusRequest((current) =>
           current?.token === target.token ? null : current,
         );
@@ -708,6 +748,11 @@ function App() {
             error={mutationError}
             isCreating={isCreatingDiscussion}
             humanMentionNotifications={humanMentionNotifications}
+            highlightedMessageId={
+              highlightedHumanMention?.discussionId === selectedDiscussionId
+                ? highlightedHumanMention.messageId
+                : null
+            }
             members={snapshot.members}
             messageBody={messageBody}
             messageInputRef={messageInputRef}
