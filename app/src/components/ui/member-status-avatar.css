@@ -1,66 +1,92 @@
 .member-status-avatar {
   position: relative;
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-text-secondary);
-  vertical-align: middle;
-}
-
-.member-status-avatar__identity {
-  box-sizing: border-box;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
+  display: inline-grid;
+  flex: none;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 50%;
-  background: var(--color-surface-selected);
+  border: 0;
+  outline: none;
+  padding: 0;
+  background: transparent;
   color: var(--color-text-secondary);
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1;
-  text-transform: uppercase;
+  vertical-align: top;
 }
 
-.member-status-avatar__label {
-  overflow: hidden;
-  color: var(--color-text-tertiary);
-  font-size: 12px;
-  font-weight: 550;
-  line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.member-status-avatar--member {
+  width: 28px;
+  height: 28px;
 }
 
 .member-status-avatar--message {
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
-  gap: 0;
 }
 
-.member-status-avatar--message .member-status-avatar__identity {
-  width: 24px;
-  height: 24px;
-  flex-basis: 24px;
+.member-status-avatar__identity {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-surface-selected);
+  color: var(--color-text-secondary);
   font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    filter 120ms ease;
+}
+
+.member-status-avatar--member .member-status-avatar__identity {
+  font-size: 10px;
+}
+
+.member-status-avatar--agent .member-status-avatar__identity {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.member-status-avatar--deleted .member-status-avatar__identity,
+.member-status-avatar--unknown .member-status-avatar__identity {
+  border-style: dashed;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-tertiary);
+}
+
+.member-status-avatar--interactive {
+  cursor: pointer;
+}
+
+.member-status-avatar--interactive:hover .member-status-avatar__identity {
+  border-color: var(--color-accent-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 24%, transparent);
+  filter: brightness(1.08);
+}
+
+.member-status-avatar--interactive:focus-visible {
+  z-index: 2;
+  border-radius: 50%;
+  box-shadow: var(--focus-ring);
 }
 
 .member-status-avatar__mark {
   position: absolute;
+  top: 20px;
+  left: 20px;
   box-sizing: border-box;
-  top: 22px;
-  left: 22px;
   display: block;
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border: 1px solid currentcolor;
   background: var(--color-surface);
-  box-shadow: 0 0 0 2px var(--color-surface);
+  box-shadow: 0 0 0 1px var(--color-surface);
   pointer-events: none;
 }
 
@@ -69,7 +95,6 @@
   left: 16px;
   width: 8px;
   height: 8px;
-  box-shadow: 0 0 0 1px var(--color-surface);
 }
 
 .member-status-avatar__mark::before,
@@ -172,6 +197,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .member-status-avatar,
+  .member-status-avatar__identity {
+    transition: none;
+  }
+
   .member-status-avatar__mark--running {
     animation: none;
     opacity: 1;

@@ -1,12 +1,7 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import App, {
-  completeHumanMentionNavigation,
-  createHumanMentionFocusRequest,
-  focusHumanMentionMessage,
-  shouldRefocusHumanMention,
-} from "@/App";
+import App from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
   Badge,
@@ -22,8 +17,11 @@ import {
 import {
   DiscussionsPage,
   discussionAgentStatus,
+  discussionEntryAccessibleLabel,
   filterDiscussions,
   formatMessageCount,
+  humanUnreadForDiscussion,
+  positionInitialDiscussionMessages,
 } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import {
@@ -34,98 +32,6 @@ import {
 } from "@/features/settings";
 
 describe("App", () => {
-  it("gives pointer and keyboard notification activation a visible message target", () => {
-    const add = vi.fn();
-    const remove = vi.fn();
-    const focus = vi.fn();
-    const scrollIntoView = vi.fn();
-    let clearHighlight: (() => void) | undefined;
-    const scheduleClear = vi.fn((callback: () => void, delay: number) => {
-      clearHighlight = callback;
-      expect(delay).toBe(2_500);
-      return 1;
-    });
-    const message = {
-      classList: { add, remove },
-      focus,
-      scrollIntoView,
-    } as unknown as HTMLElement;
-
-    focusHumanMentionMessage(message, scheduleClear);
-
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
-    expect(focus).toHaveBeenCalledOnce();
-    expect(add).toHaveBeenCalledWith("human-mention-target");
-    clearHighlight?.();
-    expect(remove).toHaveBeenCalledWith("human-mention-target");
-  });
-
-  it("issues distinct focus requests for current and cross-Discussion mentions", () => {
-    expect(createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7)).toEqual({
-      discussionId: 1,
-      humanId: 1,
-      messageId: 10,
-      navigationGeneration: 7,
-      token: 1,
-      unread: true,
-      userGeneration: 4,
-    });
-    expect(createHumanMentionFocusRequest(1, 10, 1, false, 2, 5, 7)).toEqual({
-      discussionId: 1,
-      humanId: 1,
-      messageId: 10,
-      navigationGeneration: 7,
-      token: 2,
-      unread: false,
-      userGeneration: 5,
-    });
-    expect(createHumanMentionFocusRequest(2, 20, 1, true, 3, 6, 7)).toEqual({
-      discussionId: 2,
-      humanId: 1,
-      messageId: 20,
-      navigationGeneration: 7,
-      token: 3,
-      unread: true,
-      userGeneration: 6,
-    });
-  });
-
-  it("drops stale refocus after a newer mention or normal navigation wins", () => {
-    const delayedA = createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7);
-    expect(shouldRefocusHumanMention(delayedA, 4, 7)).toBe(true);
-
-    // B has already completed and cleared its request, but its user generation remains latest.
-    expect(shouldRefocusHumanMention(delayedA, 5, 7)).toBe(false);
-    // Leaving Discussions invalidates A even when no newer notification was clicked.
-    expect(shouldRefocusHumanMention(delayedA, 4, 8)).toBe(false);
-  });
-
-  it("marks unread only after the target is focused and skips read work for read items", async () => {
-    const events: string[] = [];
-    const message = {
-      classList: {
-        add: () => events.push("highlight"),
-        remove: vi.fn(),
-      },
-      focus: () => events.push("focus"),
-      scrollIntoView: () => events.push("scroll"),
-    } as unknown as HTMLElement;
-    const scheduleClear = vi.fn(() => 1);
-
-    await completeHumanMentionNavigation(
-      message,
-      async () => {
-        events.push("read");
-      },
-      scheduleClear,
-    );
-    expect(events).toEqual(["scroll", "focus", "highlight", "read"]);
-
-    events.length = 0;
-    await completeHumanMentionNavigation(message, undefined, scheduleClear);
-    expect(events).toEqual(["scroll", "focus", "highlight"]);
-  });
-
   it("renders a clear startup state before the backend responds", () => {
     const markup = renderToStaticMarkup(<App />);
 
@@ -245,6 +151,141 @@ describe("App", () => {
     expect(filterDiscussions(discussions, "missing")).toEqual([]);
   });
 
+  it("derives unread and @Human counts from Human read state and subset truth", () => {
+    const discussion = {
+      id: 1,
+      topic: "Unread",
+      member_ids: [1, 2],
+      human_read_states: [
+        {
+          member_id: 1,
+          read_through_message_id: 1,
+          seen_message_ids: [3],
+        },
+      ],
+      messages: [
+        { id: 1, sender_id: 2, body: "Read", references: [], mentions: [] },
+        {
+          id: 2,
+          sender_id: 2,
+          body: "Mention",
+          references: [],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+        { id: 3, sender_id: 2, body: "Seen", references: [], mentions: [] },
+        { id: 4, sender_id: 1, body: "Own", references: [], mentions: [] },
+        { id: 5, sender_id: 2, body: "Unread", references: [], mentions: [] },
+      ],
+    };
+
+    expect(humanUnreadForDiscussion(discussion)).toEqual({
+      unreadMessageIds: [2, 5],
+      unreadHumanMentionMessageIds: [2],
+      unreadCount: 2,
+      unreadHumanMentionCount: 1,
+      firstUnreadMessageId: 2,
+    });
+  });
+
+  it("shows total unread and a prominent @Human subset badge independently", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "idle" as const,
+    };
+    const message = (id: number, mentioned = false) => ({
+      id,
+      sender_id: 2,
+      body: `Message ${id}`,
+      references: [],
+      mentions: [],
+      ...(mentioned
+        ? {
+            human_mentions: [{ member_id: 1, status: "unread" as const }],
+          }
+        : {}),
+    });
+    const discussions = [
+      {
+        id: 1,
+        topic: "Both badges",
+        member_ids: [1, 2],
+        human_read_states: [
+          {
+            member_id: 1,
+            read_through_message_id: null,
+            seen_message_ids: [],
+          },
+        ],
+        messages: [message(1, true), message(2)],
+      },
+      {
+        id: 2,
+        topic: "Ordinary only",
+        member_ids: [1, 2],
+        human_read_states: [
+          {
+            member_id: 1,
+            read_through_message_id: null,
+            seen_message_ids: [],
+          },
+        ],
+        messages: [message(1)],
+      },
+      {
+        id: 3,
+        topic: "Seen mention",
+        member_ids: [1, 2],
+        human_read_states: [
+          {
+            member_id: 1,
+            read_through_message_id: null,
+            seen_message_ids: [1],
+          },
+        ],
+        messages: [message(1, true)],
+      },
+    ];
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={discussions}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup.match(/aria-label="2 unread messages"/gu)).toHaveLength(1);
+    expect(markup.match(/aria-label="1 unread messages"/gu)).toHaveLength(1);
+    expect(
+      markup.match(/aria-label="1 unread mentions for you"/gu),
+    ).toHaveLength(1);
+    expect(markup).toContain(">@1</span>");
+  });
+
   it("presents the transitional pausing state as Running in Discussions", () => {
     expect(discussionAgentStatus("pausing")).toBe("running");
     expect(discussionAgentStatus("paused")).toBe("paused");
@@ -288,13 +329,23 @@ describe("App", () => {
       id: 1,
       topic: "Live status",
       member_ids: [1, 2, 3, 4, 5, 6],
-      messages: [1, 2, 3, 4, 5, 6, 99].map((senderId) => ({
-        id: senderId,
-        sender_id: senderId,
-        body: `Message from ${senderId}`,
-        references: [],
-        mentions: [],
-      })),
+      messages: [
+        ...[1, 2, 3, 4, 5, 6, 99].map((senderId) => ({
+          id: senderId,
+          sender_id: senderId,
+          body: `Message from ${senderId}`,
+          references: [],
+          mentions: [],
+        })),
+        {
+          id: 100,
+          sender_id: 100,
+          sender_name: "Former Agent",
+          body: "Historical message from a deleted member",
+          references: [],
+          mentions: [],
+        },
+      ],
     };
     const markup = renderToStaticMarkup(
       <TooltipProvider>
@@ -337,32 +388,35 @@ describe("App", () => {
     );
     expect(markup).toContain('data-discussion-focus-id="1" tabindex="-1"');
     expect(markup).toMatch(
-      /<button[^>]*aria-label="You, Human"[^>]*class="discussion-member-avatar discussion-member-avatar--human"/u,
+      /<button[^>]*class="member-status-avatar member-status-avatar--member member-status-avatar--human member-status-avatar--interactive"[^>]*aria-label="You, Human"/u,
     );
     expect(markup).toContain('aria-label="Run, Agent status: Running"');
     expect(markup).toContain('aria-label="Idle, Agent status: Idle"');
     expect(markup).toContain('aria-label="Pause, Agent status: Paused"');
     expect(markup).toContain('aria-label="Error, Agent status: Error"');
     expect(markup).toContain('aria-label="Stopping, Agent status: Running"');
-    expect(markup.match(/data-agent-status="running"/g)).toHaveLength(2);
-    expect(markup.match(/data-agent-status="idle"/g)).toHaveLength(1);
-    expect(markup.match(/data-agent-status="paused"/g)).toHaveLength(1);
-    expect(markup.match(/data-agent-status="error"/g)).toHaveLength(1);
-    expect(markup.match(/data-variant="message"/g)).toHaveLength(7);
-    expect(markup.match(/data-member-status="running"/g)).toHaveLength(2);
-    expect(markup.match(/data-member-status="idle"/g)).toHaveLength(1);
-    expect(markup.match(/data-member-status="paused"/g)).toHaveLength(1);
-    expect(markup.match(/data-member-status="error"/g)).toHaveLength(1);
-    expect(markup.match(/data-member-status="none"/g)).toHaveLength(2);
-    expect(
-      markup.match(/member-status-avatar--message[^>]*aria-label=/g),
-    ).toBeNull();
-    expect(markup.match(/member-status-avatar--message/g)).toHaveLength(7);
-    expect(
-      markup.match(
-        /aria-hidden="true" class="member-status-avatar member-status-avatar--message/g,
-      ),
-    ).toHaveLength(7);
+    expect(markup.match(/data-variant="member"/g)).toHaveLength(6);
+    expect(markup.match(/data-variant="message"/g)).toHaveLength(8);
+    expect(markup.match(/data-member-status="running"/g)).toHaveLength(4);
+    expect(markup.match(/data-member-status="idle"/g)).toHaveLength(2);
+    expect(markup.match(/data-member-status="paused"/g)).toHaveLength(2);
+    expect(markup.match(/data-member-status="error"/g)).toHaveLength(2);
+    expect(markup.match(/data-member-status="none"/g)).toHaveLength(4);
+    for (const name of ["You", "Run", "Idle", "Pause", "Error", "Stopping"]) {
+      expect(markup).toContain(`aria-label="Open member details for ${name}"`);
+    }
+    expect(markup.match(/member-status-avatar--message/g)).toHaveLength(8);
+    expect(markup).toContain(
+      'class="member-status-avatar member-status-avatar--message member-status-avatar--unknown message-avatar"',
+    );
+    expect(markup).toContain(
+      'class="member-status-avatar member-status-avatar--message member-status-avatar--deleted message-avatar"',
+    );
+    expect(markup).toContain("<strong>Former Agent</strong>");
+    expect(markup).not.toContain("Open member details for Former Agent");
+    expect(markup).toContain(
+      'data-member-navigation-key="discussion:1:message:2:member:2"',
+    );
     for (const [name, label] of [
       ["Run", "Running"],
       ["Idle", "Idle"],
@@ -375,15 +429,29 @@ describe("App", () => {
     }
     expect(markup).toContain("<strong>You</strong>");
     expect(markup).toContain("<strong>Unknown</strong>");
-    expect(markup).not.toContain("aria-live=");
+    expect(markup).not.toMatch(/member-status-avatar[^>]*aria-live=/u);
     expect(markup).not.toMatch(/member-status-avatar[^>]*tabindex=/u);
-    const styles = readFileSync(
+    const avatarStyles = readFileSync(
+      new URL("./components/ui/member-status-avatar.css", import.meta.url),
+      "utf8",
+    );
+    const discussionStyles = readFileSync(
       new URL("./features/discussions/discussions.css", import.meta.url),
       "utf8",
     );
-    expect(styles).toMatch(/\.discussion-member-avatar:hover\s*\{/u);
-    expect(styles).toMatch(/\.discussion-member-avatar:focus-visible\s*\{/u);
-    expect(styles).toMatch(/\.discussion-title:focus-visible\s*\{/u);
+    expect(avatarStyles).toMatch(
+      /\.member-status-avatar--interactive:hover\s+\.member-status-avatar__identity\s*\{/u,
+    );
+    expect(avatarStyles).toMatch(
+      /\.member-status-avatar--interactive:focus-visible\s*\{/u,
+    );
+    expect(discussionStyles).toMatch(
+      /\.message-row\s*\{[^}]*align-items:\s*flex-start;/su,
+    );
+    expect(discussionStyles).toMatch(
+      /\.message-avatar\s*\{[^}]*align-self:\s*flex-start;/su,
+    );
+    expect(discussionStyles).toMatch(/\.discussion-title:focus-visible\s*\{/u);
   });
 
   it("renders every member and focusable Agent status in crowded Discussions", () => {
@@ -439,10 +507,12 @@ describe("App", () => {
         `aria-label="${agent.name}, Agent status: ${label}"`,
       );
     }
-    expect(markup.match(/data-agent-status=/g)).toHaveLength(agents.length);
+    expect(markup.match(/data-member-identity="agent"/g)).toHaveLength(
+      agents.length,
+    );
     expect(
       markup.match(
-        /<button[^>]*class="discussion-member-avatar[^>]*data-agent-status=[^>]*type="button"/g,
+        /<button[^>]*class="member-status-avatar member-status-avatar--member member-status-avatar--agent member-status-avatar--interactive"[^>]*type="button"/g,
       ),
     ).toHaveLength(agents.length);
   });
@@ -601,7 +671,125 @@ describe("App", () => {
     expect(markup).not.toContain('aria-label="Open OldGone in Members"');
   });
 
-  it("renders Human mention notifications and historical author snapshots", () => {
+  it("includes total unread and the @me subset in the discussion entry name", () => {
+    expect(discussionEntryAccessibleLabel("Review", 2, 1)).toBe(
+      "Open Review. 2 unread messages, including 1 unread mention for you.",
+    );
+    expect(discussionEntryAccessibleLabel("Review", 2, 0)).toBe(
+      "Open Review. 2 unread messages.",
+    );
+    expect(discussionEntryAccessibleLabel("Review", 0, 0)).toBe("Open Review");
+  });
+
+  it("positions an initially unread discussion at its first unread message", () => {
+    const target = {
+      focus: vi.fn(),
+      scrollIntoView: vi.fn(),
+    };
+    const log = {
+      querySelector: vi.fn(() => target),
+      scrollHeight: 900,
+      scrollTop: 37,
+    };
+
+    expect(
+      positionInitialDiscussionMessages(log as unknown as HTMLElement, 12),
+    ).toBe("first-unread");
+    expect(log.querySelector).toHaveBeenCalledWith('[data-message-id="12"]');
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(target.focus).toHaveBeenCalledOnce();
+    expect(log.scrollTop).toBe(37);
+  });
+
+  it("follows the bottom when an opened discussion has no historical unread", () => {
+    const log = {
+      querySelector: vi.fn(),
+      scrollHeight: 900,
+      scrollTop: 37,
+    };
+
+    expect(
+      positionInitialDiscussionMessages(
+        log as unknown as HTMLElement,
+        undefined,
+      ),
+    ).toBe("bottom");
+    expect(log.scrollTop).toBe(900);
+    expect(log.querySelector).not.toHaveBeenCalled();
+  });
+
+  it("renders unread badges, divider, and jump controls from props", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "Ada",
+      status: "idle" as const,
+    };
+    const discussion = {
+      id: 1,
+      topic: "Unread work",
+      member_ids: [1, 2],
+      human_read_states: [
+        {
+          member_id: 1,
+          read_through_message_id: null,
+          seen_message_ids: [],
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sender_id: 2,
+          body: "@You please review",
+          references: [],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain(
+      'aria-label="Open Unread work. 1 unread message, including 1 unread mention for you."',
+    );
+    expect(markup).toContain('aria-label="1 unread messages"');
+    expect(markup).toContain('aria-label="Unread message navigation"');
+    expect(markup).toContain("Jump to first unread message (1 unread)");
+    expect(markup).toContain("Jump to next unread mention (1 unread)");
+    expect(markup).toContain('<hr aria-label="New messages"');
+    expect(markup).toContain('data-message-id="1" tabindex="-1"');
+  });
+
+  it("keeps @me access inside Discussions without a standalone Mentions surface", () => {
     const agent = {
       id: 2,
       type: "agent" as const,
@@ -641,16 +829,6 @@ describe("App", () => {
           disabled={false}
           discussions={[discussion]}
           error={null}
-          humanMentionNotifications={[
-            {
-              discussionId: 1,
-              discussionTopic: "Human review",
-              messageId: 1,
-              senderName: "OriginalAgent",
-              unread: true,
-            },
-          ]}
-          highlightedMessageId={1}
           isCreating={false}
           members={[{ id: 1, type: "human", name: "Owner" }, agent]}
           messageBody=""
@@ -663,7 +841,6 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
-          onOpenHumanMention={() => undefined}
           onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
@@ -676,18 +853,20 @@ describe("App", () => {
       </TooltipProvider>,
     );
 
-    expect(markup).toContain('aria-label="Human mention notifications"');
+    expect(markup).not.toContain('aria-label="Human mention notifications"');
+    expect(markup).not.toContain("<h2>Mentions</h2>");
     expect(markup).toContain(
-      'class="message-row message-row--agent human-mention-target"',
+      'aria-label="Open Human review. 1 unread message, including 1 unread mention for you."',
     );
-    expect(markup).toContain("1 unread");
-    expect(markup).toContain(
-      "<strong>OriginalAgent</strong> in Human review · Unread",
-    );
-    expect(markup).toContain('data-message-id="1"');
-    expect(markup).toContain("<strong>OriginalAgent</strong>");
+    expect(markup).toContain("Jump to next unread mention (1 unread)");
     expect(markup).toContain(
       '<span class="sr-only">OriginalAgent, Agent status: Idle</span><span aria-hidden="true">OriginalAgent</span>',
+    );
+    expect(markup).toContain(
+      'aria-label="Open member details for OriginalAgent"',
+    );
+    expect(markup).toContain(
+      'data-member-navigation-key="discussion:1:message:1:member:2"',
     );
     expect(markup).not.toContain(
       '<span class="sr-only">RenamedAgent, Agent status: Idle</span>',
@@ -711,6 +890,8 @@ describe("App", () => {
     expect(markup).not.toContain(">Overview<");
     expect(markup).not.toContain("Organization 1");
     expect(markup).toContain(">Discussions<");
+    expect(markup).not.toContain(">Mentions<");
+    expect(markup).not.toContain('aria-label="Mentions"');
     expect(markup).toContain(">Members<");
     expect(markup).not.toContain(">Agents<");
     expect(markup).toContain(">Settings<");
@@ -773,7 +954,9 @@ describe("App", () => {
     expect(markup).toContain(">Overview<");
     expect(markup).toContain(">Memory<");
     expect(markup).toContain(">History<");
-    expect(markup).toContain(">Member ID<");
+    expect(markup).not.toContain(">Member ID<");
+    expect(markup).toContain("<summary>Technical details</summary>");
+    expect(markup).toContain('aria-label="Copy Member ID"');
     expect(markup).toContain("does not schedule a Turn");
   });
 
@@ -977,6 +1160,8 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Rename current Human"');
     expect(markup).toContain('id="human-formal-name"');
     expect(markup).not.toContain(">Member ID<");
+    expect(markup).toContain("<summary>Technical details</summary>");
+    expect(markup).toContain('aria-label="Copy Member ID"');
     expect(markup).not.toContain("Human 1");
     expect(markup).not.toContain(">Memory<");
     expect(markup).not.toContain(">History<");

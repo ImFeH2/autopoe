@@ -1,4 +1,15 @@
-import type { AgentHistoryEntry, AgentHistoryRun } from "@/lib/backend";
+import { TechnicalDetails } from "@/components/ui/technical-details";
+import type {
+  AgentHistoryEntry,
+  AgentHistoryRun,
+  Discussion,
+  Member,
+} from "@/lib/backend";
+import {
+  discussionLabel,
+  senderLabel,
+  shortMessageSummary,
+} from "@/lib/humanized-identifiers";
 import { HistoryContent } from "./history-content";
 
 const historyTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -69,37 +80,64 @@ function entrySummary(entry: AgentHistoryEntry, run: AgentHistoryRun) {
   return run.status === "running" ? "Running" : "Complete";
 }
 
-function ReminderContent({ entry }: { entry: AgentHistoryEntry }) {
+function ReminderContent({
+  discussions,
+  entry,
+  members,
+}: {
+  discussions: readonly Pick<Discussion, "id" | "topic">[];
+  entry: AgentHistoryEntry;
+  members: readonly Pick<Member, "id" | "name">[];
+}) {
   return (
     <div className="agent-history-reminder-list">
-      {(entry.reminder?.mentions ?? []).map((mention) => (
-        <section
-          className="agent-history-reminder-item"
-          key={`${mention.discussion_id}-${mention.message_id}`}
-        >
-          <header>
-            <strong>
-              {mention.previously_reminded ? "Previously reminded" : "New"}
-            </strong>
-            <span>
-              Discussion {mention.discussion_id} · Message {mention.message_id}{" "}
-              · Member {mention.sender_id}
-            </span>
-          </header>
-          <HistoryContent content={mention.body} />
-        </section>
-      ))}
+      {(entry.reminder?.mentions ?? []).map((mention) => {
+        const discussion = discussions.find(
+          (candidate) => candidate.id === mention.discussion_id,
+        );
+        return (
+          <section
+            className="agent-history-reminder-item"
+            key={`${mention.discussion_id}-${mention.message_id}`}
+          >
+            <header>
+              <strong>
+                {mention.previously_reminded ? "Previously reminded" : "New"}
+              </strong>
+              <span>
+                {senderLabel(mention.sender_id, members)} ·{" "}
+                {shortMessageSummary(mention.body)}
+              </span>
+              <span>{discussionLabel(discussion)}</span>
+            </header>
+            <HistoryContent content={mention.body} />
+            <TechnicalDetails
+              identifiers={[
+                { label: "Discussion", value: mention.discussion_id },
+                { label: "Message", value: mention.message_id },
+                { label: "Sender", value: mention.sender_id },
+              ]}
+            />
+          </section>
+        );
+      })}
     </div>
   );
 }
 
 export function HistoryBlock({
+  discussions = [],
   entry,
+  members = [],
   run,
 }: {
+  discussions?: readonly Pick<Discussion, "id" | "topic">[];
   entry: AgentHistoryEntry;
+  members?: readonly Pick<Member, "id" | "name">[];
   run: AgentHistoryRun;
 }) {
+  const eventTimeLabel =
+    entry.type === "reminder" ? "Reminder event time" : "Run event time";
   return (
     <details
       className={`agent-history-block agent-history-block--${entry.type}`}
@@ -110,13 +148,20 @@ export function HistoryBlock({
         <span className="agent-history-block-summary">
           {entrySummary(entry, run)}
         </span>
-        <time dateTime={entry.timestamp}>
-          {formatHistoryTime(entry.timestamp)}
-        </time>
+        <span className="agent-history-block-time">
+          {eventTimeLabel}:{" "}
+          <time dateTime={entry.timestamp}>
+            {formatHistoryTime(entry.timestamp)}
+          </time>
+        </span>
       </summary>
       <div className="agent-history-block-content">
         {entry.type === "reminder" ? (
-          <ReminderContent entry={entry} />
+          <ReminderContent
+            discussions={discussions}
+            entry={entry}
+            members={members}
+          />
         ) : entry.type === "thinking" ? (
           <p className="agent-history-thinking">Model reasoning hidden</p>
         ) : (

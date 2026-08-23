@@ -15,8 +15,13 @@ describe("Members", () => {
     await expect($("aria/Open Ada")).toHaveAttribute("aria-current", "page");
     await expect(details.$("h2=Ada")).toBeDisplayed();
     await expect(details).toHaveText(expect.stringContaining("IDLE"));
-    await expect(details).toHaveText(expect.stringContaining("Member ID"));
     await expect(details.$("aria/Agent details")).toBeDisplayed();
+
+    const technicalDetails = await details.$("summary=Technical details");
+    await expect(technicalDetails).toBeDisplayed();
+    await technicalDetails.click();
+    await expect(details.$("aria/Copy Member ID")).toBeDisplayed();
+    await expect(details.$("button=Copy ID")).toBeDisplayed();
 
     const dataDirectory = process.env.FLOWENT_DATA_DIR;
     if (!dataDirectory) {

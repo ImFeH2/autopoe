@@ -16,8 +16,12 @@
         "height": 860,
         "minWidth": 960,
         "minHeight": 680,
-        "maximized": true,
-        "focus": false
+        "maximized": false,
+        "focus": false,
+        "visible": false,
+        "focusable": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false
       }
     ],
     "withGlobalTauri": true,

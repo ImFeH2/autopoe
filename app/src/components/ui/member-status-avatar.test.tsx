@@ -9,9 +9,11 @@ import {
 function render(
   status: string | null | undefined,
   variant: "member" | "message" = "member",
+  identity?: "agent" | "deleted" | "human" | "unknown",
 ) {
   return renderToStaticMarkup(
     <MemberStatusAvatar
+      identity={identity}
       name="Ada Lovelace"
       status={status}
       variant={variant}
@@ -49,13 +51,14 @@ describe("MemberStatusAvatar", () => {
   ])("renders %s with a label and non-color shape", (status, label, shape) => {
     const markup = render(status);
 
-    expect(markup).toContain(`aria-label="Ada Lovelace, ${label}"`);
+    expect(markup).toContain(
+      `aria-label="Ada Lovelace, Agent status: ${label}"`,
+    );
     expect(markup).toContain(`data-status-label="${label}"`);
     expect(markup).toContain(`data-status-shape="${shape}"`);
-    expect(markup).toContain(`>${label}</span>`);
   });
 
-  it("keeps the message variant compact, semantic, and non-interactive", () => {
+  it("keeps a fallback message avatar compact and non-interactive", () => {
     const markup = render("pausing", "message");
 
     expect(markup).toContain("member-status-avatar--message");
@@ -65,14 +68,53 @@ describe("MemberStatusAvatar", () => {
     expect(markup).not.toContain('role="img"');
     expect(markup).not.toContain("tabindex=");
     expect(markup).not.toContain("aria-live=");
-    expect(markup).not.toContain("member-status-avatar__label");
   });
 
-  it("renders identity without a fabricated status for humans or unknowns", () => {
-    const human = render(undefined, "message");
-    const unknown = render("future-status", "message");
+  it("uses the same focusable contract for member and message navigation", () => {
+    const member = renderToStaticMarkup(
+      <MemberStatusAvatar
+        identity="agent"
+        name="Ada Lovelace"
+        navigationKey="discussion:1:member:2"
+        onActivate={() => undefined}
+        status="running"
+        variant="member"
+      />,
+    );
+    const message = renderToStaticMarkup(
+      <MemberStatusAvatar
+        identity="agent"
+        name="Historical Ada"
+        navigationKey="discussion:1:message:7:member:2"
+        onActivate={() => undefined}
+        status="idle"
+        variant="message"
+      />,
+    );
 
-    for (const markup of [human, unknown]) {
+    expect(member).toContain("<button");
+    expect(member).toContain(
+      'aria-label="Ada Lovelace, Agent status: Running"',
+    );
+    expect(member).toContain(
+      'data-member-navigation-key="discussion:1:member:2"',
+    );
+    expect(message).toContain("<button");
+    expect(message).toContain(
+      'aria-label="Open member details for Historical Ada"',
+    );
+    expect(message).toContain(
+      'data-member-navigation-key="discussion:1:message:7:member:2"',
+    );
+    expect(message).not.toContain("aria-live=");
+  });
+
+  it("renders identity without a fabricated status for human, deleted, or unknown members", () => {
+    const human = render(undefined, "message", "human");
+    const deleted = render("running", "message", "deleted");
+    const unknown = render("future-status", "message", "unknown");
+
+    for (const markup of [human, deleted, unknown]) {
       expect(markup).toContain('aria-hidden="true"');
       expect(markup).toContain('data-member-status="none"');
       expect(markup).not.toContain("aria-label=");

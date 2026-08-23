@@ -1,8 +1,11 @@
 import {
   type FormEvent,
+  Fragment,
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -18,24 +21,119 @@ import {
   Trash2,
 } from "@/components/ui";
 import {
+  getMemberAvatarDescription,
   getMemberStatusPresentation,
   MemberStatusAvatar,
 } from "@/components/ui/member-status-avatar";
+import { TechnicalDetails } from "@/components/ui/technical-details";
 import type {
   AgentMember,
   Discussion,
   Member,
   MentionSyntax,
 } from "@/lib/backend";
+import {
+  discussionLabel,
+  shortMessageSummary,
+} from "@/lib/humanized-identifiers";
 import { DiscussionMarkdown } from "./discussion-markdown";
 import {
-  type HumanMentionNotificationItem,
-  HumanMentionNotifications,
-} from "./human-mention-notifications";
+  calculateHumanUnread,
+  clearNewMessageIndicator,
+  createNewMessageIndicatorState,
+  type HumanUnreadResult,
+  nextMessageId,
+  updateNewMessageIndicator,
+} from "./human-unread";
 import { type DraftMention, MessageComposer } from "./message-composer";
+import {
+  FirstUnreadDivider,
+  FirstUnreadJumpButton,
+  NewMessageJumpButton,
+  NextHumanMentionButton,
+  UnreadBadge,
+} from "./unread-discussion-controls";
+import {
+  createSeenMessageBatch,
+  type SeenMessageBatch,
+  useMessageViewportTracker,
+} from "./use-message-viewport-tracker";
 
 export function formatMessageCount(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
+}
+
+export function discussionEntryAccessibleLabel(
+  topic: string,
+  unreadCount: number,
+  unreadHumanMentionCount: number,
+): string {
+  if (unreadCount <= 0) {
+    return `Open ${topic}`;
+  }
+  const unreadLabel = `${unreadCount} unread ${
+    unreadCount === 1 ? "message" : "messages"
+  }`;
+  if (unreadHumanMentionCount <= 0) {
+    return `Open ${topic}. ${unreadLabel}.`;
+  }
+  const mentionLabel = `${unreadHumanMentionCount} unread ${
+    unreadHumanMentionCount === 1 ? "mention" : "mentions"
+  } for you`;
+  return `Open ${topic}. ${unreadLabel}, including ${mentionLabel}.`;
+}
+
+export function positionInitialDiscussionMessages(
+  log: HTMLElement,
+  firstUnreadMessageId: number | undefined,
+): "bottom" | "first-unread" {
+  if (firstUnreadMessageId === undefined) {
+    log.scrollTop = log.scrollHeight;
+    return "bottom";
+  }
+  const target = log.querySelector<HTMLElement>(
+    `[data-message-id="${firstUnreadMessageId}"]`,
+  );
+  target?.scrollIntoView({ block: "center" });
+  target?.focus();
+  return "first-unread";
+}
+
+export function humanUnreadForDiscussion(
+  discussion: Discussion,
+  humanMemberId = 1,
+): HumanUnreadResult<number> {
+  const state = discussion.human_read_states?.find(
+    (candidate) => candidate.member_id === humanMemberId,
+  );
+  const readThrough = state?.read_through_message_id ?? null;
+  const readMessageIds = new Set(
+    readThrough === null
+      ? []
+      : discussion.messages
+          .filter((message) => message.id <= readThrough)
+          .map((message) => message.id),
+  );
+  const humanMentionMessageIds = new Set(
+    discussion.messages.flatMap((message) =>
+      message.human_mentions?.some(
+        (mention) =>
+          mention.member_id === humanMemberId && mention.status === "unread",
+      )
+        ? [message.id]
+        : [],
+    ),
+  );
+  return calculateHumanUnread({
+    currentHumanMemberId: humanMemberId,
+    messages: discussion.messages.map((message) => ({
+      id: message.id,
+      authorMemberId: message.sender_id,
+    })),
+    readMessageIds,
+    seenMessageIds: new Set(state?.seen_message_ids ?? []),
+    humanMentionMessageIds,
+  });
 }
 
 export function filterDiscussions(
@@ -57,8 +155,6 @@ type DiscussionsPageProps = {
   discussions: Discussion[];
   error: string | null;
   isCreating: boolean;
-  humanMentionNotifications?: HumanMentionNotificationItem[];
-  highlightedMessageId?: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -70,7 +166,7 @@ type DiscussionsPageProps = {
   onCreateAgent: () => void;
   onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
-  onOpenHumanMention?: (discussionId: number, messageId: number) => void;
+  onMessagesSeen?: (discussionId: number, messageIds: number[]) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -91,8 +187,6 @@ export function DiscussionsPage({
   discussions,
   error,
   isCreating,
-  humanMentionNotifications = [],
-  highlightedMessageId = null,
   members,
   messageBody,
   messageInputRef,
@@ -104,7 +198,7 @@ export function DiscussionsPage({
   onDialogOpenChange,
   onDeleteDiscussion,
   onMessageChange,
-  onOpenHumanMention = () => undefined,
+  onMessagesSeen = () => undefined,
   onOpenMember,
   onSelectDiscussion,
   onSend,
@@ -174,10 +268,6 @@ export function DiscussionsPage({
             />
           </Dialog>
         </div>
-        <HumanMentionNotifications
-          notifications={humanMentionNotifications}
-          onOpen={onOpenHumanMention}
-        />
         {discussions.length === 0 ? (
           <p className="discussion-list-empty">No discussions</p>
         ) : filteredDiscussions.length === 0 ? (
@@ -186,10 +276,15 @@ export function DiscussionsPage({
           <div className="discussion-list-items">
             {filteredDiscussions.map((discussion) => {
               const selected = selectedDiscussion?.id === discussion.id;
+              const unread = humanUnreadForDiscussion(discussion);
               return (
                 <ListButton
                   active={selected}
-                  aria-label={`Open ${discussion.topic}`}
+                  aria-label={discussionEntryAccessibleLabel(
+                    discussion.topic,
+                    unread.unreadCount,
+                    unread.unreadHumanMentionCount,
+                  )}
                   key={discussion.id}
                   action={
                     <Dialog
@@ -234,7 +329,21 @@ export function DiscussionsPage({
                       </div>
                     </Dialog>
                   }
-                  meta={formatMessageCount(discussion.messages.length)}
+                  meta={
+                    <>
+                      {formatMessageCount(discussion.messages.length)}
+                      {unread.unreadCount > 0 ? (
+                        <UnreadBadge count={unread.unreadCount} />
+                      ) : null}
+                      {unread.unreadHumanMentionCount > 0 ? (
+                        <UnreadBadge
+                          count={unread.unreadHumanMentionCount}
+                          label="unread mentions for you"
+                          variant="mention"
+                        />
+                      ) : null}
+                    </>
+                  }
                   onClick={() => onSelectDiscussion(discussion.id)}
                   title={discussion.topic}
                 />
@@ -250,13 +359,13 @@ export function DiscussionsPage({
               discussion={selectedDiscussion}
               key={selectedDiscussion.id}
               disabled={disabled}
-              highlightedMessageId={highlightedMessageId}
               members={members}
               messageBody={messageBody}
               messageInputRef={messageInputRef}
               messageMentions={messageMentions}
               mentionSyntax={mentionSyntax}
               onMessageChange={onMessageChange}
+              onMessagesSeen={onMessagesSeen}
               onOpenMember={onOpenMember}
               onSend={onSend}
             />
@@ -376,13 +485,10 @@ function DiscussionForm({
   );
 }
 
-type DiscussionAgentStatus = "running" | "idle" | "paused" | "error";
-
 export function discussionAgentStatus(
   status: AgentMember["status"],
-): DiscussionAgentStatus {
-  const presentation = getMemberStatusPresentation(status);
-  return presentation?.status ?? "idle";
+): "error" | "idle" | "paused" | "running" {
+  return getMemberStatusPresentation(status)?.status ?? "idle";
 }
 
 function DiscussionMemberAvatar({
@@ -394,47 +500,23 @@ function DiscussionMemberAvatar({
   onOpenMember: (memberId: number, triggerKey: string) => void;
   triggerKey: string;
 }) {
-  const initial = member.name.slice(0, 1).toUpperCase();
-
-  if (member.type === "human") {
-    return (
-      <Tooltip content={`${member.name} · Human`} side="bottom">
-        <button
-          aria-label={`${member.name}, Human`}
-          className="discussion-member-avatar discussion-member-avatar--human"
-          data-member-navigation-key={triggerKey}
-          onClick={() => onOpenMember(member.id, triggerKey)}
-          type="button"
-        >
-          <span aria-hidden="true">{initial}</span>
-        </button>
-      </Tooltip>
-    );
-  }
-
-  const presentation = getMemberStatusPresentation(member.status);
-  const status = discussionAgentStatus(member.status);
-  const statusLabel = presentation?.label ?? "Idle";
+  const status = member.type === "agent" ? member.status : undefined;
+  const description = getMemberAvatarDescription(
+    member.name,
+    member.type,
+    status,
+  );
 
   return (
-    <Tooltip
-      content={`${member.name} · Agent status: ${statusLabel}`}
-      side="bottom"
-    >
-      <button
-        aria-label={`${member.name}, Agent status: ${statusLabel}`}
-        className={`discussion-member-avatar discussion-member-avatar--agent discussion-member-avatar--${status}`}
-        data-agent-status={status}
-        data-member-navigation-key={triggerKey}
-        onClick={() => onOpenMember(member.id, triggerKey)}
-        type="button"
-      >
-        <span aria-hidden="true">{initial}</span>
-        <span
-          className={`discussion-member-status-mark discussion-member-status-mark--${presentation?.shape ?? "dot"}`}
-          aria-hidden="true"
-        />
-      </button>
+    <Tooltip content={description.replace(", ", " · ")} side="bottom">
+      <MemberStatusAvatar
+        identity={member.type}
+        name={member.name}
+        navigationKey={triggerKey}
+        onActivate={() => onOpenMember(member.id, triggerKey)}
+        status={status}
+        variant="member"
+      />
     </Tooltip>
   );
 }
@@ -442,13 +524,13 @@ function DiscussionMemberAvatar({
 type DiscussionViewProps = {
   discussion: Discussion;
   disabled: boolean;
-  highlightedMessageId: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
   messageMentions: DraftMention[];
   mentionSyntax: MentionSyntax;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
+  onMessagesSeen: (discussionId: number, messageIds: number[]) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -460,18 +542,50 @@ type DiscussionViewProps = {
 function DiscussionView({
   discussion,
   disabled,
-  highlightedMessageId,
   members,
   messageBody,
   messageInputRef,
   messageMentions,
   mentionSyntax,
   onMessageChange,
+  onMessagesSeen,
   onOpenMember,
   onSend,
 }: DiscussionViewProps) {
   const messageLogRef = useRef<HTMLDivElement>(null);
-  const shouldFollowMessagesRef = useRef(true);
+  const unread = useMemo(
+    () => humanUnreadForDiscussion(discussion),
+    [discussion],
+  );
+  const initialFirstUnreadMessageIdRef = useRef(unread.firstUnreadMessageId);
+  const shouldFollowMessagesRef = useRef(
+    initialFirstUnreadMessageIdRef.current === undefined,
+  );
+  const lastMentionTargetRef = useRef<number | undefined>(undefined);
+  const onMessagesSeenRef = useRef(onMessagesSeen);
+  onMessagesSeenRef.current = onMessagesSeen;
+  const seenBatchRef = useRef<SeenMessageBatch<number> | null>(null);
+  if (seenBatchRef.current === null) {
+    seenBatchRef.current = createSeenMessageBatch((messageIds) =>
+      onMessagesSeenRef.current(discussion.id, messageIds),
+    );
+  }
+  const [newMessageIndicator, setNewMessageIndicator] = useState(() =>
+    createNewMessageIndicatorState(
+      discussion.messages.map((message) => message.id),
+    ),
+  );
+  const unreadMessageIds = useMemo(
+    () => new Set(unread.unreadMessageIds),
+    [unread.unreadMessageIds],
+  );
+  const reportMessageSeen = useCallback((messageId: number) => {
+    seenBatchRef.current?.add(messageId);
+  }, []);
+  const trackMessage = useMessageViewportTracker({
+    minVisibleRatio: 0,
+    onMessageSeen: reportMessageSeen,
+  });
   const membersById = new Map(members.map((member) => [member.id, member]));
   const discussionMembers = discussion.member_ids
     .map((id) => membersById.get(id))
@@ -482,29 +596,83 @@ function DiscussionView({
     [discussion.id, onOpenMember],
   );
 
-  useEffect(() => {
+  useEffect(
+    () => () => {
+      seenBatchRef.current?.dispose();
+      seenBatchRef.current = null;
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
     const log = messageLogRef.current;
-    if (
-      discussion.messages.length > 0 &&
-      log &&
-      shouldFollowMessagesRef.current
-    ) {
+    if (!log) {
+      return;
+    }
+    shouldFollowMessagesRef.current =
+      positionInitialDiscussionMessages(
+        log,
+        initialFirstUnreadMessageIdRef.current,
+      ) === "bottom";
+  }, []);
+
+  useEffect(() => {
+    const messageIds = discussion.messages.map((message) => message.id);
+    setNewMessageIndicator((current) =>
+      updateNewMessageIndicator(
+        current,
+        messageIds,
+        shouldFollowMessagesRef.current,
+      ),
+    );
+    const log = messageLogRef.current;
+    if (messageIds.length > 0 && log && shouldFollowMessagesRef.current) {
       log.scrollTop = log.scrollHeight;
     }
-  }, [discussion.messages.length]);
+  }, [discussion.messages]);
 
   function handleMessageScroll() {
     const log = messageLogRef.current;
     if (!log) {
       return;
     }
-    shouldFollowMessagesRef.current =
+    const followingBottom =
       log.scrollHeight - log.scrollTop - log.clientHeight <= 24;
+    shouldFollowMessagesRef.current = followingBottom;
+    if (followingBottom) {
+      setNewMessageIndicator(clearNewMessageIndicator);
+    }
   }
 
   function handleSend(event: FormEvent<HTMLFormElement>) {
     shouldFollowMessagesRef.current = true;
     onSend(event);
+  }
+
+  function focusMessage(messageId: number | undefined) {
+    if (messageId === undefined) {
+      return;
+    }
+    const target = messageLogRef.current?.querySelector<HTMLElement>(
+      `[data-message-id="${messageId}"]`,
+    );
+    target?.scrollIntoView({ block: "center" });
+    target?.focus();
+  }
+
+  function focusNewMessages() {
+    focusMessage(newMessageIndicator.pendingMessageIds[0]);
+    setNewMessageIndicator(clearNewMessageIndicator);
+  }
+
+  function focusNextMention() {
+    const target =
+      nextMessageId(
+        unread.unreadHumanMentionMessageIds,
+        lastMentionTargetRef.current,
+      ) ?? unread.unreadHumanMentionMessageIds[0];
+    lastMentionTargetRef.current = target;
+    focusMessage(target);
   }
 
   return (
@@ -516,11 +684,11 @@ function DiscussionView({
             data-discussion-focus-id={discussion.id}
             tabIndex={-1}
           >
-            {discussion.topic}
+            {discussionLabel(discussion)}
           </h2>
-          <span className="meta-text font-mono text-text-tertiary">
-            DISCUSSION {discussion.id}
-          </span>
+          <TechnicalDetails
+            identifiers={[{ label: "Discussion", value: discussion.id }]}
+          />
         </div>
         <div className="discussion-member-avatars">
           <span className="sr-only">Discussion members:</span>
@@ -541,6 +709,26 @@ function DiscussionView({
         ref={messageLogRef}
         role="log"
       >
+        {unread.unreadCount > 0 ||
+        newMessageIndicator.pendingMessageIds.length > 0 ? (
+          <nav
+            aria-label="Unread message navigation"
+            className="human-unread-controls"
+          >
+            <FirstUnreadJumpButton
+              onActivate={() => focusMessage(unread.firstUnreadMessageId)}
+              unreadCount={unread.unreadCount}
+            />
+            <NewMessageJumpButton
+              newMessageCount={newMessageIndicator.pendingMessageIds.length}
+              onActivate={focusNewMessages}
+            />
+            <NextHumanMentionButton
+              onActivate={focusNextMention}
+              unreadMentionCount={unread.unreadHumanMentionCount}
+            />
+          </nav>
+        ) : null}
         {discussion.messages.length === 0 ? (
           <div className="grid h-full place-items-center">
             <p className="body-compact m-0 text-text-tertiary">
@@ -553,82 +741,128 @@ function DiscussionView({
               const sender = membersById.get(message.sender_id);
               const senderName =
                 message.sender_name ?? sender?.name ?? "Unknown";
-              const isHuman = sender?.type === "human";
+              const senderIdentity =
+                sender?.type ?? (message.sender_name ? "deleted" : "unknown");
               const senderStatus =
                 sender?.type === "agent"
                   ? getMemberStatusPresentation(sender.status)
                   : null;
+              const isHuman = sender?.type === "human";
+              const senderTriggerKey = `discussion:${discussion.id}:message:${message.id}:member:${message.sender_id}`;
               return (
-                <li
-                  className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}${highlightedMessageId === message.id ? " human-mention-target" : ""}`}
-                  data-message-id={message.id}
-                  key={message.id}
-                  tabIndex={-1}
-                >
-                  <MemberStatusAvatar
-                    className="message-avatar"
-                    name={senderName}
-                    status={
-                      sender?.type === "agent" ? sender.status : undefined
+                <Fragment key={message.id}>
+                  {message.id === unread.firstUnreadMessageId ? (
+                    <li className="human-unread-divider-row">
+                      <FirstUnreadDivider />
+                    </li>
+                  ) : null}
+                  <li
+                    className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}`}
+                    data-message-id={message.id}
+                    ref={(element) =>
+                      trackMessage(
+                        message.id,
+                        unreadMessageIds.has(message.id) ? element : null,
+                      )
                     }
-                    variant="message"
-                  />
-                  <article className="message-bubble">
-                    <header className="message-meta">
-                      <strong>
-                        {senderStatus ? (
-                          <>
-                            <span className="sr-only">
-                              {senderName}, Agent status: {senderStatus.label}
-                            </span>
-                            <span aria-hidden="true">{senderName}</span>
-                          </>
-                        ) : (
-                          senderName
-                        )}
-                      </strong>
-                      <span className="font-mono">MESSAGE {message.id}</span>
-                    </header>
-                    <DiscussionMarkdown
-                      body={message.body}
-                      members={members}
-                      messageId={message.id}
-                      onOpenMember={handleOpenMember}
-                      references={message.references}
-                    />
-                    {message.mentions.length > 0 ? (
-                      <ul className="mention-statuses" aria-label="Mentions">
-                        {message.mentions.map((mention) => {
-                          const identity = message.references.find(
-                            (reference) =>
-                              reference.member_id === mention.member_id &&
-                              reference.notified,
-                          );
-                          const activeMember = membersById.get(
-                            mention.member_id,
-                          );
-                          const name =
-                            (identity?.deleted
-                              ? undefined
-                              : activeMember?.name) ??
-                            identity?.name ??
-                            String(mention.member_id);
-                          return (
-                            <li
-                              className={`mention-status mention-status--${mention.status}`}
-                              key={mention.member_id}
-                              title={`@${name} · ${mention.status}${
-                                identity?.deleted ? " · Deleted Agent" : ""
-                              }`}
-                            >
-                              @{name} · {mention.status.toUpperCase()}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : null}
-                  </article>
-                </li>
+                    tabIndex={-1}
+                  >
+                    <Tooltip
+                      content={getMemberAvatarDescription(
+                        senderName,
+                        senderIdentity,
+                        sender?.type === "agent" ? sender.status : undefined,
+                      ).replace(", ", " · ")}
+                      side="top"
+                    >
+                      <MemberStatusAvatar
+                        className="message-avatar"
+                        identity={senderIdentity}
+                        name={senderName}
+                        navigationKey={sender ? senderTriggerKey : undefined}
+                        onActivate={
+                          sender
+                            ? () =>
+                                handleOpenMember(sender.id, senderTriggerKey)
+                            : undefined
+                        }
+                        status={
+                          sender?.type === "agent" ? sender.status : undefined
+                        }
+                        variant="message"
+                      />
+                    </Tooltip>
+                    <article className="message-bubble">
+                      <header className="message-meta">
+                        <strong>
+                          {senderStatus ? (
+                            <>
+                              <span className="sr-only">
+                                {senderName}, Agent status: {senderStatus.label}
+                              </span>
+                              <span aria-hidden="true">{senderName}</span>
+                            </>
+                          ) : (
+                            senderName
+                          )}
+                        </strong>
+                        <span>
+                          {shortMessageSummary(
+                            message.body,
+                            96,
+                            message.references,
+                            members,
+                          )}
+                        </span>
+                      </header>
+                      <DiscussionMarkdown
+                        body={message.body}
+                        members={members}
+                        messageId={message.id}
+                        onOpenMember={handleOpenMember}
+                        references={message.references}
+                      />
+                      <TechnicalDetails
+                        identifiers={[
+                          { label: "Discussion", value: discussion.id },
+                          { label: "Message", value: message.id },
+                          { label: "Sender", value: message.sender_id },
+                        ]}
+                      />
+                      {message.mentions.length > 0 ? (
+                        <ul className="mention-statuses" aria-label="Mentions">
+                          {message.mentions.map((mention) => {
+                            const identity = message.references.find(
+                              (reference) =>
+                                reference.member_id === mention.member_id &&
+                                reference.notified,
+                            );
+                            const activeMember = membersById.get(
+                              mention.member_id,
+                            );
+                            const name =
+                              (identity?.deleted
+                                ? undefined
+                                : activeMember?.name) ??
+                              identity?.name ??
+                              "Unavailable member";
+                            return (
+                              <li
+                                className={`mention-status mention-status--${mention.status}`}
+                                key={mention.member_id}
+                                title={`@${name} · ${mention.status}${
+                                  identity?.deleted ? " · Deleted Agent" : ""
+                                }`}
+                              >
+                                @{name} · {mention.status.toUpperCase()}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
+                    </article>
+                  </li>
+                </Fragment>
               );
             })}
           </ol>
