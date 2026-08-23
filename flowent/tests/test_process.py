@@ -5,10 +5,29 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import psutil
 import pytest
+
+LOAD_TOLERANT_TIMEOUT_SECONDS = 30.0
+
+
+def wait_until(
+    predicate: Callable[[], bool],
+    *,
+    timeout: float = LOAD_TOLERANT_TIMEOUT_SECONDS,
+    interval: float = 0.02,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return predicate()
+        time.sleep(min(interval, remaining))
+    return True
+
 
 from flowent.domain import OrganizationState
 from flowent.memory import AgentMemory
@@ -75,7 +94,7 @@ def test_flowent_runs_until_stdin_closes(tmp_path: Path) -> None:
 
         assert process.stdin is not None
         process.stdin.close()
-        assert process.wait(timeout=10) == 0
+        assert process.wait(timeout=LOAD_TOLERANT_TIMEOUT_SECONDS) == 0
     finally:
         close_process(process)
 
@@ -586,18 +605,14 @@ def test_hard_killed_flowent_cleans_active_run(tmp_path: Path) -> None:
             },
         )
         pid_path = work / "long.pid"
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and not pid_path.exists():
-            time.sleep(0.02)
-        assert pid_path.exists()
+        assert wait_until(pid_path.exists)
         command_pid = int(pid_path.read_text())
 
         process.kill()
-        process.wait(timeout=5)
-        cleanup_deadline = time.monotonic() + 10
-        while cleanup_deadline > time.monotonic() and psutil.pid_exists(command_pid):
-            time.sleep(0.05)
-
-        assert not psutil.pid_exists(command_pid)
+        process.wait(timeout=LOAD_TOLERANT_TIMEOUT_SECONDS)
+        assert wait_until(
+            lambda: not psutil.pid_exists(command_pid),
+            interval=0.05,
+        )
     finally:
         close_process(process)

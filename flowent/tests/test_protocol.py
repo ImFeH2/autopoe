@@ -559,3 +559,52 @@ def test_agent_state_reads_validate_target_member_and_params(tmp_path: Path) -> 
     assert human["error"]["code"] == "not_an_agent"
     assert missing["error"]["code"] == "member_not_found"
     assert invalid["error"]["code"] == "invalid_request"
+
+
+def test_dispatches_general_member_rename_and_human_mention_read() -> None:
+    responses = run_requests(
+        {"id": 1, "method": "organization.create_agent", "params": {"name": "Ada"}},
+        {
+            "id": 2,
+            "method": "discussion.create",
+            "params": {"topic": "Plan", "creator_id": 1, "member_ids": [2]},
+        },
+        {
+            "id": 3,
+            "method": "discussion.send",
+            "params": {"discussion_id": 1, "sender_id": 2, "body": "@You review"},
+        },
+        {
+            "id": 4,
+            "method": "organization.rename_member",
+            "params": {"member_id": 1, "name": "Owner"},
+        },
+        {
+            "id": 5,
+            "method": "human.mention.read",
+            "params": {"member_id": 1, "discussion_id": 1, "message_id": 1},
+        },
+    )
+    assert responses[3]["result"]["members"][0]["name"] == "Owner"
+    message = responses[4]["result"]["discussions"][0]["messages"][0]
+    assert message["references"][0]["name"] == "You"
+    assert message["human_mentions"] == [{"member_id": 1, "status": "read"}]
+
+
+def test_dispatches_member_rename_and_returns_stable_error_codes() -> None:
+    responses = run_requests(
+        {"id": 1, "method": "organization.create_agent", "params": {"name": "Ada"}},
+        {
+            "id": 2,
+            "method": "organization.rename_member",
+            "params": {"member_id": 2, "name": "Grace"},
+        },
+        {
+            "id": 3,
+            "method": "organization.rename_member",
+            "params": {"member_id": 2, "name": " Grace"},
+        },
+    )
+
+    assert responses[1]["result"]["members"][1]["name"] == "Grace"
+    assert responses[2]["error"]["code"] == "invalid_name"
