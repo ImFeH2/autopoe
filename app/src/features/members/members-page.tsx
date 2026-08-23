@@ -12,8 +12,14 @@ import {
   Tooltip,
   Trash2,
 } from "@/components/ui";
+import { TechnicalDetails } from "@/components/ui/technical-details";
 import { agentStatusTone } from "@/features/agent-status";
-import type { AgentHistory, AgentMember, Member } from "@/lib/backend";
+import type {
+  AgentHistory,
+  AgentMember,
+  Discussion,
+  Member,
+} from "@/lib/backend";
 import { AgentMemoryBrowser } from "./agent-memory-browser";
 import { AgentRenameEditor } from "./agent-rename-editor";
 import { AgentTodos } from "./agent-todos";
@@ -28,6 +34,7 @@ type AgentHistoryState =
 type MembersPageProps = {
   agentName: string;
   disabled: boolean;
+  discussions?: Discussion[];
   error: string | null;
   history?: AgentHistoryState;
   isCreatingAgent: boolean;
@@ -55,6 +62,7 @@ function memberMeta(member: Member) {
 export function MembersPage({
   agentName,
   disabled,
+  discussions = [],
   error,
   history,
   isCreatingAgent,
@@ -236,7 +244,9 @@ export function MembersPage({
             agent={selectedMember}
             key={selectedMember.id}
             disabled={disabled}
+            discussions={discussions}
             history={history ?? { status: "loading" }}
+            members={members}
             onBackToDiscussion={onBackToDiscussion}
             onPause={onPauseAgent}
             onRename={onRenameAgent}
@@ -353,6 +363,9 @@ function HumanDetails({
                 </div>
               ) : null}
             </dl>
+            <TechnicalDetails
+              identifiers={[{ label: "Member", value: human.id }]}
+            />
             {human.id === 1 ? (
               <div className="human-rename-section">
                 <h3>Formal name</h3>
@@ -374,7 +387,9 @@ function HumanDetails({
 function AgentDetails({
   agent,
   disabled,
+  discussions,
   history,
+  members,
   onBackToDiscussion,
   onPause,
   onRename,
@@ -383,7 +398,9 @@ function AgentDetails({
 }: {
   agent: AgentMember;
   disabled: boolean;
+  discussions: Discussion[];
   history: AgentHistoryState;
+  members: Member[];
   onBackToDiscussion?: () => void;
   onPause: (agentId: number) => void;
   onRename: (memberId: number, name: string) => Promise<void>;
@@ -404,7 +421,7 @@ function AgentDetails({
           {agent.name.slice(0, 1).toUpperCase()}
         </span>
         <div className="member-detail-title">
-          <span>Agent {agent.id}</span>
+          <span>Agent</span>
           <h2>{agent.name}</h2>
         </div>
         <div className="member-detail-controls">
@@ -473,10 +490,6 @@ function AgentDetails({
                   <dd>Agent</dd>
                 </div>
                 <div>
-                  <dt>Member ID</dt>
-                  <dd>{agent.id}</dd>
-                </div>
-                <div>
                   <dt>Name</dt>
                   <dd>
                     <AgentRenameEditor
@@ -487,6 +500,9 @@ function AgentDetails({
                   </dd>
                 </div>
               </dl>
+              <TechnicalDetails
+                identifiers={[{ label: "Member", value: agent.id }]}
+              />
               {agent.error ? (
                 <section
                   className="member-detail-error"
@@ -518,7 +534,12 @@ function AgentDetails({
             id={`agent-${agent.id}-history-panel`}
             role="tabpanel"
           >
-            <AgentHistoryView agent={agent} state={history} />
+            <AgentHistoryView
+              agent={agent}
+              discussions={discussions}
+              members={members}
+              state={history}
+            />
           </section>
         ) : null}
       </div>
@@ -528,9 +549,13 @@ function AgentDetails({
 
 function AgentHistoryView({
   agent,
+  discussions,
+  members,
   state,
 }: {
   agent: AgentMember;
+  discussions: Discussion[];
+  members: Member[];
   state: AgentHistoryState;
 }) {
   const viewportRef = useRef<HTMLElement>(null);
@@ -592,7 +617,13 @@ function AgentHistoryView({
             {state.history.runs.map((run) => (
               <div className="agent-history-run" key={run.run_id}>
                 {run.entries.map((entry) => (
-                  <HistoryBlock entry={entry} key={entry.id} run={run} />
+                  <HistoryBlock
+                    discussions={discussions}
+                    entry={entry}
+                    key={entry.id}
+                    members={members}
+                    run={run}
+                  />
                 ))}
               </div>
             ))}
