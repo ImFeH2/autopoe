@@ -1,12 +1,7 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import App, {
-  completeHumanMentionNavigation,
-  createHumanMentionFocusRequest,
-  focusHumanMentionMessage,
-  shouldRefocusHumanMention,
-} from "@/App";
+import App from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
   Badge,
@@ -37,98 +32,6 @@ import {
 } from "@/features/settings";
 
 describe("App", () => {
-  it("gives pointer and keyboard notification activation a visible message target", () => {
-    const add = vi.fn();
-    const remove = vi.fn();
-    const focus = vi.fn();
-    const scrollIntoView = vi.fn();
-    let clearHighlight: (() => void) | undefined;
-    const scheduleClear = vi.fn((callback: () => void, delay: number) => {
-      clearHighlight = callback;
-      expect(delay).toBe(2_500);
-      return 1;
-    });
-    const message = {
-      classList: { add, remove },
-      focus,
-      scrollIntoView,
-    } as unknown as HTMLElement;
-
-    focusHumanMentionMessage(message, scheduleClear);
-
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
-    expect(focus).toHaveBeenCalledOnce();
-    expect(add).toHaveBeenCalledWith("human-mention-target");
-    clearHighlight?.();
-    expect(remove).toHaveBeenCalledWith("human-mention-target");
-  });
-
-  it("issues distinct focus requests for current and cross-Discussion mentions", () => {
-    expect(createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7)).toEqual({
-      discussionId: 1,
-      humanId: 1,
-      messageId: 10,
-      navigationGeneration: 7,
-      token: 1,
-      unread: true,
-      userGeneration: 4,
-    });
-    expect(createHumanMentionFocusRequest(1, 10, 1, false, 2, 5, 7)).toEqual({
-      discussionId: 1,
-      humanId: 1,
-      messageId: 10,
-      navigationGeneration: 7,
-      token: 2,
-      unread: false,
-      userGeneration: 5,
-    });
-    expect(createHumanMentionFocusRequest(2, 20, 1, true, 3, 6, 7)).toEqual({
-      discussionId: 2,
-      humanId: 1,
-      messageId: 20,
-      navigationGeneration: 7,
-      token: 3,
-      unread: true,
-      userGeneration: 6,
-    });
-  });
-
-  it("drops stale refocus after a newer mention or normal navigation wins", () => {
-    const delayedA = createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7);
-    expect(shouldRefocusHumanMention(delayedA, 4, 7)).toBe(true);
-
-    // B has already completed and cleared its request, but its user generation remains latest.
-    expect(shouldRefocusHumanMention(delayedA, 5, 7)).toBe(false);
-    // Leaving Discussions invalidates A even when no newer notification was clicked.
-    expect(shouldRefocusHumanMention(delayedA, 4, 8)).toBe(false);
-  });
-
-  it("marks unread only after the target is focused and skips read work for read items", async () => {
-    const events: string[] = [];
-    const message = {
-      classList: {
-        add: () => events.push("highlight"),
-        remove: vi.fn(),
-      },
-      focus: () => events.push("focus"),
-      scrollIntoView: () => events.push("scroll"),
-    } as unknown as HTMLElement;
-    const scheduleClear = vi.fn(() => 1);
-
-    await completeHumanMentionNavigation(
-      message,
-      async () => {
-        events.push("read");
-      },
-      scheduleClear,
-    );
-    expect(events).toEqual(["scroll", "focus", "highlight", "read"]);
-
-    events.length = 0;
-    await completeHumanMentionNavigation(message, undefined, scheduleClear);
-    expect(events).toEqual(["scroll", "focus", "highlight"]);
-  });
-
   it("renders a clear startup state before the backend responds", () => {
     const markup = renderToStaticMarkup(<App />);
 
@@ -832,7 +735,7 @@ describe("App", () => {
     expect(markup).toContain('data-message-id="1" tabindex="-1"');
   });
 
-  it("renders Human mention notifications and historical author snapshots", () => {
+  it("keeps @me access inside Discussions without a standalone Mentions surface", () => {
     const agent = {
       id: 2,
       type: "agent" as const,
@@ -872,16 +775,6 @@ describe("App", () => {
           disabled={false}
           discussions={[discussion]}
           error={null}
-          humanMentionNotifications={[
-            {
-              discussionId: 1,
-              discussionTopic: "Human review",
-              messageId: 1,
-              senderName: "OriginalAgent",
-              unread: true,
-            },
-          ]}
-          highlightedMessageId={1}
           isCreating={false}
           members={[{ id: 1, type: "human", name: "Owner" }, agent]}
           messageBody=""
@@ -894,7 +787,6 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
-          onOpenHumanMention={() => undefined}
           onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
@@ -907,15 +799,12 @@ describe("App", () => {
       </TooltipProvider>,
     );
 
-    expect(markup).toContain('aria-label="Human mention notifications"');
+    expect(markup).not.toContain('aria-label="Human mention notifications"');
+    expect(markup).not.toContain("<h2>Mentions</h2>");
     expect(markup).toContain(
-      'class="message-row message-row--agent human-mention-target"',
+      'aria-label="Open Human review. 1 unread message, including 1 unread mention for you."',
     );
-    expect(markup).toContain("1 unread");
-    expect(markup).toContain(
-      "<strong>OriginalAgent</strong> in Human review · Unread",
-    );
-    expect(markup).toContain('data-message-id="1"');
+    expect(markup).toContain("Jump to next unread mention (1 unread)");
     expect(markup).toContain("<strong>OriginalAgent</strong>");
     expect(markup).toContain('aria-label="Open Owner in Members"');
   });
@@ -936,6 +825,8 @@ describe("App", () => {
     expect(markup).not.toContain(">Overview<");
     expect(markup).not.toContain("Organization 1");
     expect(markup).toContain(">Discussions<");
+    expect(markup).not.toContain(">Mentions<");
+    expect(markup).not.toContain('aria-label="Mentions"');
     expect(markup).toContain(">Members<");
     expect(markup).not.toContain(">Agents<");
     expect(markup).toContain(">Settings<");

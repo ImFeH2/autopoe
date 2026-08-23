@@ -30,10 +30,6 @@ import type {
 } from "@/lib/backend";
 import { DiscussionMarkdown } from "./discussion-markdown";
 import {
-  type HumanMentionNotificationItem,
-  HumanMentionNotifications,
-} from "./human-mention-notifications";
-import {
   calculateHumanUnread,
   clearNewMessageIndicator,
   createNewMessageIndicatorState,
@@ -151,8 +147,6 @@ type DiscussionsPageProps = {
   discussions: Discussion[];
   error: string | null;
   isCreating: boolean;
-  humanMentionNotifications?: HumanMentionNotificationItem[];
-  highlightedMessageId?: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -165,7 +159,6 @@ type DiscussionsPageProps = {
   onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onMessagesSeen?: (discussionId: number, messageIds: number[]) => void;
-  onOpenHumanMention?: (discussionId: number, messageId: number) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -186,8 +179,6 @@ export function DiscussionsPage({
   discussions,
   error,
   isCreating,
-  humanMentionNotifications = [],
-  highlightedMessageId = null,
   members,
   messageBody,
   messageInputRef,
@@ -200,7 +191,6 @@ export function DiscussionsPage({
   onDeleteDiscussion,
   onMessageChange,
   onMessagesSeen = () => undefined,
-  onOpenHumanMention = () => undefined,
   onOpenMember,
   onSelectDiscussion,
   onSend,
@@ -270,10 +260,6 @@ export function DiscussionsPage({
             />
           </Dialog>
         </div>
-        <HumanMentionNotifications
-          notifications={humanMentionNotifications}
-          onOpen={onOpenHumanMention}
-        />
         {discussions.length === 0 ? (
           <p className="discussion-list-empty">No discussions</p>
         ) : filteredDiscussions.length === 0 ? (
@@ -365,7 +351,6 @@ export function DiscussionsPage({
               discussion={selectedDiscussion}
               key={selectedDiscussion.id}
               disabled={disabled}
-              highlightedMessageId={highlightedMessageId}
               members={members}
               messageBody={messageBody}
               messageInputRef={messageInputRef}
@@ -568,7 +553,6 @@ function DiscussionMemberAvatar({
 type DiscussionViewProps = {
   discussion: Discussion;
   disabled: boolean;
-  highlightedMessageId: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -587,7 +571,6 @@ type DiscussionViewProps = {
 function DiscussionView({
   discussion,
   disabled,
-  highlightedMessageId,
   members,
   messageBody,
   messageInputRef,
@@ -794,7 +777,7 @@ function DiscussionView({
                     </li>
                   ) : null}
                   <li
-                    className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}${highlightedMessageId === message.id ? " human-mention-target" : ""}`}
+                    className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}`}
                     data-message-id={message.id}
                     ref={(element) =>
                       trackMessage(
