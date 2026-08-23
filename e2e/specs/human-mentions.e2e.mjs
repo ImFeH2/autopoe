@@ -10,28 +10,59 @@ const mockModelServer = createServer((request, response) => {
   });
   request.on("end", () => {
     const payload = JSON.parse(rawBody);
-    const hasToolResult = payload.messages.at(-1)?.role === "tool";
-    const finishReason = hasToolResult ? "stop" : "tool_calls";
-    const delta = hasToolResult
-      ? { role: "assistant", content: "Done" }
-      : {
-          role: "assistant",
-          tool_calls: [
-            {
-              index: 0,
-              id: "call-human-mention",
-              type: "function",
-              function: {
-                name: "discussion",
-                arguments: JSON.stringify({
-                  action: "send",
-                  discussion_id: 1,
-                  body: "@Owner",
-                }),
+    const reminder = [...payload.messages].reverse().find((message) => {
+      const content = message.content;
+      return (
+        message.role === "user" &&
+        typeof content === "string" &&
+        content.includes("Here is your Reminder")
+      );
+    });
+    const reminderTarget = /Discussion (\d+), Message (\d+),/.exec(
+      reminder?.content ?? "",
+    );
+    if (!reminderTarget) {
+      throw new Error("Mock model request did not contain a Reminder target");
+    }
+    const discussionId = Number(reminderTarget[1]);
+    const messageId = Number(reminderTarget[2]);
+    const lastToolCallId = payload.messages.at(-1)?.tool_call_id;
+    const nextTool =
+      lastToolCallId === `call-ack-${messageId}`
+        ? "send"
+        : lastToolCallId === `call-send-${messageId}`
+          ? null
+          : "ack";
+    const finishReason = nextTool === null ? "stop" : "tool_calls";
+    const argumentsByTool = {
+      ack: {
+        action: "ack",
+        discussion_id: discussionId,
+        message_ids: [messageId],
+      },
+      send: {
+        action: "send",
+        discussion_id: discussionId,
+        body: "@Owner",
+      },
+    };
+    const delta =
+      nextTool === null
+        ? { role: "assistant", content: "Done" }
+        : {
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: `call-${nextTool}-${messageId}`,
+                type: "function",
+                function: {
+                  name: "discussion",
+                  arguments: JSON.stringify(argumentsByTool[nextTool]),
+                },
               },
-            },
-          ],
-        };
+            ],
+          };
 
     if (payload.stream) {
       response.writeHead(200, {
