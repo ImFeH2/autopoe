@@ -1,6 +1,7 @@
 import {
   type FormEvent,
   type RefObject,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -31,6 +32,10 @@ import {
   shortMessageSummary,
 } from "@/lib/humanized-identifiers";
 import { DiscussionMarkdown } from "./discussion-markdown";
+import {
+  type HumanMentionNotificationItem,
+  HumanMentionNotifications,
+} from "./human-mention-notifications";
 import { type DraftMention, MessageComposer } from "./message-composer";
 
 export function formatMessageCount(count: number): string {
@@ -56,6 +61,8 @@ type DiscussionsPageProps = {
   discussions: Discussion[];
   error: string | null;
   isCreating: boolean;
+  humanMentionNotifications?: HumanMentionNotificationItem[];
+  highlightedMessageId?: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -67,6 +74,12 @@ type DiscussionsPageProps = {
   onCreateAgent: () => void;
   onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
+  onOpenHumanMention?: (discussionId: number, messageId: number) => void;
+  onOpenMember: (
+    memberId: number,
+    discussionId: number,
+    triggerKey: string,
+  ) => void;
   onSelectDiscussion: (discussionId: number) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleMember: (memberId: number) => void;
@@ -82,6 +95,8 @@ export function DiscussionsPage({
   discussions,
   error,
   isCreating,
+  humanMentionNotifications = [],
+  highlightedMessageId = null,
   members,
   messageBody,
   messageInputRef,
@@ -93,6 +108,8 @@ export function DiscussionsPage({
   onDialogOpenChange,
   onDeleteDiscussion,
   onMessageChange,
+  onOpenHumanMention = () => undefined,
+  onOpenMember,
   onSelectDiscussion,
   onSend,
   onToggleMember,
@@ -161,6 +178,10 @@ export function DiscussionsPage({
             />
           </Dialog>
         </div>
+        <HumanMentionNotifications
+          notifications={humanMentionNotifications}
+          onOpen={onOpenHumanMention}
+        />
         {discussions.length === 0 ? (
           <p className="discussion-list-empty">No discussions</p>
         ) : filteredDiscussions.length === 0 ? (
@@ -172,11 +193,11 @@ export function DiscussionsPage({
               return (
                 <ListButton
                   active={selected}
-                  aria-label={`Open ${discussionLabel(discussion)}`}
+                  aria-label={`Open ${discussion.topic}`}
                   key={discussion.id}
                   action={
                     <Dialog
-                      description={`Delete ${discussionLabel(discussion)} and all of its messages.`}
+                      description={`Delete ${discussion.topic} and all of its messages.`}
                       onOpenChange={(open) =>
                         setDeletingDiscussionId(open ? discussion.id : null)
                       }
@@ -184,7 +205,7 @@ export function DiscussionsPage({
                       title="Delete discussion"
                       trigger={
                         <Button
-                          aria-label={`Delete ${discussionLabel(discussion)}`}
+                          aria-label={`Delete ${discussion.topic}`}
                           disabled={disabled}
                           size="icon"
                           variant="quiet"
@@ -219,7 +240,7 @@ export function DiscussionsPage({
                   }
                   meta={formatMessageCount(discussion.messages.length)}
                   onClick={() => onSelectDiscussion(discussion.id)}
-                  title={discussionLabel(discussion)}
+                  title={discussion.topic}
                 />
               );
             })}
@@ -233,12 +254,14 @@ export function DiscussionsPage({
               discussion={selectedDiscussion}
               key={selectedDiscussion.id}
               disabled={disabled}
+              highlightedMessageId={highlightedMessageId}
               members={members}
               messageBody={messageBody}
               messageInputRef={messageInputRef}
               messageMentions={messageMentions}
               mentionSyntax={mentionSyntax}
               onMessageChange={onMessageChange}
+              onOpenMember={onOpenMember}
               onSend={onSend}
             />
           </section>
@@ -372,15 +395,30 @@ const discussionAgentStatusLabels: Record<DiscussionAgentStatus, string> = {
   error: "Error",
 };
 
-function DiscussionMemberAvatar({ member }: { member: Member }) {
+function DiscussionMemberAvatar({
+  member,
+  onOpenMember,
+  triggerKey,
+}: {
+  member: Member;
+  onOpenMember: (memberId: number, triggerKey: string) => void;
+  triggerKey: string;
+}) {
   const initial = member.name.slice(0, 1).toUpperCase();
 
   if (member.type === "human") {
     return (
-      <span className="discussion-member-avatar discussion-member-avatar--human">
-        <span aria-hidden="true">{initial}</span>
-        <span className="sr-only">{member.name}, Human</span>
-      </span>
+      <Tooltip content={`${member.name} · Human`} side="bottom">
+        <button
+          aria-label={`${member.name}, Human`}
+          className="discussion-member-avatar discussion-member-avatar--human"
+          data-member-navigation-key={triggerKey}
+          onClick={() => onOpenMember(member.id, triggerKey)}
+          type="button"
+        >
+          <span aria-hidden="true">{initial}</span>
+        </button>
+      </Tooltip>
     );
   }
 
@@ -396,6 +434,8 @@ function DiscussionMemberAvatar({ member }: { member: Member }) {
         aria-label={`${member.name}, Agent status: ${statusLabel}`}
         className={`discussion-member-avatar discussion-member-avatar--agent discussion-member-avatar--${status}`}
         data-agent-status={status}
+        data-member-navigation-key={triggerKey}
+        onClick={() => onOpenMember(member.id, triggerKey)}
         type="button"
       >
         <span aria-hidden="true">{initial}</span>
@@ -416,24 +456,32 @@ function DiscussionMemberAvatar({ member }: { member: Member }) {
 type DiscussionViewProps = {
   discussion: Discussion;
   disabled: boolean;
+  highlightedMessageId: number | null;
   members: Member[];
   messageBody: string;
   messageInputRef: RefObject<HTMLTextAreaElement | null>;
   messageMentions: DraftMention[];
   mentionSyntax: MentionSyntax;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
+  onOpenMember: (
+    memberId: number,
+    discussionId: number,
+    triggerKey: string,
+  ) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
 };
 
 function DiscussionView({
   discussion,
   disabled,
+  highlightedMessageId,
   members,
   messageBody,
   messageInputRef,
   messageMentions,
   mentionSyntax,
   onMessageChange,
+  onOpenMember,
   onSend,
 }: DiscussionViewProps) {
   const messageLogRef = useRef<HTMLDivElement>(null);
@@ -442,6 +490,11 @@ function DiscussionView({
   const discussionMembers = discussion.member_ids
     .map((id) => membersById.get(id))
     .filter((member): member is Member => Boolean(member));
+  const handleOpenMember = useCallback(
+    (memberId: number, triggerKey: string) =>
+      onOpenMember(memberId, discussion.id, triggerKey),
+    [discussion.id, onOpenMember],
+  );
 
   useEffect(() => {
     const log = messageLogRef.current;
@@ -472,7 +525,11 @@ function DiscussionView({
     <>
       <header className="border-border border-b px-6 py-4">
         <div className="flex items-baseline justify-between gap-6">
-          <h2 className="discussion-title m-0 font-semibold">
+          <h2
+            className="discussion-title m-0 font-semibold"
+            data-discussion-focus-id={discussion.id}
+            tabIndex={-1}
+          >
             {discussionLabel(discussion)}
           </h2>
           <TechnicalDetails
@@ -482,7 +539,12 @@ function DiscussionView({
         <div className="discussion-member-avatars">
           <span className="sr-only">Discussion members:</span>
           {discussionMembers.map((member) => (
-            <DiscussionMemberAvatar key={member.id} member={member} />
+            <DiscussionMemberAvatar
+              key={member.id}
+              member={member}
+              onOpenMember={handleOpenMember}
+              triggerKey={`discussion:${discussion.id}:member:${member.id}`}
+            />
           ))}
         </div>
       </header>
@@ -506,19 +568,37 @@ function DiscussionView({
               const isHuman = sender?.type === "human";
               return (
                 <li
-                  className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}`}
+                  className={`message-row ${isHuman ? "message-row--human" : "message-row--agent"}${highlightedMessageId === message.id ? " human-mention-target" : ""}`}
+                  data-message-id={message.id}
                   key={message.id}
+                  tabIndex={-1}
                 >
                   <span className="message-avatar" aria-hidden="true">
                     {(sender?.name ?? "Unknown").slice(0, 1).toUpperCase()}
                   </span>
                   <article className="message-bubble">
                     <header className="message-meta">
-                      <strong>{senderLabel(message.sender_id, members)}</strong>
-                      <span>{shortMessageSummary(message.body)}</span>
+                      <strong>
+                        {senderLabel(
+                          message.sender_id,
+                          members,
+                          message.sender_name,
+                        )}
+                      </strong>
+                      <span>
+                        {shortMessageSummary(
+                          message.body,
+                          96,
+                          message.references,
+                          members,
+                        )}
+                      </span>
                     </header>
                     <DiscussionMarkdown
                       body={message.body}
+                      members={members}
+                      messageId={message.id}
+                      onOpenMember={handleOpenMember}
                       references={message.references}
                     />
                     <TechnicalDetails
@@ -536,7 +616,15 @@ function DiscussionView({
                               reference.member_id === mention.member_id &&
                               reference.notified,
                           );
-                          const name = identity?.name ?? "Unavailable member";
+                          const activeMember = membersById.get(
+                            mention.member_id,
+                          );
+                          const name =
+                            (identity?.deleted
+                              ? undefined
+                              : activeMember?.name) ??
+                            identity?.name ??
+                            "Unavailable member";
                           return (
                             <li
                               className={`mention-status mention-status--${mention.status}`}
@@ -559,9 +647,7 @@ function DiscussionView({
         )}
       </div>
       <MessageComposer
-        agents={members.filter(
-          (member): member is AgentMember => member.type === "agent",
-        )}
+        agents={members}
         body={messageBody}
         disabled={disabled}
         discussionId={discussion.id}

@@ -11,6 +11,16 @@ export type FlowentChannel = {
 
 export type FlowentEventListener = (event: string, data: unknown) => void;
 
+export class FlowentRequestError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "FlowentRequestError";
+    this.code = code;
+  }
+}
+
 type PendingRequest = {
   reject: (error: Error) => void;
   resolve: (value: unknown) => void;
@@ -151,15 +161,19 @@ export class FlowentClient {
     }
 
     const error = responseRecord(envelope.error);
+    const responseCode = error?.code;
     const responseMessage = error?.message;
-    if (typeof responseMessage !== "string") {
-      this.rejectPending(
-        id,
-        new Error("Invalid Flowent response error message"),
-      );
+    if (
+      typeof responseCode !== "string" ||
+      typeof responseMessage !== "string"
+    ) {
+      this.rejectPending(id, new Error("Invalid Flowent response error"));
       return;
     }
-    this.rejectPending(id, new Error(responseMessage));
+    this.rejectPending(
+      id,
+      new FlowentRequestError(responseCode, responseMessage),
+    );
   }
 
   private resolvePending(id: number, value: unknown) {

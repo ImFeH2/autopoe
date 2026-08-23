@@ -8,6 +8,12 @@ export type ReadableDiscussion = {
   topic: string;
 };
 
+export type ReadableMentionReference = {
+  member_id: number;
+  name: string;
+  deleted?: boolean;
+};
+
 function nonEmpty(value: string | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -45,8 +51,26 @@ function stripMarkdown(value: string) {
     .trim();
 }
 
-export function shortMessageSummary(body: string, maxLength = 96) {
-  const summary = stripMarkdown(body);
+export function shortMessageSummary(
+  body: string,
+  maxLength = 96,
+  references: readonly ReadableMentionReference[] = [],
+  members: readonly ReadableMember[] = [],
+) {
+  const currentBody = references.reduce((value, reference) => {
+    if (reference.deleted) {
+      return value;
+    }
+    const currentName = nonEmpty(
+      members.find((member) => member.id === reference.member_id)?.name,
+    );
+    const snapshotName = nonEmpty(reference.name);
+    if (!currentName || !snapshotName || currentName === snapshotName) {
+      return value;
+    }
+    return value.split(`@${snapshotName}`).join(`@${currentName}`);
+  }, body);
+  const summary = stripMarkdown(currentBody);
   if (!summary) {
     return "No message content";
   }

@@ -1,6 +1,12 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import App from "@/App";
+import { describe, expect, it, vi } from "vitest";
+import App, {
+  completeHumanMentionNavigation,
+  createHumanMentionFocusRequest,
+  focusHumanMentionMessage,
+  shouldRefocusHumanMention,
+} from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
   Badge,
@@ -28,6 +34,98 @@ import {
 } from "@/features/settings";
 
 describe("App", () => {
+  it("gives pointer and keyboard notification activation a visible message target", () => {
+    const add = vi.fn();
+    const remove = vi.fn();
+    const focus = vi.fn();
+    const scrollIntoView = vi.fn();
+    let clearHighlight: (() => void) | undefined;
+    const scheduleClear = vi.fn((callback: () => void, delay: number) => {
+      clearHighlight = callback;
+      expect(delay).toBe(2_500);
+      return 1;
+    });
+    const message = {
+      classList: { add, remove },
+      focus,
+      scrollIntoView,
+    } as unknown as HTMLElement;
+
+    focusHumanMentionMessage(message, scheduleClear);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(focus).toHaveBeenCalledOnce();
+    expect(add).toHaveBeenCalledWith("human-mention-target");
+    clearHighlight?.();
+    expect(remove).toHaveBeenCalledWith("human-mention-target");
+  });
+
+  it("issues distinct focus requests for current and cross-Discussion mentions", () => {
+    expect(createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7)).toEqual({
+      discussionId: 1,
+      humanId: 1,
+      messageId: 10,
+      navigationGeneration: 7,
+      token: 1,
+      unread: true,
+      userGeneration: 4,
+    });
+    expect(createHumanMentionFocusRequest(1, 10, 1, false, 2, 5, 7)).toEqual({
+      discussionId: 1,
+      humanId: 1,
+      messageId: 10,
+      navigationGeneration: 7,
+      token: 2,
+      unread: false,
+      userGeneration: 5,
+    });
+    expect(createHumanMentionFocusRequest(2, 20, 1, true, 3, 6, 7)).toEqual({
+      discussionId: 2,
+      humanId: 1,
+      messageId: 20,
+      navigationGeneration: 7,
+      token: 3,
+      unread: true,
+      userGeneration: 6,
+    });
+  });
+
+  it("drops stale refocus after a newer mention or normal navigation wins", () => {
+    const delayedA = createHumanMentionFocusRequest(1, 10, 1, true, 1, 4, 7);
+    expect(shouldRefocusHumanMention(delayedA, 4, 7)).toBe(true);
+
+    // B has already completed and cleared its request, but its user generation remains latest.
+    expect(shouldRefocusHumanMention(delayedA, 5, 7)).toBe(false);
+    // Leaving Discussions invalidates A even when no newer notification was clicked.
+    expect(shouldRefocusHumanMention(delayedA, 4, 8)).toBe(false);
+  });
+
+  it("marks unread only after the target is focused and skips read work for read items", async () => {
+    const events: string[] = [];
+    const message = {
+      classList: {
+        add: () => events.push("highlight"),
+        remove: vi.fn(),
+      },
+      focus: () => events.push("focus"),
+      scrollIntoView: () => events.push("scroll"),
+    } as unknown as HTMLElement;
+    const scheduleClear = vi.fn(() => 1);
+
+    await completeHumanMentionNavigation(
+      message,
+      async () => {
+        events.push("read");
+      },
+      scheduleClear,
+    );
+    expect(events).toEqual(["scroll", "focus", "highlight", "read"]);
+
+    events.length = 0;
+    await completeHumanMentionNavigation(message, undefined, scheduleClear);
+    expect(events).toEqual(["scroll", "focus", "highlight"]);
+  });
+
   it("renders a clear startup state before the backend responds", () => {
     const markup = renderToStaticMarkup(<App />);
 
@@ -219,6 +317,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -231,7 +330,17 @@ describe("App", () => {
     );
 
     expect(markup).toContain("Discussion members:");
-    expect(markup).toContain("You, Human");
+    expect(markup).toContain('aria-label="You, Human"');
+    expect(markup).toContain(
+      'data-member-navigation-key="discussion:1:member:1"',
+    );
+    expect(markup).toContain(
+      'data-member-navigation-key="discussion:1:member:2"',
+    );
+    expect(markup).toContain('data-discussion-focus-id="1" tabindex="-1"');
+    expect(markup).toMatch(
+      /<button[^>]*aria-label="You, Human"[^>]*class="discussion-member-avatar discussion-member-avatar--human"/u,
+    );
     expect(markup).toContain('aria-label="Run, Agent status: Running"');
     expect(markup).toContain('aria-label="Idle, Agent status: Idle"');
     expect(markup).toContain('aria-label="Pause, Agent status: Paused"');
@@ -243,6 +352,13 @@ describe("App", () => {
     expect(markup.match(/data-agent-status="error"/g)).toHaveLength(1);
     expect(markup).toContain('class="message-avatar" aria-hidden="true"');
     expect(markup).not.toContain("message-avatar--running");
+    const styles = readFileSync(
+      new URL("./features/discussions/discussions.css", import.meta.url),
+      "utf8",
+    );
+    expect(styles).toMatch(/\.discussion-member-avatar:hover\s*\{/u);
+    expect(styles).toMatch(/\.discussion-member-avatar:focus-visible\s*\{/u);
+    expect(styles).toMatch(/\.discussion-title:focus-visible\s*\{/u);
   });
 
   it("renders every member and focusable Agent status in crowded Discussions", () => {
@@ -278,6 +394,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -337,6 +454,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -356,11 +474,17 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Delete Repository work"');
   });
 
-  it("renders Markdown before structured Mention statuses", () => {
-    const agent = {
+  it("keeps active Mention body and status names current", () => {
+    const renamedAgent = {
       id: 2,
       type: "agent" as const,
-      name: "Ada",
+      name: "NewName",
+      status: "idle" as const,
+    };
+    const laterSameNameAgent = {
+      id: 4,
+      type: "agent" as const,
+      name: "OldGone",
       status: "idle" as const,
     };
     const discussion = {
@@ -371,31 +495,52 @@ describe("App", () => {
         {
           id: 1,
           sender_id: 1,
-          body: "**Bold request**\nnext line",
+          body: "@OldName **Bold request**\nnext line",
           references: [
             {
               member_id: 2,
-              name: "Ada",
-              start: null,
-              end: null,
+              name: "OldName",
+              start: 0,
+              end: 8,
+              in_discussion: true,
+              notified: true,
+              deleted: false,
+            },
+          ],
+          mentions: [{ member_id: 2, status: "read" as const }],
+        },
+        {
+          id: 2,
+          sender_id: 1,
+          body: "@OldGone",
+          references: [
+            {
+              member_id: 3,
+              name: "OldGone",
+              start: 0,
+              end: 8,
               in_discussion: true,
               notified: true,
               deleted: true,
             },
           ],
-          mentions: [{ member_id: 2, status: "read" as const }],
+          mentions: [{ member_id: 3, status: "pending" as const }],
         },
       ],
     };
     const markup = renderToStaticMarkup(
       <TooltipProvider>
         <DiscussionsPage
-          agents={[agent]}
+          agents={[renamedAgent, laterSameNameAgent]}
           disabled={false}
           discussions={[discussion]}
           error={null}
           isCreating={false}
-          members={[{ id: 1, type: "human", name: "You" }, agent]}
+          members={[
+            { id: 1, type: "human", name: "You" },
+            renamedAgent,
+            laterSameNameAgent,
+          ]}
           messageBody="composer changes do not belong to sent Markdown"
           messageInputRef={{ current: null }}
           messageMentions={[]}
@@ -406,6 +551,7 @@ describe("App", () => {
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
+          onOpenMember={() => undefined}
           onSelectDiscussion={() => undefined}
           onSend={() => undefined}
           onToggleMember={() => undefined}
@@ -422,7 +568,100 @@ describe("App", () => {
     expect(markdownIndex).toBeGreaterThan(-1);
     expect(markup).toContain("<br/>\nnext line");
     expect(mentionIndex).toBeGreaterThan(markdownIndex);
-    expect(markup).toContain("@Ada · READ");
+    expect(markup).toContain("@NewName · READ");
+    expect(markup).toContain('title="@NewName · read"');
+    expect(markup).not.toContain("@OldName");
+    expect(markup).toContain("@OldGone · PENDING");
+    expect(markup).toContain('title="@OldGone · pending · Deleted Agent"');
+    expect(markup).not.toContain('aria-label="Open OldGone in Members"');
+  });
+
+  it("renders Human mention notifications and historical author snapshots", () => {
+    const agent = {
+      id: 2,
+      type: "agent" as const,
+      name: "RenamedAgent",
+      status: "idle" as const,
+    };
+    const discussion = {
+      id: 1,
+      topic: "Human review",
+      member_ids: [1, 2],
+      messages: [
+        {
+          id: 1,
+          sender_id: 2,
+          sender_name: "OriginalAgent",
+          body: "@Owner review",
+          references: [
+            {
+              member_id: 1,
+              name: "Owner",
+              start: 0,
+              end: 6,
+              in_discussion: true,
+              notified: true,
+              deleted: false,
+            },
+          ],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <DiscussionsPage
+          agents={[agent]}
+          disabled={false}
+          discussions={[discussion]}
+          error={null}
+          humanMentionNotifications={[
+            {
+              discussionId: 1,
+              discussionTopic: "Human review",
+              messageId: 1,
+              senderName: "OriginalAgent",
+              unread: true,
+            },
+          ]}
+          highlightedMessageId={1}
+          isCreating={false}
+          members={[{ id: 1, type: "human", name: "Owner" }, agent]}
+          messageBody=""
+          messageInputRef={{ current: null }}
+          messageMentions={[]}
+          mentionSyntax={{ enabled: true, issues: [] }}
+          onCreateAgent={() => undefined}
+          onCreateDiscussion={() => undefined}
+          onDeleteDiscussion={() => undefined}
+          onDialogCloseAutoFocus={() => false}
+          onDialogOpenChange={() => undefined}
+          onMessageChange={() => undefined}
+          onOpenHumanMention={() => undefined}
+          onOpenMember={() => undefined}
+          onSelectDiscussion={() => undefined}
+          onSend={() => undefined}
+          onToggleMember={() => undefined}
+          selectedDiscussion={discussion}
+          selectedMemberIds={[]}
+          setTopic={() => undefined}
+          topic=""
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Human mention notifications"');
+    expect(markup).toContain(
+      'class="message-row message-row--agent human-mention-target"',
+    );
+    expect(markup).toContain("1 unread");
+    expect(markup).toContain(
+      "<strong>OriginalAgent</strong> in Human review · Unread",
+    );
+    expect(markup).toContain('data-message-id="1"');
+    expect(markup).toContain("<strong>OriginalAgent</strong>");
+    expect(markup).toContain('aria-label="Open Owner in Members"');
   });
 
   it("keeps the sidebar focused on global destinations", () => {
@@ -473,12 +712,14 @@ describe("App", () => {
           members={[{ id: 1, type: "human", name: "You" }, agent]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
+          onBackToDiscussion={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
           onPauseAgent={() => undefined}
           onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={agent}
+          sourceDiscussionTopic="Repository work"
         />
       </TooltipProvider>,
     );
@@ -490,6 +731,10 @@ describe("App", () => {
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('aria-label="Ada details"');
     expect(markup).toContain('aria-label="Pause Ada"');
+    expect(markup).toContain('aria-label="Back to Repository work discussion"');
+    expect(markup).toContain('data-member-return-focus="true"');
+    expect(markup).toContain('data-member-overview-focus=""');
+    expect(markup).toContain('title="Return to Repository work"');
     expect(markup).not.toContain('aria-label="Resume Ada"');
     expect(markup).toContain("Agent · IDLE");
     expect(markup).toContain('aria-label="Agent details"');
@@ -666,7 +911,7 @@ describe("App", () => {
     expect(markup).not.toContain("Retry Ada");
   });
 
-  it("renders readable Human details with the ID isolated technically", () => {
+  it("renders a minimal Human Overview with a source Discussion return", () => {
     const human = { id: 1, type: "human" as const, name: "You" };
     const markup = renderToStaticMarkup(
       <TooltipProvider>
@@ -678,23 +923,66 @@ describe("App", () => {
           members={[human]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
+          onBackToDiscussion={() => undefined}
           onCreateAgent={() => undefined}
           onDeleteAgent={() => undefined}
           onPauseAgent={() => undefined}
           onResumeAgent={() => undefined}
           onSelectMember={() => undefined}
           selectedMember={human}
+          sourceDiscussionTopic="Repository work"
         />
       </TooltipProvider>,
     );
 
     expect(markup).toContain('aria-label="Open You"');
-    expect(markup).not.toContain("Select a member");
     expect(markup).toContain('aria-label="You details"');
+    expect(markup).toContain('aria-label="Human details"');
+    expect(markup).toContain('aria-label="Back to Repository work discussion"');
+    expect(markup).toContain('data-member-return-focus="true"');
+    expect(markup).toContain('data-member-overview-focus="true"');
+    expect(markup).toContain('title="Return to Repository work"');
+    expect(markup).toContain(">Overview<");
     expect(markup).toContain(">Human<");
+    expect(markup).toContain(">Formal name<");
+    expect(markup).toContain('aria-label="Rename current Human"');
+    expect(markup).toContain('id="human-formal-name"');
     expect(markup).not.toContain(">Member ID<");
     expect(markup).toContain("<summary>Technical details</summary>");
     expect(markup).toContain('aria-label="Copy Member ID"');
+    expect(markup).not.toContain("Human 1");
+    expect(markup).not.toContain(">Memory<");
+    expect(markup).not.toContain(">History<");
+    expect(markup).not.toContain("StatusIndicator");
+    expect(markup).not.toContain('aria-label="Delete You"');
+  });
+
+  it("uses a stable Back accessible-name fallback without a source topic", () => {
+    const human = { id: 1, type: "human" as const, name: "Current Viewer" };
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <MembersPage
+          agentName=""
+          disabled={false}
+          error={null}
+          isCreatingAgent={false}
+          members={[human]}
+          onAgentDialogOpenChange={() => undefined}
+          onAgentNameChange={() => undefined}
+          onBackToDiscussion={() => undefined}
+          onCreateAgent={() => undefined}
+          onDeleteAgent={() => undefined}
+          onPauseAgent={() => undefined}
+          onResumeAgent={() => undefined}
+          onSelectMember={() => undefined}
+          selectedMember={human}
+          sourceDiscussionTopic="   "
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Back to source discussion"');
+    expect(markup).not.toContain('aria-label="Back to Discussion"');
   });
 
   it("renders production controls with accessible native semantics", () => {

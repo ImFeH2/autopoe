@@ -199,8 +199,8 @@ def test_active_agent_conflicting_with_human_name_disables_syntax() -> None:
         "issues": [
             {
                 "code": "duplicate_name",
-                "member_ids": [2, 1],
-                "names": ["Ｙｏｕ", "You"],
+                "member_ids": [1, 2],
+                "names": ["You", "Ｙｏｕ"],
                 "normalized_name": "you",
             }
         ],
@@ -408,6 +408,7 @@ def test_deleting_agent_preserves_discussions_and_messages() -> None:
         {
             "id": 1,
             "sender_id": 2,
+            "sender_name": "Ada",
             "body": "Keep my message",
             "references": [],
             "mentions": [],
@@ -487,3 +488,157 @@ def test_deleting_agent_marks_references_without_removing_mention_status() -> No
 
     later = state.send_message(1, 1, "Deleted @Ada is no longer resolvable")
     assert later["discussions"][0]["messages"][1]["references"] == []
+
+
+def test_member_rename_and_human_notifications_are_separate_from_agent_mentions() -> (
+    None
+):
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+
+    first = state.send_message(1, 2, "@You please review @You")
+    message = first["discussions"][0]["messages"][0]
+    assert len(message["references"]) == 2
+    assert message["mentions"] == []
+    assert message["human_mentions"] == [{"member_id": 1, "status": "unread"}]
+    assert state.claim_next_reminder()[0] is None
+
+    renamed = state.rename_member(1, "Owner")
+    assert renamed["members"][0]["name"] == "Owner"
+    assert renamed["discussions"][0]["messages"][0]["references"][0]["name"] == "You"
+    assert renamed["discussions"][0]["messages"][0]["human_mentions"] == [
+        {"member_id": 1, "status": "unread"}
+    ]
+
+    read = state.read_human_mention(1, 1, 1)
+    assert read["discussions"][0]["messages"][0]["human_mentions"] == [
+        {"member_id": 1, "status": "read"}
+    ]
+
+
+def test_member_rename_uses_shared_validation_and_active_uniqueness() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+
+    with pytest.raises(DomainError, match="unique"):
+        state.rename_member(1, "ＡＤＡ")
+    with pytest.raises(DomainError, match="only Unicode"):
+        state.rename_member(1, "Bad Name")
+
+    snapshot = state.rename_member(2, "Builder")
+    assert snapshot["members"][1]["name"] == "Builder"
+
+
+def test_human_self_and_out_of_discussion_mentions_never_notify() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Human present", 1, [2])
+    own = state.send_message(1, 1, "@You note")
+    assert "human_mentions" not in own["discussions"][0]["messages"][0]
+
+    state.create_discussion("Agents only", 2, [3])
+    outside = state.send_message(2, 2, "@You heads up")
+    message = outside["discussions"][1]["messages"][0]
+    assert message["references"][0]["in_discussion"] is False
+    assert message["references"][0]["notified"] is False
+    assert "human_mentions" not in message
+
+
+def test_member_rename_preserves_historical_author_name_snapshot() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "Before rename")
+
+    snapshot = state.rename_member(1, "Owner")
+    message = snapshot["discussions"][0]["messages"][0]
+
+    assert snapshot["members"][0]["name"] == "Owner"
+    assert message["sender_id"] == 1
+    assert message["sender_name"] == "You"
+    assert message["body"] == "Before rename"
+
+
+def test_rename_member_preserves_identity_and_structured_reference_snapshot() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "@Ada review")
+
+    renamed = state.rename_member(2, "Grace")
+
+    assert renamed["members"][1] == {
+        "id": 2,
+        "type": "agent",
+        "name": "Grace",
+        "status": "idle",
+    }
+    message = renamed["discussions"][0]["messages"][0]
+    assert message["body"] == "@Ada review"
+    assert message["references"][0]["member_id"] == 2
+    assert message["references"][0]["name"] == "Ada"
+    assert message["mentions"] == [{"member_id": 2, "status": "pending"}]
+
+
+def test_rename_member_enforces_shared_validation_and_active_uniqueness() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Grace")
+
+    with pytest.raises(DomainError) as whitespace:
+        state.rename_member(2, " Ada")
+    assert whitespace.value.code == "invalid_name"
+    with pytest.raises(DomainError) as invalid:
+        state.rename_member(2, "Bad Name")
+    assert invalid.value.code == "invalid_name"
+    with pytest.raises(DomainError) as duplicate:
+        state.rename_member(2, "ＧＲＡＣＥ")
+    assert duplicate.value.code == "duplicate_name"
+
+    renamed = state.rename_member(2, "ADA")
+    assert renamed["members"][1]["name"] == "ADA"
+
+
+def test_rename_member_rejects_running_pausing_and_deleted_agents() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "@Ada run")
+    reminder, _revision = state.claim_next_reminder()
+    assert reminder is not None
+
+    with pytest.raises(DomainError) as running:
+        state.rename_member(2, "Grace")
+    assert running.value.code == "agent_busy"
+
+    state.pause_agent(2)
+    with pytest.raises(DomainError) as pausing:
+        state.rename_member(2, "Grace")
+    assert pausing.value.code == "agent_busy"
+
+    state.complete_turn(2)
+    paused = state.rename_member(2, "Grace")
+    assert paused["members"][1]["status"] == "paused"
+
+    state.resume_agent(2)
+    state.delete_agent(2)
+    with pytest.raises(DomainError) as deleted:
+        state.rename_member(2, "Later")
+    assert deleted.value.code == "member_deleted"
+
+
+@pytest.mark.parametrize(
+    "members",
+    [
+        [],
+        [{"id": 1, "type": "agent", "name": "Ada"}],
+        [{"id": 1, "type": "human", "name": "Owner", "deleted": True}],
+    ],
+)
+def test_restore_requires_active_human_member_one(
+    members: list[dict[str, object]],
+) -> None:
+    with pytest.raises(RuntimeError, match="missing its Human Member"):
+        OrganizationState(persisted={"members": members, "discussions": []})
