@@ -470,11 +470,18 @@ describe("App", () => {
     expect(markup).toContain(
       'class="member-status-avatar member-status-avatar--message member-status-avatar--deleted message-avatar"',
     );
-    expect(markup).toContain("<strong>Former Agent</strong>");
+    expect(markup).toContain(
+      '<span class="sr-only">Former Agent, Deleted member</span><span aria-hidden="true">Former Agent</span>',
+    );
     expect(markup).not.toContain("Open member details for Former Agent");
     expect(markup).toContain(
       'data-member-navigation-key="discussion:1:message:2:member:2"',
     );
+    expect(
+      markup.match(
+        /data-identicon-pattern="100\/100\/011\/100\/101" data-identicon-version="v1" data-member-id="2"/g,
+      ),
+    ).toHaveLength(2);
     for (const [name, label] of [
       ["Run", "Running"],
       ["Idle", "Idle"],

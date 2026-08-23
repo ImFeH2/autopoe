@@ -31,33 +31,31 @@
   overflow: hidden;
   border: 1px solid var(--color-border-strong);
   border-radius: 50%;
-  background: var(--color-surface-selected);
-  color: var(--color-text-secondary);
-  font-size: 9px;
-  font-weight: 700;
+  background: hsl(var(--member-identicon-hue) 28% 14%);
+  color: hsl(var(--member-identicon-hue) 65% 78%);
   line-height: 1;
-  text-transform: uppercase;
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease,
     filter 120ms ease;
 }
 
-.member-status-avatar--member .member-status-avatar__identity {
-  font-size: 10px;
-}
-
-.member-status-avatar--agent .member-status-avatar__identity {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
+.member-status-avatar__identicon {
+  display: block;
+  width: 72%;
+  height: 72%;
+  fill: currentcolor;
 }
 
 .member-status-avatar--deleted .member-status-avatar__identity,
 .member-status-avatar--unknown .member-status-avatar__identity {
   border-style: dashed;
-  background: var(--color-surface-subtle);
-  color: var(--color-text-tertiary);
+}
+
+[data-color-scheme="light"] .member-status-avatar__identity,
+[data-theme="light"] .member-status-avatar__identity {
+  background: hsl(var(--member-identicon-hue) 18% 96%);
+  color: hsl(var(--member-identicon-hue) 70% 24%);
 }
 
 .member-status-avatar--interactive {

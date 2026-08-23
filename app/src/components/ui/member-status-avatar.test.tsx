@@ -10,10 +10,12 @@ function render(
   status: string | null | undefined,
   variant: "member" | "message" = "member",
   identity?: "agent" | "deleted" | "human" | "unknown",
+  memberId = 2,
 ) {
   return renderToStaticMarkup(
     <MemberStatusAvatar
       identity={identity}
+      memberId={memberId}
       name="Ada Lovelace"
       status={status}
       variant={variant}
@@ -74,6 +76,7 @@ describe("MemberStatusAvatar", () => {
     const member = renderToStaticMarkup(
       <MemberStatusAvatar
         identity="agent"
+        memberId={2}
         name="Ada Lovelace"
         navigationKey="discussion:1:member:2"
         onActivate={() => undefined}
@@ -84,6 +87,7 @@ describe("MemberStatusAvatar", () => {
     const message = renderToStaticMarkup(
       <MemberStatusAvatar
         identity="agent"
+        memberId={2}
         name="Historical Ada"
         navigationKey="discussion:1:message:7:member:2"
         onActivate={() => undefined}
@@ -106,6 +110,17 @@ describe("MemberStatusAvatar", () => {
     expect(message).toContain(
       'data-member-navigation-key="discussion:1:message:7:member:2"',
     );
+    const memberPattern = member.match(
+      /data-identicon-pattern="([^"]+)"/u,
+    )?.[1];
+    const messagePattern = message.match(
+      /data-identicon-pattern="([^"]+)"/u,
+    )?.[1];
+    expect(memberPattern).toBe("100/100/011/100/101");
+    expect(messagePattern).toBe(memberPattern);
+    expect(member).toContain('data-identicon-version="v1"');
+    expect(message).toContain('data-member-id="2"');
+    expect(member).toContain("member-status-avatar__identicon");
     expect(message).not.toContain("aria-live=");
   });
 
@@ -113,6 +128,7 @@ describe("MemberStatusAvatar", () => {
     const onActivate = vi.fn();
     const avatar = MemberStatusAvatar({
       identity: "agent",
+      memberId: 2,
       name: "Ada Lovelace",
       navigationKey: "discussion:1:message:7:member:2",
       onActivate,

@@ -547,6 +547,7 @@ function DiscussionMemberAvatar({
     <Tooltip content={description.replace(", ", " · ")} side="bottom">
       <MemberStatusAvatar
         identity={member.type}
+        memberId={member.id}
         name={member.name}
         navigationKey={triggerKey}
         onActivate={() => onOpenMember(member.id, triggerKey)}
@@ -814,6 +815,7 @@ function DiscussionView({
                       <MemberStatusAvatar
                         className="message-avatar"
                         identity={senderIdentity}
+                        memberId={message.sender_id}
                         name={senderName}
                         navigationKey={sender ? senderTriggerKey : undefined}
                         onActivate={
@@ -835,6 +837,13 @@ function DiscussionView({
                             <>
                               <span className="sr-only">
                                 {senderName}, Agent status: {senderStatus.label}
+                              </span>
+                              <span aria-hidden="true">{senderName}</span>
+                            </>
+                          ) : senderIdentity === "deleted" ? (
+                            <>
+                              <span className="sr-only">
+                                {senderName}, Deleted member
                               </span>
                               <span aria-hidden="true">{senderName}</span>
                             </>

@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import { createMemberIdenticon } from "./member-identicon";
 import "./member-status-avatar.css";
 
 type MemberStatus = "error" | "idle" | "paused" | "running";
@@ -59,6 +61,7 @@ export function getMemberAvatarDescription(
 export type MemberStatusAvatarProps = {
   className?: string;
   identity?: MemberAvatarIdentity;
+  memberId: number;
   name: string;
   navigationKey?: string;
   onActivate?: () => void;
@@ -66,22 +69,10 @@ export type MemberStatusAvatarProps = {
   variant?: MemberStatusAvatarVariant;
 };
 
-function memberInitials(name: string) {
-  const parts = name.trim().split(/\s+/u).filter(Boolean);
-
-  if (parts.length === 0) {
-    return "?";
-  }
-
-  const first = Array.from(parts[0])[0] ?? "?";
-  const lastPart = parts[parts.length - 1] ?? "";
-  const last = parts.length > 1 ? (Array.from(lastPart)[0] ?? "") : "";
-  return (first + last).toLocaleUpperCase();
-}
-
 export function MemberStatusAvatar({
   className = "",
   identity: explicitIdentity,
+  memberId,
   name,
   navigationKey,
   onActivate,
@@ -93,6 +84,10 @@ export function MemberStatusAvatar({
     explicitIdentity ?? (statusPresentation ? "agent" : "unknown");
   const presentation = identity === "agent" ? statusPresentation : null;
   const description = getMemberAvatarDescription(name, identity, status);
+  const identicon = createMemberIdenticon(memberId);
+  const identiconStyle = {
+    "--member-identicon-hue": identicon.hue,
+  } as CSSProperties;
   const interactive = Boolean(onActivate);
   const classes = [
     "member-status-avatar",
@@ -105,6 +100,9 @@ export function MemberStatusAvatar({
     .join(" ");
   const commonProps = {
     className: classes,
+    "data-identicon-pattern": identicon.pattern,
+    "data-identicon-version": identicon.version,
+    "data-member-id": memberId,
     "data-member-identity": identity,
     "data-member-navigation-key": navigationKey,
     "data-member-status": presentation?.status ?? "none",
@@ -112,8 +110,22 @@ export function MemberStatusAvatar({
   };
   const content = (
     <>
-      <span aria-hidden="true" className="member-status-avatar__identity">
-        {memberInitials(name)}
+      <span
+        aria-hidden="true"
+        className="member-status-avatar__identity"
+        style={identiconStyle}
+      >
+        <svg
+          className="member-status-avatar__identicon"
+          focusable="false"
+          shapeRendering="crispEdges"
+          viewBox="0 0 5 5"
+        >
+          <title>Member identicon</title>
+          {identicon.activeCells.map((cell) => (
+            <rect height="1" key={cell.key} width="1" x={cell.x} y={cell.y} />
+          ))}
+        </svg>
       </span>
       {presentation ? (
         <span
