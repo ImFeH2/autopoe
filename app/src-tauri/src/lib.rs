@@ -46,6 +46,12 @@ pub fn run() {
             app.state::<FlowentProcess>()
                 .start(app.handle())
                 .map_err(|error| std::io::Error::other(format!("{error:#}")))?;
+
+            // Create the window hidden so the first show can preserve the existing foreground
+            // application. With `focus: false`, Tauri uses a non-activating first show on Windows.
+            app.get_webview_window("main")
+                .ok_or_else(|| std::io::Error::other("main window is unavailable"))?
+                .show()?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -71,5 +77,38 @@ mod tests {
             validate_frontend_message(&json!({"method": "system.shutdown"})).unwrap_err(),
             "Internal Flowent method"
         );
+    }
+
+    #[test]
+    fn startup_windows_are_shown_without_activation() {
+        for (name, source) in [
+            ("release", include_str!("../tauri.conf.json")),
+            ("debug", include_str!("../tauri.debug.conf.json")),
+        ] {
+            let config: serde_json::Value = serde_json::from_str(source).unwrap();
+            let window = &config["app"]["windows"][0];
+
+            assert_eq!(
+                window["visible"], false,
+                "{name} window must be created hidden before its first show"
+            );
+            assert_eq!(window["focus"], false, "{name} window must not activate");
+            assert_eq!(
+                window["focusable"], true,
+                "{name} window must remain activatable by a Human click"
+            );
+            assert_eq!(
+                window["alwaysOnTop"], false,
+                "{name} window must not be topmost"
+            );
+            assert_eq!(
+                window["maximized"], false,
+                "{name} window must not start maximized"
+            );
+            assert_eq!(
+                window["skipTaskbar"], false,
+                "{name} window must appear in the taskbar"
+            );
+        }
     }
 }

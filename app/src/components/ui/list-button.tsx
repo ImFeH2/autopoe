@@ -7,7 +7,7 @@ type ListButtonProps = Omit<
 > & {
   action?: ReactNode;
   active?: boolean;
-  meta: string;
+  meta: ReactNode;
   title: string;
 };
 

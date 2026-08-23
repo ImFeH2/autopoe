@@ -143,6 +143,12 @@ export type HumanMention = {
   status: "unread" | "read";
 };
 
+export type HumanDiscussionReadState = {
+  member_id: number;
+  read_through_message_id: number | null;
+  seen_message_ids: number[];
+};
+
 export type MentionReference = {
   member_id: number;
   name: string;
@@ -181,6 +187,7 @@ export type Discussion = {
   topic: string;
   member_ids: number[];
   messages: Message[];
+  human_read_states?: HumanDiscussionReadState[];
 };
 
 export type OrganizationSnapshot = {
@@ -630,14 +637,82 @@ function parseDiscussion(
     }
   }
 
+  const messages = array(item.messages, `${path}.messages`).map(
+    (message, messageIndex) =>
+      parseMessage(message, index, messageIndex, membersById),
+  );
+  const readStateMemberIds = new Set<number>();
+  const humanReadStates = array(
+    item.human_read_states ?? [],
+    `${path}.human_read_states`,
+  ).map((state, stateIndex) => {
+    const statePath = `${path}.human_read_states[${stateIndex}]`;
+    const stateItem = record(state, statePath);
+    const memberId = positiveInteger(
+      stateItem.member_id,
+      `${statePath}.member_id`,
+    );
+    if (readStateMemberIds.has(memberId)) {
+      invalidSnapshot(`${path}.human_read_states must target unique Humans`);
+    }
+    if (
+      membersById.get(memberId)?.type !== "human" ||
+      !uniqueMemberIds.has(memberId)
+    ) {
+      invalidSnapshot(`${statePath} must target a Human Discussion Member`);
+    }
+    const readThroughMessageId =
+      stateItem.read_through_message_id === null
+        ? null
+        : positiveInteger(
+            stateItem.read_through_message_id,
+            `${statePath}.read_through_message_id`,
+          );
+    if (
+      readThroughMessageId !== null &&
+      readThroughMessageId > messages.length
+    ) {
+      invalidSnapshot(
+        `${statePath}.read_through_message_id is outside the Discussion`,
+      );
+    }
+    const seenMessageIds = array(
+      stateItem.seen_message_ids,
+      `${statePath}.seen_message_ids`,
+    ).map((messageId, messageIndex) =>
+      positiveInteger(
+        messageId,
+        `${statePath}.seen_message_ids[${messageIndex}]`,
+      ),
+    );
+    if (
+      new Set(seenMessageIds).size !== seenMessageIds.length ||
+      seenMessageIds.some(
+        (messageId) =>
+          messageId > messages.length ||
+          (readThroughMessageId !== null && messageId <= readThroughMessageId),
+      )
+    ) {
+      invalidSnapshot(
+        `${statePath}.seen_message_ids must be unique sparse later IDs`,
+      );
+    }
+    readStateMemberIds.add(memberId);
+    return {
+      member_id: memberId,
+      read_through_message_id: readThroughMessageId,
+      seen_message_ids: seenMessageIds,
+    };
+  });
+
   return {
     id,
     topic: nonEmptyString(item.topic, `${path}.topic`),
     member_ids: discussionMemberIds,
-    messages: array(item.messages, `${path}.messages`).map(
-      (message, messageIndex) =>
-        parseMessage(message, index, messageIndex, membersById),
-    ),
+    messages,
+    ...(item.human_read_states === undefined
+      ? {}
+      : { human_read_states: humanReadStates }),
   };
 }
 
@@ -1443,6 +1518,12 @@ export const backend = {
       discussion_id: discussionId,
       sender_id: 1,
       body,
+    }),
+  seeHumanMessages: (discussionId: number, messageIds: number[]) =>
+    organizationRequest("human.discussion.see_messages", {
+      human_id: 1,
+      discussion_id: discussionId,
+      message_ids: messageIds,
     }),
   readHumanMention: (
     memberId: number,

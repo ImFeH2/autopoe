@@ -362,6 +362,47 @@ describe("parseOrganizationSnapshot", () => {
     );
   });
 
+  it("parses Human read state and the public Human mention subset contract", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].human_read_states = [
+      {
+        member_id: 1,
+        read_through_message_id: null,
+        seen_message_ids: [],
+      },
+    ];
+    value.discussions[0].messages[0].sender_id = 2;
+    value.discussions[0].messages[0].references = [
+      {
+        member_id: 1,
+        name: "You",
+        start: null,
+        end: null,
+        in_discussion: true,
+        notified: true,
+        deleted: false,
+      },
+    ];
+    value.discussions[0].messages[0].mentions = [];
+    value.discussions[0].messages[0].human_mentions = [
+      { member_id: 1, status: "unread" },
+    ];
+
+    expect(parseOrganizationSnapshot(value).discussions[0]).toEqual(
+      value.discussions[0],
+    );
+
+    const invalidSparse = structuredClone(value);
+    const invalidState = invalidSparse.discussions[0].human_read_states?.[0];
+    if (!invalidState) {
+      throw new Error("Expected Human read state fixture");
+    }
+    invalidState.seen_message_ids = [2];
+    expect(() => parseOrganizationSnapshot(invalidSparse)).toThrow(
+      "unique sparse later IDs",
+    );
+  });
+
   it("accepts a historical sender name snapshot after rename", () => {
     const value = structuredClone(validSnapshot);
     value.members[0].name = "Owner";

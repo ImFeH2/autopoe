@@ -25,7 +25,7 @@ function entry(overrides: Partial<AgentHistoryEntry>): AgentHistoryEntry {
 }
 
 describe("Agent history blocks", () => {
-  it("renders entries as collapsed labeled details", () => {
+  it("renders entries as collapsed labeled details with explicit event time", () => {
     const markup = renderToStaticMarkup(
       <HistoryBlock
         entry={entry({ content: "Done", type: "assistant" })}
@@ -36,7 +36,39 @@ describe("Agent history blocks", () => {
     expect(markup).toContain("<details");
     expect(markup).not.toContain(' open="');
     expect(markup).toContain("<strong>Assistant</strong>");
+    expect(markup).toContain("Run event time");
     expect(markup).toContain("Done");
+  });
+
+  it("humanizes Reminders and isolates technical IDs", () => {
+    const markup = renderToStaticMarkup(
+      <HistoryBlock
+        discussions={[{ id: 12, topic: "Release plan" }]}
+        entry={entry({
+          reminder: {
+            mentions: [
+              {
+                body: "**Shipped** to production",
+                discussion_id: 12,
+                message_id: 34,
+                previously_reminded: false,
+                sender_id: 7,
+              },
+            ],
+          },
+          type: "reminder",
+        })}
+        members={[{ id: 7, name: "Ada" }]}
+        run={run}
+      />,
+    );
+
+    expect(markup).toContain("Ada · Shipped to production");
+    expect(markup).toContain("Release plan");
+    expect(markup).toContain("Reminder event time");
+    expect(markup).not.toContain("Discussion 12 · Message 34 · Member 7");
+    expect(markup).toContain("<summary>Technical details</summary>");
+    expect(markup).toContain('aria-label="Copy Message ID"');
   });
 
   it("labels web search activity clearly", () => {

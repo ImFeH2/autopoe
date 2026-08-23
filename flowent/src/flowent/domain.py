@@ -8,6 +8,11 @@ from pathlib import Path
 from threading import Condition, Event, RLock
 from typing import Any, Literal
 
+from flowent.human_read_state import (
+    HumanReadState,
+    mark_human_messages_seen,
+    normalize_human_read_state,
+)
 from flowent.mentions import (
     MentionName,
     find_mentions,
@@ -101,6 +106,7 @@ class Discussion:
     topic: str
     member_ids: tuple[int, ...]
     messages: list[Message] = field(default_factory=list)
+    human_read_states: dict[int, HumanReadState] = field(default_factory=dict)
 
 
 @dataclass
@@ -310,6 +316,11 @@ class OrganizationState:
                 id=discussion_id,
                 topic=normalized_topic,
                 member_ids=participants,
+                human_read_states={
+                    member_id: HumanReadState(member_id)
+                    for member_id in participants
+                    if self._members[member_id].type == "human"
+                },
             )
             self._changed(persist=True)
             return self._snapshot()
@@ -399,6 +410,18 @@ class OrganizationState:
                 )
                 for target_id in agent_targets
             }
+            previous_human_read_state = None
+            if self._members[sender_id].type == "human":
+                previous_human_read_state = discussion.human_read_states.get(sender_id)
+                state = discussion.human_read_states.setdefault(
+                    sender_id, HumanReadState(sender_id)
+                )
+                discussion.human_read_states[sender_id] = mark_human_messages_seen(
+                    state,
+                    human_member_id=sender_id,
+                    ordered_message_ids=[item.id for item in discussion.messages],
+                    message_ids=[message.id],
+                )
             for target_id in agent_targets:
                 execution = self._agent_execution[target_id]
                 if execution.status == "error":
@@ -408,6 +431,13 @@ class OrganizationState:
                 self._changed(persist=True)
             except BaseException:
                 discussion.messages.pop()
+                if self._members[sender_id].type == "human":
+                    if previous_human_read_state is None:
+                        discussion.human_read_states.pop(sender_id, None)
+                    else:
+                        discussion.human_read_states[sender_id] = (
+                            previous_human_read_state
+                        )
                 for target_id, (status, error) in previous_execution.items():
                     execution = self._agent_execution[target_id]
                     execution.status = status
@@ -495,6 +525,39 @@ class OrganizationState:
             if changed:
                 self._changed(persist=True)
             return self._discussion_selection_data(discussion, selected_messages)
+
+    def see_human_messages(
+        self,
+        human_id: int,
+        discussion_id: int,
+        message_ids: Iterable[int],
+    ) -> dict[str, Any]:
+        target_ids = tuple(dict.fromkeys(message_ids))
+        if not target_ids:
+            raise DomainError("invalid_seen", "At least one Message ID is required")
+
+        with self._condition:
+            member = self._require_member(human_id)
+            if member.type != "human":
+                raise DomainError("not_a_human", "Member is not a Human")
+            discussion = self._require_discussion_member(human_id, discussion_id)
+            messages_by_id = {message.id: message for message in discussion.messages}
+            if any(message_id not in messages_by_id for message_id in target_ids):
+                raise DomainError("message_not_found", "Message not found")
+
+            state = discussion.human_read_states.setdefault(
+                human_id, HumanReadState(human_id)
+            )
+            next_state = mark_human_messages_seen(
+                state,
+                human_member_id=human_id,
+                ordered_message_ids=[message.id for message in discussion.messages],
+                message_ids=target_ids,
+            )
+            if next_state != state:
+                discussion.human_read_states[human_id] = next_state
+                self._changed(persist=True)
+            return self._snapshot()
 
     def read_human_mention(
         self,
@@ -788,6 +851,14 @@ class OrganizationState:
             "messages": [
                 self._message_data(message) for message in discussion.messages
             ],
+            "human_read_states": [
+                {
+                    "member_id": state.human_member_id,
+                    "read_through_message_id": state.read_through_message_id,
+                    "seen_message_ids": list(state.sparse_seen_message_ids),
+                }
+                for state in discussion.human_read_states.values()
+            ],
         }
 
     def _discussion_selection_data(
@@ -973,11 +1044,35 @@ class OrganizationState:
                         human_mentions=human_mentions,
                     )
                 )
+            ordered_message_ids = [message.id for message in messages]
+            human_read_states = {
+                state_data["member_id"]: normalize_human_read_state(
+                    human_member_id=state_data["member_id"],
+                    ordered_message_ids=ordered_message_ids,
+                    read_through_message_id=state_data.get("read_through_message_id"),
+                    sparse_seen_message_ids=state_data.get("seen_message_ids", []),
+                )
+                for state_data in item.get("human_read_states", [])
+            }
+            for member_id in item["member_ids"]:
+                member = self._members[member_id]
+                if member.type != "human" or member_id in human_read_states:
+                    continue
+                human_read_states[member_id] = normalize_human_read_state(
+                    human_member_id=member_id,
+                    ordered_message_ids=ordered_message_ids,
+                    sparse_seen_message_ids=[
+                        message.id
+                        for message in messages
+                        if message.sender_id == member_id
+                    ],
+                )
             discussion = Discussion(
                 id=item["id"],
                 topic=item["topic"],
                 member_ids=tuple(item["member_ids"]),
                 messages=messages,
+                human_read_states=human_read_states,
             )
             self._discussions[discussion.id] = discussion
 
@@ -998,6 +1093,14 @@ class OrganizationState:
                     "id": discussion.id,
                     "topic": discussion.topic,
                     "member_ids": list(discussion.member_ids),
+                    "human_read_states": [
+                        {
+                            "member_id": state.human_member_id,
+                            "read_through_message_id": state.read_through_message_id,
+                            "seen_message_ids": list(state.sparse_seen_message_ids),
+                        }
+                        for state in discussion.human_read_states.values()
+                    ],
                     "messages": [
                         {
                             "id": message.id,

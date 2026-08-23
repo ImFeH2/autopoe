@@ -7,8 +7,11 @@ import {
   useState,
 } from "react";
 import { AppSidebar, type WorkspaceView } from "@/components/layout";
-import { DiscussionsPage, type DraftMention } from "@/features/discussions";
-import type { HumanMentionNotificationItem } from "@/features/discussions/human-mention-notifications";
+import {
+  DiscussionsPage,
+  type DraftMention,
+  humanUnreadForDiscussion,
+} from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
 import {
@@ -44,71 +47,6 @@ function toggleId(ids: number[], id: number) {
     : [...ids, id];
 }
 
-export type HumanMentionFocusRequest = {
-  discussionId: number;
-  humanId: number | null;
-  messageId: number;
-  navigationGeneration: number;
-  token: number;
-  unread: boolean;
-  userGeneration: number;
-};
-
-export function createHumanMentionFocusRequest(
-  discussionId: number,
-  messageId: number,
-  humanId: number | null,
-  unread: boolean,
-  token: number,
-  userGeneration: number,
-  navigationGeneration: number,
-): HumanMentionFocusRequest {
-  return {
-    discussionId,
-    humanId,
-    messageId,
-    navigationGeneration,
-    token,
-    unread,
-    userGeneration,
-  };
-}
-
-export function shouldRefocusHumanMention(
-  request: HumanMentionFocusRequest,
-  latestUserGeneration: number,
-  latestNavigationGeneration: number,
-): boolean {
-  return (
-    request.userGeneration === latestUserGeneration &&
-    request.navigationGeneration === latestNavigationGeneration
-  );
-}
-
-export function focusHumanMentionMessage(
-  message: HTMLElement,
-  scheduleClear: (
-    callback: () => void,
-    delay: number,
-  ) => number = window.setTimeout,
-): number {
-  message.scrollIntoView({ block: "center" });
-  message.focus();
-  message.classList.add("human-mention-target");
-  return scheduleClear(() => {
-    message.classList.remove("human-mention-target");
-  }, 2_500);
-}
-
-export async function completeHumanMentionNavigation(
-  message: HTMLElement,
-  markRead?: () => Promise<unknown>,
-  scheduleClear?: (callback: () => void, delay: number) => number,
-): Promise<void> {
-  focusHumanMentionMessage(message, scheduleClear);
-  await markRead?.();
-}
-
 function App() {
   const [requestState, setRequestState] = useState<RequestState>({
     status: "loading",
@@ -138,17 +76,6 @@ function App() {
   const focusMessageAfterDialogRef = useRef(false);
   const focusMemberDetailRef = useRef(false);
   const restoreDiscussionFocusRef = useRef<DiscussionSource | null>(null);
-  const nextHumanMentionFocusTokenRef = useRef(1);
-  const latestHumanMentionUserGenerationRef = useRef(0);
-  const humanMentionNavigationGenerationRef = useRef(0);
-  const humanMentionHighlightTimerRef = useRef<number | null>(null);
-  const [humanMentionFocusRequest, setHumanMentionFocusRequest] =
-    useState<HumanMentionFocusRequest | null>(null);
-  const [highlightedHumanMention, setHighlightedHumanMention] = useState<{
-    discussionId: number;
-    messageId: number;
-    token: number;
-  } | null>(null);
   const selectedAgentId =
     requestState.status === "ready" &&
     requestState.snapshot.members.find(
@@ -158,7 +85,6 @@ function App() {
       : null;
   const openMemberFromDiscussion = useCallback(
     (memberId: number, discussionId: number, triggerKey: string) => {
-      humanMentionNavigationGenerationRef.current += 1;
       focusMemberDetailRef.current = true;
       restoreDiscussionFocusRef.current = null;
       setDiscussionSource({ discussionId, triggerKey });
@@ -358,127 +284,6 @@ function App() {
     return () => cancelAnimationFrame(frame);
   }, [selectedDiscussionId, workspaceView]);
 
-  useEffect(
-    () => () => {
-      if (humanMentionHighlightTimerRef.current !== null) {
-        window.clearTimeout(humanMentionHighlightTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const target = humanMentionFocusRequest;
-    if (target === null) {
-      return;
-    }
-    if (
-      !shouldRefocusHumanMention(
-        target,
-        latestHumanMentionUserGenerationRef.current,
-        humanMentionNavigationGenerationRef.current,
-      )
-    ) {
-      setHumanMentionFocusRequest((current) =>
-        current?.token === target.token ? null : current,
-      );
-      return;
-    }
-    if (
-      workspaceView !== "discussions" ||
-      selectedDiscussionId !== target.discussionId
-    ) {
-      return;
-    }
-
-    let frame = 0;
-    let cancelled = false;
-    const deadline = performance.now() + 2_500;
-    const locate = () => {
-      if (cancelled) {
-        return;
-      }
-      const message = document.querySelector<HTMLElement>(
-        `[data-message-id="${target.messageId}"]`,
-      );
-      if (message) {
-        const highlight = {
-          discussionId: target.discussionId,
-          messageId: target.messageId,
-          token: target.token,
-        };
-        setHighlightedHumanMention(highlight);
-        if (humanMentionHighlightTimerRef.current !== null) {
-          window.clearTimeout(humanMentionHighlightTimerRef.current);
-        }
-        humanMentionHighlightTimerRef.current = window.setTimeout(() => {
-          setHighlightedHumanMention((current) =>
-            current?.token === highlight.token ? null : current,
-          );
-          humanMentionHighlightTimerRef.current = null;
-        }, 2_500);
-
-        const humanId = target.humanId;
-        const markRead =
-          target.unread && humanId !== null
-            ? async () => {
-                setIsSaving(true);
-                setMutationError(null);
-                try {
-                  const nextSnapshot = await backend.readHumanMention(
-                    humanId,
-                    target.discussionId,
-                    target.messageId,
-                  );
-                  setRequestState({
-                    status: "ready",
-                    snapshot: nextSnapshot,
-                  });
-                } catch (error) {
-                  setMutationError(errorMessage(error));
-                } finally {
-                  setIsSaving(false);
-                  if (
-                    shouldRefocusHumanMention(
-                      target,
-                      latestHumanMentionUserGenerationRef.current,
-                      humanMentionNavigationGenerationRef.current,
-                    )
-                  ) {
-                    const refocus = createHumanMentionFocusRequest(
-                      target.discussionId,
-                      target.messageId,
-                      humanId,
-                      false,
-                      nextHumanMentionFocusTokenRef.current,
-                      target.userGeneration,
-                      target.navigationGeneration,
-                    );
-                    nextHumanMentionFocusTokenRef.current += 1;
-                    setHumanMentionFocusRequest(
-                      (current) => current ?? refocus,
-                    );
-                  }
-                }
-              }
-            : undefined;
-        void completeHumanMentionNavigation(message, markRead, () => 0);
-        setHumanMentionFocusRequest((current) =>
-          current?.token === target.token ? null : current,
-        );
-        return;
-      }
-      if (performance.now() < deadline) {
-        frame = requestAnimationFrame(locate);
-      }
-    };
-    frame = requestAnimationFrame(locate);
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frame);
-    };
-  }, [humanMentionFocusRequest, selectedDiscussionId, workspaceView]);
-
   if (requestState.status === "loading") {
     return <StatusPage label="Starting Flowent" />;
   }
@@ -618,6 +423,36 @@ function App() {
     }
   }
 
+  async function handleMessagesSeen(
+    discussionId: number,
+    messageIds: number[],
+  ) {
+    const discussion = snapshot.discussions.find(
+      (candidate) => candidate.id === discussionId,
+    );
+    const unreadMentionMessageIds = messageIds.filter((messageId) =>
+      discussion?.messages
+        .find((message) => message.id === messageId)
+        ?.human_mentions?.some(
+          (mention) => mention.member_id === 1 && mention.status === "unread",
+        ),
+    );
+    await mutate(async () => {
+      let nextSnapshot = await backend.seeHumanMessages(
+        discussionId,
+        messageIds,
+      );
+      for (const messageId of unreadMentionMessageIds) {
+        nextSnapshot = await backend.readHumanMention(
+          1,
+          discussionId,
+          messageId,
+        );
+      }
+      return nextSnapshot;
+    });
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedDiscussion) {
@@ -631,32 +466,6 @@ function App() {
       setMessageBody("");
       setMessageMentions([]);
     }
-  }
-
-  function openHumanMention(discussionId: number, messageId: number) {
-    const currentHuman = snapshot.members.find(
-      (member) => member.id === 1 && member.type === "human",
-    );
-    const message = snapshot.discussions
-      .find((discussion) => discussion.id === discussionId)
-      ?.messages.find((candidate) => candidate.id === messageId);
-    const notification = message?.human_mentions?.find(
-      (candidate) => candidate.member_id === currentHuman?.id,
-    );
-    latestHumanMentionUserGenerationRef.current += 1;
-    setHumanMentionFocusRequest(
-      createHumanMentionFocusRequest(
-        discussionId,
-        messageId,
-        currentHuman?.id ?? null,
-        notification?.status === "unread",
-        nextHumanMentionFocusTokenRef.current,
-        latestHumanMentionUserGenerationRef.current,
-        humanMentionNavigationGenerationRef.current,
-      ),
-    );
-    nextHumanMentionFocusTokenRef.current += 1;
-    selectDiscussion(discussionId, false);
   }
 
   function toggleMember(memberId: number) {
@@ -696,10 +505,7 @@ function App() {
     setMessageMentions(mentions);
   }
 
-  function selectDiscussion(discussionId: number, focusComposer = true) {
-    if (focusComposer) {
-      humanMentionNavigationGenerationRef.current += 1;
-    }
+  function selectDiscussion(discussionId: number) {
     focusMemberDetailRef.current = false;
     restoreDiscussionFocusRef.current = null;
     setDiscussionSource(null);
@@ -708,13 +514,15 @@ function App() {
     setIsCreatingDiscussion(false);
     setMessageBody("");
     setMessageMentions([]);
-    if (focusComposer) {
+    const discussion = snapshot.discussions.find(
+      (candidate) => candidate.id === discussionId,
+    );
+    if (!discussion || humanUnreadForDiscussion(discussion).unreadCount === 0) {
       requestAnimationFrame(() => messageInputRef.current?.focus());
     }
   }
 
   function selectWorkspaceView(view: WorkspaceView) {
-    humanMentionNavigationGenerationRef.current += 1;
     focusMemberDetailRef.current = false;
     restoreDiscussionFocusRef.current = null;
     setDiscussionSource(null);
@@ -726,7 +534,6 @@ function App() {
   }
 
   function returnToSourceDiscussion() {
-    humanMentionNavigationGenerationRef.current += 1;
     if (!sourceDiscussion || !discussionSource) {
       focusMemberDetailRef.current = true;
       setDiscussionSource(null);
@@ -742,34 +549,6 @@ function App() {
   const agents = snapshot.members.filter(
     (member): member is AgentMember => member.type === "agent",
   );
-  const currentHuman = snapshot.members.find(
-    (member) => member.id === 1 && member.type === "human",
-  );
-  const humanMentionNotifications: HumanMentionNotificationItem[] = currentHuman
-    ? snapshot.discussions.flatMap((discussion) =>
-        discussion.messages.flatMap((message) => {
-          const notification = message.human_mentions?.find(
-            (candidate) => candidate.member_id === currentHuman.id,
-          );
-          return notification
-            ? [
-                {
-                  discussionId: discussion.id,
-                  discussionTopic: discussion.topic,
-                  messageId: message.id,
-                  senderName:
-                    message.sender_name ??
-                    snapshot.members.find(
-                      (member) => member.id === message.sender_id,
-                    )?.name ??
-                    "Unknown",
-                  unread: notification.status === "unread",
-                },
-              ]
-            : [];
-        }),
-      )
-    : [];
   return (
     <main className="app-shell bg-canvas text-text-primary">
       <AppSidebar
@@ -784,6 +563,7 @@ function App() {
           <MembersPage
             agentName={agentName}
             disabled={isSaving}
+            discussions={snapshot.discussions}
             error={isCreatingAgent ? mutationError : null}
             history={
               selectedMember?.type === "agent"
@@ -816,12 +596,6 @@ function App() {
             discussions={snapshot.discussions}
             error={mutationError}
             isCreating={isCreatingDiscussion}
-            humanMentionNotifications={humanMentionNotifications}
-            highlightedMessageId={
-              highlightedHumanMention?.discussionId === selectedDiscussionId
-                ? highlightedHumanMention.messageId
-                : null
-            }
             members={snapshot.members}
             messageBody={messageBody}
             messageInputRef={messageInputRef}
@@ -832,8 +606,8 @@ function App() {
             onDialogOpenChange={changeDiscussionDialog}
             onDeleteDiscussion={handleDeleteDiscussion}
             onMessageChange={changeMessageDraft}
-            onOpenHumanMention={(discussionId, messageId) =>
-              void openHumanMention(discussionId, messageId)
+            onMessagesSeen={(discussionId, messageIds) =>
+              void handleMessagesSeen(discussionId, messageIds)
             }
             onOpenMember={openMemberFromDiscussion}
             onCreateAgent={() => {

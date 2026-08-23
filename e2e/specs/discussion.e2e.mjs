@@ -58,6 +58,9 @@ describe("Discussions", () => {
     await form.$("button=Create").click();
 
     await expect($("h2=Repository work")).toBeDisplayed();
+    const discussionTechnicalDetails = await $("summary=Technical details");
+    await discussionTechnicalDetails.click();
+    await expect($("aria/Copy Discussion ID")).toBeDisplayed();
     await expect($("aria/Messages")).toHaveText("No messages yet");
     const composer = await $("aria/Send Message");
     const message = await composer.$("aria/Message");
@@ -66,6 +69,9 @@ describe("Discussions", () => {
     await composer.$("button=Send").click();
 
     await expect($("p=Document the release checklist.")).toBeDisplayed();
+    const technicalDetails = await $$("summary=Technical details");
+    await technicalDetails[1].click();
+    await expect($("aria/Copy Message ID")).toBeDisplayed();
     const discussion = await $("aria/Open Repository work");
     await browser.waitUntil(async () =>
       (await discussion.getText()).includes("1 message"),
