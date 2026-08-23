@@ -20,6 +20,7 @@ import {
   discussionEntryAccessibleLabel,
   filterDiscussions,
   formatMessageCount,
+  formatMessageTimestamp,
   humanUnreadForDiscussion,
   positionInitialDiscussionMessages,
 } from "@/features/discussions";
@@ -128,6 +129,31 @@ describe("App", () => {
     expect(formatMessageCount(2)).toBe("2 messages");
   });
 
+  it("formats Message timestamps as stable local clock time", () => {
+    const sentAt = new Date("2026-08-22T12:34:56.789Z");
+    const todayUs = formatMessageTimestamp(
+      sentAt.toISOString(),
+      new Date(sentAt),
+      "en-US",
+    );
+    const todayGb = formatMessageTimestamp(
+      sentAt.toISOString(),
+      new Date(sentAt),
+      "en-GB",
+    );
+    expect(todayUs.compact).toMatch(/(?:AM|PM)$/);
+    expect(todayGb.compact).toMatch(/^\d{2}:\d{2}$/);
+    expect(todayUs.full).toMatch(/:\d{2}/);
+
+    const historical = formatMessageTimestamp(
+      "2026-07-21T12:34:56.789Z",
+      new Date(sentAt),
+      "en-GB",
+    );
+    expect(historical.compact).toMatch(/\d{2}:\d{2}$/);
+    expect(historical.compact).not.toBe(todayGb.compact);
+  });
+
   it("filters Discussions by topic without changing their order", () => {
     const discussions = [
       {
@@ -164,18 +190,47 @@ describe("App", () => {
         },
       ],
       messages: [
-        { id: 1, sender_id: 2, body: "Read", references: [], mentions: [] },
+        {
+          id: 1,
+          sender_id: 2,
+          body: "Read",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
         {
           id: 2,
           sender_id: 2,
           body: "Mention",
+          created_at: null,
           references: [],
           mentions: [],
           human_mentions: [{ member_id: 1, status: "unread" as const }],
         },
-        { id: 3, sender_id: 2, body: "Seen", references: [], mentions: [] },
-        { id: 4, sender_id: 1, body: "Own", references: [], mentions: [] },
-        { id: 5, sender_id: 2, body: "Unread", references: [], mentions: [] },
+        {
+          id: 3,
+          sender_id: 2,
+          body: "Seen",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
+        {
+          id: 4,
+          sender_id: 1,
+          body: "Own",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
+        {
+          id: 5,
+          sender_id: 2,
+          body: "Unread",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
       ],
     };
 
@@ -199,6 +254,7 @@ describe("App", () => {
       id,
       sender_id: 2,
       body: `Message ${id}`,
+      created_at: null,
       references: [],
       mentions: [],
       ...(mentioned
@@ -334,6 +390,7 @@ describe("App", () => {
           id: senderId,
           sender_id: senderId,
           body: `Message from ${senderId}`,
+          created_at: null,
           references: [],
           mentions: [],
         })),
@@ -342,6 +399,7 @@ describe("App", () => {
           sender_id: 100,
           sender_name: "Former Agent",
           body: "Historical message from a deleted member",
+          created_at: null,
           references: [],
           mentions: [],
         },
@@ -452,6 +510,15 @@ describe("App", () => {
       /\.message-avatar\s*\{[^}]*align-self:\s*flex-start;/su,
     );
     expect(discussionStyles).toMatch(/\.discussion-title:focus-visible\s*\{/u);
+    expect(discussionStyles).toMatch(
+      /\.message-meta\s*\{[^}]*flex-wrap:\s*wrap;/su,
+    );
+    expect(discussionStyles).toMatch(
+      /\.message-meta span\s*\{[^}]*white-space:\s*nowrap;/su,
+    );
+    expect(discussionStyles).toMatch(
+      /\.message-meta strong\s*\{[^}]*overflow-wrap:\s*anywhere;/su,
+    );
   });
 
   it("renders every member and focusable Agent status in crowded Discussions", () => {
@@ -591,6 +658,7 @@ describe("App", () => {
           id: 1,
           sender_id: 1,
           body: "@OldName **Bold request**\nnext line",
+          created_at: "2026-08-22T12:34:56.789Z",
           references: [
             {
               member_id: 2,
@@ -606,8 +674,9 @@ describe("App", () => {
         },
         {
           id: 2,
-          sender_id: 1,
+          sender_id: 2,
           body: "@OldGone",
+          created_at: "2026-07-21T12:34:56.789Z",
           references: [
             {
               member_id: 3,
@@ -669,6 +738,14 @@ describe("App", () => {
     expect(markup).toContain("@OldGone · PENDING");
     expect(markup).toContain('title="@OldGone · pending · Deleted Agent"');
     expect(markup).not.toContain('aria-label="Open OldGone in Members"');
+    expect(markup.match(/class="message-timestamp font-mono"/g)).toHaveLength(
+      2,
+    );
+    expect(markup.match(/<time aria-hidden="true" dateTime=/g)).toHaveLength(2);
+    expect(markup.match(/<span class="sr-only">Sent /g)).toHaveLength(2);
+    expect(markup).not.toContain(", sent ");
+    expect(markup).toContain("message-row--human");
+    expect(markup).toContain("message-row--agent");
   });
 
   it("includes total unread and the @me subset in the discussion entry name", () => {
@@ -741,6 +818,7 @@ describe("App", () => {
           id: 1,
           sender_id: 2,
           body: "@You please review",
+          created_at: null,
           references: [],
           mentions: [],
           human_mentions: [{ member_id: 1, status: "unread" as const }],
@@ -806,6 +884,7 @@ describe("App", () => {
           sender_id: 2,
           sender_name: "OriginalAgent",
           body: "@Owner review",
+          created_at: null,
           references: [
             {
               member_id: 1,

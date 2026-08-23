@@ -52,6 +52,7 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
         {"member_id": 2, "status": "pending"}
     ]
 
+    created_at = state.snapshot()["discussions"][0]["messages"][0]["created_at"]
     read = context.discussion("read", discussion_id=1, end_message_id=1)
     assert read == {
         "discussion_id": 1,
@@ -60,6 +61,7 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
                 "id": 1,
                 "sender_id": 1,
                 "body": "@Ada private request",
+                "created_at": created_at,
                 "references": [
                     {
                         "member_id": 2,
@@ -500,6 +502,9 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
         assert state.completed.wait(timeout=1)
 
         snapshot = state.snapshot()
+        created_at = [
+            message["created_at"] for message in snapshot["discussions"][0]["messages"]
+        ]
         assert runner.activations[0].mentions[0].message_id == 1
         assert snapshot["members"][1]["status"] == "idle"
         assert snapshot["discussions"][0]["messages"] == [
@@ -507,6 +512,7 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
                 "id": 1,
                 "sender_id": 1,
                 "body": "@Ada Please handle this",
+                "created_at": created_at[0],
                 "references": [
                     {
                         "member_id": 2,
@@ -524,6 +530,7 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
                 "id": 2,
                 "sender_id": 2,
                 "body": "Handled immediately",
+                "created_at": created_at[1],
                 "references": [],
                 "mentions": [],
             },

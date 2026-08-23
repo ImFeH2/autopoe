@@ -11,6 +11,7 @@ export {
   discussionEntryAccessibleLabel,
   filterDiscussions,
   formatMessageCount,
+  formatMessageTimestamp,
   humanUnreadForDiscussion,
   positionInitialDiscussionMessages,
 } from "./discussions-page";
