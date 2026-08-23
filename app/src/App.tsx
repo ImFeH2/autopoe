@@ -430,11 +430,9 @@ function App() {
                     target.discussionId,
                     target.messageId,
                   );
-                  startTransition(() => {
-                    setRequestState({
-                      status: "ready",
-                      snapshot: nextSnapshot,
-                    });
+                  setRequestState({
+                    status: "ready",
+                    snapshot: nextSnapshot,
                   });
                 } catch (error) {
                   setMutationError(errorMessage(error));
