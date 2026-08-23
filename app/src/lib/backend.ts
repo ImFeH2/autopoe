@@ -174,6 +174,7 @@ export type MentionSyntax = {
 export type Message = {
   id: number;
   sender_id: number;
+  sender_name?: string;
   body: string;
   references: MentionReference[];
   mentions: Mention[];
@@ -390,6 +391,10 @@ function parseMessage(
     invalidSnapshot(`${path}.id must follow Discussion order`);
   }
   const senderId = positiveInteger(item.sender_id, `${path}.sender_id`);
+  const senderName =
+    item.sender_name === undefined
+      ? undefined
+      : nonEmptyString(item.sender_name, `${path}.sender_name`);
   const body = nonEmptyString(item.body, `${path}.body`);
   const bodyCodePoints = [...body];
   let previousPositionedEnd = 0;
@@ -479,6 +484,10 @@ function parseMessage(
       if (mentionedMemberIds.has(memberId)) {
         invalidSnapshot(`${path}.mentions must target unique Members`);
       }
+      const member = membersById.get(memberId);
+      if (member && member.type !== "agent") {
+        invalidSnapshot(`${mentionPath} must target an Agent`);
+      }
       if (
         !references.some(
           (reference) => reference.member_id === memberId && reference.notified,
@@ -509,13 +518,16 @@ function parseMessage(
     if (humanMentionIds.has(memberId)) {
       invalidSnapshot(`${path}.human_mentions must target unique Humans`);
     }
-    if (membersById.get(memberId)?.type !== "human") {
+    const member = membersById.get(memberId);
+    if (member?.type !== "human") {
       invalidSnapshot(`${notificationPath} must target an active Human`);
     }
-    const status: HumanMention["status"] =
-      notificationItem.status === "unread" || notificationItem.status === "read"
-        ? notificationItem.status
-        : invalidSnapshot(`${notificationPath}.status is invalid`);
+    if (
+      notificationItem.status !== "unread" &&
+      notificationItem.status !== "read"
+    ) {
+      invalidSnapshot(`${notificationPath}.status is invalid`);
+    }
     if (
       !references.some(
         (reference) => reference.member_id === memberId && reference.notified,
@@ -525,6 +537,7 @@ function parseMessage(
         `${notificationPath} requires a notified identity reference`,
       );
     }
+    const status: HumanMention["status"] = notificationItem.status;
     humanMentionIds.add(memberId);
     return { member_id: memberId, status };
   });
@@ -539,17 +552,23 @@ function parseMessage(
       );
     }
     if (
-      member?.type !== "human" &&
+      member?.type === "agent" &&
       !mentionedMemberIds.has(reference.member_id)
     ) {
       invalidSnapshot(
-        `${path}.references notified identity requires a Mention status`,
+        `${path}.references notified Agent identity requires a Mention status`,
+      );
+    }
+    if (!member && !mentionedMemberIds.has(reference.member_id)) {
+      invalidSnapshot(
+        `${path}.references deleted notified identity requires a Mention status`,
       );
     }
   }
   return {
     id,
     sender_id: senderId,
+    ...(senderName === undefined ? {} : { sender_name: senderName }),
     body,
     references,
     mentions,
@@ -682,8 +701,8 @@ export function parseOrganizationSnapshot(
     invalidSnapshot("Member IDs must be unique");
   }
   const currentHuman = members.find((member) => member.id === 1);
-  if (currentHuman?.type !== "human" || currentHuman.name !== "You") {
-    invalidSnapshot('Member 1 must be the current Human "You"');
+  if (currentHuman?.type !== "human") {
+    invalidSnapshot("Member 1 must be the current Human");
   }
 
   const membersById = new Map(members.map((member) => [member.id, member]));
@@ -1441,6 +1460,11 @@ export const backend = {
     }),
   createAgent: (name: string) =>
     organizationRequest("organization.create_agent", { name }),
+  renameMember: (memberId: number, name: string) =>
+    organizationRequest("organization.rename_member", {
+      member_id: memberId,
+      name,
+    }),
   deleteAgent: (agentId: number) =>
     organizationRequest("organization.delete_agent", { agent_id: agentId }),
   pauseAgent: (agentId: number) =>

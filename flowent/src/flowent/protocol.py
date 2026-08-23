@@ -63,6 +63,7 @@ class Dispatcher:
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.snapshot(),
             "organization.create_agent": self._create_agent,
+            "organization.rename_member": self._rename_member,
             "organization.delete_agent": self._delete_agent,
             "organization.pause_agent": self._pause_agent,
             "organization.resume_agent": self._resume_agent,
@@ -75,6 +76,7 @@ class Dispatcher:
             "discussion.delete": self._delete_discussion,
             "discussion.send": self._send_message,
             "human.discussion.see_messages": self._see_human_messages,
+            "human.mention.read": self._read_human_mention,
             "settings.get_model": self._get_model_settings,
             "settings.update_model": self._update_model_settings,
             "settings.get_observability": self._get_observability_settings,
@@ -230,6 +232,12 @@ class Dispatcher:
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._state.create_agent(name=require_string(params, "name"))
 
+    def _rename_member(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.rename_member(
+            member_id=require_integer(params, "member_id"),
+            new_name=require_string(params, "name"),
+        )
+
     def _delete_agent(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._operations.delete_agent(require_integer(params, "agent_id"))
 
@@ -320,6 +328,13 @@ class Dispatcher:
             human_id=require_integer(params, "human_id"),
             discussion_id=require_integer(params, "discussion_id"),
             message_ids=require_integer_list(params, "message_ids"),
+        )
+
+    def _read_human_mention(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.read_human_mention(
+            member_id=require_integer(params, "member_id"),
+            discussion_id=require_integer(params, "discussion_id"),
+            message_id=require_integer(params, "message_id"),
         )
 
 

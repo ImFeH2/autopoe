@@ -9,7 +9,7 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   border-right: 1px solid var(--color-border);
   background: var(--color-surface-sidebar);
 }
@@ -656,4 +656,68 @@ button.mention-reference:focus-visible {
   font-size: 0.75rem;
   line-height: 1.4;
   padding: 0.5rem 0.625rem;
+}
+
+.human-mention-notifications {
+  display: grid;
+  gap: 6px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 9px 10px;
+}
+
+.human-mention-notifications header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+}
+
+.human-mention-notifications h2 {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.human-mention-notification-list {
+  display: grid;
+  max-height: 112px;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.human-mention-notification-list button {
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 6px 7px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 10px;
+  text-align: left;
+}
+
+.human-mention-notification-list button:hover {
+  background: var(--color-surface-hover);
+}
+
+.human-mention-notification-list button:focus-visible,
+.message-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.message-row.human-mention-target {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: -2px;
+  background: var(--color-accent-subtle);
+}
+
+.human-mention-notification-list button.is-unread {
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
 }
