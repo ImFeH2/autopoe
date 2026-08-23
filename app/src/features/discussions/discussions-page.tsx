@@ -4,6 +4,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -52,6 +53,42 @@ import {
 
 export function formatMessageCount(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
+}
+
+export function discussionEntryAccessibleLabel(
+  topic: string,
+  unreadCount: number,
+  unreadHumanMentionCount: number,
+): string {
+  if (unreadCount <= 0) {
+    return `Open ${topic}`;
+  }
+  const unreadLabel = `${unreadCount} unread ${
+    unreadCount === 1 ? "message" : "messages"
+  }`;
+  if (unreadHumanMentionCount <= 0) {
+    return `Open ${topic}. ${unreadLabel}.`;
+  }
+  const mentionLabel = `${unreadHumanMentionCount} unread ${
+    unreadHumanMentionCount === 1 ? "mention" : "mentions"
+  } for you`;
+  return `Open ${topic}. ${unreadLabel}, including ${mentionLabel}.`;
+}
+
+export function positionInitialDiscussionMessages(
+  log: HTMLElement,
+  firstUnreadMessageId: number | undefined,
+): "bottom" | "first-unread" {
+  if (firstUnreadMessageId === undefined) {
+    log.scrollTop = log.scrollHeight;
+    return "bottom";
+  }
+  const target = log.querySelector<HTMLElement>(
+    `[data-message-id="${firstUnreadMessageId}"]`,
+  );
+  target?.scrollIntoView({ block: "center" });
+  target?.focus();
+  return "first-unread";
 }
 
 export function humanUnreadForDiscussion(
@@ -235,7 +272,11 @@ export function DiscussionsPage({
               return (
                 <ListButton
                   active={selected}
-                  aria-label={`Open ${discussion.topic}`}
+                  aria-label={discussionEntryAccessibleLabel(
+                    discussion.topic,
+                    unread.unreadCount,
+                    unread.unreadHumanMentionCount,
+                  )}
                   key={discussion.id}
                   action={
                     <Dialog
@@ -541,7 +582,14 @@ function DiscussionView({
   onSend,
 }: DiscussionViewProps) {
   const messageLogRef = useRef<HTMLDivElement>(null);
-  const shouldFollowMessagesRef = useRef(true);
+  const unread = useMemo(
+    () => humanUnreadForDiscussion(discussion),
+    [discussion],
+  );
+  const initialFirstUnreadMessageIdRef = useRef(unread.firstUnreadMessageId);
+  const shouldFollowMessagesRef = useRef(
+    initialFirstUnreadMessageIdRef.current === undefined,
+  );
   const lastMentionTargetRef = useRef<number | undefined>(undefined);
   const onMessagesSeenRef = useRef(onMessagesSeen);
   onMessagesSeenRef.current = onMessagesSeen;
@@ -555,10 +603,6 @@ function DiscussionView({
     createNewMessageIndicatorState(
       discussion.messages.map((message) => message.id),
     ),
-  );
-  const unread = useMemo(
-    () => humanUnreadForDiscussion(discussion),
-    [discussion],
   );
   const unreadMessageIds = useMemo(
     () => new Set(unread.unreadMessageIds),
@@ -588,6 +632,18 @@ function DiscussionView({
     },
     [],
   );
+
+  useLayoutEffect(() => {
+    const log = messageLogRef.current;
+    if (!log) {
+      return;
+    }
+    shouldFollowMessagesRef.current =
+      positionInitialDiscussionMessages(
+        log,
+        initialFirstUnreadMessageIdRef.current,
+      ) === "bottom";
+  }, []);
 
   useEffect(() => {
     const messageIds = discussion.messages.map((message) => message.id);

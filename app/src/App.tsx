@@ -7,7 +7,11 @@ import {
   useState,
 } from "react";
 import { AppSidebar, type WorkspaceView } from "@/components/layout";
-import { DiscussionsPage, type DraftMention } from "@/features/discussions";
+import {
+  DiscussionsPage,
+  type DraftMention,
+  humanUnreadForDiscussion,
+} from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
 import {
@@ -487,7 +491,12 @@ function App() {
     setIsCreatingDiscussion(false);
     setMessageBody("");
     setMessageMentions([]);
-    requestAnimationFrame(() => messageInputRef.current?.focus());
+    const discussion = snapshot.discussions.find(
+      (candidate) => candidate.id === discussionId,
+    );
+    if (!discussion || humanUnreadForDiscussion(discussion).unreadCount === 0) {
+      requestAnimationFrame(() => messageInputRef.current?.focus());
+    }
   }
 
   function selectWorkspaceView(view: WorkspaceView) {

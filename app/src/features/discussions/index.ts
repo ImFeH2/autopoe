@@ -8,9 +8,11 @@ export {
 export {
   DiscussionsPage,
   discussionAgentStatus,
+  discussionEntryAccessibleLabel,
   filterDiscussions,
   formatMessageCount,
   humanUnreadForDiscussion,
+  positionInitialDiscussionMessages,
 } from "./discussions-page";
 export type { DraftMention, MentionQuery } from "./message-composer";
 export {

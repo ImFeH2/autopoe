@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { AppSidebar } from "@/components/layout";
 import {
@@ -17,9 +17,11 @@ import {
 import {
   DiscussionsPage,
   discussionAgentStatus,
+  discussionEntryAccessibleLabel,
   filterDiscussions,
   formatMessageCount,
   humanUnreadForDiscussion,
+  positionInitialDiscussionMessages,
 } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import {
@@ -615,6 +617,53 @@ describe("App", () => {
     expect(markup).not.toContain('aria-label="Open OldGone in Members"');
   });
 
+  it("includes total unread and the @me subset in the discussion entry name", () => {
+    expect(discussionEntryAccessibleLabel("Review", 2, 1)).toBe(
+      "Open Review. 2 unread messages, including 1 unread mention for you.",
+    );
+    expect(discussionEntryAccessibleLabel("Review", 2, 0)).toBe(
+      "Open Review. 2 unread messages.",
+    );
+    expect(discussionEntryAccessibleLabel("Review", 0, 0)).toBe("Open Review");
+  });
+
+  it("positions an initially unread discussion at its first unread message", () => {
+    const target = {
+      focus: vi.fn(),
+      scrollIntoView: vi.fn(),
+    };
+    const log = {
+      querySelector: vi.fn(() => target),
+      scrollHeight: 900,
+      scrollTop: 37,
+    };
+
+    expect(
+      positionInitialDiscussionMessages(log as unknown as HTMLElement, 12),
+    ).toBe("first-unread");
+    expect(log.querySelector).toHaveBeenCalledWith('[data-message-id="12"]');
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(target.focus).toHaveBeenCalledOnce();
+    expect(log.scrollTop).toBe(37);
+  });
+
+  it("follows the bottom when an opened discussion has no historical unread", () => {
+    const log = {
+      querySelector: vi.fn(),
+      scrollHeight: 900,
+      scrollTop: 37,
+    };
+
+    expect(
+      positionInitialDiscussionMessages(
+        log as unknown as HTMLElement,
+        undefined,
+      ),
+    ).toBe("bottom");
+    expect(log.scrollTop).toBe(900);
+    expect(log.querySelector).not.toHaveBeenCalled();
+  });
+
   it("renders unread badges, divider, and jump controls from props", () => {
     const agent = {
       id: 2,
@@ -675,6 +724,9 @@ describe("App", () => {
       </TooltipProvider>,
     );
 
+    expect(markup).toContain(
+      'aria-label="Open Unread work. 1 unread message, including 1 unread mention for you."',
+    );
     expect(markup).toContain('aria-label="1 unread messages"');
     expect(markup).toContain('aria-label="Unread message navigation"');
     expect(markup).toContain("Jump to first unread message (1 unread)");
