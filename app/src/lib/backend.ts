@@ -50,16 +50,50 @@ export type AgentHistoryEntry = {
   content?: string;
   tool_name?: string;
   reminder?: AgentReminder;
+  content_length?: number;
+  content_truncated?: boolean;
+  paired_entry_id?: string;
 };
 
 export type AgentHistoryRun = {
   run_id: string;
+  sequence?: number;
   status: "running" | "completed" | "failed" | "interrupted";
   started_at: string;
   completed_at: string | null;
   usage: Record<string, unknown> | null;
   event_sequence: number;
   entries: AgentHistoryEntry[];
+};
+
+export type AgentHistoryRunMetadata = Omit<
+  AgentHistoryRun,
+  "entries" | "sequence"
+> & {
+  sequence: number;
+  entry_count: number;
+  error: string | null;
+};
+
+export type AgentHistoryPage = {
+  agent_id: number;
+  runs: AgentHistoryRunMetadata[];
+  has_earlier: boolean;
+  next_before_sequence: number | null;
+};
+
+export type AgentHistoryEntryDetail = {
+  agent_id: number;
+  run_id: string;
+  entry_id: string;
+  type: AgentHistoryEntryType;
+  tool_name?: string;
+  paired_entry_id?: string;
+  content: string;
+  content_length: number;
+  offset: number;
+  next_offset: number | null;
+  truncated: boolean;
 };
 
 export type AgentHistory = {
@@ -183,12 +217,54 @@ export type Message = {
   human_mentions?: HumanMention[];
 };
 
+export type HumanDiscussionActivity = HumanDiscussionReadState & {
+  unread_count: number;
+  first_unread_message_id: number | null;
+  unread_human_mention_count: number;
+  next_human_mention_message_id: number | null;
+};
+
+export type DiscussionSummary = {
+  id: number;
+  topic: string;
+  member_ids: number[];
+  message_count: number;
+  first_message_id: number | null;
+  latest_message_id: number | null;
+  human_activity: HumanDiscussionActivity[];
+};
+
 export type Discussion = {
   id: number;
   topic: string;
   member_ids: number[];
-  messages: Message[];
+  messages?: Message[];
   human_read_states?: HumanDiscussionReadState[];
+  message_count?: number;
+  first_message_id?: number | null;
+  latest_message_id?: number | null;
+  human_activity?: HumanDiscussionActivity[];
+};
+
+export type DiscussionMessagePageMode =
+  | "latest"
+  | "before"
+  | "after"
+  | "anchor";
+
+export type DiscussionMessagePage = {
+  discussion_id: number;
+  mode: DiscussionMessagePageMode;
+  messages: Message[];
+  oldest_message_id: number | null;
+  newest_message_id: number | null;
+  latest_message_id: number | null;
+  has_earlier: boolean;
+  has_later: boolean;
+  next_before_message_id: number | null;
+  next_after_message_id: number | null;
+  anchor_message_id?: number;
+  anchor_index?: number;
 };
 
 export type OrganizationSnapshot = {
@@ -413,11 +489,14 @@ function parseMessage(
   discussionIndex: number,
   messageIndex: number,
   membersById: Map<number, Member>,
+  enforceOrder = true,
+  pathOverride?: string,
 ): Message {
-  const path = `discussions[${discussionIndex}].messages[${messageIndex}]`;
+  const path =
+    pathOverride ?? `discussions[${discussionIndex}].messages[${messageIndex}]`;
   const item = record(value, path);
   const id = positiveInteger(item.id, `${path}.id`);
-  if (id !== messageIndex + 1) {
+  if (enforceOrder && id !== messageIndex + 1) {
     invalidSnapshot(`${path}.id must follow Discussion order`);
   }
   const senderId = positiveInteger(item.sender_id, `${path}.sender_id`);
@@ -622,115 +701,264 @@ function parseMessage(
   };
 }
 
+function nullablePositiveInteger(value: unknown, path: string): number | null {
+  return value === null ? null : positiveInteger(value, path);
+}
+
 function parseDiscussion(
   value: unknown,
   index: number,
   membersById: Map<number, Member>,
-): Discussion {
+): DiscussionSummary {
   const path = `discussions[${index}]`;
   const item = record(value, path);
+  if (item.messages !== undefined || item.human_read_states !== undefined) {
+    invalidSnapshot(`${path} must be a lightweight summary`);
+  }
   const id = positiveInteger(item.id, `${path}.id`);
-  const discussionMemberIds = array(item.member_ids, `${path}.member_ids`).map(
+  const memberIds = array(item.member_ids, `${path}.member_ids`).map(
     (memberId, memberIndex) =>
       positiveInteger(memberId, `${path}.member_ids[${memberIndex}]`),
   );
-  const uniqueMemberIds = new Set(discussionMemberIds);
-  if (uniqueMemberIds.size !== discussionMemberIds.length) {
+  if (new Set(memberIds).size !== memberIds.length) {
     invalidSnapshot(`${path}.member_ids must contain unique Members`);
   }
-  for (const memberId of discussionMemberIds) {
+  for (const memberId of memberIds) {
     if (!membersById.has(memberId)) {
       invalidSnapshot(`${path}.member_ids contains an unknown Member`);
     }
   }
-
-  const messages = array(item.messages, `${path}.messages`).map(
-    (message, messageIndex) =>
-      parseMessage(message, index, messageIndex, membersById),
+  const messageCount = nonNegativeInteger(
+    item.message_count,
+    `${path}.message_count`,
   );
-  const readStateMemberIds = new Set<number>();
-  const humanReadStates = array(
-    item.human_read_states ?? [],
-    `${path}.human_read_states`,
-  ).map((state, stateIndex) => {
-    const statePath = `${path}.human_read_states[${stateIndex}]`;
-    const stateItem = record(state, statePath);
+  const firstMessageId = nullablePositiveInteger(
+    item.first_message_id,
+    `${path}.first_message_id`,
+  );
+  const latestMessageId = nullablePositiveInteger(
+    item.latest_message_id,
+    `${path}.latest_message_id`,
+  );
+  if (
+    (messageCount === 0) !==
+    (firstMessageId === null && latestMessageId === null)
+  ) {
+    invalidSnapshot(`${path} message bounds are inconsistent`);
+  }
+  if (
+    firstMessageId !== null &&
+    latestMessageId !== null &&
+    firstMessageId > latestMessageId
+  ) {
+    invalidSnapshot(`${path} message bounds are invalid`);
+  }
+  const latestBound = latestMessageId ?? 0;
+  const activityMemberIds = new Set<number>();
+  const humanActivity = array(
+    item.human_activity,
+    `${path}.human_activity`,
+  ).map((value, activityIndex) => {
+    const activityPath = `${path}.human_activity[${activityIndex}]`;
+    const activity = record(value, activityPath);
     const memberId = positiveInteger(
-      stateItem.member_id,
-      `${statePath}.member_id`,
+      activity.member_id,
+      `${activityPath}.member_id`,
     );
-    if (readStateMemberIds.has(memberId)) {
-      invalidSnapshot(`${path}.human_read_states must target unique Humans`);
-    }
     if (
       membersById.get(memberId)?.type !== "human" ||
-      (discussionMemberIds.length > 0 && !uniqueMemberIds.has(memberId))
+      !memberIds.includes(memberId)
     ) {
-      invalidSnapshot(`${statePath} must target a Human Discussion Member`);
+      invalidSnapshot(`${activityPath} must target a Human Discussion Member`);
     }
+    if (activityMemberIds.has(memberId)) {
+      invalidSnapshot(`${path}.human_activity must target unique Humans`);
+    }
+    activityMemberIds.add(memberId);
     const joinedAfterMessageId = nonNegativeInteger(
-      stateItem.joined_after_message_id,
-      `${statePath}.joined_after_message_id`,
+      activity.joined_after_message_id,
+      `${activityPath}.joined_after_message_id`,
     );
-    if (joinedAfterMessageId > messages.length) {
+    if (joinedAfterMessageId > latestBound) {
       invalidSnapshot(
-        `${statePath}.joined_after_message_id is outside the Discussion`,
+        `${activityPath}.joined_after_message_id is outside the Discussion`,
       );
     }
-    const readThroughMessageId =
-      stateItem.read_through_message_id === null
-        ? null
-        : positiveInteger(
-            stateItem.read_through_message_id,
-            `${statePath}.read_through_message_id`,
-          );
-    if (
-      readThroughMessageId !== null &&
-      readThroughMessageId > messages.length
-    ) {
+    const readThroughMessageId = nullablePositiveInteger(
+      activity.read_through_message_id,
+      `${activityPath}.read_through_message_id`,
+    );
+    if (readThroughMessageId !== null && readThroughMessageId > latestBound) {
       invalidSnapshot(
-        `${statePath}.read_through_message_id is outside the Discussion`,
+        `${activityPath}.read_through_message_id is outside the Discussion`,
       );
     }
     const seenMessageIds = array(
-      stateItem.seen_message_ids,
-      `${statePath}.seen_message_ids`,
+      activity.seen_message_ids,
+      `${activityPath}.seen_message_ids`,
     ).map((messageId, messageIndex) =>
       positiveInteger(
         messageId,
-        `${statePath}.seen_message_ids[${messageIndex}]`,
+        `${activityPath}.seen_message_ids[${messageIndex}]`,
       ),
     );
     if (
       new Set(seenMessageIds).size !== seenMessageIds.length ||
       seenMessageIds.some(
         (messageId) =>
-          messageId > messages.length ||
+          messageId <= joinedAfterMessageId ||
+          messageId > latestBound ||
           (readThroughMessageId !== null && messageId <= readThroughMessageId),
       )
     ) {
       invalidSnapshot(
-        `${statePath}.seen_message_ids must be unique sparse later IDs`,
+        `${activityPath}.seen_message_ids are outside the eligible sparse range`,
       );
     }
-    readStateMemberIds.add(memberId);
+    const unreadCount = nonNegativeInteger(
+      activity.unread_count,
+      `${activityPath}.unread_count`,
+    );
+    const firstUnreadMessageId = nullablePositiveInteger(
+      activity.first_unread_message_id,
+      `${activityPath}.first_unread_message_id`,
+    );
+    const unreadHumanMentionCount = nonNegativeInteger(
+      activity.unread_human_mention_count,
+      `${activityPath}.unread_human_mention_count`,
+    );
+    const nextHumanMentionMessageId = nullablePositiveInteger(
+      activity.next_human_mention_message_id,
+      `${activityPath}.next_human_mention_message_id`,
+    );
+    if (
+      (unreadCount === 0) !== (firstUnreadMessageId === null) ||
+      (firstUnreadMessageId !== null &&
+        (firstUnreadMessageId <= joinedAfterMessageId ||
+          firstUnreadMessageId > latestBound))
+    ) {
+      invalidSnapshot(
+        `${activityPath}.first_unread_message_id is inconsistent`,
+      );
+    }
+    if (
+      (unreadHumanMentionCount === 0) !==
+        (nextHumanMentionMessageId === null) ||
+      (nextHumanMentionMessageId !== null &&
+        (nextHumanMentionMessageId <= joinedAfterMessageId ||
+          nextHumanMentionMessageId > latestBound))
+    ) {
+      invalidSnapshot(
+        `${activityPath}.next_human_mention_message_id is inconsistent`,
+      );
+    }
     return {
       member_id: memberId,
       joined_after_message_id: joinedAfterMessageId,
       read_through_message_id: readThroughMessageId,
       seen_message_ids: seenMessageIds,
+      unread_count: unreadCount,
+      first_unread_message_id: firstUnreadMessageId,
+      unread_human_mention_count: unreadHumanMentionCount,
+      next_human_mention_message_id: nextHumanMentionMessageId,
     };
   });
-
   return {
     id,
     topic: nonEmptyString(item.topic, `${path}.topic`),
-    member_ids: discussionMemberIds,
-    messages,
-    ...(item.human_read_states === undefined
-      ? {}
-      : { human_read_states: humanReadStates }),
+    member_ids: memberIds,
+    message_count: messageCount,
+    first_message_id: firstMessageId,
+    latest_message_id: latestMessageId,
+    human_activity: humanActivity,
   };
+}
+
+export function parseDiscussionMessagePage(
+  value: unknown,
+  members: Member[],
+): DiscussionMessagePage {
+  const page = record(value, "discussion message page");
+  const mode = page.mode;
+  if (
+    mode !== "latest" &&
+    mode !== "before" &&
+    mode !== "after" &&
+    mode !== "anchor"
+  ) {
+    invalidSnapshot("discussion message page.mode is invalid");
+  }
+  const membersById = new Map(members.map((member) => [member.id, member]));
+  const messages = array(page.messages, "discussion message page.messages").map(
+    (message, index) =>
+      parseMessage(
+        message,
+        0,
+        index,
+        membersById,
+        false,
+        `discussion message page.messages[${index}]`,
+      ),
+  );
+  if (
+    new Set(messages.map((message) => message.id)).size !== messages.length ||
+    messages.some(
+      (message, index) => index > 0 && messages[index - 1].id >= message.id,
+    )
+  ) {
+    invalidSnapshot(
+      "discussion message page.messages must be unique and increasing",
+    );
+  }
+  const result: DiscussionMessagePage = {
+    discussion_id: positiveInteger(
+      page.discussion_id,
+      "discussion message page.discussion_id",
+    ),
+    mode,
+    messages,
+    oldest_message_id: nullablePositiveInteger(
+      page.oldest_message_id,
+      "discussion message page.oldest_message_id",
+    ),
+    newest_message_id: nullablePositiveInteger(
+      page.newest_message_id,
+      "discussion message page.newest_message_id",
+    ),
+    latest_message_id: nullablePositiveInteger(
+      page.latest_message_id,
+      "discussion message page.latest_message_id",
+    ),
+    has_earlier: boolean(
+      page.has_earlier,
+      "discussion message page.has_earlier",
+    ),
+    has_later: boolean(page.has_later, "discussion message page.has_later"),
+    next_before_message_id: nullablePositiveInteger(
+      page.next_before_message_id,
+      "discussion message page.next_before_message_id",
+    ),
+    next_after_message_id: nullablePositiveInteger(
+      page.next_after_message_id,
+      "discussion message page.next_after_message_id",
+    ),
+  };
+  if (mode === "anchor") {
+    result.anchor_message_id = positiveInteger(
+      page.anchor_message_id,
+      "discussion message page.anchor_message_id",
+    );
+    result.anchor_index = nonNegativeInteger(
+      page.anchor_index,
+      "discussion message page.anchor_index",
+    );
+    if (
+      result.anchor_index >= messages.length ||
+      messages[result.anchor_index]?.id !== result.anchor_message_id
+    )
+      invalidSnapshot("discussion message page anchor is inconsistent");
+  }
+  return result;
 }
 
 export function parseOrganizationSnapshot(
@@ -772,17 +1000,17 @@ export function parseOrganizationSnapshot(
       continue;
     }
     const discussionMemberIds = new Set(discussion.member_ids);
-    const readStateMemberIds = new Set(
-      discussion.human_read_states?.map((state) => state.member_id) ?? [],
+    const activityMemberIds = new Set(
+      discussion.human_activity.map((activity) => activity.member_id),
     );
     if (
       humanIds.some(
         (humanId) =>
-          !discussionMemberIds.has(humanId) || !readStateMemberIds.has(humanId),
+          !discussionMemberIds.has(humanId) || !activityMemberIds.has(humanId),
       )
     ) {
       invalidSnapshot(
-        `discussions[${index}] must contain every active Human and their cutoff state`,
+        `discussions[${index}] must contain every active Human and their cutoff activity`,
       );
     }
   }
@@ -894,6 +1122,21 @@ function parseHistoryEntry(
   if (item.tool_name !== undefined && item.tool_name !== null) {
     entry.tool_name = nonEmptyString(item.tool_name, `${path}.tool_name`);
   }
+  if (item.content_length !== undefined)
+    entry.content_length = nonNegativeInteger(
+      item.content_length,
+      `${path}.content_length`,
+    );
+  if (item.content_truncated !== undefined)
+    entry.content_truncated = boolean(
+      item.content_truncated,
+      `${path}.content_truncated`,
+    );
+  if (item.paired_entry_id !== undefined && item.paired_entry_id !== null)
+    entry.paired_entry_id = nonEmptyString(
+      item.paired_entry_id,
+      `${path}.paired_entry_id`,
+    );
   return entry;
 }
 
@@ -918,6 +1161,10 @@ function parseHistoryRun(value: unknown, index: number): AgentHistoryRun {
   }
   return {
     run_id: nonEmptyString(item.run_id, `${path}.run_id`),
+    sequence:
+      item.sequence === undefined
+        ? index + 1
+        : positiveInteger(item.sequence, `${path}.sequence`),
     status: item.status,
     started_at: nonEmptyString(item.started_at, `${path}.started_at`),
     completed_at: completedAt,
@@ -930,6 +1177,102 @@ function parseHistoryRun(value: unknown, index: number): AgentHistoryRun {
       parseHistoryEntry(entry, index, entryIndex),
     ),
   };
+}
+
+export function parseAgentHistoryPage(value: unknown): AgentHistoryPage {
+  const page = record(value, "agent history page");
+  const runs = array(page.runs, "agent history page.runs").map(
+    (value, index) => {
+      const path = `agent history page.runs[${index}]`;
+      const item = record(value, path);
+      if (
+        item.status !== "running" &&
+        item.status !== "completed" &&
+        item.status !== "failed" &&
+        item.status !== "interrupted"
+      )
+        invalidSnapshot(`${path}.status is invalid`);
+      return {
+        run_id: nonEmptyString(item.run_id, `${path}.run_id`),
+        sequence: positiveInteger(item.sequence, `${path}.sequence`),
+        status: item.status,
+        started_at: nonEmptyString(item.started_at, `${path}.started_at`),
+        completed_at:
+          item.completed_at === null
+            ? null
+            : nonEmptyString(item.completed_at, `${path}.completed_at`),
+        usage: item.usage === null ? null : record(item.usage, `${path}.usage`),
+        event_sequence: nonNegativeInteger(
+          item.event_sequence,
+          `${path}.event_sequence`,
+        ),
+        entry_count: nonNegativeInteger(
+          item.entry_count,
+          `${path}.entry_count`,
+        ),
+        error:
+          item.error === null
+            ? null
+            : nonEmptyString(item.error, `${path}.error`),
+      } as AgentHistoryRunMetadata;
+    },
+  );
+  if (
+    runs.some(
+      (run, index) => index > 0 && runs[index - 1].sequence >= run.sequence,
+    )
+  )
+    invalidSnapshot("agent history page runs must be increasing");
+  return {
+    agent_id: positiveInteger(page.agent_id, "agent history page.agent_id"),
+    runs,
+    has_earlier: boolean(page.has_earlier, "agent history page.has_earlier"),
+    next_before_sequence: nullablePositiveInteger(
+      page.next_before_sequence,
+      "agent history page.next_before_sequence",
+    ),
+  };
+}
+
+export function parseAgentHistoryRun(value: unknown): AgentHistoryRun {
+  return parseHistoryRun(value, 0);
+}
+
+export function parseAgentHistoryEntryDetail(
+  value: unknown,
+): AgentHistoryEntryDetail {
+  const item = record(value, "agent history entry");
+  const detail: AgentHistoryEntryDetail = {
+    agent_id: positiveInteger(item.agent_id, "agent history entry.agent_id"),
+    run_id: nonEmptyString(item.run_id, "agent history entry.run_id"),
+    entry_id: nonEmptyString(item.entry_id, "agent history entry.entry_id"),
+    type: historyEntryType(item.type, "agent history entry.type"),
+    content: typeof item.content === "string" ? item.content : "",
+    content_length: nonNegativeInteger(
+      item.content_length,
+      "agent history entry.content_length",
+    ),
+    offset: nonNegativeInteger(item.offset, "agent history entry.offset"),
+    next_offset:
+      item.next_offset === null
+        ? null
+        : nonNegativeInteger(
+            item.next_offset,
+            "agent history entry.next_offset",
+          ),
+    truncated: boolean(item.truncated, "agent history entry.truncated"),
+  };
+  if (item.tool_name !== null && item.tool_name !== undefined)
+    detail.tool_name = nonEmptyString(
+      item.tool_name,
+      "agent history entry.tool_name",
+    );
+  if (item.paired_entry_id !== null && item.paired_entry_id !== undefined)
+    detail.paired_entry_id = nonEmptyString(
+      item.paired_entry_id,
+      "agent history entry.paired_entry_id",
+    );
+  return detail;
 }
 
 export function parseAgentHistory(value: unknown): AgentHistory {
@@ -1234,10 +1577,6 @@ function memoryContentLineCount(content: string): number {
   return breaks + (endsWithBreak ? 0 : 1);
 }
 
-function nullablePositiveInteger(value: unknown, path: string): number | null {
-  return value === null ? null : positiveInteger(value, path);
-}
-
 function todoStatus(value: unknown, path: string): AgentTodoStatus {
   if (value === "pending" || value === "in_progress" || value === "completed") {
     return value;
@@ -1481,9 +1820,62 @@ async function organizationRequest(
 
 export const backend = {
   getOrganization: () => organizationRequest("organization.get"),
+  getDiscussionMessagesPage: async (
+    discussionId: number,
+    members: Member[],
+    cursor: {
+      before_message_id?: number;
+      after_message_id?: number;
+      anchor_message_id?: number;
+    } = {},
+    limit = 50,
+  ) =>
+    parseDiscussionMessagePage(
+      await request("human.discussion.messages.page", {
+        discussion_id: discussionId,
+        limit,
+        ...cursor,
+      }),
+      members,
+    ),
   getAgentHistory: async (agentId: number) =>
     parseAgentHistory(
       await request("agent.history.get", { agent_id: agentId }),
+    ),
+  getAgentHistoryPage: async (
+    agentId: number,
+    beforeSequence: number | null = null,
+    limit = 30,
+  ) =>
+    parseAgentHistoryPage(
+      await request("agent.history.runs.page", {
+        agent_id: agentId,
+        before_sequence: beforeSequence,
+        limit,
+      }),
+    ),
+  getAgentHistoryRun: async (agentId: number, runId: string) =>
+    parseAgentHistoryRun(
+      await request("agent.history.run.get", {
+        agent_id: agentId,
+        run_id: runId,
+      }),
+    ),
+  getAgentHistoryEntry: async (
+    agentId: number,
+    runId: string,
+    entryId: string,
+    offset = 0,
+    maxChars = 8_000,
+  ) =>
+    parseAgentHistoryEntryDetail(
+      await request("agent.history.entry.get", {
+        agent_id: agentId,
+        run_id: runId,
+        entry_id: entryId,
+        offset,
+        max_chars: maxChars,
+      }),
     ),
   listAgentMemory: async (agentId: number, offset = 0, limit = 100) =>
     parseAgentMemoryList(

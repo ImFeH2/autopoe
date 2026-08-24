@@ -253,9 +253,12 @@ def test_flowent_accepts_utf8_jsonl_messages(tmp_path: Path) -> None:
             },
         )
 
-        message = snapshot["discussions"][0]["messages"][0]
-        assert message["body"] == "你在哪个目录下？"
-        assert request(process, 4, "system.shutdown", {}) == {"stopped": True}
+        assert snapshot["discussions"][0]["message_count"] == 1
+        page = request(
+            process, 4, "human.discussion.messages.page", {"discussion_id": 1}
+        )
+        assert page["messages"][0]["body"] == "你在哪个目录下？"
+        assert request(process, 5, "system.shutdown", {}) == {"stopped": True}
         assert process.wait(timeout=10) == 0
     finally:
         close_process(process)
@@ -392,9 +395,10 @@ def test_persists_state_and_uses_home_across_launch_directories(
         assert snapshot["working_directory"] == str(Path.home())
         assert snapshot["members"][1]["name"] == "Ada"
         assert snapshot["discussions"][0]["topic"] == "Persistent work"
-        assert snapshot["discussions"][0]["messages"][0]["body"] == (
-            "Still here after restart"
+        page = request(
+            second, 4, "human.discussion.messages.page", {"discussion_id": 1}
         )
+        assert page["messages"][0]["body"] == "Still here after restart"
         assert settings == {
             "api_type": "openai-responses",
             "base_url": "https://example.invalid/v1",
@@ -486,10 +490,16 @@ def test_agent_model_history_continues_across_process_restarts(
         while time.monotonic() < deadline:
             snapshot = request(first, request_id, "organization.get", {})
             request_id += 1
+            page = request(
+                first,
+                request_id,
+                "human.discussion.messages.page",
+                {"discussion_id": 1},
+            )
+            request_id += 1
             if (
                 snapshot["members"][1]["status"] == "idle"
-                and snapshot["discussions"][0]["messages"][0]["mentions"][0]["status"]
-                == "acked"
+                and page["messages"][0]["mentions"][0]["status"] == "acked"
             ):
                 break
             time.sleep(0.02)
@@ -523,15 +533,28 @@ def test_agent_model_history_continues_across_process_restarts(
                 "body": "@Ada Continue as the same Agent",
             },
         )
-        triggering_message_id = snapshot["discussions"][0]["messages"][-1]["id"]
-        request_id = 2
+        page = request(
+            second,
+            2,
+            "human.discussion.messages.page",
+            {"discussion_id": 1},
+        )
+        triggering_message_id = page["messages"][-1]["id"]
+        request_id = 3
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             snapshot = request(second, request_id, "organization.get", {})
             request_id += 1
+            page = request(
+                second,
+                request_id,
+                "human.discussion.messages.page",
+                {"discussion_id": 1},
+            )
+            request_id += 1
             trigger = next(
                 message
-                for message in snapshot["discussions"][0]["messages"]
+                for message in page["messages"]
                 if message["id"] == triggering_message_id
             )
             if (

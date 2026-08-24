@@ -1,7 +1,6 @@
 import io
 import json
 import sqlite3
-from collections.abc import Callable
 from pathlib import Path
 from threading import Thread
 
@@ -14,24 +13,18 @@ from flowent.protocol import Dispatcher, JsonLineWriter, serve
 from flowent.todos import AgentTodos
 
 
-def run_requests(
-    *requests: object, message_clock: Callable[[], str] | None = None
-) -> list[dict[str, object]]:
+def run_requests(*requests: object) -> list[dict[str, object]]:
     input_stream = io.StringIO(
         "".join(json.dumps(request) + "\n" for request in requests)
     )
     output_stream = io.StringIO()
 
-    serve(
-        input_stream,
-        output_stream,
-        OrganizationState(message_clock=message_clock),
-    )
+    serve(input_stream, output_stream, OrganizationState())
 
     return [json.loads(line) for line in output_stream.getvalue().splitlines()]
 
 
-def test_dispatches_mutations_and_returns_complete_snapshot() -> None:
+def test_dispatches_mutations_and_returns_summary_snapshot() -> None:
     responses = run_requests(
         {"id": 1, "method": "organization.create_agent", "params": {"name": "Ada"}},
         {
@@ -42,29 +35,17 @@ def test_dispatches_mutations_and_returns_complete_snapshot() -> None:
         {
             "id": 3,
             "method": "discussion.send",
-            "params": {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "Begin.",
-                "created_at": "1900-01-01T00:00:00.000Z",
-            },
+            "params": {"discussion_id": 1, "sender_id": 1, "body": "Begin."},
         },
-        message_clock=lambda: "2026-08-22T12:34:56.789Z",
     )
 
     snapshot = responses[-1]["result"]
     assert isinstance(snapshot, dict)
     assert snapshot["members"][1]["name"] == "Ada"
-    assert snapshot["discussions"][0]["messages"] == [
-        {
-            "id": 1,
-            "sender_id": 1,
-            "body": "Begin.",
-            "created_at": "2026-08-22T12:34:56.789Z",
-            "references": [],
-            "mentions": [],
-        }
-    ]
+    discussion = snapshot["discussions"][0]
+    assert "messages" not in discussion
+    assert discussion["message_count"] == 1
+    assert discussion["latest_message_id"] == 1
 
 
 def test_discussion_send_derives_mentions_from_body_only() -> None:
@@ -88,45 +69,18 @@ def test_discussion_send_derives_mentions_from_body_only() -> None:
         {
             "id": 4,
             "method": "discussion.send",
-            "params": {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "@Ada please begin",
-            },
+            "params": {"discussion_id": 1, "sender_id": 1, "body": "@Ada please begin"},
+        },
+        {
+            "id": 5,
+            "method": "human.discussion.messages.page",
+            "params": {"discussion_id": 1},
         },
     )
 
-    messages = responses[-1]["result"]["discussions"][0]["messages"]
+    messages = responses[-1]["result"]["messages"]
     assert messages[0]["mentions"] == []
     assert messages[1]["mentions"] == [{"member_id": 2, "status": "pending"}]
-
-
-def test_discussion_send_rejects_forged_self_reference_payload() -> None:
-    responses = run_requests(
-        {"id": 1, "method": "organization.create_agent", "params": {"name": "Ada"}},
-        {
-            "id": 2,
-            "method": "discussion.create",
-            "params": {"topic": "Plan", "creator_id": 1, "member_ids": [2]},
-        },
-        {
-            "id": 3,
-            "method": "discussion.send",
-            "params": {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "@You remains ordinary text",
-                "references": [{"member_id": 1, "notified": True}],
-                "human_mentions": [{"member_id": 1, "status": "unread"}],
-            },
-        },
-    )
-
-    message = responses[-1]["result"]["discussions"][0]["messages"][0]
-    assert message["body"] == "@You remains ordinary text"
-    assert message["references"] == []
-    assert message["mentions"] == []
-    assert "human_mentions" not in message
 
 
 def test_returns_the_selected_agents_complete_history(tmp_path: Path) -> None:
@@ -174,22 +128,10 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
         {"id": 1, "type": "human", "name": "You"},
         {"id": 2, "type": "agent", "name": "Ada", "status": "idle"},
     ]
-    assert agent_response["result"]["discussions"] == [
-        {
-            "id": 2,
-            "topic": "Lin work",
-            "member_ids": [1],
-            "messages": [],
-            "human_read_states": [
-                {
-                    "member_id": 1,
-                    "joined_after_message_id": 0,
-                    "read_through_message_id": None,
-                    "seen_message_ids": [],
-                }
-            ],
-        }
-    ]
+    remaining = agent_response["result"]["discussions"][0]
+    assert remaining["id"] == 2
+    assert remaining["message_count"] == 0
+    assert "messages" not in remaining
     assert todos.list(3)["todos"] == []
     assert memories.list(2) == {"paths": ["MEMORY.md"], "count": 1}
     assert memories.list(3) == {"paths": [], "count": 0}
@@ -251,11 +193,7 @@ def test_returns_structured_errors_without_stopping_the_stream() -> None:
     )
     output_stream = io.StringIO()
 
-    serve(
-        input_stream,
-        output_stream,
-        OrganizationState(),
-    )
+    serve(input_stream, output_stream, OrganizationState())
 
     responses = [json.loads(line) for line in output_stream.getvalue().splitlines()]
     assert responses[0]["error"]["code"] == "invalid_json"
@@ -630,14 +568,43 @@ def test_dispatches_human_message_seen_updates() -> None:
         }
     )
 
-    assert response["result"]["discussions"][0]["human_read_states"] == [
-        {
-            "member_id": 1,
-            "joined_after_message_id": 0,
-            "read_through_message_id": 1,
-            "seen_message_ids": [],
+    activity = response["result"]["discussions"][0]["human_activity"][0]
+    assert activity["joined_after_message_id"] == 0
+    assert activity["read_through_message_id"] == 1
+    assert activity["unread_count"] == 0
+
+
+def test_summary_activity_respects_human_join_frontier() -> None:
+    state = OrganizationState(
+        persisted={
+            "members": [
+                {"id": 1, "type": "human", "name": "Owner"},
+                {"id": 2, "type": "agent", "name": "Ada"},
+                {"id": 3, "type": "human", "name": "Guest"},
+            ],
+            "discussions": [
+                {
+                    "id": 1,
+                    "topic": "Existing",
+                    "member_ids": [1, 2],
+                    "messages": [
+                        {"id": 1, "sender_id": 2, "body": "Old one", "mentions": []},
+                        {"id": 2, "sender_id": 2, "body": "Old two", "mentions": []},
+                    ],
+                }
+            ],
         }
-    ]
+    )
+
+    guest = state.summary()["discussions"][0]["human_activity"][1]
+    assert guest["joined_after_message_id"] == 2
+    assert guest["unread_count"] == 0
+    assert guest["first_unread_message_id"] is None
+
+    state.send_message(1, 2, "New")
+    guest = state.summary()["discussions"][0]["human_activity"][1]
+    assert guest["unread_count"] == 1
+    assert guest["first_unread_message_id"] == 3
 
 
 def test_dispatches_general_member_rename_and_human_mention_read() -> None:
@@ -663,9 +630,14 @@ def test_dispatches_general_member_rename_and_human_mention_read() -> None:
             "method": "human.mention.read",
             "params": {"member_id": 1, "discussion_id": 1, "message_id": 1},
         },
+        {
+            "id": 6,
+            "method": "human.discussion.messages.page",
+            "params": {"discussion_id": 1},
+        },
     )
     assert responses[3]["result"]["members"][0]["name"] == "Owner"
-    message = responses[4]["result"]["discussions"][0]["messages"][0]
+    message = responses[5]["result"]["messages"][0]
     assert message["references"][0]["name"] == "You"
     assert message["human_mentions"] == [{"member_id": 1, "status": "read"}]
 

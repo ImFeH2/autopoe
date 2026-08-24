@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "@/components/ui";
 import { agentStatusTone } from "@/features/agent-status";
+import type { AgentHistoryCache } from "@/features/incremental/agent-history-cache";
 import type {
   AgentHistory,
   AgentMember,
@@ -36,7 +37,24 @@ type MembersPageProps = {
   discussions?: Discussion[];
   error: string | null;
   history?: AgentHistoryState;
+  historyCache?: AgentHistoryCache;
   isCreatingAgent: boolean;
+  onLoadEarlierHistory?: (
+    agentId: number,
+    beforeSequence: number | null,
+  ) => Promise<void>;
+  onLoadHistoryRun?: (agentId: number, runId: string) => Promise<void>;
+  onToggleHistoryEntry?: (
+    agentId: number,
+    runId: string,
+    entryId: string,
+    open: boolean,
+  ) => Promise<void> | void;
+  onHistoryScrollState?: (
+    agentId: number,
+    scrollTop: number,
+    followsLatest: boolean,
+  ) => void;
   members: Member[];
   onAgentDialogOpenChange: (open: boolean) => void;
   onAgentNameChange: (name: string) => void;
@@ -64,7 +82,12 @@ export function MembersPage({
   discussions = [],
   error,
   history,
+  historyCache,
   isCreatingAgent,
+  onLoadEarlierHistory,
+  onLoadHistoryRun,
+  onToggleHistoryEntry,
+  onHistoryScrollState,
   members,
   onAgentDialogOpenChange,
   onAgentNameChange,
@@ -245,7 +268,12 @@ export function MembersPage({
             disabled={disabled}
             discussions={discussions}
             history={history ?? { status: "loading" }}
+            historyCache={historyCache}
             members={members}
+            onLoadEarlierHistory={onLoadEarlierHistory}
+            onLoadHistoryRun={onLoadHistoryRun}
+            onToggleHistoryEntry={onToggleHistoryEntry}
+            onHistoryScrollState={onHistoryScrollState}
             onBackToDiscussion={onBackToDiscussion}
             onPause={onPauseAgent}
             onRename={onRenameAgent}
@@ -385,8 +413,13 @@ function AgentDetails({
   disabled,
   discussions,
   history,
+  historyCache,
   members,
   onBackToDiscussion,
+  onLoadEarlierHistory,
+  onLoadHistoryRun,
+  onToggleHistoryEntry,
+  onHistoryScrollState,
   onPause,
   onRename,
   onResume,
@@ -396,7 +429,24 @@ function AgentDetails({
   disabled: boolean;
   discussions: Discussion[];
   history: AgentHistoryState;
+  historyCache?: AgentHistoryCache;
   members: Member[];
+  onLoadEarlierHistory?: (
+    agentId: number,
+    beforeSequence: number | null,
+  ) => Promise<void>;
+  onLoadHistoryRun?: (agentId: number, runId: string) => Promise<void>;
+  onToggleHistoryEntry?: (
+    agentId: number,
+    runId: string,
+    entryId: string,
+    open: boolean,
+  ) => Promise<void> | void;
+  onHistoryScrollState?: (
+    agentId: number,
+    scrollTop: number,
+    followsLatest: boolean,
+  ) => void;
   onBackToDiscussion?: () => void;
   onPause: (agentId: number) => void;
   onRename: (memberId: number, name: string) => Promise<void>;
@@ -532,6 +582,11 @@ function AgentDetails({
               discussions={discussions}
               members={members}
               state={history}
+              cache={historyCache}
+              onLoadEarlier={onLoadEarlierHistory}
+              onLoadRun={onLoadHistoryRun}
+              onToggleEntry={onToggleHistoryEntry}
+              onScrollState={onHistoryScrollState}
             />
           </section>
         ) : null}
@@ -545,32 +600,60 @@ function AgentHistoryView({
   discussions,
   members,
   state,
+  cache,
+  onLoadEarlier,
+  onLoadRun,
+  onToggleEntry,
+  onScrollState,
 }: {
   agent: AgentMember;
   discussions: Discussion[];
   members: Member[];
   state: AgentHistoryState;
+  cache?: AgentHistoryCache;
+  onLoadEarlier?: (
+    agentId: number,
+    beforeSequence: number | null,
+  ) => Promise<void>;
+  onLoadRun?: (agentId: number, runId: string) => Promise<void>;
+  onToggleEntry?: (
+    agentId: number,
+    runId: string,
+    entryId: string,
+    open: boolean,
+  ) => Promise<void> | void;
+  onScrollState?: (
+    agentId: number,
+    scrollTop: number,
+    followsLatest: boolean,
+  ) => void;
 }) {
   const viewportRef = useRef<HTMLElement>(null);
-  const followsLatestRef = useRef(true);
-  const latestRun =
-    state.status === "ready"
-      ? state.history.runs[state.history.runs.length - 1]
-      : null;
-  const latestEntry = latestRun?.entries[latestRun.entries.length - 1];
-  const historyRevision = latestRun
-    ? `${latestRun.run_id}:${latestRun.status}:${latestRun.event_sequence}:${latestRun.entries.length}:${latestEntry?.content?.length ?? 0}`
-    : state.status;
+  const followsLatestRef = useRef(cache?.followsLatest ?? true);
+  const initialHistoryScrollTopRef = useRef(cache?.scrollTop);
+  const readyRuns = state.status === "ready" ? state.history.runs : [];
 
   useEffect(() => {
-    if (!historyRevision) {
-      return;
-    }
     const viewport = viewportRef.current;
-    if (viewport && followsLatestRef.current) {
+    if (!viewport) return;
+    if (cache?.loaded)
+      viewport.scrollTop = initialHistoryScrollTopRef.current ?? 0;
+    else if (followsLatestRef.current)
       viewport.scrollTop = viewport.scrollHeight;
-    }
-  }, [historyRevision]);
+  }, [cache?.loaded]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (viewport && followsLatestRef.current)
+      viewport.scrollTop = viewport.scrollHeight;
+  });
+
+  const loading = cache
+    ? cache.loading && !cache.loaded
+    : state.status === "loading";
+  const error =
+    cache?.error ?? (state.status === "error" ? state.message : null);
+  const count = cache ? cache.orderedRunIds.length : readyRuns.length;
 
   return (
     <section
@@ -579,35 +662,94 @@ function AgentHistoryView({
     >
       <header className="agent-history-header">
         <h3 id={`agent-${agent.id}-history`}>History</h3>
-        {state.status === "ready" ? (
-          <Badge size="small">{state.history.runs.length}</Badge>
-        ) : null}
+        {!loading ? <Badge size="small">{count}</Badge> : null}
       </header>
       <section
-        aria-busy={state.status === "loading"}
+        aria-busy={loading}
         aria-label={`${agent.name} history`}
         className="agent-history-viewport"
         // biome-ignore lint/a11y/noNoninteractiveTabindex: The scroll viewport must be keyboard reachable for PageDown and PageUp.
         tabIndex={0}
         onScroll={(event) => {
           const viewport = event.currentTarget;
-          followsLatestRef.current =
+          const followsLatest =
             viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <
             32;
+          followsLatestRef.current = followsLatest;
+          onScrollState?.(agent.id, viewport.scrollTop, followsLatest);
         }}
         ref={viewportRef}
       >
-        {state.status === "loading" ? (
+        {loading ? (
           <p className="agent-history-empty">Loading history</p>
-        ) : state.status === "error" ? (
+        ) : error ? (
           <p className="agent-history-empty text-danger" role="alert">
-            {state.message}
+            {error}
           </p>
-        ) : state.history.runs.length === 0 ? (
+        ) : count === 0 ? (
           <p className="agent-history-empty">No history</p>
+        ) : cache ? (
+          <div className="agent-history-timeline">
+            {cache.newRunCount > 0 ? (
+              <Button
+                onClick={() => {
+                  const viewport = viewportRef.current;
+                  if (viewport) viewport.scrollTop = viewport.scrollHeight;
+                }}
+                variant="quiet"
+              >
+                {cache.newRunCount} new History{" "}
+                {cache.newRunCount === 1 ? "run" : "runs"}
+              </Button>
+            ) : null}
+            {cache.hasEarlier && onLoadEarlier ? (
+              <Button
+                disabled={cache.loading}
+                onClick={() =>
+                  void onLoadEarlier(agent.id, cache.nextBeforeSequence)
+                }
+                variant="quiet"
+              >
+                {cache.loading
+                  ? "Loading earlier History"
+                  : "Load earlier History"}
+              </Button>
+            ) : null}
+            {cache.orderedRunIds.map((runId) => {
+              const metadata = cache.metadataByRunId[runId];
+              const run = cache.detailByRunId[runId];
+              return (
+                <div className="agent-history-run" key={runId}>
+                  {!run ? (
+                    <Button
+                      onClick={() => void onLoadRun?.(agent.id, runId)}
+                      variant="quiet"
+                    >
+                      Load run {metadata?.sequence ?? ""} details ·{" "}
+                      {metadata?.entry_count ?? 0} entries
+                    </Button>
+                  ) : (
+                    run.entries.map((entry) => (
+                      <HistoryBlock
+                        discussions={discussions}
+                        entry={entry}
+                        key={entry.id}
+                        members={members}
+                        run={run}
+                        open={cache.expandedIds.includes(entry.id)}
+                        onOpenChange={(open) =>
+                          void onToggleEntry?.(agent.id, runId, entry.id, open)
+                        }
+                      />
+                    ))
+                  )}
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div className="agent-history-timeline">
-            {state.history.runs.map((run) => (
+            {readyRuns.map((run) => (
               <div className="agent-history-run" key={run.run_id}>
                 {run.entries.map((entry) => (
                   <HistoryBlock

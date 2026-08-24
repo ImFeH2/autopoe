@@ -25,6 +25,11 @@ import {
   getMemberStatusPresentation,
   MemberStatusAvatar,
 } from "@/components/ui/member-status-avatar";
+import {
+  captureStableScrollAnchor,
+  restoreStableScrollAnchor,
+  type StableScrollAnchor,
+} from "@/features/incremental/stable-scroll-anchor";
 import type {
   AgentMember,
   Discussion,
@@ -126,11 +131,39 @@ export function humanUnreadForDiscussion(
   discussion: Discussion,
   humanMemberId = 1,
 ): HumanUnreadResult<number> {
+  const activity = discussion.human_activity?.find(
+    (candidate) => candidate.member_id === humanMemberId,
+  );
+  if (activity) {
+    const readThrough = activity.read_through_message_id;
+    const seen = new Set(activity.seen_message_ids);
+    const loadedUnread = (discussion.messages ?? []).filter(
+      (message) =>
+        message.id > activity.joined_after_message_id &&
+        message.sender_id !== humanMemberId &&
+        !(readThrough !== null && message.id <= readThrough) &&
+        !seen.has(message.id),
+    );
+    return {
+      unreadCount: activity.unread_count,
+      unreadMessageIds: loadedUnread.map((message) => message.id),
+      firstUnreadMessageId: activity.first_unread_message_id ?? undefined,
+      unreadHumanMentionCount: activity.unread_human_mention_count,
+      unreadHumanMentionMessageIds: loadedUnread.flatMap((message) =>
+        message.human_mentions?.some(
+          (mention) =>
+            mention.member_id === humanMemberId && mention.status === "unread",
+        )
+          ? [message.id]
+          : [],
+      ),
+    };
+  }
   const state = discussion.human_read_states?.find(
     (candidate) => candidate.member_id === humanMemberId,
   );
   const joinedAfterMessageId = state?.joined_after_message_id ?? 0;
-  const eligibleMessages = discussion.messages.filter(
+  const eligibleMessages = (discussion.messages ?? []).filter(
     (message) => message.id > joinedAfterMessageId,
   );
   const readThrough = state?.read_through_message_id ?? null;
@@ -194,6 +227,14 @@ type DiscussionsPageProps = {
   onDeleteDiscussion: (discussionId: number) => void;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onMessagesSeen?: (discussionId: number, messageIds: number[]) => void;
+  onLoadEarlier?: () => Promise<void>;
+  onRequestMessage?: (messageId: number) => Promise<void>;
+  onLoadNewMessages?: () => Promise<void>;
+  unloadedNewMessageCount?: number;
+  messagePageLoading?: boolean;
+  messagePageError?: string | null;
+  initialScrollTop?: number;
+  onMessageScrollState?: (scrollTop: number, followsLatest: boolean) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -226,6 +267,14 @@ export function DiscussionsPage({
   onDeleteDiscussion,
   onMessageChange,
   onMessagesSeen = () => undefined,
+  onLoadEarlier,
+  onRequestMessage,
+  onLoadNewMessages,
+  unloadedNewMessageCount = 0,
+  messagePageLoading = false,
+  messagePageError = null,
+  initialScrollTop,
+  onMessageScrollState,
   onOpenMember,
   onSelectDiscussion,
   onSend,
@@ -359,7 +408,11 @@ export function DiscussionsPage({
                   }
                   meta={
                     <>
-                      {formatMessageCount(discussion.messages.length)}
+                      {formatMessageCount(
+                        discussion.message_count ??
+                          discussion.messages?.length ??
+                          0,
+                      )}
                       {unread.unreadCount > 0 ? (
                         <UnreadBadge count={unread.unreadCount} />
                       ) : null}
@@ -394,6 +447,14 @@ export function DiscussionsPage({
               mentionSyntax={mentionSyntax}
               onMessageChange={onMessageChange}
               onMessagesSeen={onMessagesSeen}
+              onLoadEarlier={onLoadEarlier}
+              onRequestMessage={onRequestMessage}
+              onLoadNewMessages={onLoadNewMessages}
+              unloadedNewMessageCount={unloadedNewMessageCount}
+              messagePageLoading={messagePageLoading}
+              messagePageError={messagePageError}
+              initialScrollTop={initialScrollTop}
+              onMessageScrollState={onMessageScrollState}
               onOpenMember={onOpenMember}
               onSend={onSend}
             />
@@ -583,6 +644,14 @@ type DiscussionViewProps = {
   mentionSyntax: MentionSyntax;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onMessagesSeen: (discussionId: number, messageIds: number[]) => void;
+  onLoadEarlier?: () => Promise<void>;
+  onRequestMessage?: (messageId: number) => Promise<void>;
+  onLoadNewMessages?: () => Promise<void>;
+  unloadedNewMessageCount: number;
+  messagePageLoading: boolean;
+  messagePageError: string | null;
+  initialScrollTop?: number;
+  onMessageScrollState?: (scrollTop: number, followsLatest: boolean) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -601,6 +670,14 @@ function DiscussionView({
   mentionSyntax,
   onMessageChange,
   onMessagesSeen,
+  onLoadEarlier,
+  onRequestMessage,
+  onLoadNewMessages,
+  unloadedNewMessageCount,
+  messagePageLoading,
+  messagePageError,
+  initialScrollTop,
+  onMessageScrollState,
   onOpenMember,
   onSend,
 }: DiscussionViewProps) {
@@ -611,11 +688,15 @@ function DiscussionView({
     throw new Error("Discussion composer requires the current Human Member");
   }
   const messageLogRef = useRef<HTMLDivElement>(null);
+  const prependAnchorRef = useRef<StableScrollAnchor | null>(null);
+  const prependMessageCountRef = useRef(0);
+  const loadEarlierButtonRef = useRef<HTMLButtonElement>(null);
   const unread = useMemo(
     () => humanUnreadForDiscussion(discussion),
     [discussion],
   );
   const initialFirstUnreadMessageIdRef = useRef(unread.firstUnreadMessageId);
+  const initialScrollTopRef = useRef(initialScrollTop);
   const shouldFollowMessagesRef = useRef(
     initialFirstUnreadMessageIdRef.current === undefined,
   );
@@ -630,7 +711,7 @@ function DiscussionView({
   }
   const [newMessageIndicator, setNewMessageIndicator] = useState(() =>
     createNewMessageIndicatorState(
-      discussion.messages.map((message) => message.id),
+      (discussion.messages ?? []).map((message) => message.id),
     ),
   );
   const unreadMessageIds = useMemo(
@@ -667,15 +748,35 @@ function DiscussionView({
     if (!log) {
       return;
     }
-    shouldFollowMessagesRef.current =
-      positionInitialDiscussionMessages(
-        log,
-        initialFirstUnreadMessageIdRef.current,
-      ) === "bottom";
+    if (initialScrollTopRef.current !== undefined) {
+      log.scrollTop = initialScrollTopRef.current;
+      shouldFollowMessagesRef.current =
+        log.scrollHeight - log.scrollTop - log.clientHeight <= 24;
+    } else {
+      shouldFollowMessagesRef.current =
+        positionInitialDiscussionMessages(
+          log,
+          initialFirstUnreadMessageIdRef.current,
+        ) === "bottom";
+    }
   }, []);
 
+  useLayoutEffect(() => {
+    const log = messageLogRef.current;
+    const anchor = prependAnchorRef.current;
+    if (
+      log &&
+      anchor &&
+      (discussion.messages?.length ?? 0) > prependMessageCountRef.current &&
+      restoreStableScrollAnchor(log, anchor)
+    ) {
+      prependAnchorRef.current = null;
+      loadEarlierButtonRef.current?.focus();
+    }
+  });
+
   useEffect(() => {
-    const messageIds = discussion.messages.map((message) => message.id);
+    const messageIds = (discussion.messages ?? []).map((message) => message.id);
     setNewMessageIndicator((current) =>
       updateNewMessageIndicator(
         current,
@@ -697,9 +798,18 @@ function DiscussionView({
     const followingBottom =
       log.scrollHeight - log.scrollTop - log.clientHeight <= 24;
     shouldFollowMessagesRef.current = followingBottom;
+    onMessageScrollState?.(log.scrollTop, followingBottom);
     if (followingBottom) {
       setNewMessageIndicator(clearNewMessageIndicator);
     }
+  }
+
+  async function handleLoadEarlier() {
+    const log = messageLogRef.current;
+    if (!log || !onLoadEarlier || messagePageLoading) return;
+    prependAnchorRef.current = captureStableScrollAnchor(log);
+    prependMessageCountRef.current = discussion.messages?.length ?? 0;
+    await onLoadEarlier();
   }
 
   function handleSend(event: FormEvent<HTMLFormElement>) {
@@ -707,19 +817,38 @@ function DiscussionView({
     onSend(event);
   }
 
-  function focusMessage(messageId: number | undefined) {
-    if (messageId === undefined) {
-      return;
-    }
-    const target = messageLogRef.current?.querySelector<HTMLElement>(
+  async function focusMessage(messageId: number | undefined) {
+    if (messageId === undefined) return;
+    let target = messageLogRef.current?.querySelector<HTMLElement>(
       `[data-message-id="${messageId}"]`,
     );
+    if (!target && onRequestMessage) {
+      await onRequestMessage(messageId);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      target = messageLogRef.current?.querySelector<HTMLElement>(
+        `[data-message-id="${messageId}"]`,
+      );
+    }
     target?.scrollIntoView({ block: "center" });
     target?.focus();
   }
 
-  function focusNewMessages() {
-    focusMessage(newMessageIndicator.pendingMessageIds[0]);
+  async function focusNewMessages() {
+    if (
+      newMessageIndicator.pendingMessageIds.length === 0 &&
+      onLoadNewMessages
+    ) {
+      await onLoadNewMessages();
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const loadedIds = discussion.messages?.map((message) => message.id) ?? [];
+      await focusMessage(loadedIds[loadedIds.length - 1]);
+    } else {
+      await focusMessage(newMessageIndicator.pendingMessageIds[0]);
+    }
     setNewMessageIndicator(clearNewMessageIndicator);
   }
 
@@ -730,7 +859,7 @@ function DiscussionView({
         lastMentionTargetRef.current,
       ) ?? unread.unreadHumanMentionMessageIds[0];
     lastMentionTargetRef.current = target;
-    focusMessage(target);
+    void focusMessage(target);
   }
 
   return (
@@ -764,19 +893,59 @@ function DiscussionView({
         ref={messageLogRef}
         role="log"
       >
+        {onLoadEarlier ? (
+          <div className="flex min-h-10 items-center justify-center py-2">
+            <Button
+              ref={loadEarlierButtonRef}
+              aria-disabled={messagePageLoading}
+              onClick={() => void handleLoadEarlier()}
+              variant="quiet"
+            >
+              {messagePageLoading
+                ? "Loading earlier messages"
+                : messagePageError
+                  ? "Retry loading earlier messages"
+                  : "Load earlier messages"}
+            </Button>
+            {messagePageError ? (
+              <span className="sr-only" role="alert">
+                {messagePageError}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {messagePageLoading && (discussion.messages?.length ?? 0) === 0 ? (
+          <p
+            className="body-compact m-0 py-4 text-center text-text-tertiary"
+            aria-live="polite"
+          >
+            Loading messages
+          </p>
+        ) : messagePageError && (discussion.messages?.length ?? 0) === 0 ? (
+          <p
+            className="body-compact m-0 py-4 text-center text-danger"
+            role="alert"
+          >
+            {messagePageError}
+          </p>
+        ) : null}
         {unread.unreadCount > 0 ||
-        newMessageIndicator.pendingMessageIds.length > 0 ? (
+        newMessageIndicator.pendingMessageIds.length > 0 ||
+        unloadedNewMessageCount > 0 ? (
           <nav
             aria-label="Unread message navigation"
             className="human-unread-controls"
           >
             <FirstUnreadJumpButton
-              onActivate={() => focusMessage(unread.firstUnreadMessageId)}
+              onActivate={() => void focusMessage(unread.firstUnreadMessageId)}
               unreadCount={unread.unreadCount}
             />
             <NewMessageJumpButton
-              newMessageCount={newMessageIndicator.pendingMessageIds.length}
-              onActivate={focusNewMessages}
+              newMessageCount={
+                newMessageIndicator.pendingMessageIds.length +
+                unloadedNewMessageCount
+              }
+              onActivate={() => void focusNewMessages()}
             />
             <NextHumanMentionButton
               onActivate={focusNextMention}
@@ -784,7 +953,7 @@ function DiscussionView({
             />
           </nav>
         ) : null}
-        {discussion.messages.length === 0 ? (
+        {(discussion.messages?.length ?? 0) === 0 ? (
           <div className="grid h-full place-items-center">
             <p className="body-compact m-0 text-text-tertiary">
               No messages yet
@@ -792,7 +961,7 @@ function DiscussionView({
           </div>
         ) : (
           <ol className="m-0 list-none p-0">
-            {discussion.messages.map((message) => {
+            {(discussion.messages ?? []).map((message) => {
               const sender = membersById.get(message.sender_id);
               const senderName =
                 message.sender_name ?? sender?.name ?? "Unknown";

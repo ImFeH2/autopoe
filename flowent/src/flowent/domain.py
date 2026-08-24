@@ -572,6 +572,33 @@ class OrganizationState:
                 self._changed(persist=True)
             return self._discussion_selection_data(discussion, selected_messages)
 
+    def human_discussion_messages_page(
+        self,
+        human_id: int,
+        discussion_id: int,
+        *,
+        limit: int = 50,
+        before_message_id: int | None = None,
+        after_message_id: int | None = None,
+        anchor_message_id: int | None = None,
+    ) -> dict[str, Any]:
+        from flowent.discussion_paging import select_message_page
+
+        with self._condition:
+            member = self._require_member(human_id)
+            if member.type != "human":
+                raise DomainError("not_a_human", "Member is not a Human")
+            discussion = self._require_discussion_member(human_id, discussion_id)
+            return select_message_page(
+                discussion.messages,
+                discussion_id=discussion_id,
+                limit=limit,
+                before_message_id=before_message_id,
+                after_message_id=after_message_id,
+                anchor_message_id=anchor_message_id,
+                project=self._message_data,
+            )
+
     def see_human_messages(
         self,
         human_id: int,
@@ -795,6 +822,10 @@ class OrganizationState:
         with self._condition:
             return self._snapshot()
 
+    def summary(self) -> dict[str, Any]:
+        with self._condition:
+            return self._summary_snapshot()
+
     def _pending_mentions(self, agent_id: int) -> frozenset[tuple[int, int]]:
         return frozenset(
             (discussion.id, message.id)
@@ -862,6 +893,22 @@ class OrganizationState:
             ],
         }
 
+    def _summary_snapshot(self) -> dict[str, Any]:
+        return {
+            "organization": {"id": 1},
+            "working_directory": self._working_directory,
+            "mention_syntax": self._mention_syntax_data(),
+            "members": [
+                self._member_data(member)
+                for member in self._members.values()
+                if not member.deleted
+            ],
+            "discussions": [
+                self._discussion_summary_data(discussion)
+                for discussion in self._discussions.values()
+            ],
+        }
+
     def _snapshot(self) -> dict[str, Any]:
         return {
             "organization": {"id": 1},
@@ -895,6 +942,61 @@ class OrganizationState:
                 if execution.error:
                     data["error"] = execution.error
         return data
+
+    def _discussion_summary_data(self, discussion: Discussion) -> dict[str, Any]:
+        first_message_id = discussion.messages[0].id if discussion.messages else None
+        latest_message_id = discussion.messages[-1].id if discussion.messages else None
+        human_activity = []
+        for state in discussion.human_read_states.values():
+            membership = discussion.membership(state.human_member_id)
+            if membership is None or not membership.active:
+                continue
+            eligible = [
+                message
+                for message in discussion.messages
+                if message.id > membership.joined_after_message_id
+            ]
+            seen = set(state.sparse_seen_message_ids)
+            unread = [
+                message
+                for message in eligible
+                if message.sender_id != state.human_member_id
+                and not (
+                    state.read_through_message_id is not None
+                    and message.id <= state.read_through_message_id
+                )
+                and message.id not in seen
+            ]
+            unread_mentions = [
+                message
+                for message in eligible
+                if (notification := message.human_mentions.get(state.human_member_id))
+                is not None
+                and not notification.read
+            ]
+            human_activity.append(
+                {
+                    "member_id": state.human_member_id,
+                    "joined_after_message_id": membership.joined_after_message_id,
+                    "read_through_message_id": state.read_through_message_id,
+                    "seen_message_ids": list(state.sparse_seen_message_ids),
+                    "unread_count": len(unread),
+                    "first_unread_message_id": unread[0].id if unread else None,
+                    "unread_human_mention_count": len(unread_mentions),
+                    "next_human_mention_message_id": (
+                        unread_mentions[0].id if unread_mentions else None
+                    ),
+                }
+            )
+        return {
+            "id": discussion.id,
+            "topic": discussion.topic,
+            "member_ids": list(discussion.member_ids),
+            "message_count": len(discussion.messages),
+            "first_message_id": first_message_id,
+            "latest_message_id": latest_message_id,
+            "human_activity": human_activity,
+        }
 
     def _discussion_data(self, discussion: Discussion) -> dict[str, Any]:
         return {

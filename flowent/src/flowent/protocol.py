@@ -61,13 +61,16 @@ class Dispatcher:
         )
         self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-            "organization.get": lambda _params: self._state.snapshot(),
+            "organization.get": lambda _params: self._state.summary(),
             "organization.create_agent": self._create_agent,
             "organization.rename_member": self._rename_member,
             "organization.delete_agent": self._delete_agent,
             "organization.pause_agent": self._pause_agent,
             "organization.resume_agent": self._resume_agent,
             "agent.history.get": self._get_agent_history,
+            "agent.history.runs.page": self._get_agent_history_runs_page,
+            "agent.history.run.get": self._get_agent_history_run,
+            "agent.history.entry.get": self._get_agent_history_entry,
             "agent.memory.list": self._list_agent_memory,
             "agent.memory.read": self._read_agent_memory,
             "agent.todo.list": self._list_agent_todos,
@@ -75,6 +78,7 @@ class Dispatcher:
             "discussion.create": self._create_discussion,
             "discussion.delete": self._delete_discussion,
             "discussion.send": self._send_message,
+            "human.discussion.messages.page": self._get_human_discussion_messages_page,
             "human.discussion.see_messages": self._see_human_messages,
             "human.mention.read": self._read_human_mention,
             "settings.get_model": self._get_model_settings,
@@ -230,22 +234,27 @@ class Dispatcher:
         )
 
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.create_agent(name=require_string(params, "name"))
+        self._state.create_agent(name=require_string(params, "name"))
+        return self._state.summary()
 
     def _rename_member(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.rename_member(
+        self._state.rename_member(
             member_id=require_integer(params, "member_id"),
             new_name=require_string(params, "name"),
         )
+        return self._state.summary()
 
     def _delete_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._operations.delete_agent(require_integer(params, "agent_id"))
+        self._operations.delete_agent(require_integer(params, "agent_id"))
+        return self._state.summary()
 
     def _pause_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._operations.pause_agent(require_integer(params, "agent_id"))
+        self._operations.pause_agent(require_integer(params, "agent_id"))
+        return self._state.summary()
 
     def _resume_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._operations.resume_agent(require_integer(params, "agent_id"))
+        self._operations.resume_agent(require_integer(params, "agent_id"))
+        return self._state.summary()
 
     def _get_agent_history(self, params: dict[str, Any]) -> dict[str, Any]:
         agent_id = require_integer(params, "agent_id")
@@ -255,6 +264,39 @@ class Dispatcher:
         if self._history is None:
             raise RuntimeError("Agent history is unavailable")
         return self._history.snapshot(agent_id)
+
+    def _get_agent_history_runs_page(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        self._require_agent(agent_id)
+        if self._history is None:
+            raise RuntimeError("Agent history is unavailable")
+        return self._history.runs_page(
+            agent_id,
+            before_sequence=require_optional_integer(
+                params, "before_sequence", minimum=1
+            ),
+            limit=require_optional_integer(params, "limit", minimum=1) or 30,
+        )
+
+    def _get_agent_history_run(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        self._require_agent(agent_id)
+        if self._history is None:
+            raise RuntimeError("Agent history is unavailable")
+        return self._history.run_detail(agent_id, require_string(params, "run_id"))
+
+    def _get_agent_history_entry(self, params: dict[str, Any]) -> dict[str, Any]:
+        agent_id = require_integer(params, "agent_id")
+        self._require_agent(agent_id)
+        if self._history is None:
+            raise RuntimeError("Agent history is unavailable")
+        return self._history.entry_detail(
+            agent_id,
+            require_string(params, "run_id"),
+            require_string(params, "entry_id"),
+            offset=require_optional_integer(params, "offset", minimum=0) or 0,
+            max_chars=require_optional_integer(params, "max_chars", minimum=1) or 8_000,
+        )
 
     def _require_agent(self, agent_id: int) -> None:
         member = self._state.member(agent_id)
@@ -305,37 +347,60 @@ class Dispatcher:
         return self._todos.read(agent_id, require_integer(params, "todo_id"))
 
     def _create_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.create_discussion(
+        self._state.create_discussion(
             topic=require_string(params, "topic"),
             creator_id=require_integer(params, "creator_id"),
             member_ids=require_integer_list(params, "member_ids"),
         )
+        return self._state.summary()
 
     def _delete_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._operations.delete_discussion(
+        self._operations.delete_discussion(
             discussion_id=require_integer(params, "discussion_id")
         )
+        return self._state.summary()
 
     def _send_message(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.send_message(
+        self._state.send_message(
             discussion_id=require_integer(params, "discussion_id"),
             sender_id=require_integer(params, "sender_id"),
             body=require_string(params, "body"),
         )
+        return self._state.summary()
+
+    def _get_human_discussion_messages_page(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self._state.human_discussion_messages_page(
+            human_id=require_optional_integer(params, "human_id", minimum=1) or 1,
+            discussion_id=require_integer(params, "discussion_id"),
+            limit=require_optional_integer(params, "limit", minimum=1) or 50,
+            before_message_id=require_optional_integer(
+                params, "before_message_id", minimum=1
+            ),
+            after_message_id=require_optional_integer(
+                params, "after_message_id", minimum=1
+            ),
+            anchor_message_id=require_optional_integer(
+                params, "anchor_message_id", minimum=1
+            ),
+        )
 
     def _see_human_messages(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.see_human_messages(
+        self._state.see_human_messages(
             human_id=require_integer(params, "human_id"),
             discussion_id=require_integer(params, "discussion_id"),
             message_ids=require_integer_list(params, "message_ids"),
         )
+        return self._state.summary()
 
     def _read_human_mention(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.read_human_mention(
+        self._state.read_human_mention(
             member_id=require_integer(params, "member_id"),
             discussion_id=require_integer(params, "discussion_id"),
             message_id=require_integer(params, "message_id"),
         )
+        return self._state.summary()
 
 
 def require_string(params: dict[str, Any], key: str) -> str:

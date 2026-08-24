@@ -394,3 +394,65 @@ def test_marks_running_history_interrupted_after_restart(tmp_path: Path) -> None
     assert run["status"] == "interrupted"
     assert run["completed_at"] is not None
     assert run["error"] == "Flowent stopped before this run completed"
+
+
+def test_history_run_pages_and_entry_chunks_are_incremental(tmp_path: Path) -> None:
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+    for index in range(31):
+        run = history.start(reminder())
+        run.complete(
+            "completed",
+            (
+                ModelResponse(
+                    parts=[TextPart(content=f"entry-{index}-" + "x" * 20000)],
+                    model_name="test",
+                ),
+            ),
+        )
+    latest = history.runs_page(2)
+    assert len(latest["runs"]) == 30
+    assert latest["has_earlier"] is True
+    assert latest["next_before_sequence"] == 2
+    assert all("entries" not in run for run in latest["runs"])
+    earlier = history.runs_page(2, before_sequence=latest["next_before_sequence"])
+    assert [run["sequence"] for run in earlier["runs"]] == [1]
+    detail = history.run_detail(2, latest["runs"][-1]["run_id"])
+    entry = detail["entries"][-1]
+    assert entry["content_truncated"] is True
+    chunk = history.entry_detail(2, detail["run_id"], entry["id"], max_chars=1000)
+    assert len(chunk["content"]) == 1000
+    assert chunk["next_offset"] == 1000
+    assert chunk["truncated"] is True
+
+
+def test_history_run_detail_pairs_tool_entries(tmp_path: Path) -> None:
+    history = AgentHistory(SQLiteStore(tmp_path / "data"))
+    run = history.start(reminder())
+    run.complete(
+        "completed",
+        (
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="discussion",
+                        args={"action": "list"},
+                        tool_call_id="call",
+                    )
+                ],
+                model_name="test",
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="discussion",
+                        content={"ok": True},
+                        tool_call_id="call",
+                    )
+                ]
+            ),
+        ),
+    )
+    detail = history.run_detail(2, run.run_id)
+    call, result = detail["entries"][-2:]
+    assert call["paired_entry_id"] == result["id"]
+    assert result["paired_entry_id"] == call["id"]

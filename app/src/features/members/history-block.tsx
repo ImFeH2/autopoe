@@ -122,17 +122,23 @@ export function HistoryBlock({
   entry,
   members = [],
   run,
+  open,
+  onOpenChange,
 }: {
   discussions?: readonly Pick<Discussion, "id" | "topic">[];
   entry: AgentHistoryEntry;
   members?: readonly Pick<Member, "id" | "name">[];
   run: AgentHistoryRun;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const eventTimeLabel =
     entry.type === "reminder" ? "Reminder event time" : "Run event time";
   return (
     <details
       className={`agent-history-block agent-history-block--${entry.type}`}
+      open={open}
+      onToggle={(event) => onOpenChange?.(event.currentTarget.open)}
     >
       <summary>
         <span className="agent-history-block-marker" aria-hidden="true" />

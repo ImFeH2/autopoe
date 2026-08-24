@@ -8,6 +8,7 @@ import {
   parseAgentMemoryList,
   parseAgentTodoDetail,
   parseAgentTodoPage,
+  parseDiscussionMessagePage,
   parseModelSettings,
   parseObservabilitySettings,
   parseOrganizationSnapshot,
@@ -26,36 +27,55 @@ const validSnapshot: OrganizationSnapshot = {
       id: 1,
       topic: "Ship",
       member_ids: [1, 2],
-      human_read_states: [
+      message_count: 1,
+      first_message_id: 1,
+      latest_message_id: 1,
+      human_activity: [
         {
           member_id: 1,
           joined_after_message_id: 0,
           read_through_message_id: null,
           seen_message_ids: [],
-        },
-      ],
-      messages: [
-        {
-          id: 1,
-          sender_id: 1,
-          body: "Begin.",
-          created_at: "2026-08-22T12:34:56.789Z",
-          references: [
-            {
-              member_id: 2,
-              name: "Ada",
-              start: null,
-              end: null,
-              in_discussion: true,
-              notified: true,
-              deleted: false,
-            },
-          ],
-          mentions: [{ member_id: 2, status: "pending" }],
+          unread_count: 0,
+          first_unread_message_id: null,
+          unread_human_mention_count: 0,
+          next_human_mention_message_id: null,
         },
       ],
     },
   ],
+};
+
+const validMessagePage = {
+  discussion_id: 1,
+  mode: "latest",
+  messages: [
+    {
+      id: 1,
+      sender_id: 1,
+      body: "Begin.",
+      created_at: null,
+      references: [
+        {
+          member_id: 2,
+          name: "Ada",
+          start: null,
+          end: null,
+          in_discussion: true,
+          notified: true,
+          deleted: false,
+        },
+      ],
+      mentions: [{ member_id: 2, status: "pending" }],
+    },
+  ],
+  oldest_message_id: 1,
+  newest_message_id: 1,
+  latest_message_id: 1,
+  has_earlier: false,
+  has_later: false,
+  next_before_message_id: null,
+  next_after_message_id: null,
 };
 
 describe("Agent history", () => {
@@ -260,356 +280,109 @@ describe("parseObservabilitySettings", () => {
 });
 
 describe("parseOrganizationSnapshot", () => {
-  it("returns a complete validated snapshot", () => {
-    expect(parseOrganizationSnapshot(validSnapshot)).toEqual(validSnapshot);
+  it("returns a lightweight validated summary without messages", () => {
+    const parsed = parseOrganizationSnapshot(structuredClone(validSnapshot));
+    expect(parsed).toEqual(validSnapshot);
+    expect(parsed.discussions[0]).not.toHaveProperty("messages");
   });
 
-  it.each([null, {}, { ...validSnapshot, members: [] }])(
-    "rejects an invalid root or empty Organization: %j",
-    (value) => {
-      expect(() => parseOrganizationSnapshot(value)).toThrow(
-        "Invalid Organization snapshot",
-      );
-    },
-  );
-
-  it.each(["pausing", "paused"] as const)(
-    "accepts the %s Agent status",
-    (status) => {
-      const value = structuredClone(validSnapshot);
-      if (value.members[1].type !== "agent") {
-        throw new Error("Expected Agent fixture");
-      }
-      value.members[1].status = status;
-
-      expect(parseOrganizationSnapshot(value).members[1]).toEqual({
-        id: 2,
-        type: "agent",
-        name: "Ada",
-        status,
-      });
-    },
-  );
-
-  it("accepts missing legacy timestamps and rejects malformed timestamps", () => {
-    const legacy = structuredClone(validSnapshot) as unknown as {
-      discussions: Array<{ messages: Array<Record<string, unknown>> }>;
-    };
-    delete legacy.discussions[0].messages[0].created_at;
-    expect(
-      parseOrganizationSnapshot(legacy).discussions[0].messages[0].created_at,
-    ).toBeNull();
-
-    for (const createdAt of [
-      "2026-08-22T12:34:56Z",
-      "2026-08-22T12:34:56.789+00:00",
-      "2026-02-30T12:34:56.789Z",
-      "not-a-time",
-    ]) {
-      const malformed = structuredClone(validSnapshot);
-      malformed.discussions[0].messages[0].created_at = createdAt;
-      expect(() => parseOrganizationSnapshot(malformed)).toThrow("created_at");
-    }
+  it("rejects old full-message snapshots", () => {
+    const value = structuredClone(validSnapshot) as unknown as Record<
+      string,
+      unknown
+    >;
+    const discussion = (value.discussions as Array<Record<string, unknown>>)[0];
+    discussion.messages = validMessagePage.messages;
+    expect(() => parseOrganizationSnapshot(value)).toThrow();
   });
 
-  it("rejects Discussion references to unknown Members", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].member_ids = [1, 99];
-
-    expect(() => parseOrganizationSnapshot(value)).toThrow("unknown Member");
-  });
-
-  it("accepts historical sender and Mention IDs no longer in the Discussion", () => {
-    const value = structuredClone(validSnapshot);
-    value.members.push({
-      id: 3,
-      type: "agent",
-      name: "Lin",
-      status: "idle",
-    });
-    value.discussions[0].member_ids = [1];
-    value.discussions[0].messages[0].sender_id = 3;
-
-    expect(parseOrganizationSnapshot(value).discussions[0]).toEqual(
-      value.discussions[0],
+  it("validates summary bounds, member identity, and duplicate IDs", () => {
+    const invalidBounds = structuredClone(validSnapshot);
+    invalidBounds.discussions[0].message_count = 0;
+    expect(() => parseOrganizationSnapshot(invalidBounds)).toThrow(
+      "message bounds",
     );
-  });
-
-  it("accepts a preserved Discussion after all of its Members are deleted", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].member_ids = [];
-
-    expect(parseOrganizationSnapshot(value).discussions[0]).toEqual(
-      value.discussions[0],
+    const unknownMember = structuredClone(validSnapshot);
+    unknownMember.discussions[0].member_ids = [1, 99];
+    expect(() => parseOrganizationSnapshot(unknownMember)).toThrow(
+      "unknown Member",
     );
-  });
-
-  it("rejects out-of-order Message IDs", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].messages[0].id = 2;
-
-    expect(() => parseOrganizationSnapshot(value)).toThrow(
-      "must follow Discussion order",
-    );
-  });
-
-  it("validates code-point ranges, notification identity, and deleted history", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].messages[0].body = "😀 @Ada";
-    value.discussions[0].messages[0].references[0] = {
-      member_id: 99,
-      name: "Ada",
-      start: 2,
-      end: 6,
-      in_discussion: true,
-      notified: true,
-      deleted: true,
-    };
-    value.discussions[0].messages[0].mentions[0].member_id = 99;
-
-    expect(parseOrganizationSnapshot(value).discussions[0].messages[0]).toEqual(
-      value.discussions[0].messages[0],
-    );
-
-    const partial = structuredClone(value);
-    partial.discussions[0].messages[0].references[0].end = null;
-    expect(() => parseOrganizationSnapshot(partial)).toThrow(
-      "start and end must both be null or set",
-    );
-
-    const missingIdentity = structuredClone(value);
-    missingIdentity.discussions[0].messages[0].references[0].notified = false;
-    expect(() => parseOrganizationSnapshot(missingIdentity)).toThrow(
-      "requires a notified identity reference",
-    );
-  });
-
-  it("parses Human read state and the public Human mention subset contract", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].human_read_states = [
-      {
-        member_id: 1,
-        joined_after_message_id: 0,
-        read_through_message_id: null,
-        seen_message_ids: [],
-      },
-    ];
-    value.discussions[0].messages[0].sender_id = 2;
-    value.discussions[0].messages[0].references = [
-      {
-        member_id: 1,
-        name: "You",
-        start: null,
-        end: null,
-        in_discussion: true,
-        notified: true,
-        deleted: false,
-      },
-    ];
-    value.discussions[0].messages[0].mentions = [];
-    value.discussions[0].messages[0].human_mentions = [
-      { member_id: 1, status: "unread" },
-    ];
-
-    expect(parseOrganizationSnapshot(value).discussions[0]).toEqual(
-      value.discussions[0],
-    );
-
-    const invalidSparse = structuredClone(value);
-    const invalidState = invalidSparse.discussions[0].human_read_states?.[0];
-    if (!invalidState) {
-      throw new Error("Expected Human read state fixture");
-    }
-    invalidState.seen_message_ids = [2];
-    expect(() => parseOrganizationSnapshot(invalidSparse)).toThrow(
-      "unique sparse later IDs",
-    );
-  });
-
-  it("rejects missing global Human membership and invalid membership cutoffs", () => {
-    const missingHuman = structuredClone(validSnapshot);
-    missingHuman.discussions[0].member_ids = [2];
-    missingHuman.discussions[0].human_read_states = [];
-    expect(() => parseOrganizationSnapshot(missingHuman)).toThrow(
-      "must contain every active Human and their cutoff state",
-    );
-
-    const missingCutoff = structuredClone(validSnapshot) as unknown as {
-      discussions: Array<{
-        human_read_states: Array<Record<string, unknown>>;
-      }>;
-    };
-    delete missingCutoff.discussions[0].human_read_states[0]
-      .joined_after_message_id;
-    expect(() => parseOrganizationSnapshot(missingCutoff)).toThrow(
-      "joined_after_message_id must be a non-negative integer",
-    );
-
-    const futureCutoff = structuredClone(validSnapshot);
-    const state = futureCutoff.discussions[0].human_read_states?.[0];
-    if (!state) {
-      throw new Error("Expected Human cutoff fixture");
-    }
-    state.joined_after_message_id = 2;
-    expect(() => parseOrganizationSnapshot(futureCutoff)).toThrow(
-      "joined_after_message_id is outside the Discussion",
-    );
-  });
-
-  it("accepts a historical sender name snapshot after rename", () => {
-    const value = structuredClone(validSnapshot);
-    value.members[0].name = "Owner";
-    value.discussions[0].messages[0].sender_name = "You";
-
-    expect(
-      parseOrganizationSnapshot(value).discussions[0].messages[0].sender_name,
-    ).toBe("You");
-  });
-
-  it("accepts renamed current Human and separate Human notification state", () => {
-    const value = structuredClone(validSnapshot);
-    value.members[0].name = "Owner";
-    const message = value.discussions[0].messages[0];
-    message.sender_id = 2;
-    message.body = "@Owner review";
-    message.references = [
-      {
-        member_id: 1,
-        name: "Owner",
-        start: 0,
-        end: 6,
-        in_discussion: true,
-        notified: true,
-        deleted: false,
-      },
-    ];
-    message.mentions = [];
-    message.human_mentions = [{ member_id: 1, status: "unread" }];
-
-    expect(parseOrganizationSnapshot(value).members[0].name).toBe("Owner");
-  });
-
-  it("keeps historical self-reference display but rejects self delivery state", () => {
-    const historical = structuredClone(validSnapshot);
-    const message = historical.discussions[0].messages[0];
-    message.body = "@You historical";
-    message.references = [
-      {
-        member_id: 1,
-        name: "You",
-        start: 0,
-        end: 4,
-        in_discussion: true,
-        notified: false,
-        deleted: false,
-      },
-    ];
-    message.mentions = [];
-
-    expect(
-      parseOrganizationSnapshot(historical).discussions[0].messages[0]
-        .references,
-    ).toEqual(message.references);
-
-    const forgedHuman = structuredClone(historical);
-    forgedHuman.discussions[0].messages[0].references[0].notified = true;
-    forgedHuman.discussions[0].messages[0].human_mentions = [
-      { member_id: 1, status: "unread" },
-    ];
-    expect(() => parseOrganizationSnapshot(forgedHuman)).toThrow(
-      "cannot notify its sender",
-    );
-
-    const forgedAgent = structuredClone(validSnapshot);
-    forgedAgent.discussions[0].messages[0].sender_id = 2;
-    expect(() => parseOrganizationSnapshot(forgedAgent)).toThrow(
-      "cannot notify its sender",
-    );
-  });
-
-  it("rejects Human delivery in Agent Mention state", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].messages[0].sender_id = 2;
-    value.discussions[0].messages[0].references[0].member_id = 1;
-    value.discussions[0].messages[0].mentions[0].member_id = 1;
-    expect(() => parseOrganizationSnapshot(value)).toThrow(
-      "must target an Agent",
-    );
-  });
-
-  it("rejects a notified reference without a Mention status", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].messages[0].mentions = [];
-    expect(() => parseOrganizationSnapshot(value)).toThrow(
-      "notified Agent identity requires a Mention status",
-    );
-  });
-
-  it("rejects overlapping or mismatched positioned references", () => {
-    const value = structuredClone(validSnapshot);
-    value.discussions[0].messages[0].body = "@Ada @Ada";
-    value.discussions[0].messages[0].references = [
-      {
-        member_id: 2,
-        name: "Ada",
-        start: 0,
-        end: 4,
-        in_discussion: true,
-        notified: true,
-        deleted: false,
-      },
-      {
-        member_id: 2,
-        name: "Ada",
-        start: 3,
-        end: 9,
-        in_discussion: true,
-        notified: true,
-        deleted: false,
-      },
-    ];
-    expect(() => parseOrganizationSnapshot(value)).toThrow(
-      "ordered and non-overlapping",
-    );
-  });
-
-  it("requires mention_syntax enabled and issues to agree", () => {
-    const value = structuredClone(validSnapshot);
-    value.mention_syntax = {
-      enabled: true,
-      issues: [
-        {
-          code: "duplicate_name",
-          member_ids: [2, 1],
-          names: ["Ada", "You"],
-          normalized_name: "ada",
-        },
-      ],
-    };
-    expect(() => parseOrganizationSnapshot(value)).toThrow(
-      "enabled must match",
-    );
-  });
-
-  it("rejects duplicate Member and Discussion IDs", () => {
-    const duplicateMember = structuredClone(validSnapshot);
-    duplicateMember.members.push({
-      id: 2,
-      type: "agent",
-      name: "Lin",
-      status: "idle",
-    });
-    expect(() => parseOrganizationSnapshot(duplicateMember)).toThrow(
-      "Member IDs must be unique",
-    );
-
-    const duplicateDiscussion = structuredClone(validSnapshot);
-    duplicateDiscussion.discussions.push(
-      structuredClone(duplicateDiscussion.discussions[0]),
-    );
-    expect(() => parseOrganizationSnapshot(duplicateDiscussion)).toThrow(
+    const duplicate = structuredClone(validSnapshot);
+    duplicate.discussions.push(structuredClone(duplicate.discussions[0]));
+    expect(() => parseOrganizationSnapshot(duplicate)).toThrow(
       "Discussion IDs must be unique",
     );
+  });
+
+  it("accepts empty Discussion summaries and validates Human eligibility", () => {
+    const missingHuman = structuredClone(validSnapshot);
+    missingHuman.discussions[0].member_ids = [2];
+    missingHuman.discussions[0].human_activity = [];
+    expect(() => parseOrganizationSnapshot(missingHuman)).toThrow(
+      "must contain every active Human and their cutoff activity",
+    );
+
+    const empty = structuredClone(validSnapshot);
+    empty.discussions[0] = {
+      ...empty.discussions[0],
+      member_ids: [],
+      message_count: 0,
+      first_message_id: null,
+      latest_message_id: null,
+      human_activity: [],
+    };
+    expect(parseOrganizationSnapshot(empty).discussions[0].message_count).toBe(
+      0,
+    );
+
+    const invalidFrontier = structuredClone(validSnapshot);
+    const discussion = invalidFrontier.discussions[0];
+    const activity = discussion?.human_activity?.[0];
+    if (!activity) throw new Error("Expected Human activity fixture");
+    activity.joined_after_message_id = 1;
+    activity.unread_count = 1;
+    activity.first_unread_message_id = 1;
+    expect(() => parseOrganizationSnapshot(invalidFrontier)).toThrow(
+      "first_unread_message_id is inconsistent",
+    );
+  });
+
+  it("parses stable-ID message pages independently", () => {
+    expect(
+      parseDiscussionMessagePage(validMessagePage, validSnapshot.members)
+        .messages[0].body,
+    ).toBe("Begin.");
+  });
+
+  it("accepts ID gaps and rejects unordered duplicate pages", () => {
+    const page = structuredClone(validMessagePage);
+    page.messages.push({ ...structuredClone(page.messages[0]), id: 3 });
+    page.newest_message_id = 3;
+    expect(
+      parseDiscussionMessagePage(page, validSnapshot.members).messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual([1, 3]);
+    page.messages.reverse();
+    expect(() =>
+      parseDiscussionMessagePage(page, validSnapshot.members),
+    ).toThrow("unique and increasing");
+  });
+
+  it("validates exact anchor coordinates", () => {
+    const page = {
+      ...structuredClone(validMessagePage),
+      mode: "anchor",
+      anchor_message_id: 1,
+      anchor_index: 0,
+    };
+    expect(
+      parseDiscussionMessagePage(page, validSnapshot.members).anchor_index,
+    ).toBe(0);
+    page.anchor_index = 1;
+    expect(() =>
+      parseDiscussionMessagePage(page, validSnapshot.members),
+    ).toThrow("anchor is inconsistent");
   });
 });
 

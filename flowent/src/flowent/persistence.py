@@ -1408,6 +1408,77 @@ class SQLiteStore:
             connection.execute("DELETE FROM agent_runs WHERE agent_id = ?", (agent_id,))
         self.path.chmod(0o600)
 
+    def load_agent_run_page(
+        self, agent_id: int, before_sequence: int | None, limit: int
+    ) -> list[dict[str, Any]]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        where = "agent_id = ?"
+        arguments: list[Any] = [agent_id]
+        if before_sequence is not None:
+            where += " AND sequence < ?"
+            arguments.append(before_sequence)
+        arguments.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT agent_id, sequence, run_id, status, started_at, completed_at,
+                    usage_json, error,
+                    1 + COALESCE((
+                        SELECT SUM(json_array_length(
+                            json_extract(value, char(36) || '.parts')
+                        ))
+                        FROM json_each(agent_runs.messages_json)
+                    ), 0) + CASE WHEN error IS NULL THEN 0 ELSE 1 END AS entry_count
+                FROM agent_runs WHERE {where}
+                ORDER BY sequence DESC LIMIT ?
+                """,
+                arguments,
+            )
+            return [
+                {
+                    "agent_id": row["agent_id"],
+                    "sequence": row["sequence"],
+                    "run_id": row["run_id"],
+                    "status": row["status"],
+                    "started_at": row["started_at"],
+                    "completed_at": row["completed_at"],
+                    "usage": json.loads(row["usage_json"])
+                    if row["usage_json"] is not None
+                    else None,
+                    "error": row["error"],
+                    "entry_count": row["entry_count"],
+                }
+                for row in rows
+            ]
+
+    def load_agent_run(self, agent_id: int, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT agent_id, sequence, run_id, status, started_at, completed_at,
+                    reminder_json, messages_json, usage_json, error
+                FROM agent_runs WHERE agent_id = ? AND run_id = ?
+                """,
+                (agent_id, run_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "agent_id": row["agent_id"],
+            "sequence": row["sequence"],
+            "run_id": row["run_id"],
+            "status": row["status"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "reminder": json.loads(row["reminder_json"]),
+            "messages_json": row["messages_json"],
+            "usage": json.loads(row["usage_json"])
+            if row["usage_json"] is not None
+            else None,
+            "error": row["error"],
+        }
+
     def load_agent_runs(self, agent_id: int) -> list[dict[str, Any]]:
         with self._connect() as connection:
             return [

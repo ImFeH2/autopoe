@@ -47,6 +47,12 @@ class AgentHistoryRepository(Protocol):
 
     def load_agent_runs(self, agent_id: int) -> list[dict[str, Any]]: ...
 
+    def load_agent_run_page(
+        self, agent_id: int, before_sequence: int | None, limit: int
+    ) -> list[dict[str, Any]]: ...
+
+    def load_agent_run(self, agent_id: int, run_id: str) -> dict[str, Any] | None: ...
+
     def delete_agent_runs(self, agent_id: int) -> None: ...
 
 
@@ -170,6 +176,140 @@ class AgentHistory:
             active=active is not None,
         )
         return {"agent_id": agent_id, "runs": runs}
+
+    def runs_page(
+        self,
+        agent_id: int,
+        *,
+        before_sequence: int | None = None,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        limit = _bounded_history_value("limit", limit, 1, 100)
+        if before_sequence is not None and before_sequence < 1:
+            raise DomainError(
+                "invalid_history_arguments", "before_sequence must be positive"
+            )
+        rows = self._repository.load_agent_run_page(
+            agent_id, before_sequence, limit + 1
+        )
+        has_earlier = len(rows) > limit
+        selected = rows[:limit]
+        with self._lock:
+            active = self._active_runs.get(agent_id)
+        metadata = []
+        for row in reversed(selected):
+            item = {
+                "run_id": row["run_id"],
+                "sequence": row["sequence"],
+                "status": row["status"],
+                "started_at": row["started_at"],
+                "completed_at": row["completed_at"],
+                "usage": row["usage"],
+                "error": row["error"],
+                "entry_count": row["entry_count"],
+                "event_sequence": 0,
+            }
+            if active is not None and row["run_id"] == active.run_id:
+                item["entry_count"] = 1 + len(active._live_entries)
+                item["event_sequence"] = active._event_sequence
+            metadata.append(item)
+        return {
+            "agent_id": agent_id,
+            "runs": metadata,
+            "has_earlier": has_earlier,
+            "next_before_sequence": selected[-1]["sequence"]
+            if has_earlier and selected
+            else None,
+        }
+
+    def run_detail(self, agent_id: int, run_id: str) -> dict[str, Any]:
+        row = self._repository.load_agent_run(agent_id, run_id)
+        if row is None:
+            raise DomainError(
+                "history_run_not_found", "Agent History run was not found"
+            )
+        projected = self._project_run(row)
+        with self._lock:
+            active = self._active_runs.get(agent_id)
+            if active is not None and active.run_id == run_id:
+                projected["entries"].extend(
+                    dict(entry) for entry in active._live_entries
+                )
+                projected["event_sequence"] = active._event_sequence
+        entries = []
+        for entry in projected["entries"]:
+            content = entry.get("content")
+            length = len(content) if isinstance(content, str) else 0
+            entries.append(
+                {
+                    **entry,
+                    **(
+                        {"content": content[:HISTORY_PREVIEW_CHARS]}
+                        if isinstance(content, str)
+                        else {}
+                    ),
+                    "content_length": length,
+                    "content_truncated": length > HISTORY_PREVIEW_CHARS,
+                }
+            )
+        return {**projected, "sequence": row["sequence"], "entries": entries}
+
+    def entry_detail(
+        self,
+        agent_id: int,
+        run_id: str,
+        entry_id: str,
+        *,
+        offset: int = 0,
+        max_chars: int = 8_000,
+    ) -> dict[str, Any]:
+        if offset < 0:
+            raise DomainError(
+                "invalid_history_arguments", "offset must be non-negative"
+            )
+        max_chars = _bounded_history_value(
+            "max_chars", max_chars, 1, HISTORY_ENTRY_MAX_CHARS
+        )
+        row = self._repository.load_agent_run(agent_id, run_id)
+        if row is None:
+            raise DomainError(
+                "history_run_not_found", "Agent History run was not found"
+            )
+        projected = self._project_run(row)
+        with self._lock:
+            active = self._active_runs.get(agent_id)
+            if active is not None and active.run_id == run_id:
+                projected["entries"].extend(dict(item) for item in active._live_entries)
+        entry = next(
+            (item for item in projected["entries"] if item["id"] == entry_id), None
+        )
+        if entry is None:
+            raise DomainError(
+                "history_entry_not_found", "Agent History entry was not found"
+            )
+        content = entry.get("content")
+        if not isinstance(content, str):
+            content = json.dumps(
+                entry.get("reminder", {}), ensure_ascii=False, indent=2
+            )
+        if offset > len(content):
+            raise DomainError(
+                "invalid_history_arguments", "offset exceeds content length"
+            )
+        end = min(len(content), offset + max_chars)
+        return {
+            "agent_id": agent_id,
+            "run_id": run_id,
+            "entry_id": entry_id,
+            "type": entry["type"],
+            "tool_name": entry.get("tool_name"),
+            "paired_entry_id": entry.get("paired_entry_id"),
+            "content": content[offset:end],
+            "content_length": len(content),
+            "offset": offset,
+            "next_offset": end if end < len(content) else None,
+            "truncated": end < len(content),
+        }
 
     def list_compacted(
         self,
@@ -633,6 +773,7 @@ class AgentHistory:
                             "type": "tool_call",
                             "timestamp": message_timestamp,
                             "tool_name": part.get("tool_name"),
+                            "tool_call_id": part.get("tool_call_id"),
                             "content": _format_content(part.get("args")),
                             "state": message_state,
                         }
@@ -644,6 +785,7 @@ class AgentHistory:
                             "type": "tool_result",
                             "timestamp": part.get("timestamp") or message_timestamp,
                             "tool_name": part.get("tool_name"),
+                            "tool_call_id": part.get("tool_call_id"),
                             "content": _format_content(part.get("content")),
                             "state": message_state,
                         }
@@ -655,6 +797,7 @@ class AgentHistory:
                             "type": "retry",
                             "timestamp": part.get("timestamp") or message_timestamp,
                             "tool_name": part.get("tool_name"),
+                            "tool_call_id": part.get("tool_call_id"),
                             "content": _format_content(part.get("content")),
                             "state": message_state,
                         }
@@ -669,6 +812,7 @@ class AgentHistory:
                     "state": "complete",
                 }
             )
+        _link_tool_entries(entries)
         return {
             "run_id": run["run_id"],
             "status": run["status"],
@@ -785,7 +929,7 @@ def _link_tool_entries(entries: list[dict[str, Any]]) -> None:
     for entry in entries:
         tool_call_id = entry.get("tool_call_id")
         if isinstance(tool_call_id, str) and tool_call_id:
-            key = (entry["run_id"], tool_call_id)
+            key = (str(entry.get("run_id", "")), tool_call_id)
             by_call_id.setdefault(key, []).append(entry)
     for related in by_call_id.values():
         if len(related) != 2:

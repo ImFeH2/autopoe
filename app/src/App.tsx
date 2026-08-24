@@ -12,12 +12,21 @@ import {
   type DraftMention,
   humanUnreadForDiscussion,
 } from "@/features/discussions";
+import {
+  type AgentHistoryCache,
+  createAgentHistoryCache,
+  mergeAgentHistoryPage,
+} from "@/features/incremental/agent-history-cache";
+import {
+  cachedDiscussionMessages,
+  createDiscussionMessageCache,
+  type DiscussionMessageCache,
+  mergeDiscussionMessagePage,
+} from "@/features/incremental/discussion-message-cache";
 import { MembersPage } from "@/features/members";
 import { SettingsPage } from "@/features/settings";
 import {
-  type AgentHistory,
   type AgentMember,
-  applyAgentHistoryEvent,
   backend,
   type OrganizationSnapshot,
 } from "@/lib/backend";
@@ -30,11 +39,6 @@ type DiscussionSource = {
 type RequestState =
   | { status: "loading" }
   | { status: "ready"; snapshot: OrganizationSnapshot }
-  | { status: "error"; message: string };
-
-export type AgentHistoryRequestState =
-  | { status: "loading" }
-  | { status: "ready"; history: AgentHistory }
   | { status: "error"; message: string };
 
 function errorMessage(error: unknown) {
@@ -67,9 +71,14 @@ function App() {
   const [messageBody, setMessageBody] = useState("");
   const [messageMentions, setMessageMentions] = useState<DraftMention[]>([]);
   const [mutationError, setMutationError] = useState<string | null>(null);
-  const [agentHistories, setAgentHistories] = useState<
-    Record<number, AgentHistoryRequestState>
+  const [discussionCaches, setDiscussionCaches] = useState<
+    Record<number, DiscussionMessageCache>
   >({});
+  const discussionRequestTokensRef = useRef<Record<number, number>>({});
+  const [agentHistoryCaches, setAgentHistoryCaches] = useState<
+    Record<number, AgentHistoryCache>
+  >({});
+  const agentHistoryRequestTokensRef = useRef<Record<number, number>>({});
   const [isSaving, setIsSaving] = useState(false);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const restoreMessageFocusRef = useRef(false);
@@ -94,6 +103,55 @@ function App() {
       setIsCreatingDiscussion(false);
     },
     [],
+  );
+
+  const loadDiscussionPage = useCallback(
+    async (
+      discussionId: number,
+      cursor: {
+        before_message_id?: number;
+        after_message_id?: number;
+        anchor_message_id?: number;
+      } = {},
+    ) => {
+      if (requestState.status !== "ready") return;
+      const token = (discussionRequestTokensRef.current[discussionId] ?? 0) + 1;
+      discussionRequestTokensRef.current[discussionId] = token;
+      setDiscussionCaches((current) => ({
+        ...current,
+        [discussionId]: {
+          ...(current[discussionId] ?? createDiscussionMessageCache()),
+          loading: true,
+          error: null,
+        },
+      }));
+      try {
+        const page = await backend.getDiscussionMessagesPage(
+          discussionId,
+          requestState.snapshot.members,
+          cursor,
+        );
+        if (discussionRequestTokensRef.current[discussionId] !== token) return;
+        setDiscussionCaches((current) => ({
+          ...current,
+          [discussionId]: mergeDiscussionMessagePage(
+            current[discussionId] ?? createDiscussionMessageCache(),
+            page,
+          ),
+        }));
+      } catch (error) {
+        if (discussionRequestTokensRef.current[discussionId] !== token) return;
+        setDiscussionCaches((current) => ({
+          ...current,
+          [discussionId]: {
+            ...(current[discussionId] ?? createDiscussionMessageCache()),
+            loading: false,
+            error: errorMessage(error),
+          },
+        }));
+      }
+    },
+    [requestState],
   );
 
   useEffect(() => {
@@ -127,87 +185,227 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (selectedAgentId === null) {
+    if (selectedDiscussionId === null || requestState.status !== "ready")
       return;
-    }
-    let active = true;
-    setAgentHistories((current) =>
-      current[selectedAgentId]
-        ? current
-        : { ...current, [selectedAgentId]: { status: "loading" } },
-    );
-    void backend
-      .getAgentHistory(selectedAgentId)
-      .then((history) => {
-        if (active) {
-          setAgentHistories((current) => ({
-            ...current,
-            [selectedAgentId]: { status: "ready", history },
-          }));
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          setAgentHistories((current) => ({
-            ...current,
-            [selectedAgentId]: {
-              status: "error",
-              message: errorMessage(error),
-            },
-          }));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [selectedAgentId]);
+    const cache = discussionCaches[selectedDiscussionId];
+    if (!cache?.loaded && !cache?.loading)
+      void loadDiscussionPage(selectedDiscussionId);
+  }, [
+    discussionCaches,
+    loadDiscussionPage,
+    requestState.status,
+    selectedDiscussionId,
+  ]);
 
   useEffect(() => {
-    let active = true;
-    const unsubscribe = backend.onAgentHistoryEvent((event) => {
-      setAgentHistories((current) => {
-        const existing = current[event.agent_id];
-        const history =
-          existing?.status === "ready"
-            ? existing.history
-            : { agent_id: event.agent_id, runs: [] };
+    if (requestState.status !== "ready") return;
+    const summary = requestState.snapshot.discussions.find(
+      (item) => item.id === selectedDiscussionId,
+    );
+    const cache =
+      selectedDiscussionId === null
+        ? undefined
+        : discussionCaches[selectedDiscussionId];
+    if (
+      summary?.latest_message_id &&
+      cache?.loaded &&
+      cache.followsLatest &&
+      !cache.loading &&
+      (cache.newestMessageId ?? 0) < summary.latest_message_id
+    ) {
+      void loadDiscussionPage(summary.id, {
+        after_message_id: cache.newestMessageId ?? undefined,
+      });
+    }
+  }, [
+    discussionCaches,
+    loadDiscussionPage,
+    requestState,
+    selectedDiscussionId,
+  ]);
+
+  useEffect(() => {
+    if (requestState.status !== "ready" || selectedDiscussionId === null)
+      return;
+    const summary = requestState.snapshot.discussions.find(
+      (item) => item.id === selectedDiscussionId,
+    );
+    const activity = summary?.human_activity?.find(
+      (item) => item.member_id === 1,
+    );
+    const target =
+      activity?.first_unread_message_id ??
+      activity?.next_human_mention_message_id;
+    const cache = discussionCaches[selectedDiscussionId];
+    if (
+      target &&
+      cache?.loaded &&
+      !cache.loading &&
+      !cache.messagesById[target]
+    ) {
+      void loadDiscussionPage(selectedDiscussionId, {
+        anchor_message_id: target,
+      });
+    }
+  }, [
+    discussionCaches,
+    loadDiscussionPage,
+    requestState,
+    selectedDiscussionId,
+  ]);
+
+  const loadAgentHistoryPage = useCallback(
+    async (agentId: number, beforeSequence: number | null = null) => {
+      const token = (agentHistoryRequestTokensRef.current[agentId] ?? 0) + 1;
+      agentHistoryRequestTokensRef.current[agentId] = token;
+      setAgentHistoryCaches((current) => ({
+        ...current,
+        [agentId]: {
+          ...(current[agentId] ?? createAgentHistoryCache()),
+          loading: true,
+          error: null,
+        },
+      }));
+      try {
+        const page = await backend.getAgentHistoryPage(agentId, beforeSequence);
+        if (agentHistoryRequestTokensRef.current[agentId] !== token) return;
+        setAgentHistoryCaches((current) => ({
+          ...current,
+          [agentId]: mergeAgentHistoryPage(
+            current[agentId] ?? createAgentHistoryCache(),
+            page,
+          ),
+        }));
+      } catch (error) {
+        if (agentHistoryRequestTokensRef.current[agentId] !== token) return;
+        setAgentHistoryCaches((current) => ({
+          ...current,
+          [agentId]: {
+            ...(current[agentId] ?? createAgentHistoryCache()),
+            loading: false,
+            error: errorMessage(error),
+          },
+        }));
+      }
+    },
+    [],
+  );
+
+  const loadAgentHistoryRun = useCallback(
+    async (agentId: number, runId: string) => {
+      const detail = await backend.getAgentHistoryRun(agentId, runId);
+      setAgentHistoryCaches((current) => {
+        const cache = current[agentId] ?? createAgentHistoryCache();
         return {
           ...current,
-          [event.agent_id]: {
-            status: "ready",
-            history: applyAgentHistoryEvent(history, event),
+          [agentId]: {
+            ...cache,
+            detailByRunId: { ...cache.detailByRunId, [runId]: detail },
           },
         };
       });
-      if (event.type === "run_completed" || event.type === "run_failed") {
-        void backend
-          .getAgentHistory(event.agent_id)
-          .then((history) => {
-            if (active) {
-              setAgentHistories((current) => ({
-                ...current,
-                [event.agent_id]: { status: "ready", history },
-              }));
-            }
-          })
-          .catch((error) => {
-            if (active) {
-              setAgentHistories((current) => ({
-                ...current,
-                [event.agent_id]: {
-                  status: "error",
-                  message: errorMessage(error),
-                },
-              }));
-            }
-          });
-      }
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
+    },
+    [],
+  );
+
+  const loadAgentHistoryEntry = useCallback(
+    async (agentId: number, runId: string, entryId: string) => {
+      const detail = await backend.getAgentHistoryEntry(
+        agentId,
+        runId,
+        entryId,
+        0,
+        16_000,
+      );
+      setAgentHistoryCaches((current) => {
+        const cache = current[agentId] ?? createAgentHistoryCache();
+        const run = cache.detailByRunId[runId];
+        if (!run) return current;
+        return {
+          ...current,
+          [agentId]: {
+            ...cache,
+            expandedIds: cache.expandedIds.includes(entryId)
+              ? cache.expandedIds
+              : [...cache.expandedIds, entryId],
+            detailByRunId: {
+              ...cache.detailByRunId,
+              [runId]: {
+                ...run,
+                entries: run.entries.map((entry) =>
+                  entry.id === entryId
+                    ? {
+                        ...entry,
+                        content: detail.content,
+                        content_length: detail.content_length,
+                        content_truncated: detail.truncated,
+                        paired_entry_id: detail.paired_entry_id,
+                      }
+                    : entry,
+                ),
+              },
+            },
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (requestState.status !== "ready" || selectedDiscussionId === null)
+      return;
+    const summary = requestState.snapshot.discussions.find(
+      (item) => item.id === selectedDiscussionId,
+    );
+    const cache = discussionCaches[selectedDiscussionId];
+    if (!summary || !cache?.loaded || cache.loading || cache.error) return;
+    const activity = summary.human_activity?.find(
+      (item) => item.member_id === 1,
+    );
+    const missingTarget = [
+      activity?.first_unread_message_id,
+      activity?.next_human_mention_message_id,
+    ].find(
+      (messageId): messageId is number =>
+        messageId !== null &&
+        messageId !== undefined &&
+        !cache.messagesById[messageId],
+    );
+    if (missingTarget !== undefined)
+      void loadDiscussionPage(selectedDiscussionId, {
+        anchor_message_id: missingTarget,
+      });
+  }, [
+    discussionCaches,
+    loadDiscussionPage,
+    requestState,
+    selectedDiscussionId,
+  ]);
+
+  useEffect(() => {
+    if (selectedAgentId === null) return;
+    const cache = agentHistoryCaches[selectedAgentId];
+    if (!cache?.loaded && !cache?.loading)
+      void loadAgentHistoryPage(selectedAgentId);
+  }, [agentHistoryCaches, loadAgentHistoryPage, selectedAgentId]);
+
+  useEffect(
+    () =>
+      backend.onAgentHistoryEvent((event) => {
+        const cache = agentHistoryCaches[event.agent_id];
+        if (
+          event.type === "run_started" ||
+          event.type === "run_completed" ||
+          event.type === "run_failed"
+        ) {
+          void loadAgentHistoryPage(event.agent_id);
+        }
+        if (cache?.detailByRunId[event.run_id])
+          void loadAgentHistoryRun(event.agent_id, event.run_id);
+      }),
+    [agentHistoryCaches, loadAgentHistoryPage, loadAgentHistoryRun],
+  );
 
   useEffect(() => {
     if (isSaving) {
@@ -293,9 +491,21 @@ function App() {
   }
 
   const { snapshot } = requestState;
-  const selectedDiscussion = snapshot.discussions.find(
+  const selectedDiscussionSummary = snapshot.discussions.find(
     (discussion) => discussion.id === selectedDiscussionId,
   );
+  const selectedDiscussionCache =
+    selectedDiscussionId === null
+      ? undefined
+      : discussionCaches[selectedDiscussionId];
+  const selectedDiscussion = selectedDiscussionSummary
+    ? {
+        ...selectedDiscussionSummary,
+        messages: selectedDiscussionCache
+          ? cachedDiscussionMessages(selectedDiscussionCache)
+          : [],
+      }
+    : undefined;
   const selectedMember = snapshot.members.find(
     (member) => member.id === selectedMemberId,
   );
@@ -379,11 +589,12 @@ function App() {
           ? null
           : current,
       );
-      setAgentHistories((current) => {
+      setAgentHistoryCaches((current) => {
         const next = { ...current };
         delete next[agentId];
         return next;
       });
+      delete agentHistoryRequestTokensRef.current[agentId];
       setMessageBody("");
       setMessageMentions([]);
     }
@@ -411,6 +622,14 @@ function App() {
     const nextSnapshot = await mutate(() =>
       backend.deleteDiscussion(discussionId),
     );
+    if (nextSnapshot) {
+      setDiscussionCaches((current) => {
+        const next = { ...current };
+        delete next[discussionId];
+        return next;
+      });
+      delete discussionRequestTokensRef.current[discussionId];
+    }
     if (nextSnapshot && selectedDiscussionId === discussionId) {
       setSelectedDiscussionId(null);
       setMessageBody("");
@@ -427,17 +646,13 @@ function App() {
     discussionId: number,
     messageIds: number[],
   ) {
-    const discussion = snapshot.discussions.find(
-      (candidate) => candidate.id === discussionId,
-    );
+    const cache = discussionCaches[discussionId];
     const unreadMentionMessageIds = messageIds.filter((messageId) =>
-      discussion?.messages
-        .find((message) => message.id === messageId)
-        ?.human_mentions?.some(
-          (mention) => mention.member_id === 1 && mention.status === "unread",
-        ),
+      cache?.messagesById[messageId]?.human_mentions?.some(
+        (mention) => mention.member_id === 1 && mention.status === "unread",
+      ),
     );
-    await mutate(async () => {
+    const nextSnapshot = await mutate(async () => {
       let nextSnapshot = await backend.seeHumanMessages(
         discussionId,
         messageIds,
@@ -451,6 +666,29 @@ function App() {
       }
       return nextSnapshot;
     });
+    if (nextSnapshot) {
+      setDiscussionCaches((current) => {
+        const currentCache = current[discussionId];
+        if (!currentCache) return current;
+        const messagesById = { ...currentCache.messagesById };
+        for (const messageId of messageIds) {
+          const message = messagesById[messageId];
+          if (message)
+            messagesById[messageId] = {
+              ...message,
+              human_mentions: message.human_mentions?.map((mention) =>
+                mention.member_id === 1
+                  ? { ...mention, status: "read" }
+                  : mention,
+              ),
+            };
+        }
+        return {
+          ...current,
+          [discussionId]: { ...currentCache, messagesById },
+        };
+      });
+    }
   }
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
@@ -462,6 +700,13 @@ function App() {
       backend.sendMessage(selectedDiscussion.id, messageBody),
     );
     if (nextSnapshot) {
+      const latestMessageId = nextSnapshot.discussions.find(
+        (discussion) => discussion.id === selectedDiscussion.id,
+      )?.latest_message_id;
+      await loadDiscussionPage(
+        selectedDiscussion.id,
+        latestMessageId ? { anchor_message_id: latestMessageId } : {},
+      );
       restoreMessageFocusRef.current = true;
       setMessageBody("");
       setMessageMentions([]);
@@ -565,10 +810,44 @@ function App() {
             disabled={isSaving}
             discussions={snapshot.discussions}
             error={isCreatingAgent ? mutationError : null}
-            history={
+            historyCache={
               selectedMember?.type === "agent"
-                ? (agentHistories[selectedMember.id] ?? { status: "loading" })
+                ? (agentHistoryCaches[selectedMember.id] ??
+                  createAgentHistoryCache())
                 : undefined
+            }
+            onLoadEarlierHistory={(agentId, beforeSequence) =>
+              loadAgentHistoryPage(agentId, beforeSequence)
+            }
+            onLoadHistoryRun={loadAgentHistoryRun}
+            onToggleHistoryEntry={async (agentId, runId, entryId, open) => {
+              if (open) await loadAgentHistoryEntry(agentId, runId, entryId);
+              else
+                setAgentHistoryCaches((current) => {
+                  const cache = current[agentId] ?? createAgentHistoryCache();
+                  return {
+                    ...current,
+                    [agentId]: {
+                      ...cache,
+                      expandedIds: cache.expandedIds.filter(
+                        (id) => id !== entryId,
+                      ),
+                    },
+                  };
+                });
+            }}
+            onHistoryScrollState={(agentId, scrollTop, followsLatest) =>
+              setAgentHistoryCaches((current) => ({
+                ...current,
+                [agentId]: {
+                  ...(current[agentId] ?? createAgentHistoryCache()),
+                  scrollTop,
+                  followsLatest,
+                  newRunCount: followsLatest
+                    ? 0
+                    : (current[agentId]?.newRunCount ?? 0),
+                },
+              }))
             }
             isCreatingAgent={isCreatingAgent}
             members={snapshot.members}
@@ -609,6 +888,61 @@ function App() {
             onMessagesSeen={(discussionId, messageIds) =>
               void handleMessagesSeen(discussionId, messageIds)
             }
+            onRequestMessage={
+              selectedDiscussionId !== null
+                ? (messageId) =>
+                    loadDiscussionPage(selectedDiscussionId, {
+                      anchor_message_id: messageId,
+                    })
+                : undefined
+            }
+            onLoadNewMessages={
+              selectedDiscussionId !== null
+                ? () =>
+                    loadDiscussionPage(selectedDiscussionId, {
+                      after_message_id:
+                        selectedDiscussionCache?.newestMessageId ?? undefined,
+                    })
+                : undefined
+            }
+            unloadedNewMessageCount={
+              selectedDiscussionSummary?.latest_message_id &&
+              selectedDiscussionCache?.newestMessageId &&
+              selectedDiscussionSummary.latest_message_id >
+                selectedDiscussionCache.newestMessageId &&
+              !selectedDiscussionCache.followsLatest
+                ? 1
+                : 0
+            }
+            onLoadEarlier={
+              selectedDiscussionCache?.hasEarlier &&
+              selectedDiscussionId !== null
+                ? () =>
+                    loadDiscussionPage(selectedDiscussionId, {
+                      before_message_id:
+                        selectedDiscussionCache.oldestMessageId ?? undefined,
+                    })
+                : undefined
+            }
+            messagePageLoading={selectedDiscussionCache?.loading}
+            messagePageError={selectedDiscussionCache?.error}
+            initialScrollTop={
+              selectedDiscussionCache?.loaded
+                ? selectedDiscussionCache.scrollTop
+                : undefined
+            }
+            onMessageScrollState={(scrollTop, followsLatest) => {
+              if (!selectedDiscussionId) return;
+              setDiscussionCaches((current) => ({
+                ...current,
+                [selectedDiscussionId]: {
+                  ...(current[selectedDiscussionId] ??
+                    createDiscussionMessageCache()),
+                  scrollTop,
+                  followsLatest,
+                },
+              }));
+            }}
             onOpenMember={openMemberFromDiscussion}
             onCreateAgent={() => {
               selectWorkspaceView("members");
