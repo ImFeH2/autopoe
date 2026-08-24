@@ -206,6 +206,12 @@ export type MentionSyntax = {
   issues: MentionSyntaxIssue[];
 };
 
+export type MemberNamePolicy = {
+  normalization: "NFKC";
+  max_code_points: number;
+  max_utf8_bytes: number;
+};
+
 export type Message = {
   id: number;
   sender_id: number;
@@ -271,6 +277,7 @@ export type OrganizationSnapshot = {
   organization: { id: 1 };
   working_directory: string;
   mention_syntax: MentionSyntax;
+  member_name_policy: MemberNamePolicy;
   members: Member[];
   discussions: Discussion[];
 };
@@ -421,6 +428,24 @@ function parseMentionSyntax(value: unknown): MentionSyntax {
     );
   }
   return { enabled, issues };
+}
+
+function parseMemberNamePolicy(value: unknown): MemberNamePolicy {
+  const item = record(value, "member_name_policy");
+  if (item.normalization !== "NFKC") {
+    invalidSnapshot("member_name_policy.normalization must be NFKC");
+  }
+  return {
+    normalization: "NFKC",
+    max_code_points: positiveInteger(
+      item.max_code_points,
+      "member_name_policy.max_code_points",
+    ),
+    max_utf8_bytes: positiveInteger(
+      item.max_utf8_bytes,
+      "member_name_policy.max_utf8_bytes",
+    ),
+  };
 }
 
 function parseMember(value: unknown, index: number): Member {
@@ -971,6 +996,7 @@ export function parseOrganizationSnapshot(
   }
 
   const mentionSyntax = parseMentionSyntax(snapshot.mention_syntax);
+  const memberNamePolicy = parseMemberNamePolicy(snapshot.member_name_policy);
   const members = array(snapshot.members, "members").map(parseMember);
   if (members.length === 0) {
     invalidSnapshot("members cannot be empty");
@@ -1022,6 +1048,7 @@ export function parseOrganizationSnapshot(
       "working_directory",
     ),
     mention_syntax: mentionSyntax,
+    member_name_policy: memberNamePolicy,
     members,
     discussions,
   };

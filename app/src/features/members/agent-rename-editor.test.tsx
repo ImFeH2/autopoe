@@ -13,6 +13,11 @@ function render(status: "idle" | "running" | "pausing" | "paused" | "error") {
     <TooltipProvider>
       <AgentRenameEditor
         agent={{ id: 2, type: "agent", name: "Ada", status }}
+        namePolicy={{
+          normalization: "NFKC",
+          max_code_points: 32,
+          max_utf8_bytes: 128,
+        }}
         onRename={async () => undefined}
       />
     </TooltipProvider>,

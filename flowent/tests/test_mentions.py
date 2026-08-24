@@ -49,6 +49,12 @@ def test_requires_complete_hyphen_and_underscore_tokens_with_longest_name() -> N
     ) == [(3, 0, 13), (2, 15, 19), (4, 28, 34)]
 
 
+def test_matches_names_at_the_new_maximum_without_a_parser_side_limit() -> None:
+    name = "𐐀" * 32
+    body = f"Ask @{name} now"
+    assert refs(body, (2, name)) == [(2, 4, 37)]
+
+
 def test_excludes_email_generic_urls_and_code() -> None:
     body = (
         "ada@example.com https://example.com/@Ada mailto:Ada@example.com "

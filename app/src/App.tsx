@@ -24,12 +24,17 @@ import {
   mergeDiscussionMessagePage,
 } from "@/features/incremental/discussion-message-cache";
 import { MembersPage } from "@/features/members";
+import {
+  memberNameErrorMessage,
+  memberNameValidationMessage,
+} from "@/features/members/member-name-policy";
 import { SettingsPage } from "@/features/settings";
 import {
   type AgentMember,
   backend,
   type OrganizationSnapshot,
 } from "@/lib/backend";
+import { FlowentRequestError } from "@/lib/flowent";
 
 type DiscussionSource = {
   discussionId: number;
@@ -536,12 +541,32 @@ function App() {
 
   async function handleCreateAgent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const nextSnapshot = await mutate(() => backend.createAgent(agentName));
-    if (nextSnapshot) {
+    const validationError = memberNameValidationMessage(
+      agentName,
+      snapshot.member_name_policy,
+    );
+    if (validationError) {
+      setMutationError(validationError);
+      return;
+    }
+    setIsSaving(true);
+    setMutationError(null);
+    try {
+      const nextSnapshot = await backend.createAgent(agentName);
+      commit(nextSnapshot);
       const created = nextSnapshot.members[nextSnapshot.members.length - 1];
       setAgentName("");
       setSelectedMemberId(created?.type === "agent" ? created.id : null);
       setIsCreatingAgent(false);
+    } catch (error) {
+      setMutationError(
+        error instanceof FlowentRequestError
+          ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
+              error.message)
+          : errorMessage(error),
+      );
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -851,6 +876,7 @@ function App() {
             }
             isCreatingAgent={isCreatingAgent}
             members={snapshot.members}
+            namePolicy={snapshot.member_name_policy}
             onAgentDialogOpenChange={changeAgentDialog}
             onAgentNameChange={setAgentName}
             onCreateAgent={handleCreateAgent}

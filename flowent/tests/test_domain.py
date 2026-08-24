@@ -20,6 +20,11 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
         "organization": {"id": 1},
         "working_directory": str(tmp_path),
         "mention_syntax": {"enabled": True, "issues": []},
+        "member_name_policy": {
+            "normalization": "NFKC",
+            "max_code_points": 32,
+            "max_utf8_bytes": 128,
+        },
         "members": [
             {"id": 1, "type": "human", "name": "You"},
             {"id": 2, "type": "agent", "name": "Ada", "status": "idle"},
@@ -237,6 +242,114 @@ def test_agent_names_are_legal_and_nfkc_casefold_unique() -> None:
         state.create_agent("Ａｄａ")
     with pytest.raises(DomainError, match="only Unicode"):
         state.create_agent("Ada@Work")
+    with pytest.raises(DomainError, match="only Unicode"):
+        state.create_agent("Ada😀")
+
+
+def test_member_name_limits_use_nfkc_code_points_and_utf8_bytes() -> None:
+    state = OrganizationState()
+    composed = "É" * 32
+    decomposed = "É" * 32
+    four_byte_letter = "𐐀"
+
+    assert state.create_agent(decomposed)["members"][-1]["name"] == decomposed
+    with pytest.raises(DomainError) as normalized_duplicate:
+        state.create_agent(composed)
+    assert normalized_duplicate.value.code == "duplicate_name"
+    state.rename_member(2, composed)
+
+    with pytest.raises(DomainError) as chars:
+        state.rename_member(2, "a" * 33)
+    assert chars.value.code == "name_too_long"
+
+    state.rename_member(2, four_byte_letter * 32)
+    with pytest.raises(DomainError) as utf8:
+        state.rename_member(2, four_byte_letter * 32 + "a")
+    assert utf8.value.code == "name_too_large"
+
+    with pytest.raises(DomainError) as nfkc_expansion:
+        state.rename_member(2, "ﬃ" * 11)
+    assert nfkc_expansion.value.code == "name_too_long"
+
+    with pytest.raises(DomainError) as emoji:
+        state.rename_member(2, "Ada😀")
+    assert emoji.value.code == "invalid_name"
+
+
+def test_create_and_human_agent_rename_share_member_name_validation() -> None:
+    state = OrganizationState()
+
+    for name in (" Ada", "Ada "):
+        with pytest.raises(DomainError) as create:
+            state.create_agent(name)
+        assert create.value.code == "invalid_name"
+
+    state.create_agent("Ada")
+    for member_id in (1, 2):
+        with pytest.raises(DomainError) as rename:
+            state.rename_member(member_id, "x" * 33)
+        assert rename.value.code == "name_too_long"
+
+
+def test_legacy_overlong_active_name_restores_without_disabling_mentions() -> None:
+    legacy_name = "\U00010400" * 33
+    state = OrganizationState(
+        persisted={
+            "members": [
+                {"id": 1, "type": "human", "name": "You"},
+                {"id": 2, "type": "agent", "name": legacy_name},
+            ],
+            "discussions": [
+                {
+                    "id": 1,
+                    "topic": "Legacy",
+                    "member_ids": [1, 2],
+                    "messages": [
+                        {
+                            "id": 1,
+                            "sender_id": 1,
+                            "body": "legacy structured reference",
+                            "references": [
+                                {
+                                    "member_id": 2,
+                                    "name": legacy_name,
+                                    "start": None,
+                                    "end": None,
+                                    "in_discussion": True,
+                                    "notified": False,
+                                    "deleted": False,
+                                }
+                            ],
+                            "mentions": [],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    snapshot = state.send_message(1, 1, f"@{legacy_name}")
+    assert snapshot["members"][1]["name"] == legacy_name
+    assert snapshot["mention_syntax"] == {"enabled": True, "issues": []}
+    assert snapshot["discussions"][0]["messages"][0]["references"][0] == {
+        "member_id": 2,
+        "name": legacy_name,
+        "start": None,
+        "end": None,
+        "in_discussion": True,
+        "notified": False,
+        "deleted": False,
+    }
+    assert snapshot["discussions"][0]["messages"][1]["mentions"] == [
+        {"member_id": 2, "status": "pending"}
+    ]
+
+    with pytest.raises(DomainError) as unchanged_rename:
+        state.rename_member(2, legacy_name)
+    assert unchanged_rename.value.code == "name_too_large"
+
+    renamed = state.rename_member(2, "Legacy")
+    assert renamed["members"][1]["name"] == "Legacy"
 
 
 def test_legacy_name_issue_disables_syntax_but_restores_notification_identity() -> None:

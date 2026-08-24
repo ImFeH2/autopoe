@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from unicodedata import category, normalize
+from unicodedata import category
+
+from flowent.member_names import (
+    normalized_member_name_key,
+    validate_mention_safe_name,
+)
 
 
 @dataclass(frozen=True)
@@ -28,23 +33,11 @@ class MentionOccurrence:
 
 
 def normalized_mention_name(value: str) -> str:
-    return normalize("NFKC", value).casefold()
+    return normalized_member_name_key(value)
 
 
 def validate_mention_name(value: str) -> str:
-    name = value.strip()
-    if not name:
-        raise ValueError("Mention name is required")
-    if not any(category(character)[0] in {"L", "N"} for character in name):
-        raise ValueError("Mention names require a Unicode letter or number")
-    if any(
-        character not in "-_" and category(character)[0] not in {"L", "M", "N"}
-        for character in name
-    ):
-        raise ValueError(
-            "Mention names may contain only Unicode letters, numbers, marks, '-' and '_'"
-        )
-    return name
+    return validate_mention_safe_name(value)
 
 
 def mention_name_issues(names: Iterable[MentionName]) -> tuple[MentionNameIssue, ...]:

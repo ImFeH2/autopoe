@@ -642,6 +642,41 @@ def test_dispatches_general_member_rename_and_human_mention_read() -> None:
     assert message["human_mentions"] == [{"member_id": 1, "status": "read"}]
 
 
+def test_protocol_exposes_member_name_policy_and_length_error_codes() -> None:
+    responses = run_requests(
+        {"id": 1, "method": "organization.get"},
+        {
+            "id": 2,
+            "method": "organization.create_agent",
+            "params": {"name": "Ada"},
+        },
+        {
+            "id": 3,
+            "method": "organization.create_agent",
+            "params": {"name": "a" * 33},
+        },
+        {
+            "id": 4,
+            "method": "organization.rename_member",
+            "params": {"member_id": 1, "name": "a" * 33},
+        },
+        {
+            "id": 5,
+            "method": "organization.rename_member",
+            "params": {"member_id": 2, "name": "𐐀" * 32 + "a"},
+        },
+    )
+
+    assert responses[0]["result"]["member_name_policy"] == {
+        "normalization": "NFKC",
+        "max_code_points": 32,
+        "max_utf8_bytes": 128,
+    }
+    assert responses[2]["error"]["code"] == "name_too_long"
+    assert responses[3]["error"]["code"] == "name_too_long"
+    assert responses[4]["error"]["code"] == "name_too_large"
+
+
 def test_dispatches_member_rename_and_returns_stable_error_codes() -> None:
     responses = run_requests(
         {"id": 1, "method": "organization.create_agent", "params": {"name": "Ada"}},

@@ -13,13 +13,13 @@ from flowent.human_read_state import (
     mark_human_messages_seen,
     normalize_human_read_state,
 )
-from flowent.mentions import (
-    MentionName,
-    find_mentions,
-    mention_syntax_issues,
-    normalized_mention_name,
-    validate_mention_name,
+from flowent.member_names import (
+    MemberNameValidationError,
+    member_name_policy_data,
+    normalized_member_name_key,
+    validate_member_name_for_mutation,
 )
+from flowent.mentions import MentionName, find_mentions, mention_syntax_issues
 
 MESSAGE_CREATED_AT_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,}Z$"
@@ -190,15 +190,15 @@ class OrganizationState:
 
     def create_agent(self, name: str) -> dict[str, Any]:
         try:
-            normalized_name = validate_mention_name(name)
-        except ValueError as error:
-            raise DomainError("invalid_name", str(error)) from error
+            normalized_name = validate_member_name_for_mutation(name)
+        except MemberNameValidationError as error:
+            raise DomainError(error.code, str(error)) from error
 
         with self._condition:
-            normalized_key = normalized_mention_name(normalized_name)
+            normalized_key = normalized_member_name_key(normalized_name)
             if any(
                 not member.deleted
-                and normalized_mention_name(member.name) == normalized_key
+                and normalized_member_name_key(member.name) == normalized_key
                 for member in self._members.values()
             ):
                 raise DomainError("duplicate_name", "Member names must be unique")
@@ -214,14 +214,10 @@ class OrganizationState:
             return self._snapshot()
 
     def rename_member(self, member_id: int, new_name: str) -> dict[str, Any]:
-        if new_name != new_name.strip():
-            raise DomainError(
-                "invalid_name", "Member name cannot start or end with whitespace"
-            )
         try:
-            normalized_name = validate_mention_name(new_name)
-        except ValueError as error:
-            raise DomainError("invalid_name", str(error)) from error
+            normalized_name = validate_member_name_for_mutation(new_name)
+        except MemberNameValidationError as error:
+            raise DomainError(error.code, str(error)) from error
 
         with self._condition:
             member = self._members.get(member_id)
@@ -236,11 +232,11 @@ class OrganizationState:
                 raise DomainError(
                     "agent_busy", "Running or pausing Agents cannot be renamed"
                 )
-            normalized_key = normalized_mention_name(normalized_name)
+            normalized_key = normalized_member_name_key(normalized_name)
             if any(
                 candidate.id != member_id
                 and not candidate.deleted
-                and normalized_mention_name(candidate.name) == normalized_key
+                and normalized_member_name_key(candidate.name) == normalized_key
                 for candidate in self._members.values()
             ):
                 raise DomainError("duplicate_name", "Member names must be unique")
@@ -898,6 +894,7 @@ class OrganizationState:
             "organization": {"id": 1},
             "working_directory": self._working_directory,
             "mention_syntax": self._mention_syntax_data(),
+            "member_name_policy": member_name_policy_data(),
             "members": [
                 self._member_data(member)
                 for member in self._members.values()
@@ -914,6 +911,7 @@ class OrganizationState:
             "organization": {"id": 1},
             "working_directory": self._working_directory,
             "mention_syntax": self._mention_syntax_data(),
+            "member_name_policy": member_name_policy_data(),
             "members": [
                 self._member_data(member)
                 for member in self._members.values()

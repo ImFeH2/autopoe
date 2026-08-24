@@ -49,8 +49,11 @@ export function agentRenameSuccessCopy(currentName: string, nextName: string) {
   };
 }
 
-export function agentRenameInlineError(code: string): string {
-  return INLINE_ERROR_MESSAGES.get(code) ?? UNKNOWN_INLINE_ERROR;
+export function agentRenameInlineError(
+  code: string,
+  lengthError?: string | null,
+): string {
+  return lengthError ?? INLINE_ERROR_MESSAGES.get(code) ?? UNKNOWN_INLINE_ERROR;
 }
 
 export function hasAgentRenameBoundaryWhitespace(name: string): boolean {

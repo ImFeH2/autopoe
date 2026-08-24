@@ -26,6 +26,26 @@ from flowent.runtime import AgentRunContext, AgentRunFailure, AgentRuntime
 from flowent.todos import AgentTodos
 
 
+def test_agent_organization_tool_uses_member_name_mutation_policy(
+    tmp_path: Path,
+) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    context = AgentRunContext(
+        agent_id=2,
+        state=state,
+        host_tools=HostTools(tmp_path),
+    )
+
+    with pytest.raises(DomainError) as too_long:
+        context.organization("create_agent", name="x" * 33)
+    assert too_long.value.code == "name_too_long"
+
+    with pytest.raises(DomainError) as too_large:
+        context.organization("create_agent", name="\U00010400" * 32 + "a")
+    assert too_large.value.code == "name_too_large"
+
+
 def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> None:
     state = OrganizationState()
     state.create_agent("Ada")

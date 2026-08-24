@@ -18,6 +18,11 @@ const validSnapshot: OrganizationSnapshot = {
   organization: { id: 1 },
   working_directory: "/project/flowent",
   mention_syntax: { enabled: true, issues: [] },
+  member_name_policy: {
+    normalization: "NFKC",
+    max_code_points: 32,
+    max_utf8_bytes: 128,
+  },
   members: [
     { id: 1, type: "human", name: "You" },
     { id: 2, type: "agent", name: "Ada", status: "idle" },
@@ -284,6 +289,14 @@ describe("parseOrganizationSnapshot", () => {
     const parsed = parseOrganizationSnapshot(structuredClone(validSnapshot));
     expect(parsed).toEqual(validSnapshot);
     expect(parsed.discussions[0]).not.toHaveProperty("messages");
+  });
+
+  it("requires a positive Member name policy", () => {
+    const value = structuredClone(validSnapshot);
+    value.member_name_policy.max_code_points = 0;
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "member_name_policy.max_code_points must be a positive integer",
+    );
   });
 
   it("rejects old full-message snapshots", () => {

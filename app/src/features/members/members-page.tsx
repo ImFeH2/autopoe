@@ -19,12 +19,18 @@ import type {
   AgentMember,
   Discussion,
   Member,
+  MemberNamePolicy,
 } from "@/lib/backend";
 import { AgentMemoryBrowser } from "./agent-memory-browser";
 import { AgentRenameEditor } from "./agent-rename-editor";
 import { AgentTodos } from "./agent-todos";
 import { HistoryBlock } from "./history-block";
 import { HumanRenameEditor } from "./human-rename-editor";
+import {
+  memberNameConstraints,
+  memberNameCount,
+  memberNameValidationMessage,
+} from "./member-name-policy";
 
 type AgentHistoryState =
   | { status: "loading" }
@@ -56,6 +62,7 @@ type MembersPageProps = {
     followsLatest: boolean,
   ) => void;
   members: Member[];
+  namePolicy: MemberNamePolicy;
   onAgentDialogOpenChange: (open: boolean) => void;
   onAgentNameChange: (name: string) => void;
   onBackToDiscussion?: () => void;
@@ -89,6 +96,7 @@ export function MembersPage({
   onToggleHistoryEntry,
   onHistoryScrollState,
   members,
+  namePolicy,
   onAgentDialogOpenChange,
   onAgentNameChange,
   onBackToDiscussion,
@@ -105,6 +113,11 @@ export function MembersPage({
   const agentNameInputRef = useRef<HTMLInputElement>(null);
   const [deletingAgentId, setDeletingAgentId] = useState<number | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const agentNameValidationError = agentName
+    ? memberNameValidationMessage(agentName, namePolicy)
+    : null;
+  const agentNameCount = memberNameCount(agentName, namePolicy);
+  const agentNameConstraints = memberNameConstraints(namePolicy);
 
   return (
     <section className="members-workspace">
@@ -138,11 +151,29 @@ export function MembersPage({
             <form
               className="member-agent-form"
               aria-label="Create Agent"
-              onSubmit={onCreateAgent}
+              onSubmit={(event) => {
+                if (agentNameValidationError) {
+                  event.preventDefault();
+                  return;
+                }
+                onCreateAgent(event);
+              }}
             >
               <label className="member-agent-field" htmlFor="agent-name">
                 <span>Name</span>
                 <Input
+                  aria-describedby={[
+                    "agent-name-constraints",
+                    agentNameCount ? "agent-name-count" : null,
+                    agentNameValidationError || error
+                      ? "agent-name-error"
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  aria-invalid={
+                    agentNameValidationError || error ? "true" : undefined
+                  }
                   autoComplete="off"
                   disabled={disabled}
                   id="agent-name"
@@ -153,9 +184,25 @@ export function MembersPage({
                   value={agentName}
                 />
               </label>
-              {error ? (
-                <p className="caption-text m-0 text-danger" role="alert">
-                  {error}
+              <span className="sr-only" id="agent-name-constraints">
+                {agentNameConstraints}
+              </span>
+              {agentNameCount ? (
+                <p
+                  aria-live="polite"
+                  className="caption-text m-0"
+                  id="agent-name-count"
+                >
+                  {agentNameCount}
+                </p>
+              ) : null}
+              {agentNameValidationError || error ? (
+                <p
+                  className="caption-text m-0 text-danger"
+                  id="agent-name-error"
+                  role="alert"
+                >
+                  {agentNameValidationError ?? error}
                 </p>
               ) : null}
               <div className="member-agent-actions">
@@ -166,7 +213,11 @@ export function MembersPage({
                 >
                   Cancel
                 </Button>
-                <Button disabled={disabled} type="submit" variant="primary">
+                <Button
+                  disabled={disabled || agentNameValidationError !== null}
+                  type="submit"
+                  variant="primary"
+                >
                   Create
                 </Button>
               </div>
@@ -270,6 +321,7 @@ export function MembersPage({
             history={history ?? { status: "loading" }}
             historyCache={historyCache}
             members={members}
+            namePolicy={namePolicy}
             onLoadEarlierHistory={onLoadEarlierHistory}
             onLoadHistoryRun={onLoadHistoryRun}
             onToggleHistoryEntry={onToggleHistoryEntry}
@@ -284,6 +336,7 @@ export function MembersPage({
           <HumanDetails
             disabled={disabled}
             human={selectedMember}
+            namePolicy={namePolicy}
             onBackToDiscussion={onBackToDiscussion}
             onRename={onRenameMember}
             sourceDiscussionTopic={sourceDiscussionTopic}
@@ -324,12 +377,14 @@ function DiscussionReturnButton({
 function HumanDetails({
   disabled,
   human,
+  namePolicy,
   onBackToDiscussion,
   onRename,
   sourceDiscussionTopic,
 }: {
   disabled: boolean;
   human: Extract<Member, { type: "human" }>;
+  namePolicy: MemberNamePolicy;
   onBackToDiscussion?: () => void;
   onRename: (memberId: number, name: string) => Promise<void>;
   sourceDiscussionTopic?: string;
@@ -397,6 +452,7 @@ function HumanDetails({
                 <HumanRenameEditor
                   disabled={disabled}
                   human={human}
+                  namePolicy={namePolicy}
                   onRename={onRename}
                 />
               </div>
@@ -415,6 +471,7 @@ function AgentDetails({
   history,
   historyCache,
   members,
+  namePolicy,
   onBackToDiscussion,
   onLoadEarlierHistory,
   onLoadHistoryRun,
@@ -431,6 +488,7 @@ function AgentDetails({
   history: AgentHistoryState;
   historyCache?: AgentHistoryCache;
   members: Member[];
+  namePolicy: MemberNamePolicy;
   onLoadEarlierHistory?: (
     agentId: number,
     beforeSequence: number | null,
@@ -541,6 +599,7 @@ function AgentDetails({
                     <AgentRenameEditor
                       agent={agent}
                       disabled={disabled}
+                      namePolicy={namePolicy}
                       onRename={onRename}
                     />
                   </dd>

@@ -5,9 +5,10 @@ import {
 } from "./human-rename-editor";
 
 describe("HumanRenameEditor", () => {
-  it("only enables a trimmed changed name", () => {
-    expect(humanRenameChanged("You", " You ")).toBe(false);
+  it("treats the exact unmodified draft as the rename candidate", () => {
+    expect(humanRenameChanged("You", " You ")).toBe(true);
     expect(humanRenameChanged("You", "Owner")).toBe(true);
+    expect(humanRenameChanged("You", "You")).toBe(false);
   });
 
   it("associates an error until editing resumes", () => {

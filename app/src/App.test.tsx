@@ -33,6 +33,12 @@ import {
   SettingsPage,
 } from "@/features/settings";
 
+const memberNamePolicy = {
+  normalization: "NFKC" as const,
+  max_code_points: 32,
+  max_utf8_bytes: 128,
+};
+
 describe("App", () => {
   it("renders a clear startup state before the backend responds", () => {
     const markup = renderToStaticMarkup(<App />);
@@ -1065,6 +1071,7 @@ describe("App", () => {
           disabled={false}
           error={null}
           isCreatingAgent={false}
+          namePolicy={memberNamePolicy}
           members={[{ id: 1, type: "human", name: "You" }, agent]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
@@ -1168,6 +1175,7 @@ describe("App", () => {
             },
           }}
           isCreatingAgent={false}
+          namePolicy={memberNamePolicy}
           members={[{ id: 1, type: "human", name: "You" }, agent]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
@@ -1206,6 +1214,7 @@ describe("App", () => {
             disabled={false}
             error={null}
             isCreatingAgent={false}
+            namePolicy={memberNamePolicy}
             members={[{ id: 1, type: "human", name: "You" }, agent]}
             onAgentDialogOpenChange={() => undefined}
             onAgentNameChange={() => undefined}
@@ -1248,6 +1257,7 @@ describe("App", () => {
           disabled={false}
           error={null}
           isCreatingAgent={false}
+          namePolicy={memberNamePolicy}
           members={[{ id: 1, type: "human", name: "You" }, agent]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
@@ -1276,6 +1286,7 @@ describe("App", () => {
           disabled={false}
           error={null}
           isCreatingAgent={false}
+          namePolicy={memberNamePolicy}
           members={[human]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}
@@ -1303,6 +1314,9 @@ describe("App", () => {
     expect(markup).toContain(">Formal name<");
     expect(markup).toContain('aria-label="Rename current Human"');
     expect(markup).toContain('id="human-formal-name"');
+    expect(markup).toContain(
+      "32 Unicode code points after NFKC normalization and 128 UTF-8 bytes",
+    );
     expect(markup).not.toContain(">Member ID<");
     expect(markup).not.toContain("Technical details");
     expect(markup).not.toContain('aria-label="Copy Member ID"');
@@ -1322,6 +1336,7 @@ describe("App", () => {
           disabled={false}
           error={null}
           isCreatingAgent={false}
+          namePolicy={memberNamePolicy}
           members={[human]}
           onAgentDialogOpenChange={() => undefined}
           onAgentNameChange={() => undefined}

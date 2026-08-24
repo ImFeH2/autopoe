@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { Button, Dialog, Input } from "@/components/ui";
-import type { AgentMember } from "@/lib/backend";
+import type { AgentMember, MemberNamePolicy } from "@/lib/backend";
 import { FlowentRequestError } from "@/lib/flowent";
 import {
   agentRenameConfirmationCopy,
@@ -14,8 +14,13 @@ import {
   agentRenameInlineError,
   agentRenameSuccessCopy,
   canRenameAgent,
-  hasAgentRenameBoundaryWhitespace,
 } from "./agent-rename-policy";
+import {
+  memberNameConstraints,
+  memberNameCount,
+  memberNameErrorMessage,
+  memberNameValidationMessage,
+} from "./member-name-policy";
 
 type AgentRenameInput = Pick<HTMLInputElement, "focus" | "select">;
 type ScheduleFrame = (callback: FrameRequestCallback) => number;
@@ -44,12 +49,14 @@ export function returnToAgentRenameEditor(
 type AgentRenameEditorProps = {
   agent: AgentMember;
   disabled?: boolean;
+  namePolicy: MemberNamePolicy;
   onRename: (memberId: number, name: string) => Promise<void>;
 };
 
 export function AgentRenameEditor({
   agent,
   disabled = false,
+  namePolicy,
   onRename,
 }: AgentRenameEditorProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +69,12 @@ export function AgentRenameEditor({
   const statusReason = agentRenameDisabledReason(agent.status);
   const unavailable = disabled || !canRenameAgent(agent.status);
   const changed = draft !== agent.name;
+  const validationError = changed
+    ? memberNameValidationMessage(draft, namePolicy)
+    : null;
+  const count = memberNameCount(draft, namePolicy);
+  const constraints = memberNameConstraints(namePolicy);
+  const visibleError = validationError ?? error;
   const confirmation = agentRenameConfirmationCopy(agent.name, draft);
 
   const returnToEditor = useCallback(() => {
@@ -93,8 +106,8 @@ export function AgentRenameEditor({
       setError(agentRenameInlineError("agent_busy"));
       return;
     }
-    if (hasAgentRenameBoundaryWhitespace(draft)) {
-      setError(agentRenameInlineError("invalid_name"));
+    if (validationError) {
+      setError(validationError);
       inputRef.current?.focus();
       return;
     }
@@ -118,6 +131,9 @@ export function AgentRenameEditor({
       setError(
         agentRenameInlineError(
           reason instanceof FlowentRequestError ? reason.code : "unknown",
+          reason instanceof FlowentRequestError
+            ? memberNameErrorMessage(reason.code, namePolicy)
+            : null,
         ),
       );
       returnToEditor();
@@ -185,9 +201,15 @@ export function AgentRenameEditor({
               <span>Name</span>
               <Input
                 aria-describedby={
-                  error ? `agent-${agent.id}-rename-error` : undefined
+                  [
+                    `agent-${agent.id}-rename-constraints`,
+                    count ? `agent-${agent.id}-rename-count` : null,
+                    visibleError ? `agent-${agent.id}-rename-error` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined
                 }
-                aria-invalid={error ? "true" : undefined}
+                aria-invalid={visibleError ? "true" : undefined}
                 autoComplete="off"
                 disabled={saving}
                 id={`agent-${agent.id}-rename`}
@@ -200,18 +222,33 @@ export function AgentRenameEditor({
                 value={draft}
               />
             </label>
+            <span
+              className="sr-only"
+              id={`agent-${agent.id}-rename-constraints`}
+            >
+              {constraints}
+            </span>
+            {count ? (
+              <p
+                className="caption-text m-0"
+                id={`agent-${agent.id}-rename-count`}
+                aria-live="polite"
+              >
+                {count}
+              </p>
+            ) : null}
             {statusReason ? (
               <p className="caption-text m-0 text-danger" role="alert">
                 {statusReason}
               </p>
             ) : null}
-            {error ? (
+            {visibleError ? (
               <p
                 className="caption-text m-0 text-danger"
                 id={`agent-${agent.id}-rename-error`}
                 role="alert"
               >
-                {error}
+                {visibleError}
               </p>
             ) : null}
             <div className="member-agent-actions">
@@ -219,7 +256,7 @@ export function AgentRenameEditor({
                 Cancel
               </Button>
               <Button
-                disabled={saving || !changed}
+                disabled={saving || !changed || validationError !== null}
                 type="submit"
                 variant="primary"
               >
