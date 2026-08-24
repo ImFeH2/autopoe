@@ -327,6 +327,15 @@ describe("parseOrganizationSnapshot", () => {
     );
   });
 
+  it("accepts a preserved Discussion after all of its Members are deleted", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].member_ids = [];
+
+    expect(parseOrganizationSnapshot(value).discussions[0]).toEqual(
+      value.discussions[0],
+    );
+  });
+
   it("rejects out-of-order Message IDs", () => {
     const value = structuredClone(validSnapshot);
     value.discussions[0].messages[0].id = 2;

@@ -378,6 +378,42 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
     assert restored.create_agent("Lin")["members"][-1]["id"] == 3
 
 
+def test_empty_discussion_survives_restart_after_all_agents_are_deleted(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Agent archive", 2, [3])
+    state.send_message(1, 2, "Keep this history")
+    created_at = state.snapshot()["discussions"][0]["messages"][0]["created_at"]
+
+    state.delete_agent(2)
+    state.delete_agent(3)
+    restored = persisted_state(store, tmp_path)
+
+    assert restored.snapshot()["discussions"] == [
+        {
+            "id": 1,
+            "topic": "Agent archive",
+            "member_ids": [],
+            "human_read_states": [],
+            "messages": [
+                {
+                    "id": 1,
+                    "sender_id": 2,
+                    "sender_name": "Ada",
+                    "body": "Keep this history",
+                    "created_at": created_at,
+                    "references": [],
+                    "mentions": [],
+                }
+            ],
+        }
+    ]
+
+
 def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
     runtime = ModelRuntime(on_configure=store.save_model_config)

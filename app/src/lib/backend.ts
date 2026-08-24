@@ -634,10 +634,7 @@ function parseDiscussion(
       positiveInteger(memberId, `${path}.member_ids[${memberIndex}]`),
   );
   const uniqueMemberIds = new Set(discussionMemberIds);
-  if (
-    discussionMemberIds.length < 1 ||
-    uniqueMemberIds.size !== discussionMemberIds.length
-  ) {
+  if (uniqueMemberIds.size !== discussionMemberIds.length) {
     invalidSnapshot(`${path}.member_ids must contain unique Members`);
   }
   for (const memberId of discussionMemberIds) {

@@ -601,6 +601,37 @@ def test_deleting_agent_preserves_discussions_and_messages() -> None:
         state.member(2)
 
 
+def test_deleting_all_agents_preserves_an_empty_discussion() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T01:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Agent archive", 2, [3])
+    state.send_message(1, 2, "Keep this history")
+
+    state.delete_agent(2)
+    snapshot = state.delete_agent(3)
+
+    assert snapshot["discussions"] == [
+        {
+            "id": 1,
+            "topic": "Agent archive",
+            "member_ids": [],
+            "human_read_states": [],
+            "messages": [
+                {
+                    "id": 1,
+                    "sender_id": 2,
+                    "sender_name": "Ada",
+                    "body": "Keep this history",
+                    "created_at": "2026-08-24T01:00:00.000Z",
+                    "references": [],
+                    "mentions": [],
+                }
+            ],
+        }
+    ]
+
+
 def test_running_agent_cannot_be_deleted_but_their_discussion_can() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
