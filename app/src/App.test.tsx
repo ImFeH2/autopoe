@@ -15,6 +15,7 @@ import {
   TooltipProvider,
 } from "@/components/ui";
 import {
+  DiscussionForm,
   DiscussionsPage,
   discussionAgentStatus,
   discussionEntryAccessibleLabel,
@@ -185,6 +186,7 @@ describe("App", () => {
       human_read_states: [
         {
           member_id: 1,
+          joined_after_message_id: 0,
           read_through_message_id: 1,
           seen_message_ids: [3],
         },
@@ -243,6 +245,58 @@ describe("App", () => {
     });
   });
 
+  it("does not report messages at or before a Human membership cutoff", () => {
+    const discussion = {
+      id: 1,
+      topic: "Joined later",
+      member_ids: [1, 2],
+      human_read_states: [
+        {
+          member_id: 1,
+          joined_after_message_id: 2,
+          read_through_message_id: null,
+          seen_message_ids: [],
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sender_id: 2,
+          body: "Old",
+          created_at: null,
+          references: [],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+        {
+          id: 2,
+          sender_id: 2,
+          body: "Cutoff",
+          created_at: null,
+          references: [],
+          mentions: [],
+        },
+        {
+          id: 3,
+          sender_id: 2,
+          body: "New",
+          created_at: null,
+          references: [],
+          mentions: [],
+          human_mentions: [{ member_id: 1, status: "unread" as const }],
+        },
+      ],
+    };
+
+    expect(humanUnreadForDiscussion(discussion)).toEqual({
+      unreadMessageIds: [3],
+      unreadHumanMentionMessageIds: [3],
+      unreadCount: 1,
+      unreadHumanMentionCount: 1,
+      firstUnreadMessageId: 3,
+    });
+  });
+
   it("shows total unread and a prominent @Human subset badge independently", () => {
     const agent = {
       id: 2,
@@ -271,6 +325,7 @@ describe("App", () => {
         human_read_states: [
           {
             member_id: 1,
+            joined_after_message_id: 0,
             read_through_message_id: null,
             seen_message_ids: [],
           },
@@ -284,6 +339,7 @@ describe("App", () => {
         human_read_states: [
           {
             member_id: 1,
+            joined_after_message_id: 0,
             read_through_message_id: null,
             seen_message_ids: [],
           },
@@ -297,6 +353,7 @@ describe("App", () => {
         human_read_states: [
           {
             member_id: 1,
+            joined_after_message_id: 0,
             read_through_message_id: null,
             seen_message_ids: [1],
           },
@@ -816,6 +873,7 @@ describe("App", () => {
       human_read_states: [
         {
           member_id: 1,
+          joined_after_message_id: 0,
           read_through_message_id: null,
           seen_message_ids: [],
         },
@@ -1297,6 +1355,33 @@ describe("App", () => {
     expect(markup).toContain("ui-textarea--composer");
     expect(markup).toContain('type="submit"');
     expect(markup).toContain(">Send</button>");
+  });
+
+  it("shows Humans as inherent Discussion participants without controls", () => {
+    const markup = renderToStaticMarkup(
+      <DiscussionForm
+        agents={[{ id: 2, name: "Ada" }]}
+        humans={[
+          { id: 1, name: "Owner" },
+          { id: 3, name: "Guest" },
+        ]}
+        disabled={false}
+        error={null}
+        onCancel={() => undefined}
+        onSubmit={() => undefined}
+        onToggleMember={() => undefined}
+        selectedMemberIds={[]}
+        setTopic={() => undefined}
+        topic="Work"
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Inherent Human participants"');
+    expect(markup).toContain("Owner · Human");
+    expect(markup).toContain("Guest · Human");
+    expect(markup).not.toContain("discussion-member-1");
+    expect(markup).not.toContain("discussion-member-3");
+    expect(markup).toContain("discussion-member-2");
   });
 
   it("exposes an accessible segmented radio group", () => {

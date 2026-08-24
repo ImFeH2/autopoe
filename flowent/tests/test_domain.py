@@ -33,6 +33,7 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
                 "human_read_states": [
                     {
                         "member_id": 1,
+                        "joined_after_message_id": 0,
                         "read_through_message_id": 1,
                         "seen_message_ids": [],
                     }
@@ -133,6 +134,7 @@ def test_failed_persistence_does_not_leave_a_message_or_consume_its_id() -> None
     assert discussion["human_read_states"] == [
         {
             "member_id": 1,
+            "joined_after_message_id": 0,
             "read_through_message_id": 1,
             "seen_message_ids": [],
         }
@@ -461,14 +463,114 @@ def test_sender_cannot_mention_itself_by_name() -> None:
     ] == [(3, True, True)]
 
 
-def test_agent_can_create_a_discussion_with_another_agent() -> None:
+def test_agent_created_discussion_includes_every_active_human() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_agent("Lin")
 
     snapshot = state.create_discussion("Agent collaboration", 2, [3])
 
-    assert snapshot["discussions"][0]["member_ids"] == [2, 3]
+    assert snapshot["discussions"][0]["member_ids"] == [1, 2, 3]
+
+
+def test_restore_adds_missing_active_human_at_latest_message_cutoff() -> None:
+    persisted = {
+        "members": [
+            {"id": 1, "type": "human", "name": "Owner"},
+            {"id": 2, "type": "agent", "name": "Ada"},
+            {"id": 3, "type": "human", "name": "Guest"},
+        ],
+        "discussions": [
+            {
+                "id": 1,
+                "topic": "Existing",
+                "member_ids": [1, 2],
+                "messages": [
+                    {"id": 1, "sender_id": 2, "body": "Old one", "mentions": []},
+                    {"id": 2, "sender_id": 2, "body": "Old two", "mentions": []},
+                ],
+            }
+        ],
+    }
+    repairs: list[dict[str, object]] = []
+
+    state = OrganizationState(persisted=persisted, on_persist=repairs.append)
+    discussion = state.snapshot()["discussions"][0]
+
+    assert discussion["member_ids"] == [1, 2, 3]
+    assert discussion["human_read_states"] == [
+        {
+            "member_id": 1,
+            "joined_after_message_id": 0,
+            "read_through_message_id": None,
+            "seen_message_ids": [],
+        },
+        {
+            "member_id": 3,
+            "joined_after_message_id": 2,
+            "read_through_message_id": None,
+            "seen_message_ids": [],
+        },
+    ]
+    assert len(repairs) == 1
+    repaired_discussion = repairs[0]["discussions"][0]
+    assert repaired_discussion["memberships"][2] == {
+        "member_id": 3,
+        "active": True,
+        "joined_after_message_id": 2,
+    }
+
+    reopened = OrganizationState(persisted=repairs[0])
+    reopened_guest_state = reopened.snapshot()["discussions"][0]["human_read_states"][1]
+    assert reopened_guest_state["joined_after_message_id"] == 2
+
+
+def test_restore_deactivates_deleted_human_membership_without_losing_history() -> None:
+    persisted = {
+        "members": [
+            {"id": 1, "type": "human", "name": "Owner"},
+            {"id": 2, "type": "agent", "name": "Ada"},
+            {"id": 3, "type": "human", "name": "Former", "deleted": True},
+        ],
+        "discussions": [
+            {
+                "id": 1,
+                "topic": "History",
+                "memberships": [
+                    {"member_id": 1, "active": True, "joined_after_message_id": 0},
+                    {"member_id": 2, "active": True, "joined_after_message_id": 0},
+                    {"member_id": 3, "active": True, "joined_after_message_id": 0},
+                ],
+                "human_read_states": [
+                    {
+                        "member_id": 3,
+                        "read_through_message_id": 1,
+                        "seen_message_ids": [],
+                    }
+                ],
+                "messages": [
+                    {"id": 1, "sender_id": 3, "body": "Historical", "mentions": []}
+                ],
+            }
+        ],
+    }
+    repairs: list[dict[str, object]] = []
+
+    state = OrganizationState(persisted=persisted, on_persist=repairs.append)
+
+    assert state.snapshot()["discussions"][0]["member_ids"] == [1, 2]
+    repaired_discussion = repairs[0]["discussions"][0]
+    assert repaired_discussion["memberships"][2] == {
+        "member_id": 3,
+        "active": False,
+        "joined_after_message_id": 0,
+    }
+    assert repaired_discussion["human_read_states"][0] == {
+        "member_id": 3,
+        "read_through_message_id": 1,
+        "seen_message_ids": [],
+    }
+    assert repaired_discussion["messages"][0]["sender_id"] == 3
 
 
 def test_message_ids_are_scoped_to_each_discussion() -> None:
@@ -601,7 +703,7 @@ def test_deleting_agent_preserves_discussions_and_messages() -> None:
         state.member(2)
 
 
-def test_deleting_all_agents_preserves_an_empty_discussion() -> None:
+def test_deleting_all_agents_preserves_the_discussion_with_its_human() -> None:
     state = OrganizationState(message_clock=lambda: "2026-08-24T01:00:00.000Z")
     state.create_agent("Ada")
     state.create_agent("Lin")
@@ -615,8 +717,15 @@ def test_deleting_all_agents_preserves_an_empty_discussion() -> None:
         {
             "id": 1,
             "topic": "Agent archive",
-            "member_ids": [],
-            "human_read_states": [],
+            "member_ids": [1],
+            "human_read_states": [
+                {
+                    "member_id": 1,
+                    "joined_after_message_id": 0,
+                    "read_through_message_id": None,
+                    "seen_message_ids": [],
+                }
+            ],
             "messages": [
                 {
                     "id": 1,
@@ -716,6 +825,7 @@ def test_human_seen_messages_advance_prefix_and_keep_sparse_state() -> None:
     assert sparse["discussions"][0]["human_read_states"] == [
         {
             "member_id": 1,
+            "joined_after_message_id": 0,
             "read_through_message_id": None,
             "seen_message_ids": [3],
         }
@@ -725,6 +835,7 @@ def test_human_seen_messages_advance_prefix_and_keep_sparse_state() -> None:
     assert advanced["discussions"][0]["human_read_states"] == [
         {
             "member_id": 1,
+            "joined_after_message_id": 0,
             "read_through_message_id": 3,
             "seen_message_ids": [],
         }
@@ -788,7 +899,7 @@ def test_member_rename_uses_shared_validation_and_active_uniqueness() -> None:
     assert snapshot["members"][1]["name"] == "Builder"
 
 
-def test_human_self_and_out_of_discussion_mentions_never_notify() -> None:
+def test_human_self_mention_does_not_notify_and_agent_created_discussion_does() -> None:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_agent("Lin")
@@ -798,12 +909,12 @@ def test_human_self_and_out_of_discussion_mentions_never_notify() -> None:
     assert own_message["references"] == []
     assert "human_mentions" not in own_message
 
-    state.create_discussion("Agents only", 2, [3])
-    outside = state.send_message(2, 2, "@You heads up")
-    message = outside["discussions"][1]["messages"][0]
-    assert message["references"][0]["in_discussion"] is False
-    assert message["references"][0]["notified"] is False
-    assert "human_mentions" not in message
+    state.create_discussion("Agent created", 2, [3])
+    notified = state.send_message(2, 2, "@You heads up")
+    message = notified["discussions"][1]["messages"][0]
+    assert message["references"][0]["in_discussion"] is True
+    assert message["references"][0]["notified"] is True
+    assert message["human_mentions"] == [{"member_id": 1, "status": "unread"}]
 
 
 def test_human_self_mention_uses_stable_id_after_rename_and_deleted_name_reuse() -> (

@@ -26,6 +26,14 @@ const validSnapshot: OrganizationSnapshot = {
       id: 1,
       topic: "Ship",
       member_ids: [1, 2],
+      human_read_states: [
+        {
+          member_id: 1,
+          joined_after_message_id: 0,
+          read_through_message_id: null,
+          seen_message_ids: [],
+        },
+      ],
       messages: [
         {
           id: 1,
@@ -381,6 +389,7 @@ describe("parseOrganizationSnapshot", () => {
     value.discussions[0].human_read_states = [
       {
         member_id: 1,
+        joined_after_message_id: 0,
         read_through_message_id: null,
         seen_message_ids: [],
       },
@@ -414,6 +423,36 @@ describe("parseOrganizationSnapshot", () => {
     invalidState.seen_message_ids = [2];
     expect(() => parseOrganizationSnapshot(invalidSparse)).toThrow(
       "unique sparse later IDs",
+    );
+  });
+
+  it("rejects missing global Human membership and invalid membership cutoffs", () => {
+    const missingHuman = structuredClone(validSnapshot);
+    missingHuman.discussions[0].member_ids = [2];
+    missingHuman.discussions[0].human_read_states = [];
+    expect(() => parseOrganizationSnapshot(missingHuman)).toThrow(
+      "must contain every active Human and their cutoff state",
+    );
+
+    const missingCutoff = structuredClone(validSnapshot) as unknown as {
+      discussions: Array<{
+        human_read_states: Array<Record<string, unknown>>;
+      }>;
+    };
+    delete missingCutoff.discussions[0].human_read_states[0]
+      .joined_after_message_id;
+    expect(() => parseOrganizationSnapshot(missingCutoff)).toThrow(
+      "joined_after_message_id must be a non-negative integer",
+    );
+
+    const futureCutoff = structuredClone(validSnapshot);
+    const state = futureCutoff.discussions[0].human_read_states?.[0];
+    if (!state) {
+      throw new Error("Expected Human cutoff fixture");
+    }
+    state.joined_after_message_id = 2;
+    expect(() => parseOrganizationSnapshot(futureCutoff)).toThrow(
+      "joined_after_message_id is outside the Discussion",
     );
   });
 

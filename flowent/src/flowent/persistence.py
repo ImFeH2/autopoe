@@ -18,7 +18,8 @@ from flowent.todos import TodoStatus
 LEGACY_SCHEMA_VERSION = 11
 MESSAGE_IDENTITY_SCHEMA_VERSION = 12
 HUMAN_READ_STATE_SCHEMA_VERSION = 13
-SCHEMA_VERSION = 14
+MESSAGE_CREATED_AT_SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -69,15 +70,21 @@ class SQLiteStore:
                     self._migrate_version_eleven(connection)
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
+                    self._migrate_version_fourteen(connection)
                 elif version == LEGACY_SCHEMA_VERSION:
                     self._migrate_version_eleven(connection)
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
+                    self._migrate_version_fourteen(connection)
                 elif version == MESSAGE_IDENTITY_SCHEMA_VERSION:
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
+                    self._migrate_version_fourteen(connection)
                 elif version == HUMAN_READ_STATE_SCHEMA_VERSION:
                     self._migrate_version_thirteen(connection)
+                    self._migrate_version_fourteen(connection)
+                elif version == MESSAGE_CREATED_AT_SCHEMA_VERSION:
+                    self._migrate_version_fourteen(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
@@ -165,6 +172,9 @@ class SQLiteStore:
                 discussion_id INTEGER NOT NULL,
                 position INTEGER NOT NULL,
                 member_id INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                joined_after_message_id INTEGER NOT NULL DEFAULT 0
+                    CHECK (joined_after_message_id >= 0),
                 PRIMARY KEY (discussion_id, position),
                 UNIQUE (discussion_id, member_id),
                 FOREIGN KEY (discussion_id) REFERENCES discussions (id)
@@ -681,7 +691,96 @@ class SQLiteStore:
     def _migrate_version_thirteen(connection: sqlite3.Connection) -> None:
         with SQLiteStore._migration_transaction(connection):
             SQLiteStore._add_message_created_at_column(connection)
+            connection.execute(
+                f"PRAGMA user_version = {MESSAGE_CREATED_AT_SCHEMA_VERSION}"
+            )
+
+    @staticmethod
+    def _migrate_version_fourteen(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            SQLiteStore._add_discussion_membership_columns(connection)
+            connection.execute(
+                """
+                UPDATE discussion_members
+                SET active = 0
+                WHERE member_id IN (SELECT id FROM members WHERE deleted = 1)
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO discussion_members (
+                    discussion_id, position, member_id, active,
+                    joined_after_message_id
+                )
+                SELECT
+                    discussions.id,
+                    COALESCE((
+                        SELECT MAX(existing.position) + 1
+                        FROM discussion_members AS existing
+                        WHERE existing.discussion_id = discussions.id
+                    ), 0) + members.id - (
+                        SELECT MIN(active_humans.id)
+                        FROM members AS active_humans
+                        WHERE active_humans.type = 'human'
+                            AND active_humans.deleted = 0
+                    ),
+                    members.id,
+                    1,
+                    COALESCE((
+                        SELECT MAX(messages.id)
+                        FROM messages
+                        WHERE messages.discussion_id = discussions.id
+                    ), 0)
+                FROM discussions
+                CROSS JOIN members
+                WHERE members.type = 'human'
+                    AND members.deleted = 0
+                    AND NOT EXISTS (
+                        SELECT 1 FROM discussion_members
+                        WHERE discussion_members.discussion_id = discussions.id
+                            AND discussion_members.member_id = members.id
+                    )
+                ORDER BY discussions.id, members.id
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO human_discussion_read_states (
+                    human_id, discussion_id, read_through_message_id
+                )
+                SELECT discussion_members.member_id, discussion_members.discussion_id, NULL
+                FROM discussion_members
+                JOIN members ON members.id = discussion_members.member_id
+                WHERE discussion_members.active = 1
+                    AND members.type = 'human'
+                    AND members.deleted = 0
+                    AND NOT EXISTS (
+                        SELECT 1 FROM human_discussion_read_states
+                        WHERE human_discussion_read_states.human_id =
+                                discussion_members.member_id
+                            AND human_discussion_read_states.discussion_id =
+                                discussion_members.discussion_id
+                    )
+                """
+            )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _add_discussion_membership_columns(
+        connection: sqlite3.Connection,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(discussion_members)")
+        }
+        if "active" not in columns:
+            connection.execute(
+                "ALTER TABLE discussion_members ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))"
+            )
+        if "joined_after_message_id" not in columns:
+            connection.execute(
+                "ALTER TABLE discussion_members ADD COLUMN joined_after_message_id INTEGER NOT NULL DEFAULT 0 CHECK (joined_after_message_id >= 0)"
+            )
 
     @staticmethod
     def _add_message_created_at_column(connection: sqlite3.Connection) -> None:
@@ -902,11 +1001,18 @@ class SQLiteStore:
                 "SELECT id, topic FROM discussions ORDER BY id"
             ):
                 discussion_id = row["id"]
-                member_ids = [
-                    member["member_id"]
-                    for member in connection.execute(
+                memberships = [
+                    {
+                        "member_id": membership["member_id"],
+                        "active": bool(membership["active"]),
+                        "joined_after_message_id": membership[
+                            "joined_after_message_id"
+                        ],
+                    }
+                    for membership in connection.execute(
                         """
-                        SELECT member_id FROM discussion_members
+                        SELECT member_id, active, joined_after_message_id
+                        FROM discussion_members
                         WHERE discussion_id = ? ORDER BY position
                         """,
                         (discussion_id,),
@@ -1012,7 +1118,7 @@ class SQLiteStore:
                     {
                         "id": discussion_id,
                         "topic": row["topic"],
-                        "member_ids": member_ids,
+                        "memberships": memberships,
                         "messages": messages,
                         "human_read_states": human_read_states,
                     }
@@ -1067,14 +1173,31 @@ class SQLiteStore:
                 "INSERT INTO discussions (id, topic) VALUES (?, ?)",
                 (discussion_id, discussion["topic"]),
             )
-            for position, member_id in enumerate(discussion["member_ids"]):
+            memberships = discussion.get("memberships")
+            if memberships is None:
+                memberships = [
+                    {
+                        "member_id": member_id,
+                        "active": True,
+                        "joined_after_message_id": 0,
+                    }
+                    for member_id in discussion["member_ids"]
+                ]
+            for position, membership in enumerate(memberships):
                 connection.execute(
                     """
                     INSERT INTO discussion_members
-                        (discussion_id, position, member_id)
-                    VALUES (?, ?, ?)
+                        (discussion_id, position, member_id, active,
+                         joined_after_message_id)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (discussion_id, position, member_id),
+                    (
+                        discussion_id,
+                        position,
+                        membership["member_id"],
+                        int(membership.get("active", True)),
+                        membership.get("joined_after_message_id", 0),
+                    ),
                 )
             for message in discussion["messages"]:
                 connection.execute(

@@ -145,6 +145,7 @@ export type HumanMention = {
 
 export type HumanDiscussionReadState = {
   member_id: number;
+  joined_after_message_id: number;
   read_through_message_id: number | null;
   seen_message_ids: number[];
 };
@@ -663,9 +664,18 @@ function parseDiscussion(
     }
     if (
       membersById.get(memberId)?.type !== "human" ||
-      !uniqueMemberIds.has(memberId)
+      (discussionMemberIds.length > 0 && !uniqueMemberIds.has(memberId))
     ) {
       invalidSnapshot(`${statePath} must target a Human Discussion Member`);
+    }
+    const joinedAfterMessageId = nonNegativeInteger(
+      stateItem.joined_after_message_id,
+      `${statePath}.joined_after_message_id`,
+    );
+    if (joinedAfterMessageId > messages.length) {
+      invalidSnapshot(
+        `${statePath}.joined_after_message_id is outside the Discussion`,
+      );
     }
     const readThroughMessageId =
       stateItem.read_through_message_id === null
@@ -706,6 +716,7 @@ function parseDiscussion(
     readStateMemberIds.add(memberId);
     return {
       member_id: memberId,
+      joined_after_message_id: joinedAfterMessageId,
       read_through_message_id: readThroughMessageId,
       seen_message_ids: seenMessageIds,
     };
@@ -752,6 +763,28 @@ export function parseOrganizationSnapshot(
   const discussionIds = new Set(discussions.map((discussion) => discussion.id));
   if (discussionIds.size !== discussions.length) {
     invalidSnapshot("Discussion IDs must be unique");
+  }
+  const humanIds = members
+    .filter((member) => member.type === "human")
+    .map((member) => member.id);
+  for (const [index, discussion] of discussions.entries()) {
+    if (discussion.member_ids.length === 0) {
+      continue;
+    }
+    const discussionMemberIds = new Set(discussion.member_ids);
+    const readStateMemberIds = new Set(
+      discussion.human_read_states?.map((state) => state.member_id) ?? [],
+    );
+    if (
+      humanIds.some(
+        (humanId) =>
+          !discussionMemberIds.has(humanId) || !readStateMemberIds.has(humanId),
+      )
+    ) {
+      invalidSnapshot(
+        `discussions[${index}] must contain every active Human and their cutoff state`,
+      );
+    }
   }
 
   return {

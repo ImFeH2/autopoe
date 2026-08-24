@@ -183,6 +183,7 @@ def test_dispatches_discussion_and_agent_deletion(tmp_path: Path) -> None:
             "human_read_states": [
                 {
                     "member_id": 1,
+                    "joined_after_message_id": 0,
                     "read_through_message_id": None,
                     "seen_message_ids": [],
                 }
@@ -632,6 +633,7 @@ def test_dispatches_human_message_seen_updates() -> None:
     assert response["result"]["discussions"][0]["human_read_states"] == [
         {
             "member_id": 1,
+            "joined_after_message_id": 0,
             "read_through_message_id": 1,
             "seen_message_ids": [],
         }

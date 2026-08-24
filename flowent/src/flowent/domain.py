@@ -100,13 +100,36 @@ class Message:
     human_mentions: dict[int, HumanMentionNotification] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class DiscussionMembership:
+    member_id: int
+    active: bool = True
+    joined_after_message_id: int = 0
+
+
 @dataclass
 class Discussion:
     id: int
     topic: str
-    member_ids: tuple[int, ...]
+    memberships: list[DiscussionMembership]
     messages: list[Message] = field(default_factory=list)
     human_read_states: dict[int, HumanReadState] = field(default_factory=dict)
+
+    @property
+    def member_ids(self) -> tuple[int, ...]:
+        return tuple(
+            membership.member_id for membership in self.memberships if membership.active
+        )
+
+    def membership(self, member_id: int) -> DiscussionMembership | None:
+        return next(
+            (
+                membership
+                for membership in self.memberships
+                if membership.member_id == member_id
+            ),
+            None,
+        )
 
 
 @dataclass
@@ -153,14 +176,17 @@ class OrganizationState:
         self._members: dict[int, Member] = {}
         self._discussions: dict[int, Discussion] = {}
         self._agent_execution: dict[int, AgentExecution] = {}
+        repaired_memberships = False
         if persisted is None:
             self._members[1] = Member(id=1, type="human", name="You")
         else:
-            self._restore(persisted)
+            repaired_memberships = self._restore(persisted)
         self._next_member_id = max(self._members, default=1) + 1
         self._next_discussion_id = max(self._discussions, default=0) + 1
         self._revision = 0
         self._condition = Condition(RLock())
+        if repaired_memberships and self._on_persist is not None:
+            self._on_persist(self._persistence_data())
 
     def create_agent(self, name: str) -> dict[str, Any]:
         try:
@@ -249,11 +275,16 @@ class OrganizationState:
                     for reference in message.references:
                         if reference.member_id == agent_id:
                             reference.deleted = True
-                discussion.member_ids = tuple(
-                    member_id
-                    for member_id in discussion.member_ids
-                    if member_id != agent_id
-                )
+                discussion.memberships = [
+                    DiscussionMembership(
+                        member_id=membership.member_id,
+                        active=False,
+                        joined_after_message_id=membership.joined_after_message_id,
+                    )
+                    if membership.member_id == agent_id
+                    else membership
+                    for membership in discussion.memberships
+                ]
             del self._agent_execution[agent_id]
             self._changed(persist=True)
             return self._snapshot()
@@ -302,20 +333,31 @@ class OrganizationState:
             raise DomainError("invalid_topic", "Discussion topic is required")
 
         with self._condition:
-            participants = tuple(dict.fromkeys((creator_id, *member_ids)))
+            requested_members = tuple(dict.fromkeys((creator_id, *member_ids)))
+            self._require_members(requested_members)
+            participants = tuple(
+                dict.fromkeys(
+                    (
+                        *self._active_human_ids(),
+                        *requested_members,
+                    )
+                )
+            )
             if len(participants) < 2:
                 raise DomainError(
                     "invalid_members",
                     "A Discussion requires at least two Members",
                 )
-            self._require_members(participants)
 
             discussion_id = self._next_discussion_id
             self._next_discussion_id += 1
             self._discussions[discussion_id] = Discussion(
                 id=discussion_id,
                 topic=normalized_topic,
-                member_ids=participants,
+                memberships=[
+                    DiscussionMembership(member_id=member_id)
+                    for member_id in participants
+                ],
                 human_read_states={
                     member_id: HumanReadState(member_id)
                     for member_id in participants
@@ -787,6 +829,13 @@ class OrganizationState:
             if not active_only or not member.deleted
         )
 
+    def _active_human_ids(self) -> tuple[int, ...]:
+        return tuple(
+            member.id
+            for member in self._members.values()
+            if member.type == "human" and not member.deleted
+        )
+
     def _human_names(self) -> tuple[MentionName, ...]:
         return tuple(
             MentionName(member.id, member.name)
@@ -858,10 +907,14 @@ class OrganizationState:
             "human_read_states": [
                 {
                     "member_id": state.human_member_id,
+                    "joined_after_message_id": membership.joined_after_message_id,
                     "read_through_message_id": state.read_through_message_id,
                     "seen_message_ids": list(state.sparse_seen_message_ids),
                 }
                 for state in discussion.human_read_states.values()
+                if (membership := discussion.membership(state.human_member_id))
+                is not None
+                and membership.active
             ],
         }
 
@@ -959,7 +1012,8 @@ class OrganizationState:
             ),
         }
 
-    def _restore(self, persisted: dict[str, Any]) -> None:
+    def _restore(self, persisted: dict[str, Any]) -> bool:
+        repaired_memberships = False
         for item in persisted["members"]:
             member = Member(
                 id=item["id"],
@@ -1054,36 +1108,131 @@ class OrganizationState:
                     )
                 )
             ordered_message_ids = [message.id for message in messages]
-            human_read_states = {
-                state_data["member_id"]: normalize_human_read_state(
-                    human_member_id=state_data["member_id"],
+            latest_message_id = ordered_message_ids[-1] if ordered_message_ids else 0
+            membership_data = item.get("memberships")
+            if membership_data is None:
+                membership_data = [
+                    {
+                        "member_id": member_id,
+                        "active": True,
+                        "joined_after_message_id": 0,
+                    }
+                    for member_id in item["member_ids"]
+                ]
+            memberships: list[DiscussionMembership] = []
+            membership_ids: set[int] = set()
+            for membership_item in membership_data:
+                member_id = membership_item["member_id"]
+                if member_id in membership_ids:
+                    raise RuntimeError("Persisted Discussion membership is duplicated")
+                member = self._members.get(member_id)
+                if member is None:
+                    raise RuntimeError("Persisted Discussion membership is unknown")
+                joined_after_message_id = membership_item.get(
+                    "joined_after_message_id", 0
+                )
+                if (
+                    type(joined_after_message_id) is not int
+                    or joined_after_message_id < 0
+                    or joined_after_message_id > latest_message_id
+                ):
+                    raise RuntimeError(
+                        "Persisted Discussion membership cutoff is invalid"
+                    )
+                active = membership_item.get("active", True)
+                if type(active) is not bool:
+                    raise RuntimeError(
+                        "Persisted Discussion membership active is invalid"
+                    )
+                if member.deleted and active:
+                    active = False
+                    repaired_memberships = True
+                memberships.append(
+                    DiscussionMembership(
+                        member_id=member_id,
+                        active=active,
+                        joined_after_message_id=joined_after_message_id,
+                    )
+                )
+                membership_ids.add(member_id)
+            human_read_states: dict[int, HumanReadState] = {}
+            for state_data in item.get("human_read_states", []):
+                human_id = state_data["member_id"]
+                member = self._members.get(human_id)
+                membership = next(
+                    (
+                        candidate
+                        for candidate in memberships
+                        if candidate.member_id == human_id
+                    ),
+                    None,
+                )
+                if (
+                    member is None
+                    or member.type != "human"
+                    or membership is None
+                    or human_id in human_read_states
+                ):
+                    raise RuntimeError("Persisted Human read state is invalid")
+                human_read_states[human_id] = normalize_human_read_state(
+                    human_member_id=human_id,
                     ordered_message_ids=ordered_message_ids,
                     read_through_message_id=state_data.get("read_through_message_id"),
                     sparse_seen_message_ids=state_data.get("seen_message_ids", []),
                 )
-                for state_data in item.get("human_read_states", [])
-            }
-            for member_id in item["member_ids"]:
-                member = self._members[member_id]
-                if member.type != "human" or member_id in human_read_states:
+            for membership in memberships:
+                member = self._members[membership.member_id]
+                if member.type != "human" or member.id in human_read_states:
                     continue
-                human_read_states[member_id] = normalize_human_read_state(
-                    human_member_id=member_id,
+                human_read_states[member.id] = normalize_human_read_state(
+                    human_member_id=member.id,
                     ordered_message_ids=ordered_message_ids,
                     sparse_seen_message_ids=[
                         message.id
                         for message in messages
-                        if message.sender_id == member_id
+                        if message.sender_id == member.id
                     ],
                 )
             discussion = Discussion(
                 id=item["id"],
                 topic=item["topic"],
-                member_ids=tuple(item["member_ids"]),
+                memberships=memberships,
                 messages=messages,
                 human_read_states=human_read_states,
             )
             self._discussions[discussion.id] = discussion
+        if self._ensure_active_humans_in_all_discussions():
+            repaired_memberships = True
+        return repaired_memberships
+
+    def _ensure_active_humans_in_discussion(self, discussion: Discussion) -> bool:
+        latest_message_id = discussion.messages[-1].id if discussion.messages else 0
+        changed = False
+        for human_id in self._active_human_ids():
+            membership = discussion.membership(human_id)
+            if membership is None:
+                discussion.memberships.append(
+                    DiscussionMembership(
+                        member_id=human_id,
+                        joined_after_message_id=latest_message_id,
+                    )
+                )
+                discussion.human_read_states.setdefault(
+                    human_id, HumanReadState(human_id)
+                )
+                changed = True
+            elif not membership.active:
+                raise RuntimeError(
+                    "Persisted active Human has inactive Discussion membership"
+                )
+        return changed
+
+    def _ensure_active_humans_in_all_discussions(self) -> bool:
+        changed = False
+        for discussion in self._discussions.values():
+            if self._ensure_active_humans_in_discussion(discussion):
+                changed = True
+        return changed
 
     def _persistence_data(self) -> dict[str, Any]:
         return {
@@ -1101,7 +1250,16 @@ class OrganizationState:
                 {
                     "id": discussion.id,
                     "topic": discussion.topic,
-                    "member_ids": list(discussion.member_ids),
+                    "memberships": [
+                        {
+                            "member_id": membership.member_id,
+                            "active": membership.active,
+                            "joined_after_message_id": (
+                                membership.joined_after_message_id
+                            ),
+                        }
+                        for membership in discussion.memberships
+                    ],
                     "human_read_states": [
                         {
                             "member_id": state.human_member_id,

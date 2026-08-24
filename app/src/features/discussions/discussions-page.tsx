@@ -130,16 +130,20 @@ export function humanUnreadForDiscussion(
   const state = discussion.human_read_states?.find(
     (candidate) => candidate.member_id === humanMemberId,
   );
+  const joinedAfterMessageId = state?.joined_after_message_id ?? 0;
+  const eligibleMessages = discussion.messages.filter(
+    (message) => message.id > joinedAfterMessageId,
+  );
   const readThrough = state?.read_through_message_id ?? null;
   const readMessageIds = new Set(
     readThrough === null
       ? []
-      : discussion.messages
+      : eligibleMessages
           .filter((message) => message.id <= readThrough)
           .map((message) => message.id),
   );
   const humanMentionMessageIds = new Set(
-    discussion.messages.flatMap((message) =>
+    eligibleMessages.flatMap((message) =>
       message.human_mentions?.some(
         (mention) =>
           mention.member_id === humanMemberId && mention.status === "unread",
@@ -150,7 +154,7 @@ export function humanUnreadForDiscussion(
   );
   return calculateHumanUnread({
     currentHumanMemberId: humanMemberId,
-    messages: discussion.messages.map((message) => ({
+    messages: eligibleMessages.map((message) => ({
       id: message.id,
       authorMemberId: message.sender_id,
     })),
@@ -281,6 +285,7 @@ export function DiscussionsPage({
           >
             <DiscussionForm
               agents={agents}
+              humans={members.filter((member) => member.type === "human")}
               disabled={disabled}
               error={error}
               onCancel={() => onDialogOpenChange(false)}
@@ -430,6 +435,7 @@ export function DiscussionsPage({
 
 type DiscussionFormProps = {
   agents: Array<{ id: number; name: string }>;
+  humans: Array<{ id: number; name: string }>;
   disabled: boolean;
   error: string | null;
   onCancel: () => void;
@@ -440,8 +446,9 @@ type DiscussionFormProps = {
   topic: string;
 };
 
-function DiscussionForm({
+export function DiscussionForm({
   agents,
+  humans,
   disabled,
   error,
   onCancel,
@@ -471,6 +478,15 @@ function DiscussionForm({
       </label>
       <fieldset className="discussion-members">
         <legend>Members</legend>
+        <section
+          aria-label="Inherent Human participants"
+          className="discussion-inherent-members"
+        >
+          <span>Always included</span>
+          {humans.map((human) => (
+            <span key={human.id}>{human.name} · Human</span>
+          ))}
+        </section>
         <div className="discussion-member-options">
           {agents.map((agent) => {
             const checkboxId = `discussion-member-${agent.id}`;

@@ -6,6 +6,7 @@ export {
   normalizeMentionText,
 } from "@/lib/mention-normalization";
 export {
+  DiscussionForm,
   DiscussionsPage,
   discussionAgentStatus,
   discussionEntryAccessibleLabel,

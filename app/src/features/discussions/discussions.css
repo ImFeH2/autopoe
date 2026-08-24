@@ -128,6 +128,18 @@
   font-weight: 550;
 }
 
+.discussion-inherent-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.discussion-inherent-members > :first-child {
+  color: var(--color-text-tertiary);
+}
+
 .discussion-member-options {
   display: flex;
   flex-wrap: wrap;

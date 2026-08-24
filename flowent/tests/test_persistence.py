@@ -358,6 +358,7 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
             "human_read_states": [
                 {
                     "member_id": 1,
+                    "joined_after_message_id": 0,
                     "read_through_message_id": None,
                     "seen_message_ids": [],
                 }
@@ -378,7 +379,7 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
     assert restored.create_agent("Lin")["members"][-1]["id"] == 3
 
 
-def test_empty_discussion_survives_restart_after_all_agents_are_deleted(
+def test_discussion_keeps_its_human_after_all_agents_are_deleted_and_restart(
     tmp_path: Path,
 ) -> None:
     store = SQLiteStore(tmp_path / "data")
@@ -397,8 +398,15 @@ def test_empty_discussion_survives_restart_after_all_agents_are_deleted(
         {
             "id": 1,
             "topic": "Agent archive",
-            "member_ids": [],
-            "human_read_states": [],
+            "member_ids": [1],
+            "human_read_states": [
+                {
+                    "member_id": 1,
+                    "joined_after_message_id": 0,
+                    "read_through_message_id": None,
+                    "seen_message_ids": [],
+                }
+            ],
             "messages": [
                 {
                     "id": 1,
@@ -906,6 +914,134 @@ def test_version_thirteen_timestamp_migration_rolls_back_and_reopens(
         }
 
 
+def test_migrates_version_fourteen_memberships_with_stable_human_cutoffs(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Existing", 1, [2])
+    state.send_message(1, 2, "Old one")
+    state.send_message(1, 2, "Old two")
+    state.see_human_messages(1, 1, [1])
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "INSERT INTO members (id, type, name, deleted, paused) VALUES (3, 'human', 'Guest', 0, 0)"
+        )
+        connection.execute("ALTER TABLE discussion_members DROP COLUMN active")
+        connection.execute(
+            "ALTER TABLE discussion_members DROP COLUMN joined_after_message_id"
+        )
+        connection.execute("PRAGMA user_version = 14")
+
+    migrated = SQLiteStore(data)
+    with sqlite3.connect(migrated.path) as connection:
+        memberships = connection.execute(
+            """
+            SELECT member_id, active, joined_after_message_id
+            FROM discussion_members WHERE discussion_id = 1 ORDER BY position
+            """
+        ).fetchall()
+        read_states = connection.execute(
+            """
+            SELECT human_id, read_through_message_id
+            FROM human_discussion_read_states
+            WHERE discussion_id = 1 ORDER BY human_id
+            """
+        ).fetchall()
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 15
+    assert memberships == [(1, 1, 0), (2, 1, 0), (3, 1, 2)]
+    assert read_states == [(1, 1), (3, None)]
+
+    restored = persisted_state(migrated, tmp_path).snapshot()
+    assert restored["discussions"][0]["member_ids"] == [1, 2, 3]
+    assert restored["discussions"][0]["human_read_states"] == [
+        {
+            "member_id": 1,
+            "joined_after_message_id": 0,
+            "read_through_message_id": 1,
+            "seen_message_ids": [],
+        },
+        {
+            "member_id": 3,
+            "joined_after_message_id": 2,
+            "read_through_message_id": None,
+            "seen_message_ids": [],
+        },
+    ]
+
+    reopened = SQLiteStore(data)
+    with sqlite3.connect(reopened.path) as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM discussion_members WHERE discussion_id = 1"
+            ).fetchone()[0]
+            == 3
+        )
+        assert (
+            connection.execute(
+                """
+            SELECT joined_after_message_id FROM discussion_members
+            WHERE discussion_id = 1 AND member_id = 3
+            """
+            ).fetchone()[0]
+            == 2
+        )
+
+
+def test_version_fourteen_membership_migration_rolls_back_and_reopens(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("ALTER TABLE discussion_members DROP COLUMN active")
+        connection.execute(
+            "ALTER TABLE discussion_members DROP COLUMN joined_after_message_id"
+        )
+        connection.execute("PRAGMA user_version = 14")
+
+    def fail_after_adding_column(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "ALTER TABLE discussion_members ADD COLUMN active INTEGER NOT NULL DEFAULT 1"
+        )
+        raise sqlite3.OperationalError("injected membership migration failure")
+
+    monkeypatch.setattr(
+        SQLiteStore,
+        "_add_discussion_membership_columns",
+        staticmethod(fail_after_adding_column),
+    )
+    with pytest.raises(sqlite3.OperationalError, match="injected membership"):
+        SQLiteStore(data)
+
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(discussion_members)")
+        }
+        assert "active" not in columns
+        assert "joined_after_message_id" not in columns
+
+    monkeypatch.undo()
+    reopened = SQLiteStore(data)
+    with sqlite3.connect(reopened.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 15
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(discussion_members)")
+        }
+        assert {"active", "joined_after_message_id"} <= columns
+
+
 def test_migrates_version_ten_and_backfills_all_reference_occurrences(
     tmp_path: Path,
 ) -> None:
@@ -1074,6 +1210,7 @@ def test_persists_human_prefix_and_sparse_seen_state(tmp_path: Path) -> None:
     assert restored.snapshot()["discussions"][0]["human_read_states"] == [
         {
             "member_id": 1,
+            "joined_after_message_id": 0,
             "read_through_message_id": 1,
             "seen_message_ids": [3],
         }
