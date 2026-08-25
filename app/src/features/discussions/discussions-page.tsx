@@ -25,7 +25,6 @@ import {
   getMemberStatusPresentation,
   MemberStatusAvatar,
 } from "@/components/ui/member-status-avatar";
-import { TechnicalDetails } from "@/components/ui/technical-details";
 import type {
   AgentMember,
   Discussion,
@@ -745,9 +744,6 @@ function DiscussionView({
           >
             {discussionLabel(discussion)}
           </h2>
-          <TechnicalDetails
-            identifiers={[{ label: "Discussion", value: discussion.id }]}
-          />
         </div>
         <div className="discussion-member-avatars">
           <span className="sr-only">Discussion members:</span>
@@ -891,13 +887,6 @@ function DiscussionView({
                         messageId={message.id}
                         onOpenMember={handleOpenMember}
                         references={message.references}
-                      />
-                      <TechnicalDetails
-                        identifiers={[
-                          { label: "Discussion", value: discussion.id },
-                          { label: "Message", value: message.id },
-                          { label: "Sender", value: message.sender_id },
-                        ]}
                       />
                       {message.mentions.length > 0 ? (
                         <ul className="mention-statuses" aria-label="Mentions">

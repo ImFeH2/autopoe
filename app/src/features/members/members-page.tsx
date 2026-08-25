@@ -12,7 +12,6 @@ import {
   Tooltip,
   Trash2,
 } from "@/components/ui";
-import { TechnicalDetails } from "@/components/ui/technical-details";
 import { agentStatusTone } from "@/features/agent-status";
 import type {
   AgentHistory,
@@ -363,9 +362,6 @@ function HumanDetails({
                 </div>
               ) : null}
             </dl>
-            <TechnicalDetails
-              identifiers={[{ label: "Member", value: human.id }]}
-            />
             {human.id === 1 ? (
               <div className="human-rename-section">
                 <h3>Formal name</h3>
@@ -500,9 +496,6 @@ function AgentDetails({
                   </dd>
                 </div>
               </dl>
-              <TechnicalDetails
-                identifiers={[{ label: "Member", value: agent.id }]}
-              />
               {agent.error ? (
                 <section
                   className="member-detail-error"

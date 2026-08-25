@@ -1099,8 +1099,8 @@ describe("App", () => {
     expect(markup).toContain(">Memory<");
     expect(markup).toContain(">History<");
     expect(markup).not.toContain(">Member ID<");
-    expect(markup).toContain("<summary>Technical details</summary>");
-    expect(markup).toContain('aria-label="Copy Member ID"');
+    expect(markup).not.toContain("Technical details");
+    expect(markup).not.toContain('aria-label="Copy Member ID"');
     expect(markup).toContain("does not schedule a Turn");
   });
 
@@ -1304,8 +1304,8 @@ describe("App", () => {
     expect(markup).toContain('aria-label="Rename current Human"');
     expect(markup).toContain('id="human-formal-name"');
     expect(markup).not.toContain(">Member ID<");
-    expect(markup).toContain("<summary>Technical details</summary>");
-    expect(markup).toContain('aria-label="Copy Member ID"');
+    expect(markup).not.toContain("Technical details");
+    expect(markup).not.toContain('aria-label="Copy Member ID"');
     expect(markup).not.toContain("Human 1");
     expect(markup).not.toContain(">Memory<");
     expect(markup).not.toContain(">History<");

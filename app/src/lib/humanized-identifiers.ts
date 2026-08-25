@@ -86,7 +86,3 @@ export function shortMessageSummary(
     .join("")
     .trimEnd()}…`;
 }
-
-export function technicalIdLabel(kind: string, id: number | string) {
-  return `${kind} ID ${id}`;
-}

@@ -1,4 +1,3 @@
-import { TechnicalDetails } from "@/components/ui/technical-details";
 import type {
   AgentHistoryEntry,
   AgentHistoryRun,
@@ -111,13 +110,6 @@ function ReminderContent({
               <span>{discussionLabel(discussion)}</span>
             </header>
             <HistoryContent content={mention.body} />
-            <TechnicalDetails
-              identifiers={[
-                { label: "Discussion", value: mention.discussion_id },
-                { label: "Message", value: mention.message_id },
-                { label: "Sender", value: mention.sender_id },
-              ]}
-            />
           </section>
         );
       })}

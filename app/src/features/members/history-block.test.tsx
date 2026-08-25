@@ -40,7 +40,7 @@ describe("Agent history blocks", () => {
     expect(markup).toContain("Done");
   });
 
-  it("humanizes Reminders and isolates technical IDs", () => {
+  it("humanizes Reminders without exposing technical IDs", () => {
     const markup = renderToStaticMarkup(
       <HistoryBlock
         discussions={[{ id: 12, topic: "Release plan" }]}
@@ -67,8 +67,8 @@ describe("Agent history blocks", () => {
     expect(markup).toContain("Release plan");
     expect(markup).toContain("Reminder event time");
     expect(markup).not.toContain("Discussion 12 · Message 34 · Member 7");
-    expect(markup).toContain("<summary>Technical details</summary>");
-    expect(markup).toContain('aria-label="Copy Message ID"');
+    expect(markup).not.toContain("Technical details");
+    expect(markup).not.toContain('aria-label="Copy Message ID"');
   });
 
   it("labels web search activity clearly", () => {

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { $, expect } from "@wdio/globals";
+import { $, $$, expect } from "@wdio/globals";
 import { describe, it } from "mocha";
 import { createAgent, waitForWorkspace } from "../support/app.mjs";
 
@@ -17,11 +17,9 @@ describe("Members", () => {
     await expect(details).toHaveText(expect.stringContaining("IDLE"));
     await expect(details.$("aria/Agent details")).toBeDisplayed();
 
-    const technicalDetails = await details.$("summary=Technical details");
-    await expect(technicalDetails).toBeDisplayed();
-    await technicalDetails.click();
-    await expect(details.$("aria/Copy Member ID")).toBeDisplayed();
-    await expect(details.$("button=Copy ID")).toBeDisplayed();
+    await expect($$("summary=Technical details")).toBeElementsArrayOfSize(0);
+    await expect($$("aria/Copy Member ID")).toBeElementsArrayOfSize(0);
+    await expect($$("button=Copy ID")).toBeElementsArrayOfSize(0);
 
     const dataDirectory = process.env.FLOWENT_DATA_DIR;
     if (!dataDirectory) {

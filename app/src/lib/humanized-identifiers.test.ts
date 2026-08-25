@@ -3,7 +3,6 @@ import {
   discussionLabel,
   senderLabel,
   shortMessageSummary,
-  technicalIdLabel,
 } from "./humanized-identifiers";
 
 describe("humanized identifiers", () => {
@@ -36,9 +35,5 @@ describe("humanized identifiers", () => {
         [{ id: 2, name: "NewName" }],
       ),
     ).toBe("Ask @NewName for help");
-  });
-
-  it("formats technical IDs only when requested", () => {
-    expect(technicalIdLabel("Message", 42)).toBe("Message ID 42");
   });
 });
