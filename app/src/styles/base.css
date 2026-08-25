@@ -5,7 +5,7 @@
 html,
 body,
 #root {
-  min-width: 960px;
+  min-width: 0;
   min-height: 100%;
   margin: 0;
 }

@@ -120,7 +120,7 @@ describe("Discussions", () => {
     );
   });
 
-  it("keeps crowded member status avatars stable in a narrow viewport", async () => {
+  it("keeps crowded member avatars in a fixed scrolling header", async () => {
     const agentNames = Array.from(
       { length: 24 },
       (_, index) => `Crowd${String(index + 1).padStart(2, "0")}`,
@@ -134,7 +134,15 @@ describe("Discussions", () => {
     const newDiscussion = await $("aria/New discussion");
     await newDiscussion.waitForEnabled();
     await newDiscussion.click();
-    const form = await $("aria/Create Discussion");
+    let form = await $("aria/Create Discussion");
+    await form.waitForDisplayed();
+    await form.$("#discussion-topic").setValue("Sparse layout");
+    await form.$(`aria/${agentNames[0]}`).click();
+    await form.$("button=Create").click();
+    await expect($("h2=Sparse layout")).toBeDisplayed();
+
+    await newDiscussion.click();
+    form = await $("aria/Create Discussion");
     await form.waitForDisplayed();
     await form.$("#discussion-topic").setValue("Crowded layout");
     for (const name of agentNames) {
@@ -143,94 +151,118 @@ describe("Discussions", () => {
     await form.$("button=Create").click();
     await expect($("h2=Crowded layout")).toBeDisplayed();
 
-    const avatars = await $$(".discussion-member-avatar");
-    const agentAvatars = await $$("[data-agent-status]");
-    await expect(avatars).toBeElementsArrayOfSize(agentNames.length + 1);
-    await expect(agentAvatars).toBeElementsArrayOfSize(agentNames.length);
+    async function readGeometry() {
+      return browser.executeAsync((done) => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const readRect = (selector) => {
+              const element = document.querySelector(selector);
+              if (!(element instanceof HTMLElement)) return null;
+              const { x, y, width, height } = element.getBoundingClientRect();
+              return { x, y, width, height };
+            };
+            const container = document.querySelector(
+              ".discussion-member-avatars",
+            );
+            const items = container
+              ? [...container.children].filter(
+                  (item) => !item.classList.contains("sr-only"),
+                )
+              : [];
+            done({
+              shell: readRect(".app-shell"),
+              sidebar: readRect(".app-sidebar"),
+              workspace: readRect(".workspace-main"),
+              detail: readRect(".discussion-detail-pane"),
+              header: readRect(".discussion-pane > header"),
+              title: readRect(".discussion-title"),
+              avatars: readRect(".discussion-member-avatars"),
+              messageLog: readRect(".message-log"),
+              composer: readRect('form[aria-label="Send Message"]'),
+              rowTops: items.map((item) => item.getBoundingClientRect().top),
+              avatarScrollWidth:
+                container instanceof HTMLElement ? container.scrollWidth : 0,
+              avatarClientWidth:
+                container instanceof HTMLElement ? container.clientWidth : 0,
+              flexWrap:
+                container instanceof HTMLElement
+                  ? getComputedStyle(container).flexWrap
+                  : null,
+              rootHasNoOverflow:
+                document.documentElement.scrollWidth <=
+                  document.documentElement.clientWidth &&
+                document.body.scrollWidth <= document.body.clientWidth,
+            });
+          }),
+        );
+      });
+    }
 
-    const layout = await browser.execute(() => {
+    await $("aria/Open Sparse layout").click();
+    const sparse = await readGeometry();
+    await $("aria/Open Crowded layout").click();
+    await $(".discussion-member-avatars").waitForDisplayed();
+    const agentAvatars = await $$('[data-member-identity="agent"]');
+    expect(
+      await browser.execute(
+        () =>
+          [
+            ...document.querySelectorAll(".discussion-member-avatars > *"),
+          ].filter((item) => !item.classList.contains("sr-only")).length,
+      ),
+    ).toBe(agentNames.length + 1);
+    await expect(agentAvatars).toBeElementsArrayOfSize(agentNames.length);
+    const crowded = await readGeometry();
+    expect(sparse).not.toBeNull();
+    expect(crowded).not.toBeNull();
+    for (const key of [
+      "shell",
+      "sidebar",
+      "workspace",
+      "detail",
+      "header",
+      "messageLog",
+      "composer",
+    ]) {
+      expect(crowded[key]).toEqual(sparse[key]);
+    }
+    expect(crowded.title.y).toBe(sparse.title.y);
+    expect(new Set(crowded.rowTops.map((top) => Math.round(top))).size).toBe(1);
+    expect(crowded.avatarScrollWidth).toBeGreaterThan(
+      crowded.avatarClientWidth,
+    );
+    expect(crowded.flexWrap).toBe("nowrap");
+    expect(crowded.rootHasNoOverflow).toBe(true);
+
+    const lastAgentAvatar = agentAvatars.at(-1);
+    await browser.execute(() => {
+      const targets = document.querySelectorAll(
+        '[data-member-identity="agent"]',
+      );
+      targets[targets.length - 1]?.focus();
+    });
+    await expect(lastAgentAvatar).toBeFocused();
+    const focusedLayout = await browser.execute(() => {
       const container = document.querySelector(".discussion-member-avatars");
-      const header = container?.closest("header");
+      const target = document.activeElement;
       if (
         !(container instanceof HTMLElement) ||
-        !(header instanceof HTMLElement)
+        !(target instanceof HTMLElement)
       ) {
         return null;
       }
-      const directItems = [...container.children].filter(
-        (item) => !item.classList.contains("sr-only"),
-      );
-      const targets = directItems.map((item) =>
-        item.classList.contains("discussion-member-avatar")
-          ? item
-          : item.querySelector(".discussion-member-avatar"),
-      );
-      if (targets.some((target) => !(target instanceof HTMLElement))) {
-        return null;
-      }
-      const headerRect = header.getBoundingClientRect();
-      const itemRects = directItems.map((item) => item.getBoundingClientRect());
-      const targetRects = targets.map((target) =>
-        target.getBoundingClientRect(),
-      );
-      const markRects = [
-        ...container.querySelectorAll(".discussion-member-status-mark"),
-      ].map((mark) => mark.getBoundingClientRect());
-      const withinHeader = (rect, inset = 0) =>
-        rect.left - inset >= headerRect.left - 0.5 &&
-        rect.right + inset <= headerRect.right + 0.5 &&
-        rect.top - inset >= headerRect.top - 0.5 &&
-        rect.bottom + inset <= headerRect.bottom + 0.5;
-
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
       return {
-        directItemsFixed: itemRects.every(
-          (rect) =>
-            Math.abs(rect.width - 28) < 0.1 && Math.abs(rect.height - 28) < 0.1,
-        ),
-        targetsFixed: targetRects.every(
-          (rect) =>
-            Math.abs(rect.width - 28) < 0.1 && Math.abs(rect.height - 28) < 0.1,
-        ),
-        wrapped:
-          new Set(itemRects.map((rect) => Math.round(rect.top))).size > 1,
-        marksVisible: markRects.every((rect) => withinHeader(rect)),
-        focusRingsVisible: targetRects.every((rect) => withinHeader(rect, 3)),
-        keyboardTargetsReachable: targets
-          .filter((target) => target.matches("[data-agent-status]"))
-          .every(
-            (target) =>
-              target instanceof HTMLButtonElement &&
-              target.tabIndex === 0 &&
-              !target.disabled,
-          ),
-        wrappedAgentIndex:
-          targetRects.findIndex(
-            (rect, index) => index > 0 && rect.top > targetRects[0].top + 1,
-          ) - 1,
-        headerHasNoHorizontalOverflow: header.scrollWidth <= header.clientWidth,
-        pageHasNoHorizontalOverflow:
-          document.body.scrollWidth <= document.body.clientWidth,
-        flexWrap: getComputedStyle(container).flexWrap,
+        scrollLeft: container.scrollLeft,
+        targetVisible:
+          targetRect.left >= containerRect.left - 0.5 &&
+          targetRect.right <= containerRect.right + 0.5,
       };
     });
-
-    expect(layout).not.toBeNull();
-    expect(layout.directItemsFixed).toBe(true);
-    expect(layout.targetsFixed).toBe(true);
-    expect(layout.wrapped).toBe(true);
-    expect(layout.marksVisible).toBe(true);
-    expect(layout.focusRingsVisible).toBe(true);
-    expect(layout.keyboardTargetsReachable).toBe(true);
-    expect(layout.headerHasNoHorizontalOverflow).toBe(true);
-    expect(layout.pageHasNoHorizontalOverflow).toBe(true);
-    expect(layout.flexWrap).toBe("wrap");
-
-    expect(layout.wrappedAgentIndex).toBeGreaterThanOrEqual(0);
-    await browser.execute((index) => {
-      document.querySelectorAll("[data-agent-status]")[index]?.focus();
-    }, layout.wrappedAgentIndex);
-    await expect(agentAvatars[layout.wrappedAgentIndex]).toBeFocused();
-    await expect(agentAvatars[layout.wrappedAgentIndex]).toHaveAttribute(
+    expect(focusedLayout.scrollLeft).toBeGreaterThan(0);
+    expect(focusedLayout.targetVisible).toBe(true);
+    await expect(lastAgentAvatar).toHaveAttribute(
       "aria-label",
       expect.stringContaining("Agent status:"),
     );

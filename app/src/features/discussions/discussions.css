@@ -97,6 +97,10 @@
   flex: 1 1 auto;
 }
 
+.discussion-pane > header {
+  min-width: 0;
+}
+
 .discussion-delete-confirmation {
   display: grid;
   gap: 20px;
@@ -186,11 +190,14 @@
 
 .discussion-member-avatars {
   display: flex;
-  min-height: 36px;
-  flex-wrap: wrap;
+  min-width: 0;
+  height: 46px;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   margin-top: 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 4px;
 }
 

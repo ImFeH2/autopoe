@@ -11,6 +11,7 @@ const specs = [
   "e2e/specs/startup.e2e.mjs",
   "e2e/specs/members.e2e.mjs",
   "e2e/specs/discussion.e2e.mjs",
+  "e2e/specs/discussion-shell-trace.e2e.mjs",
 ];
 
 rmSync(artifactDir, { force: true, recursive: true });
