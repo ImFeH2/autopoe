@@ -763,13 +763,21 @@ class PydanticAgentRunner:
                     request_count=request_index,
                     duration_ms=round((time.monotonic() - started) * 1000),
                 )
+                failed_messages = clean_runtime_context(
+                    captured_messages[len(message_history) :],
+                    runtime_prompt=prompt,
+                    persisted_prompt=persisted_prompt,
+                )
+                if (
+                    failed_messages
+                    and isinstance(last_message := failed_messages[-1], ModelResponse)
+                    and last_message.state == "complete"
+                    and last_message.tool_calls
+                ):
+                    failed_messages += (ModelRequest(parts=[], state="interrupted"),)
                 raise AgentRunFailure(
                     "Model request failed",
-                    clean_runtime_context(
-                        captured_messages[len(message_history) :],
-                        runtime_prompt=prompt,
-                        persisted_prompt=persisted_prompt,
-                    ),
+                    failed_messages,
                 ) from error
         messages = clean_runtime_context(
             result.new_messages(),

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -504,6 +505,84 @@ def test_pydantic_runner_executes_agent_management_tools(tmp_path: Path) -> None
     ]
     assert state.snapshot()["discussions"] == []
     assert "Management completed" in str(outcome.messages)
+
+
+def test_runner_recovers_after_tool_execution_is_interrupted(tmp_path: Path) -> None:
+    fail_persistence = False
+
+    def persist(_snapshot: dict[str, Any]) -> None:
+        if fail_persistence:
+            raise sqlite3.OperationalError("write failed")
+
+    async def send_message(_messages: list[ModelMessage], _info: AgentInfo):
+        yield {
+            0: DeltaToolCall(
+                name="discussion",
+                json_args=json.dumps(
+                    {
+                        "action": "send",
+                        "discussion_id": 1,
+                        "body": "Progress",
+                    }
+                ),
+                tool_call_id="failed-send",
+            )
+        }
+
+    state = OrganizationState(on_persist=persist)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "@Ada Continue")
+    reminder, _ = state.claim_next_reminder()
+    assert reminder is not None
+    context = AgentRunContext(2, state, HostTools(tmp_path))
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+
+    fail_persistence = True
+    with (
+        runner._agent.override(model=FunctionModel(stream_function=send_message)),
+        pytest.raises(AgentRunFailure) as caught,
+    ):
+        runner.run(reminder, context)
+
+    assert isinstance(caught.value.messages[-1], ModelRequest)
+    assert caught.value.messages[-1].state == "interrupted"
+    assert caught.value.messages[-1].parts == []
+
+    fail_persistence = False
+    recovered = False
+
+    async def continue_turn(messages: list[ModelMessage], _info: AgentInfo):
+        nonlocal recovered
+        recovered = any(
+            isinstance(part, ToolReturnPart)
+            and part.tool_call_id == "failed-send"
+            and part.outcome == "interrupted"
+            for message in messages
+            for part in message.parts
+        )
+        yield "Recovered"
+
+    with runner._agent.override(model=FunctionModel(stream_function=continue_turn)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                2,
+                state,
+                HostTools(tmp_path),
+                message_history=caught.value.messages,
+            ),
+        )
+
+    assert recovered
+    assert "Recovered" in str(outcome.messages)
 
 
 def test_runner_publishes_native_web_search_events(tmp_path: Path) -> None:
