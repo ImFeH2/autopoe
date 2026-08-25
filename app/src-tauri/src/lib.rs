@@ -1,8 +1,10 @@
 mod bridge_diagnostics;
 mod flowent;
+mod single_instance;
 
 use flowent::FlowentProcess;
 use serde_json::Value;
+use single_instance::{ActivationState, activate_main_window};
 use tauri::{Manager, ipc::Channel};
 
 fn validate_frontend_message(message: &Value) -> Result<(), String> {
@@ -32,7 +34,11 @@ fn subscribe(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default()
+        .manage(ActivationState::default())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            app.state::<ActivationState>().request(app);
+        }));
     #[cfg(feature = "debug")]
     let builder = builder
         .plugin(tauri_plugin_wdio_webdriver::init())
@@ -49,9 +55,14 @@ pub fn run() {
 
             // Create the window hidden so the first show can preserve the existing foreground
             // application. With `focus: false`, Tauri uses a non-activating first show on Windows.
-            app.get_webview_window("main")
-                .ok_or_else(|| std::io::Error::other("main window is unavailable"))?
-                .show()?;
+            let main_window = app
+                .get_webview_window("main")
+                .ok_or_else(|| std::io::Error::other("main window is unavailable"))?;
+            if app.state::<ActivationState>().finish_startup() {
+                activate_main_window(app.handle());
+            } else {
+                main_window.show()?;
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -77,6 +88,21 @@ mod tests {
             validate_frontend_message(&json!({"method": "system.shutdown"})).unwrap_err(),
             "Internal Flowent method"
         );
+    }
+
+    #[test]
+    fn single_instance_is_the_first_application_plugin() {
+        let source = include_str!("lib.rs");
+        let single_instance = source
+            .find(".plugin(tauri_plugin_single_instance::init")
+            .unwrap();
+        let webdriver = source
+            .find(".plugin(tauri_plugin_wdio_webdriver::init")
+            .unwrap();
+        let shell = source.find(".plugin(tauri_plugin_shell::init").unwrap();
+
+        assert!(single_instance < webdriver);
+        assert!(single_instance < shell);
     }
 
     #[test]
