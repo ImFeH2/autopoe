@@ -1,8 +1,44 @@
 from pathlib import Path
 
 import pytest
+from snapshot_helpers import without_delivery
 
 from flowent.domain import DomainError, OrganizationState
+
+
+def test_current_human_identity_is_explicit_and_not_tied_to_member_one() -> None:
+    state = OrganizationState(current_human_member_id=7)
+    state.create_agent("Ada")
+    snapshot = state.create_discussion("Dynamic Human", 7, [8])
+
+    assert snapshot["organization"] == {
+        "id": 1,
+        "current_human_member_id": 7,
+    }
+    assert snapshot["members"][0] == {
+        "id": 7,
+        "type": "human",
+        "name": "You",
+    }
+    assert snapshot["discussions"][0]["member_ids"] == [7, 8]
+
+    restored = OrganizationState(
+        persisted=state._persistence_data(), current_human_member_id=7
+    )
+    assert restored.snapshot()["organization"]["current_human_member_id"] == 7
+
+    with pytest.raises(RuntimeError, match="missing its current Human Member"):
+        OrganizationState(
+            persisted=state._persistence_data(), current_human_member_id=1
+        )
+
+
+@pytest.mark.parametrize("invalid_id", [True, 0, -1, "1"])
+def test_current_human_identity_rejects_non_positive_integers(
+    invalid_id: object,
+) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        OrganizationState(current_human_member_id=invalid_id)  # type: ignore[arg-type]
 
 
 def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
@@ -16,8 +52,8 @@ def test_creates_agents_discussion_and_ordered_messages(tmp_path: Path) -> None:
     state.send_message(1, 1, "Start with the domain model.")
     snapshot = state.send_message(1, 2, "I will take it.")
 
-    assert snapshot == {
-        "organization": {"id": 1},
+    assert without_delivery(snapshot) == {
+        "organization": {"id": 1, "current_human_member_id": 1},
         "working_directory": str(tmp_path),
         "mention_syntax": {"enabled": True, "issues": []},
         "member_name_policy": {
@@ -625,6 +661,7 @@ def test_restore_adds_missing_active_human_at_latest_message_cutoff() -> None:
             "seen_message_ids": [],
         },
     ]
+    assert discussion["activity_frontiers"] == []
     assert len(repairs) == 1
     repaired_discussion = repairs[0]["discussions"][0]
     assert repaired_discussion["memberships"][2] == {
@@ -632,10 +669,22 @@ def test_restore_adds_missing_active_human_at_latest_message_cutoff() -> None:
         "active": True,
         "joined_after_message_id": 2,
     }
+    assert repaired_discussion["activity_frontiers"] == []
 
     reopened = OrganizationState(persisted=repairs[0])
-    reopened_guest_state = reopened.snapshot()["discussions"][0]["human_read_states"][1]
+    reopened_discussion = reopened.snapshot()["discussions"][0]
+    reopened_guest_state = reopened_discussion["human_read_states"][1]
     assert reopened_guest_state["joined_after_message_id"] == 2
+    assert reopened_discussion["activity_frontiers"] == []
+
+    next_snapshot = reopened.send_message(1, 2, "New after Guest joined")
+    new_recipients = next_snapshot["discussions"][0]["messages"][2]["delivery"][
+        "recipients"
+    ]
+    assert [recipient["member_id"] for recipient in new_recipients] == [1, 3]
+    assert next_snapshot["discussions"][0]["activity_frontiers"] == [
+        {"member_id": 2, "latest_activity_message_id": 3}
+    ]
 
 
 def test_restore_deactivates_deleted_human_membership_without_losing_history() -> None:
@@ -781,7 +830,7 @@ def test_deleting_discussion_removes_its_messages() -> None:
 
     snapshot = state.delete_discussion(1)
 
-    assert snapshot["discussions"] == []
+    assert without_delivery(snapshot["discussions"]) == []
 
 
 def test_deleting_agent_preserves_discussions_and_messages() -> None:
@@ -801,7 +850,7 @@ def test_deleting_agent_preserves_discussions_and_messages() -> None:
     ]
     assert snapshot["discussions"][0]["member_ids"] == [1, 3]
     assert snapshot["discussions"][1]["member_ids"] == [1]
-    assert snapshot["discussions"][0]["messages"] == [
+    assert without_delivery(snapshot["discussions"][0]["messages"]) == [
         {
             "id": 1,
             "sender_id": 2,
@@ -826,7 +875,7 @@ def test_deleting_all_agents_preserves_the_discussion_with_its_human() -> None:
     state.delete_agent(2)
     snapshot = state.delete_agent(3)
 
-    assert snapshot["discussions"] == [
+    assert without_delivery(snapshot["discussions"]) == [
         {
             "id": 1,
             "topic": "Agent archive",
@@ -1139,8 +1188,294 @@ def test_rename_member_rejects_running_pausing_and_deleted_agents() -> None:
         [{"id": 1, "type": "human", "name": "Owner", "deleted": True}],
     ],
 )
-def test_restore_requires_active_human_member_one(
+def test_restore_requires_the_explicit_current_human_member(
     members: list[dict[str, object]],
 ) -> None:
-    with pytest.raises(RuntimeError, match="missing its Human Member"):
+    with pytest.raises(RuntimeError, match="missing its current Human Member"):
         OrganizationState(persisted={"members": members, "discussions": []})
+
+
+def test_delivery_freezes_recipients_and_preserves_send_time_identity() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T12:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Delivery", 1, [2, 3])
+
+    first = state.send_message(1, 1, "@Ada review")
+    delivery = first["discussions"][0]["messages"][0]["delivery"]
+    assert delivery == {
+        "recipients_known": True,
+        "recipients": [
+            {
+                "member_id": 2,
+                "member_type_at_send": "agent",
+                "member_name_at_send": "Ada",
+                "available": True,
+                "mentioned": True,
+                "read": False,
+                "ack": "pending",
+            },
+            {
+                "member_id": 3,
+                "member_type_at_send": "agent",
+                "member_name_at_send": "Lin",
+                "available": True,
+                "mentioned": False,
+                "read": False,
+                "ack": "not_applicable",
+            },
+        ],
+    }
+
+    state.rename_member(2, "Grace")
+    deleted = state.delete_agent(3)
+    recipients = deleted["discussions"][0]["messages"][0]["delivery"]["recipients"]
+    assert recipients[0]["member_name_at_send"] == "Ada"
+    assert recipients[0]["available"] is True
+    assert recipients[1]["member_name_at_send"] == "Lin"
+    assert recipients[1]["available"] is False
+
+
+def test_human_viewport_mark_all_and_explicit_ack_are_independent() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T12:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_discussion("Human delivery", 1, [2])
+    state.send_message(1, 2, "@You first")
+    state.send_message(1, 2, "second")
+
+    state.see_human_messages(1, 1, [2])
+    discussion = state.snapshot()["discussions"][0]
+    assert discussion["activity_frontiers"] == [
+        {"member_id": 1, "latest_activity_message_id": 2},
+        {"member_id": 2, "latest_activity_message_id": 2},
+    ]
+    first_recipient = discussion["messages"][0]["delivery"]["recipients"][0]
+    assert first_recipient["read"] is False
+    assert first_recipient["ack"] == "pending"
+
+    state.mark_all_human_messages_read(1, 1, 2)
+    first_recipient = state.snapshot()["discussions"][0]["messages"][0]["delivery"][
+        "recipients"
+    ][0]
+    assert first_recipient["read"] is True
+    assert first_recipient["ack"] == "pending"
+
+    state.ack_human_mention(1, 1, 1)
+    acknowledged = state.snapshot()["discussions"][0]["messages"][0]["delivery"][
+        "recipients"
+    ][0]
+    assert acknowledged["read"] is True
+    assert acknowledged["ack"] == "acked"
+
+
+def test_agent_claim_is_not_read_but_exact_context_and_tool_read_are() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T12:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_discussion("Agent delivery", 1, [2])
+    state.send_message(1, 1, "@Ada first")
+    state.send_message(1, 1, "second")
+
+    reminder, _revision = state.claim_next_reminder()
+    assert reminder is not None
+    recipient = state.snapshot()["discussions"][0]["messages"][0]["delivery"][
+        "recipients"
+    ][0]
+    assert recipient["read"] is False
+
+    state.record_message_reads(
+        2,
+        [(1, 1)],
+        source="agent_reminder_context",
+        agent_run_id="run-123",
+    )
+    discussion = state.snapshot()["discussions"][0]
+    assert discussion["messages"][0]["delivery"]["recipients"][0]["read"] is True
+    assert discussion["messages"][1]["delivery"]["recipients"][0]["read"] is False
+
+    state.read_discussion(2, 1, start_message_id=2, limit=1)
+    assert (
+        state.snapshot()["discussions"][0]["messages"][1]["delivery"]["recipients"][0][
+            "read"
+        ]
+        is True
+    )
+
+
+def test_new_discussion_has_no_inferred_frontier_until_real_activity() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T12:00:00.000Z")
+    state.create_agent("Ada")
+
+    created = state.create_discussion("Fresh", 1, [2])
+    assert created["discussions"][0]["activity_frontiers"] == []
+
+    sent = state.send_message(1, 2, "First for the Human")
+    assert sent["discussions"][0]["activity_frontiers"] == [
+        {"member_id": 2, "latest_activity_message_id": 1}
+    ]
+    recipient = sent["discussions"][0]["messages"][0]["delivery"]["recipients"][0]
+    assert recipient["member_id"] == 1
+    assert recipient["read"] is False
+
+
+def test_viewport_batch_and_human_ack_fail_atomically() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T12:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_discussion("Atomic", 1, [2])
+    state.send_message(1, 2, "@You review")
+    state.send_message(1, 2, "not mentioned")
+
+    with pytest.raises(DomainError) as invalid_batch:
+        state.see_human_messages(1, 1, [1, 99])
+    assert invalid_batch.value.code == "message_not_found"
+    discussion = state.snapshot()["discussions"][0]
+    assert 1 not in {
+        frontier["member_id"] for frontier in discussion["activity_frontiers"]
+    }
+    assert discussion["messages"][0]["delivery"]["recipients"][0]["read"] is False
+
+    with pytest.raises(DomainError) as unread_ack:
+        state.ack_human_mention(1, 1, 1)
+    assert unread_ack.value.code == "invalid_ack"
+    assert (
+        state.snapshot()["discussions"][0]["messages"][0]["delivery"]["recipients"][0][
+            "ack"
+        ]
+        == "pending"
+    )
+
+    state.see_human_messages(1, 1, [2])
+    with pytest.raises(DomainError) as not_notified:
+        state.ack_human_mention(1, 1, 2)
+    assert not_notified.value.code == "invalid_ack"
+    second = state.snapshot()["discussions"][0]["messages"][1]["delivery"][
+        "recipients"
+    ][0]
+    assert second["read"] is True
+    assert second["ack"] == "not_applicable"
+
+
+def test_repeated_mentions_share_one_frozen_recipient_and_ack_fact() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T12:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_discussion("Deduplicate", 1, [2])
+
+    sent = state.send_message(1, 1, "@Ada review, then @Ada confirm")
+    message = sent["discussions"][0]["messages"][0]
+    assert len(message["references"]) == 2
+    assert message["mentions"] == [{"member_id": 2, "status": "pending"}]
+    assert len(message["delivery"]["recipients"]) == 1
+
+    state.read_discussion(2, 1, start_message_id=1, limit=1)
+    state.ack_messages(2, 1, [1, 1])
+    acknowledged = state.snapshot()["discussions"][0]["messages"][0]
+    assert acknowledged["mentions"] == [{"member_id": 2, "status": "acked"}]
+    assert acknowledged["delivery"]["recipients"][0]["ack"] == "acked"
+
+
+def test_new_human_does_not_change_historical_recipient_denominator() -> None:
+    persisted_versions: list[dict[str, object]] = []
+    state = OrganizationState(
+        message_clock=lambda: "2026-08-24T12:00:00.000Z",
+        on_persist=persisted_versions.append,
+    )
+    state.create_agent("Ada")
+    state.create_discussion("Lifecycle", 1, [2])
+    state.send_message(1, 1, "Before Guest")
+
+    persisted = persisted_versions[-1]
+    persisted["members"].append(
+        {"id": 3, "type": "human", "name": "Guest", "deleted": False}
+    )
+    restored = OrganizationState(persisted=persisted)
+    discussion = restored.snapshot()["discussions"][0]
+    assert [
+        recipient["member_id"]
+        for recipient in discussion["messages"][0]["delivery"]["recipients"]
+    ] == [2]
+    guest_state = next(
+        item for item in discussion["human_read_states"] if item["member_id"] == 3
+    )
+    assert guest_state["joined_after_message_id"] == 1
+    assert 3 not in {
+        frontier["member_id"] for frontier in discussion["activity_frontiers"]
+    }
+
+    after_join = restored.send_message(1, 2, "After Guest")
+    latest_recipients = after_join["discussions"][0]["messages"][1]["delivery"][
+        "recipients"
+    ]
+    assert [recipient["member_id"] for recipient in latest_recipients] == [1, 3]
+    assert [
+        recipient["member_id"]
+        for recipient in after_join["discussions"][0]["messages"][0]["delivery"][
+            "recipients"
+        ]
+    ] == [2]
+
+
+def test_list_info_and_search_do_not_create_read_receipts() -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-24T12:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_discussion("No side effects", 1, [2])
+    state.send_message(1, 1, "@Ada searchable")
+
+    state.list_discussions(2)
+    state.discussion_info(2, 1)
+    state.search_messages("searchable", discussion_id=1, member_id=2)
+
+    recipient = state.snapshot()["discussions"][0]["messages"][0]["delivery"][
+        "recipients"
+    ][0]
+    assert recipient["read"] is False
+    assert recipient["ack"] == "pending"
+
+
+def test_agent_read_persists_only_a_new_receipt_and_never_implies_ack() -> None:
+    persisted_versions: list[dict[str, object]] = []
+    state = OrganizationState(
+        message_clock=lambda: "2026-08-24T12:00:00.000Z",
+        on_persist=persisted_versions.append,
+    )
+    state.create_agent("Ada")
+    state.create_discussion("Exact read effects", 1, [2])
+    state.send_message(1, 1, "@Ada inspect")
+    persisted_versions.clear()
+
+    empty = state.read_discussion(2, 1, start_message_id=2, limit=1)
+    assert empty["messages"] == []
+    assert persisted_versions == []
+
+    state.read_discussion(2, 1, start_message_id=1, limit=1)
+    assert len(persisted_versions) == 1
+    discussion = state.snapshot()["discussions"][0]
+    recipient = discussion["messages"][0]["delivery"]["recipients"][0]
+    assert recipient["read"] is True
+    assert recipient["ack"] == "pending"
+    assert discussion["messages"][0]["mentions"] == [{"member_id": 2, "status": "read"}]
+    assert discussion["activity_frontiers"] == [
+        {"member_id": 1, "latest_activity_message_id": 1},
+        {"member_id": 2, "latest_activity_message_id": 1},
+    ]
+
+    state.read_discussion(2, 1, start_message_id=1, limit=1)
+    assert len(persisted_versions) == 1
+    assert (
+        state.snapshot()["discussions"][0]["messages"][0]["delivery"]["recipients"][0][
+            "ack"
+        ]
+        == "pending"
+    )
+
+    state.ack_messages(2, 1, [1])
+    assert len(persisted_versions) == 2
+    acknowledged = state.snapshot()["discussions"][0]
+    assert acknowledged["messages"][0]["delivery"]["recipients"][0] == {
+        "member_id": 2,
+        "member_type_at_send": "agent",
+        "member_name_at_send": "Ada",
+        "available": True,
+        "mentioned": True,
+        "read": True,
+        "ack": "acked",
+    }
+    assert acknowledged["activity_frontiers"] == discussion["activity_frontiers"]

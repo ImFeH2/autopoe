@@ -85,11 +85,16 @@
 }
 
 .discussion-pane {
-  display: grid;
-  min-width: 0;
-  min-height: 0;
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.message-log {
+  flex: 1 1 auto;
 }
 
 .discussion-delete-confirmation {
@@ -600,4 +605,160 @@ button.mention-reference:focus-visible {
 .message-timestamp:hover::after {
   opacity: 1;
   transform: translateY(0);
+}
+
+.message-bubble {
+  position: relative;
+}
+
+.delivery-circle {
+  align-items: center;
+  background: conic-gradient(
+    var(--color-accent) var(--delivery-progress),
+    var(--color-border) 0
+  );
+  border: 2px solid var(--color-canvas);
+  border-radius: 999px;
+  bottom: -0.7rem;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  height: 2rem;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.2rem;
+  position: absolute;
+  z-index: 2;
+}
+
+.delivery-circle::before {
+  background: var(--color-surface);
+  border-radius: inherit;
+  content: "";
+  inset: 3px;
+  position: absolute;
+}
+
+.delivery-circle span {
+  position: relative;
+}
+.delivery-circle--left {
+  left: -0.75rem;
+}
+.delivery-circle--right {
+  right: -0.75rem;
+}
+.delivery-circle:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.delivery-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
+  left: 50%;
+  max-height: min(70vh, 32rem);
+  max-width: min(92vw, 34rem);
+  overflow: auto;
+  padding: 1rem;
+  position: absolute;
+  top: 7rem;
+  transform: translateX(-50%);
+  width: 30rem;
+  z-index: 30;
+}
+
+.delivery-panel > header {
+  align-items: center;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: space-between;
+}
+.delivery-panel ul {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+/* biome-ignore lint/style/noDescendingSpecificity: delivery-panel rows do not inherit Markdown list adjacency. */
+.delivery-panel li {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+}
+.delivery-panel li > div {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.delivery-panel li strong {
+  overflow-wrap: anywhere;
+}
+.delivery-panel button {
+  cursor: pointer;
+}
+
+.mention-reference--reference {
+  background: var(--color-surface-muted);
+}
+.mention-reference--reference::after {
+  content: " ·";
+}
+.mention-reference--unread {
+  background: transparent;
+  border: 1px solid var(--color-accent);
+}
+.mention-reference--unread::after {
+  content: " •";
+}
+.mention-reference--pending {
+  background: color-mix(in srgb, #d39a2c 18%, transparent);
+  border: 1px solid #d39a2c;
+}
+.mention-reference--pending::after {
+  content: " ◷";
+}
+.mention-reference--acked {
+  background: color-mix(in srgb, #3b9b69 18%, transparent);
+  border: 1px solid #3b9b69;
+}
+.mention-reference--acked::after {
+  content: " ✓";
+}
+.mention-reference--unknown {
+  background: transparent;
+  border: 1px dashed var(--color-text-tertiary);
+}
+.mention-reference--unknown::after {
+  content: " ?";
+}
+
+@media (max-width: 640px) {
+  .delivery-panel {
+    left: 0.5rem;
+    right: 0.5rem;
+    transform: none;
+    width: auto;
+  }
+}
+.delivery-panel-backdrop {
+  background: rgb(0 0 0 / 18%);
+  border: 0;
+  inset: 0;
+  position: absolute;
+  z-index: 29;
+}
+.human-activity-count {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
 }

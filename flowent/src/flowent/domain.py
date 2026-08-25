@@ -88,6 +88,37 @@ class MentionReference:
     deleted: bool = False
 
 
+ReadReceiptSource = Literal[
+    "human_viewport",
+    "human_mark_all",
+    "agent_reminder_context",
+    "agent_discussion_read",
+    "legacy_human_seen",
+]
+AckSource = Literal["human_explicit", "agent_tool", "legacy_agent_ack"]
+
+
+@dataclass(frozen=True)
+class MessageRecipient:
+    member_id: int
+    member_type_at_send: Literal["human", "agent"]
+    member_name_at_send: str
+    mentioned: bool = False
+
+
+@dataclass(frozen=True)
+class MessageReadReceipt:
+    member_id: int
+    source: ReadReceiptSource
+    agent_run_id: str | None = None
+
+
+@dataclass(frozen=True)
+class MessageMentionAcknowledgement:
+    member_id: int
+    source: AckSource
+
+
 @dataclass
 class Message:
     id: int
@@ -98,6 +129,12 @@ class Message:
     references: list[MentionReference] = field(default_factory=list)
     mentions: dict[int, Mention] = field(default_factory=dict)
     human_mentions: dict[int, HumanMentionNotification] = field(default_factory=dict)
+    recipient_snapshot_known: bool = False
+    recipients: dict[int, MessageRecipient] = field(default_factory=dict)
+    read_receipts: dict[int, MessageReadReceipt] = field(default_factory=dict)
+    mention_acknowledgements: dict[int, MessageMentionAcknowledgement] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -114,6 +151,7 @@ class Discussion:
     memberships: list[DiscussionMembership]
     messages: list[Message] = field(default_factory=list)
     human_read_states: dict[int, HumanReadState] = field(default_factory=dict)
+    activity_frontiers: dict[int, int] = field(default_factory=dict)
 
     @property
     def member_ids(self) -> tuple[int, ...]:
@@ -162,6 +200,7 @@ class OrganizationState:
         persisted: dict[str, Any] | None = None,
         on_persist: Callable[[dict[str, Any]], None] | None = None,
         message_clock: Callable[[], str] | None = None,
+        current_human_member_id: int = 1,
     ) -> None:
         if working_directory is None:
             self._working_directory = str(Path.cwd().resolve())
@@ -171,6 +210,9 @@ class OrganizationState:
             self._working_directory = working_directory
         else:
             raise ValueError("working_directory must be a non-empty path")
+        if type(current_human_member_id) is not int or current_human_member_id < 1:
+            raise ValueError("current_human_member_id must be a positive integer")
+        self._current_human_member_id = current_human_member_id
         self._on_persist = on_persist
         self._message_clock = message_clock or message_created_at
         self._members: dict[int, Member] = {}
@@ -178,7 +220,9 @@ class OrganizationState:
         self._agent_execution: dict[int, AgentExecution] = {}
         repaired_memberships = False
         if persisted is None:
-            self._members[1] = Member(id=1, type="human", name="You")
+            self._members[current_human_member_id] = Member(
+                id=current_human_member_id, type="human", name="You"
+            )
         else:
             repaired_memberships = self._restore(persisted)
         self._next_member_id = max(self._members, default=1) + 1
@@ -428,8 +472,21 @@ class OrganizationState:
                 for target_id in targets
                 if self._members[target_id].type == "human"
             )
+            message_id = len(discussion.messages) + 1
+            recipients = {
+                membership.member_id: MessageRecipient(
+                    member_id=membership.member_id,
+                    member_type_at_send=self._members[membership.member_id].type,
+                    member_name_at_send=self._members[membership.member_id].name,
+                    mentioned=membership.member_id in targets,
+                )
+                for membership in discussion.memberships
+                if membership.active
+                and membership.member_id != sender_id
+                and message_id > membership.joined_after_message_id
+            }
             message = Message(
-                id=len(discussion.messages) + 1,
+                id=message_id,
                 sender_id=sender_id,
                 sender_name=self._members[sender_id].name,
                 body=normalized_body,
@@ -443,8 +500,12 @@ class OrganizationState:
                     target_id: HumanMentionNotification(member_id=target_id)
                     for target_id in human_targets
                 },
+                recipient_snapshot_known=True,
+                recipients=recipients,
             )
             discussion.messages.append(message)
+            previous_sender_frontier = discussion.activity_frontiers.get(sender_id)
+            discussion.activity_frontiers[sender_id] = message.id
             previous_execution = {
                 target_id: (
                     self._agent_execution[target_id].status,
@@ -473,6 +534,10 @@ class OrganizationState:
                 self._changed(persist=True)
             except BaseException:
                 discussion.messages.pop()
+                if previous_sender_frontier is None:
+                    discussion.activity_frontiers.pop(sender_id, None)
+                else:
+                    discussion.activity_frontiers[sender_id] = previous_sender_frontier
                 if self._members[sender_id].type == "human":
                     if previous_human_read_state is None:
                         discussion.human_read_states.pop(sender_id, None)
@@ -541,7 +606,11 @@ class OrganizationState:
         with self._condition:
             self._require_agent(agent_id)
             discussion = self._require_discussion_member(agent_id, discussion_id)
-            messages = discussion.messages
+            messages = [
+                message
+                for message in discussion.messages
+                if self._message_is_read_eligible(agent_id, discussion, message)
+            ]
             if start_message_id is None:
                 candidates = [
                     message
@@ -557,15 +626,13 @@ class OrganizationState:
                     and (end_message_id is None or message.id <= end_message_id)
                 ]
                 selected_messages = candidates[:limit]
-
-            changed = False
-            for message in selected_messages:
-                mention = message.mentions.get(agent_id)
-                if mention is not None and not mention.read:
-                    mention.read = True
-                    changed = True
-            if changed:
-                self._changed(persist=True)
+            self._record_message_reads_locked(
+                agent_id,
+                ((discussion_id, message.id) for message in selected_messages),
+                source="agent_discussion_read",
+                agent_run_id=None,
+                persist=True,
+            )
             return self._discussion_selection_data(discussion, selected_messages)
 
     def human_discussion_messages_page(
@@ -595,6 +662,119 @@ class OrganizationState:
                 project=self._message_data,
             )
 
+    def record_message_reads(
+        self,
+        member_id: int,
+        coordinates: Iterable[tuple[int, int]],
+        *,
+        source: ReadReceiptSource,
+        agent_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self._condition:
+            self._require_member(member_id)
+            changed = self._record_message_reads_locked(
+                member_id,
+                coordinates,
+                source=source,
+                agent_run_id=agent_run_id,
+                persist=False,
+            )
+            if changed:
+                try:
+                    self._changed(persist=True)
+                except Exception:  # noqa: BLE001
+                    # The receipt is already present in memory. Preserve model-call
+                    # recovery so a later state change can retry durable persistence.
+                    self._changed(persist=False)
+            return self._snapshot()
+
+    @staticmethod
+    def _message_is_read_eligible(
+        member_id: int,
+        discussion: Discussion,
+        message: Message,
+    ) -> bool:
+        membership = discussion.membership(member_id)
+        if membership is None or message.id <= membership.joined_after_message_id:
+            return False
+        return (
+            message.sender_id == member_id
+            or not message.recipient_snapshot_known
+            or member_id in message.recipients
+        )
+
+    def _record_message_reads_locked(
+        self,
+        member_id: int,
+        coordinates: Iterable[tuple[int, int]],
+        *,
+        source: ReadReceiptSource,
+        agent_run_id: str | None,
+        persist: bool,
+    ) -> bool:
+        targets = tuple(dict.fromkeys(coordinates))
+        if not targets:
+            return False
+        resolved: list[tuple[Discussion, Message]] = []
+        for discussion_id, message_id in targets:
+            discussion = self._require_discussion_member(member_id, discussion_id)
+            if message_id < 1 or message_id > len(discussion.messages):
+                raise DomainError("message_not_found", "Message not found")
+            message = discussion.messages[message_id - 1]
+            if not self._message_is_read_eligible(member_id, discussion, message):
+                raise DomainError(
+                    "invalid_read", "Message was not eligible for this Member"
+                )
+            resolved.append((discussion, message))
+        changed = False
+        human_ids_by_discussion: dict[int, list[int]] = {}
+        for discussion, message in resolved:
+            if message.sender_id == member_id:
+                frontier = discussion.activity_frontiers.get(member_id, 0)
+                if message.id > frontier:
+                    discussion.activity_frontiers[member_id] = message.id
+                    changed = True
+                continue
+            if member_id not in message.read_receipts:
+                message.read_receipts[member_id] = MessageReadReceipt(
+                    member_id=member_id,
+                    source=source,
+                    agent_run_id=agent_run_id,
+                )
+                changed = True
+            frontier = discussion.activity_frontiers.get(member_id, 0)
+            if message.id > frontier:
+                discussion.activity_frontiers[member_id] = message.id
+                changed = True
+            mention = message.mentions.get(member_id)
+            if mention is not None and not mention.read:
+                mention.read = True
+                changed = True
+            notification = message.human_mentions.get(member_id)
+            if notification is not None and not notification.read:
+                notification.read = True
+                changed = True
+            if self._members[member_id].type == "human":
+                human_ids_by_discussion.setdefault(discussion.id, []).append(message.id)
+        if self._members[member_id].type == "human":
+            for discussion_id, message_ids in human_ids_by_discussion.items():
+                discussion = self._discussions[discussion_id]
+                state = discussion.human_read_states.setdefault(
+                    member_id, HumanReadState(member_id)
+                )
+                next_state = mark_human_messages_seen(
+                    state,
+                    human_member_id=member_id,
+                    ordered_message_ids=[message.id for message in discussion.messages],
+                    message_ids=message_ids,
+                )
+                if next_state != state:
+                    discussion.human_read_states[member_id] = next_state
+                    changed = True
+        if changed and persist:
+            self._changed(persist=True)
+        return changed
+
     def see_human_messages(
         self,
         human_id: int,
@@ -604,35 +784,65 @@ class OrganizationState:
         target_ids = tuple(dict.fromkeys(message_ids))
         if not target_ids:
             raise DomainError("invalid_seen", "At least one Message ID is required")
+        with self._condition:
+            member = self._require_member(human_id)
+            if member.type != "human":
+                raise DomainError("not_a_human", "Member is not a Human")
+            self._record_message_reads_locked(
+                human_id,
+                ((discussion_id, message_id) for message_id in target_ids),
+                source="human_viewport",
+                agent_run_id=None,
+                persist=True,
+            )
+            return self._snapshot()
 
+    def mark_all_human_messages_read(
+        self, human_id: int, discussion_id: int, through_message_id: int
+    ) -> dict[str, Any]:
         with self._condition:
             member = self._require_member(human_id)
             if member.type != "human":
                 raise DomainError("not_a_human", "Member is not a Human")
             discussion = self._require_discussion_member(human_id, discussion_id)
-            messages_by_id = {message.id: message for message in discussion.messages}
-            if any(message_id not in messages_by_id for message_id in target_ids):
-                raise DomainError("message_not_found", "Message not found")
-
-            state = discussion.human_read_states.setdefault(
-                human_id, HumanReadState(human_id)
+            latest = discussion.messages[-1].id if discussion.messages else 0
+            if through_message_id < 0 or through_message_id > latest:
+                raise DomainError(
+                    "invalid_range", "through_message_id is outside the Discussion"
+                )
+            membership = discussion.membership(human_id)
+            assert membership is not None
+            coordinates = []
+            for message in discussion.messages:
+                if (
+                    message.id > through_message_id
+                    or message.id <= membership.joined_after_message_id
+                ):
+                    continue
+                if message.sender_id == human_id:
+                    continue
+                if (
+                    message.recipient_snapshot_known
+                    and human_id not in message.recipients
+                ):
+                    continue
+                coordinates.append((discussion_id, message.id))
+            changed = self._record_message_reads_locked(
+                human_id,
+                coordinates,
+                source="human_mark_all",
+                agent_run_id=None,
+                persist=False,
             )
-            next_state = mark_human_messages_seen(
-                state,
-                human_member_id=human_id,
-                ordered_message_ids=[message.id for message in discussion.messages],
-                message_ids=target_ids,
-            )
-            if next_state != state:
-                discussion.human_read_states[human_id] = next_state
+            if through_message_id > discussion.activity_frontiers.get(human_id, 0):
+                discussion.activity_frontiers[human_id] = through_message_id
+                changed = True
+            if changed:
                 self._changed(persist=True)
-            return self._snapshot()
+            return self._summary_snapshot()
 
     def read_human_mention(
-        self,
-        member_id: int,
-        discussion_id: int,
-        message_id: int,
+        self, member_id: int, discussion_id: int, message_id: int
     ) -> dict[str, Any]:
         with self._condition:
             member = self._require_member(member_id)
@@ -641,53 +851,110 @@ class OrganizationState:
             discussion = self._require_discussion_member(member_id, discussion_id)
             if message_id < 1 or message_id > len(discussion.messages):
                 raise DomainError("message_not_found", "Message not found")
-            notification = discussion.messages[message_id - 1].human_mentions.get(
-                member_id
-            )
-            if notification is None:
+            if member_id not in discussion.messages[message_id - 1].human_mentions:
                 raise DomainError(
                     "invalid_human_mention", "Message did not notify this Human"
                 )
-            if not notification.read:
-                notification.read = True
-                self._changed(persist=True)
+            self._record_message_reads_locked(
+                member_id,
+                [(discussion_id, message_id)],
+                source="human_viewport",
+                agent_run_id=None,
+                persist=True,
+            )
             return self._snapshot()
 
-    def ack_messages(
+    def ack_human_mention(
+        self, human_id: int, discussion_id: int, message_id: int
+    ) -> dict[str, Any]:
+        with self._condition:
+            member = self._require_member(human_id)
+            if member.type != "human":
+                raise DomainError("not_a_human", "Member is not a Human")
+            discussion = self._require_discussion_member(human_id, discussion_id)
+            self._ack_message_mention_locked(
+                human_id, discussion, message_id, source="human_explicit"
+            )
+            return self._summary_snapshot()
+
+    def _ack_message_mention_locked(
         self,
-        agent_id: int,
-        discussion_id: int,
-        message_ids: Iterable[int],
+        member_id: int,
+        discussion: Discussion,
+        message_id: int,
+        *,
+        source: AckSource,
+        persist: bool = True,
+    ) -> bool:
+        if message_id < 1 or message_id > len(discussion.messages):
+            raise DomainError("message_not_found", "Message not found")
+        message = discussion.messages[message_id - 1]
+        if source == "human_explicit":
+            mentioned = member_id in message.human_mentions
+        elif source == "agent_tool":
+            mentioned = member_id in message.mentions
+        else:
+            mentioned = (
+                member_id in message.mentions
+                or member_id in message.human_mentions
+                or any(
+                    reference.member_id == member_id and reference.notified
+                    for reference in message.references
+                )
+            )
+        if not mentioned:
+            raise DomainError("invalid_ack", "Message did not notify this Member")
+        if member_id in message.mention_acknowledgements:
+            return False
+        if member_id not in message.read_receipts:
+            raise DomainError("invalid_ack", "Message must be read before ack")
+        message.mention_acknowledgements[member_id] = MessageMentionAcknowledgement(
+            member_id=member_id, source=source
+        )
+        mention = message.mentions.get(member_id)
+        if mention is not None:
+            mention.acked = True
+        if persist:
+            self._changed(persist=True)
+        return True
+
+    def ack_messages(
+        self, agent_id: int, discussion_id: int, message_ids: Iterable[int]
     ) -> dict[str, Any]:
         target_ids = tuple(dict.fromkeys(message_ids))
         if not target_ids:
             raise DomainError("invalid_ack", "At least one Message ID is required")
-
         with self._condition:
             self._require_agent(agent_id)
             discussion = self._require_discussion_member(agent_id, discussion_id)
-            messages_by_id = {message.id: message for message in discussion.messages}
             for message_id in target_ids:
-                message = messages_by_id.get(message_id)
-                if message is None:
+                if message_id < 1 or message_id > len(discussion.messages):
                     raise DomainError("message_not_found", "Message not found")
-                mention = message.mentions.get(agent_id)
-                if mention is None:
+                message = discussion.messages[message_id - 1]
+                if agent_id not in message.mentions:
                     raise DomainError(
                         "invalid_ack", "Message did not mention this Agent"
                     )
-                if not mention.read:
+                if (
+                    agent_id not in message.mention_acknowledgements
+                    and agent_id not in message.read_receipts
+                ):
                     raise DomainError("invalid_ack", "Message must be read before ack")
-            newly_acked = 0
-            for message_id in target_ids:
-                mention = messages_by_id[message_id].mentions[agent_id]
-                if not mention.acked:
-                    mention.acked = True
-                    newly_acked += 1
+            newly_acked = sum(
+                self._ack_message_mention_locked(
+                    agent_id,
+                    discussion,
+                    message_id,
+                    source="agent_tool",
+                    persist=False,
+                )
+                for message_id in target_ids
+            )
             execution = self._agent_execution[agent_id]
             if execution.status == "running":
                 execution.acknowledged_in_turn += newly_acked
-            self._changed(persist=True)
+            if newly_acked:
+                self._changed(persist=True)
             return {"acked_message_ids": list(target_ids)}
 
     def search_messages(
@@ -753,7 +1020,6 @@ class OrganizationState:
                         .messages[item.message_id - 1]
                         .mentions[member.id]
                     )
-                    mention.read = True
                     mention.reminded = True
                 execution.status = "running"
                 execution.error = None
@@ -891,7 +1157,10 @@ class OrganizationState:
 
     def _summary_snapshot(self) -> dict[str, Any]:
         return {
-            "organization": {"id": 1},
+            "organization": {
+                "id": 1,
+                "current_human_member_id": self._current_human_member_id,
+            },
             "working_directory": self._working_directory,
             "mention_syntax": self._mention_syntax_data(),
             "member_name_policy": member_name_policy_data(),
@@ -908,7 +1177,10 @@ class OrganizationState:
 
     def _snapshot(self) -> dict[str, Any]:
         return {
-            "organization": {"id": 1},
+            "organization": {
+                "id": 1,
+                "current_human_member_id": self._current_human_member_id,
+            },
             "working_directory": self._working_directory,
             "mention_syntax": self._mention_syntax_data(),
             "member_name_policy": member_name_policy_data(),
@@ -949,22 +1221,18 @@ class OrganizationState:
             membership = discussion.membership(state.human_member_id)
             if membership is None or not membership.active:
                 continue
+            frontier = discussion.activity_frontiers.get(state.human_member_id, 0)
             eligible = [
                 message
                 for message in discussion.messages
                 if message.id > membership.joined_after_message_id
-            ]
-            seen = set(state.sparse_seen_message_ids)
-            unread = [
-                message
-                for message in eligible
-                if message.sender_id != state.human_member_id
-                and not (
-                    state.read_through_message_id is not None
-                    and message.id <= state.read_through_message_id
+                and message.sender_id != state.human_member_id
+                and (
+                    not message.recipient_snapshot_known
+                    or state.human_member_id in message.recipients
                 )
-                and message.id not in seen
             ]
+            unread = [message for message in eligible if message.id > frontier]
             unread_mentions = [
                 message
                 for message in eligible
@@ -1014,6 +1282,12 @@ class OrganizationState:
                 for state in discussion.human_read_states.values()
                 if (membership := discussion.membership(state.human_member_id))
                 is not None
+                and membership.active
+            ],
+            "activity_frontiers": [
+                {"member_id": member_id, "latest_activity_message_id": frontier}
+                for member_id, frontier in sorted(discussion.activity_frontiers.items())
+                if (membership := discussion.membership(member_id)) is not None
                 and membership.active
             ],
         }
@@ -1072,6 +1346,7 @@ class OrganizationState:
             ),
             "body": message.body,
             "created_at": message.created_at,
+            "delivery": self._delivery_data(message),
             "references": [
                 {
                     "member_id": reference.member_id,
@@ -1112,6 +1387,81 @@ class OrganizationState:
             ),
         }
 
+    def _delivery_data(self, message: Message) -> dict[str, Any]:
+        recipients = dict(message.recipients)
+        if not message.recipient_snapshot_known:
+            factual_member_ids = set(message.read_receipts) | set(
+                message.mention_acknowledgements
+            )
+            factual_member_ids.update(message.mentions)
+            factual_member_ids.update(message.human_mentions)
+            for reference in message.references:
+                if reference.notified:
+                    factual_member_ids.add(reference.member_id)
+            for member_id in factual_member_ids:
+                if member_id == message.sender_id or member_id in recipients:
+                    continue
+                member = self._members.get(member_id)
+                reference = next(
+                    (
+                        item
+                        for item in message.references
+                        if item.member_id == member_id
+                    ),
+                    None,
+                )
+                recipients[member_id] = MessageRecipient(
+                    member_id=member_id,
+                    member_type_at_send=(
+                        member.type if member is not None else "agent"
+                    ),
+                    member_name_at_send=(
+                        reference.name
+                        if reference is not None
+                        else member.name
+                        if member is not None
+                        else str(member_id)
+                    ),
+                    mentioned=(
+                        member_id in message.mentions
+                        or member_id in message.human_mentions
+                        or (reference is not None and reference.notified)
+                    ),
+                )
+        recipient_data = []
+        for recipient in recipients.values():
+            receipt = message.read_receipts.get(recipient.member_id)
+            acknowledgement = message.mention_acknowledgements.get(recipient.member_id)
+            if not recipient.mentioned:
+                ack_status = "not_applicable"
+            elif acknowledgement is not None:
+                ack_status = "acked"
+            elif message.recipient_snapshot_known:
+                ack_status = "pending"
+            else:
+                ack_status = "unknown"
+            active_member = self._members.get(recipient.member_id)
+            recipient_data.append(
+                {
+                    "member_id": recipient.member_id,
+                    "member_type_at_send": recipient.member_type_at_send,
+                    "member_name_at_send": recipient.member_name_at_send,
+                    "available": active_member is not None
+                    and not active_member.deleted,
+                    "mentioned": recipient.mentioned,
+                    "read": True
+                    if receipt is not None
+                    else False
+                    if message.recipient_snapshot_known
+                    else None,
+                    "ack": ack_status,
+                }
+            )
+        return {
+            "recipients_known": message.recipient_snapshot_known,
+            "recipients": recipient_data,
+        }
+
     def _restore(self, persisted: dict[str, Any]) -> bool:
         repaired_memberships = False
         for item in persisted["members"]:
@@ -1125,13 +1475,15 @@ class OrganizationState:
             self._members[member.id] = member
             if member.type == "agent" and not member.deleted:
                 self._agent_execution[member.id] = AgentExecution()
-        current_human = self._members.get(1)
+        current_human = self._members.get(self._current_human_member_id)
         if (
             current_human is None
             or current_human.type != "human"
             or current_human.deleted
         ):
-            raise RuntimeError("Persisted Organization is missing its Human Member")
+            raise RuntimeError(
+                "Persisted Organization is missing its current Human Member"
+            )
         for item in persisted["discussions"]:
             messages: list[Message] = []
             for message_data in item["messages"]:
@@ -1190,6 +1542,35 @@ class OrganizationState:
                     for notification in message_data.get("human_mentions", [])
                     if notification["member_id"] != message_data["sender_id"]
                 }
+                recipients = {
+                    recipient["member_id"]: MessageRecipient(
+                        member_id=recipient["member_id"],
+                        member_type_at_send=recipient["member_type_at_send"],
+                        member_name_at_send=recipient["member_name_at_send"],
+                        mentioned=recipient.get("mentioned", False),
+                    )
+                    for recipient in message_data.get("recipients", [])
+                    if recipient["member_id"] != message_data["sender_id"]
+                }
+                read_receipts = {
+                    receipt["member_id"]: MessageReadReceipt(
+                        member_id=receipt["member_id"],
+                        source=receipt["source"],
+                        agent_run_id=receipt.get("agent_run_id"),
+                    )
+                    for receipt in message_data.get("read_receipts", [])
+                    if receipt["member_id"] != message_data["sender_id"]
+                }
+                acknowledgements = {
+                    acknowledgement["member_id"]: MessageMentionAcknowledgement(
+                        member_id=acknowledgement["member_id"],
+                        source=acknowledgement["source"],
+                    )
+                    for acknowledgement in message_data.get(
+                        "mention_acknowledgements", []
+                    )
+                    if acknowledgement["member_id"] != message_data["sender_id"]
+                }
                 messages.append(
                     Message(
                         id=message_data["id"],
@@ -1205,6 +1586,12 @@ class OrganizationState:
                         references=references,
                         mentions=mentions,
                         human_mentions=human_mentions,
+                        recipient_snapshot_known=message_data.get(
+                            "recipient_snapshot_known", False
+                        ),
+                        recipients=recipients,
+                        read_receipts=read_receipts,
+                        mention_acknowledgements=acknowledgements,
                     )
                 )
             ordered_message_ids = [message.id for message in messages]
@@ -1255,6 +1642,56 @@ class OrganizationState:
                     )
                 )
                 membership_ids.add(member_id)
+            memberships_by_id = {
+                membership.member_id: membership for membership in memberships
+            }
+            for message in messages:
+                if not message.recipient_snapshot_known and message.recipients:
+                    raise RuntimeError(
+                        "Persisted legacy Message cannot contain inferred recipients"
+                    )
+                for recipient in message.recipients.values():
+                    membership = memberships_by_id.get(recipient.member_id)
+                    if (
+                        recipient.member_id == message.sender_id
+                        or membership is None
+                        or message.id <= membership.joined_after_message_id
+                    ):
+                        raise RuntimeError(
+                            "Persisted Message recipient snapshot is invalid"
+                        )
+                for receipt in message.read_receipts.values():
+                    membership = memberships_by_id.get(receipt.member_id)
+                    if (
+                        receipt.member_id == message.sender_id
+                        or membership is None
+                        or message.id <= membership.joined_after_message_id
+                        or (
+                            message.recipient_snapshot_known
+                            and receipt.member_id not in message.recipients
+                        )
+                    ):
+                        raise RuntimeError("Persisted Message read receipt is invalid")
+                notified_member_ids = set(message.mentions) | set(
+                    message.human_mentions
+                )
+                notified_member_ids.update(
+                    reference.member_id
+                    for reference in message.references
+                    if reference.notified
+                )
+                for acknowledgement in message.mention_acknowledgements.values():
+                    if (
+                        acknowledgement.member_id == message.sender_id
+                        or acknowledgement.member_id not in notified_member_ids
+                        or (
+                            acknowledgement.source != "legacy_agent_ack"
+                            and acknowledgement.member_id not in message.read_receipts
+                        )
+                    ):
+                        raise RuntimeError(
+                            "Persisted Message mention acknowledgement is invalid"
+                        )
             human_read_states: dict[int, HumanReadState] = {}
             for state_data in item.get("human_read_states", []):
                 human_id = state_data["member_id"]
@@ -1293,12 +1730,17 @@ class OrganizationState:
                         if message.sender_id == member.id
                     ],
                 )
+            activity_frontiers = {
+                frontier["member_id"]: frontier["latest_activity_message_id"]
+                for frontier in item.get("activity_frontiers", [])
+            }
             discussion = Discussion(
                 id=item["id"],
                 topic=item["topic"],
                 memberships=memberships,
                 messages=messages,
                 human_read_states=human_read_states,
+                activity_frontiers=activity_frontiers,
             )
             self._discussions[discussion.id] = discussion
         if self._ensure_active_humans_in_all_discussions():
@@ -1368,6 +1810,15 @@ class OrganizationState:
                         }
                         for state in discussion.human_read_states.values()
                     ],
+                    "activity_frontiers": [
+                        {
+                            "member_id": member_id,
+                            "latest_activity_message_id": frontier,
+                        }
+                        for member_id, frontier in sorted(
+                            discussion.activity_frontiers.items()
+                        )
+                    ],
                     "messages": [
                         {
                             "id": message.id,
@@ -1402,6 +1853,39 @@ class OrganizationState:
                                     "read": notification.read,
                                 }
                                 for notification in message.human_mentions.values()
+                            ],
+                            "recipient_snapshot_known": (
+                                message.recipient_snapshot_known
+                            ),
+                            "recipients": [
+                                {
+                                    "member_id": recipient.member_id,
+                                    "member_type_at_send": (
+                                        recipient.member_type_at_send
+                                    ),
+                                    "member_name_at_send": (
+                                        recipient.member_name_at_send
+                                    ),
+                                    "mentioned": recipient.mentioned,
+                                }
+                                for recipient in message.recipients.values()
+                            ],
+                            "read_receipts": [
+                                {
+                                    "member_id": receipt.member_id,
+                                    "source": receipt.source,
+                                    "agent_run_id": receipt.agent_run_id,
+                                }
+                                for receipt in message.read_receipts.values()
+                            ],
+                            "mention_acknowledgements": [
+                                {
+                                    "member_id": acknowledgement.member_id,
+                                    "source": acknowledgement.source,
+                                }
+                                for acknowledgement in (
+                                    message.mention_acknowledgements.values()
+                                )
                             ],
                         }
                         for message in discussion.messages

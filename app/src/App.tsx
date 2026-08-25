@@ -85,6 +85,8 @@ function App() {
   >({});
   const agentHistoryRequestTokensRef = useRef<Record<number, number>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingMutationsRef = useRef(0);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const restoreMessageFocusRef = useRef(false);
   const focusMessageAfterDialogRef = useRef(false);
@@ -96,6 +98,10 @@ function App() {
       (member) => member.id === selectedMemberId,
     )?.type === "agent"
       ? selectedMemberId
+      : null;
+  const requestedHumanMemberId =
+    requestState.status === "ready"
+      ? requestState.snapshot.organization.current_human_member_id
       : null;
   const openMemberFromDiscussion = useCallback(
     (memberId: number, discussionId: number, triggerKey: string) => {
@@ -132,6 +138,7 @@ function App() {
       }));
       try {
         const page = await backend.getDiscussionMessagesPage(
+          requestState.snapshot.organization.current_human_member_id,
           discussionId,
           requestState.snapshot.members,
           cursor,
@@ -166,7 +173,7 @@ function App() {
     async function refresh() {
       try {
         const snapshot = await backend.getOrganization();
-        if (active) {
+        if (active && pendingMutationsRef.current === 0) {
           setRequestState({ status: "ready", snapshot });
         }
       } catch (error) {
@@ -236,7 +243,7 @@ function App() {
       (item) => item.id === selectedDiscussionId,
     );
     const activity = summary?.human_activity?.find(
-      (item) => item.member_id === 1,
+      (item) => item.member_id === requestedHumanMemberId,
     );
     const target =
       activity?.first_unread_message_id ??
@@ -256,6 +263,7 @@ function App() {
     discussionCaches,
     loadDiscussionPage,
     requestState,
+    requestedHumanMemberId,
     selectedDiscussionId,
   ]);
 
@@ -366,7 +374,7 @@ function App() {
     const cache = discussionCaches[selectedDiscussionId];
     if (!summary || !cache?.loaded || cache.loading || cache.error) return;
     const activity = summary.human_activity?.find(
-      (item) => item.member_id === 1,
+      (item) => item.member_id === requestedHumanMemberId,
     );
     const missingTarget = [
       activity?.first_unread_message_id,
@@ -385,6 +393,7 @@ function App() {
     discussionCaches,
     loadDiscussionPage,
     requestState,
+    requestedHumanMemberId,
     selectedDiscussionId,
   ]);
 
@@ -517,6 +526,15 @@ function App() {
   const sourceDiscussion = snapshot.discussions.find(
     (discussion) => discussion.id === discussionSource?.discussionId,
   );
+  const currentHumanMember = snapshot.members.find(
+    (member) => member.id === snapshot.organization.current_human_member_id,
+  );
+  if (!currentHumanMember) {
+    return (
+      <StatusPage label="Current Human Member is unavailable" tone="error" />
+    );
+  }
+  const currentHumanMemberId = currentHumanMember.id;
 
   function commit(nextSnapshot: OrganizationSnapshot) {
     startTransition(() => {
@@ -524,19 +542,37 @@ function App() {
     });
   }
 
-  async function mutate(action: () => Promise<OrganizationSnapshot>) {
+  async function mutate(
+    action: () => Promise<OrganizationSnapshot>,
+    formatMutationError: (error: unknown) => string = errorMessage,
+    rethrow = false,
+  ) {
+    pendingMutationsRef.current += 1;
     setIsSaving(true);
     setMutationError(null);
-    try {
-      const nextSnapshot = await action();
-      commit(nextSnapshot);
-      return nextSnapshot;
-    } catch (error) {
-      setMutationError(errorMessage(error));
-      return null;
-    } finally {
-      setIsSaving(false);
-    }
+    const run = mutationQueueRef.current.then(async () => {
+      try {
+        const nextSnapshot = await action();
+        commit(nextSnapshot);
+        return nextSnapshot;
+      } catch (error) {
+        setMutationError(formatMutationError(error));
+        if (rethrow) {
+          throw error;
+        }
+        return null;
+      } finally {
+        pendingMutationsRef.current -= 1;
+        if (pendingMutationsRef.current === 0) {
+          setIsSaving(false);
+        }
+      }
+    });
+    mutationQueueRef.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   async function handleCreateAgent(event: FormEvent<HTMLFormElement>) {
@@ -549,44 +585,38 @@ function App() {
       setMutationError(validationError);
       return;
     }
-    setIsSaving(true);
-    setMutationError(null);
-    try {
-      const nextSnapshot = await backend.createAgent(agentName);
-      commit(nextSnapshot);
+    const nextSnapshot = await mutate(
+      () => backend.createAgent(agentName),
+      (error) =>
+        error instanceof FlowentRequestError
+          ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
+            error.message)
+          : errorMessage(error),
+    );
+    if (nextSnapshot) {
       const created = nextSnapshot.members[nextSnapshot.members.length - 1];
       setAgentName("");
       setSelectedMemberId(created?.type === "agent" ? created.id : null);
       setIsCreatingAgent(false);
-    } catch (error) {
-      setMutationError(
-        error instanceof FlowentRequestError
-          ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
-              error.message)
-          : errorMessage(error),
-      );
-    } finally {
-      setIsSaving(false);
     }
   }
 
   async function handleRenameMember(memberId: number, name: string) {
-    setIsSaving(true);
-    setMutationError(null);
-    try {
-      commit(await backend.renameMember(memberId, name));
-    } catch (error) {
-      setMutationError(errorMessage(error));
-      throw error;
-    } finally {
-      setIsSaving(false);
-    }
+    await mutate(
+      () => backend.renameMember(memberId, name),
+      (error) =>
+        error instanceof FlowentRequestError
+          ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
+            error.message)
+          : errorMessage(error),
+      true,
+    );
   }
 
   async function handleCreateDiscussion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextSnapshot = await mutate(() =>
-      backend.createDiscussion(topic, selectedMemberIds),
+      backend.createDiscussion(currentHumanMemberId, topic, selectedMemberIds),
     );
     if (nextSnapshot) {
       const created =
@@ -626,13 +656,15 @@ function App() {
   }
 
   async function handleRenameAgent(memberId: number, name: string) {
-    setIsSaving(true);
-    setMutationError(null);
-    try {
-      commit(await backend.renameMember(memberId, name));
-    } finally {
-      setIsSaving(false);
-    }
+    await mutate(
+      () => backend.renameMember(memberId, name),
+      (error) =>
+        error instanceof FlowentRequestError
+          ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
+            error.message)
+          : errorMessage(error),
+      true,
+    );
   }
 
   async function handlePauseAgent(agentId: number) {
@@ -671,26 +703,9 @@ function App() {
     discussionId: number,
     messageIds: number[],
   ) {
-    const cache = discussionCaches[discussionId];
-    const unreadMentionMessageIds = messageIds.filter((messageId) =>
-      cache?.messagesById[messageId]?.human_mentions?.some(
-        (mention) => mention.member_id === 1 && mention.status === "unread",
-      ),
+    const nextSnapshot = await mutate(() =>
+      backend.seeHumanMessages(currentHumanMemberId, discussionId, messageIds),
     );
-    const nextSnapshot = await mutate(async () => {
-      let nextSnapshot = await backend.seeHumanMessages(
-        discussionId,
-        messageIds,
-      );
-      for (const messageId of unreadMentionMessageIds) {
-        nextSnapshot = await backend.readHumanMention(
-          1,
-          discussionId,
-          messageId,
-        );
-      }
-      return nextSnapshot;
-    });
     if (nextSnapshot) {
       setDiscussionCaches((current) => {
         const currentCache = current[discussionId];
@@ -702,7 +717,7 @@ function App() {
             messagesById[messageId] = {
               ...message,
               human_mentions: message.human_mentions?.map((mention) =>
-                mention.member_id === 1
+                mention.member_id === currentHumanMemberId
                   ? { ...mention, status: "read" }
                   : mention,
               ),
@@ -716,13 +731,41 @@ function App() {
     }
   }
 
+  async function handleMarkAllRead(
+    discussionId: number,
+    throughMessageId: number,
+  ) {
+    return Boolean(
+      await mutate(() =>
+        backend.markAllHumanMessagesRead(
+          currentHumanMemberId,
+          discussionId,
+          throughMessageId,
+        ),
+      ),
+    );
+  }
+
+  async function handleAcknowledgeHumanMention(
+    discussionId: number,
+    messageId: number,
+  ) {
+    await mutate(() =>
+      backend.ackHumanMention(currentHumanMemberId, discussionId, messageId),
+    );
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedDiscussion) {
       return;
     }
     const nextSnapshot = await mutate(() =>
-      backend.sendMessage(selectedDiscussion.id, messageBody),
+      backend.sendMessage(
+        currentHumanMemberId,
+        selectedDiscussion.id,
+        messageBody,
+      ),
     );
     if (nextSnapshot) {
       const latestMessageId = nextSnapshot.discussions.find(
@@ -787,7 +830,11 @@ function App() {
     const discussion = snapshot.discussions.find(
       (candidate) => candidate.id === discussionId,
     );
-    if (!discussion || humanUnreadForDiscussion(discussion).unreadCount === 0) {
+    if (
+      !discussion ||
+      humanUnreadForDiscussion(discussion, currentHumanMemberId).unreadCount ===
+        0
+    ) {
       requestAnimationFrame(() => messageInputRef.current?.focus());
     }
   }
@@ -897,6 +944,7 @@ function App() {
         {workspaceView === "discussions" ? (
           <DiscussionsPage
             agents={agents}
+            currentHumanMemberId={currentHumanMemberId}
             disabled={isSaving}
             discussions={snapshot.discussions}
             error={mutationError}
@@ -969,6 +1017,10 @@ function App() {
                 },
               }));
             }}
+            onMarkAllRead={handleMarkAllRead}
+            onAcknowledgeHumanMention={(discussionId, messageId) =>
+              void handleAcknowledgeHumanMention(discussionId, messageId)
+            }
             onOpenMember={openMemberFromDiscussion}
             onCreateAgent={() => {
               selectWorkspaceView("members");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAgentHistoryEvent,
+  type DiscussionMessagePage,
   type OrganizationSnapshot,
   parseAgentHistory,
   parseAgentHistoryEvent,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/backend";
 
 const validSnapshot: OrganizationSnapshot = {
-  organization: { id: 1 },
+  organization: { id: 1, current_human_member_id: 1 },
   working_directory: "/project/flowent",
   mention_syntax: { enabled: true, issues: [] },
   member_name_policy: {
@@ -51,7 +52,7 @@ const validSnapshot: OrganizationSnapshot = {
   ],
 };
 
-const validMessagePage = {
+const validMessagePage: DiscussionMessagePage = {
   discussion_id: 1,
   mode: "latest",
   messages: [
@@ -60,6 +61,7 @@ const validMessagePage = {
       sender_id: 1,
       body: "Begin.",
       created_at: null,
+      delivery: { recipients_known: false, recipients: [] },
       references: [
         {
           member_id: 2,
@@ -297,6 +299,110 @@ describe("parseOrganizationSnapshot", () => {
     expect(() => parseOrganizationSnapshot(value)).toThrow(
       "member_name_policy.max_code_points must be a positive integer",
     );
+  });
+
+  it("uses the explicit current Human identity instead of assuming Member 1", () => {
+    const value = structuredClone(validSnapshot);
+    value.organization.current_human_member_id = 7;
+    value.members[0].id = 7;
+    const discussion = value.discussions[0];
+    const activity = discussion?.human_activity?.[0];
+    if (!discussion || !activity) {
+      throw new Error("Expected Discussion activity fixture");
+    }
+    discussion.member_ids[0] = 7;
+    activity.member_id = 7;
+
+    expect(
+      parseOrganizationSnapshot(value).organization.current_human_member_id,
+    ).toBe(7);
+
+    value.organization.current_human_member_id = 2;
+    expect(() => parseOrganizationSnapshot(value)).toThrow(
+      "must target an active Human",
+    );
+  });
+
+  it.each([null, {}, { ...validSnapshot, members: [] }])(
+    "rejects an invalid root or empty Organization: %j",
+    (value) => {
+      expect(() => parseOrganizationSnapshot(value)).toThrow(
+        "Invalid Organization snapshot",
+      );
+    },
+  );
+
+  it.each(["pausing", "paused"] as const)(
+    "accepts the %s Agent status",
+    (status) => {
+      const value = structuredClone(validSnapshot);
+      if (value.members[1].type !== "agent") {
+        throw new Error("Expected Agent fixture");
+      }
+      value.members[1].status = status;
+
+      expect(parseOrganizationSnapshot(value).members[1]).toEqual({
+        id: 2,
+        type: "agent",
+        name: "Ada",
+        status,
+      });
+    },
+  );
+
+  it("accepts missing legacy page timestamps and rejects malformed timestamps", () => {
+    const legacy = structuredClone(validMessagePage) as unknown as {
+      messages: Array<Record<string, unknown>>;
+    };
+    const legacyMessage = legacy.messages[0];
+    if (!legacyMessage) throw new Error("Expected Message fixture");
+    delete legacyMessage.created_at;
+    expect(
+      parseDiscussionMessagePage(legacy, validSnapshot.members).messages[0]
+        .created_at,
+    ).toBeNull();
+
+    for (const createdAt of [
+      "2026-08-22T12:34:56Z",
+      "2026-08-22T12:34:56.789+00:00",
+      "2026-02-30T12:34:56.789Z",
+      "not-a-time",
+    ]) {
+      const malformed = structuredClone(validMessagePage);
+      const malformedMessage = malformed.messages[0];
+      if (!malformedMessage) throw new Error("Expected Message fixture");
+      malformedMessage.created_at = createdAt;
+      expect(() =>
+        parseDiscussionMessagePage(malformed, validSnapshot.members),
+      ).toThrow("created_at");
+    }
+  });
+
+  it("preserves frontier-derived Human activity in the lightweight summary", () => {
+    const value = structuredClone(validSnapshot);
+    const discussion = value.discussions[0];
+    const activity = discussion?.human_activity?.[0];
+    if (!discussion || !activity) {
+      throw new Error("Expected Human activity fixture");
+    }
+    discussion.human_activity = [
+      {
+        ...activity,
+        read_through_message_id: 1,
+        unread_count: 0,
+        first_unread_message_id: null,
+      },
+    ];
+    expect(
+      parseOrganizationSnapshot(value).discussions[0]?.human_activity?.[0]
+        ?.read_through_message_id,
+    ).toBe(1);
+  });
+
+  it("rejects Discussion references to unknown Members", () => {
+    const value = structuredClone(validSnapshot);
+    value.discussions[0].member_ids = [1, 99];
+    expect(() => parseOrganizationSnapshot(value)).toThrow("unknown Member");
   });
 
   it("rejects old full-message snapshots", () => {
@@ -663,5 +769,85 @@ describe("Agent Memory and Todo payloads", () => {
     expect(() => parseAgentTodoPage(payload)).toThrow(
       "contents or cursor are inconsistent",
     );
+  });
+});
+
+describe("message delivery snapshots", () => {
+  it("accepts frozen known recipients on message pages", () => {
+    const page = structuredClone(validMessagePage);
+    const message = page.messages[0];
+    if (!message) throw new Error("Expected Message fixture");
+    message.delivery = {
+      recipients_known: true,
+      recipients: [
+        {
+          member_id: 2,
+          member_type_at_send: "agent",
+          member_name_at_send: "Ada",
+          available: true,
+          mentioned: true,
+          read: true,
+          ack: "acked",
+        },
+      ],
+    };
+    expect(
+      parseDiscussionMessagePage(page, validSnapshot.members).messages[0]
+        .delivery,
+    ).toEqual(message.delivery);
+  });
+
+  it("rejects sender recipients, duplicate recipients, and fabricated legacy unread", () => {
+    const sender = structuredClone(validMessagePage);
+    const senderMessage = sender.messages[0];
+    if (!senderMessage) throw new Error("Expected Message fixture");
+    senderMessage.delivery = {
+      recipients_known: true,
+      recipients: [
+        {
+          member_id: 1,
+          member_type_at_send: "human",
+          member_name_at_send: "You",
+          available: true,
+          mentioned: false,
+          read: false,
+          ack: "not_applicable",
+        },
+      ],
+    };
+    expect(() =>
+      parseDiscussionMessagePage(sender, validSnapshot.members),
+    ).toThrow("cannot target the sender");
+
+    const recipient = {
+      member_id: 2,
+      member_type_at_send: "agent" as const,
+      member_name_at_send: "Ada",
+      available: true,
+      mentioned: false,
+      read: false,
+      ack: "not_applicable" as const,
+    };
+    const duplicate = structuredClone(validMessagePage);
+    const duplicateMessage = duplicate.messages[0];
+    if (!duplicateMessage) throw new Error("Expected Message fixture");
+    duplicateMessage.delivery = {
+      recipients_known: true,
+      recipients: [recipient, recipient],
+    };
+    expect(() =>
+      parseDiscussionMessagePage(duplicate, validSnapshot.members),
+    ).toThrow("unique Members");
+
+    const legacy = structuredClone(validMessagePage);
+    const legacyMessage = legacy.messages[0];
+    if (!legacyMessage) throw new Error("Expected Message fixture");
+    legacyMessage.delivery = {
+      recipients_known: false,
+      recipients: [{ ...recipient, read: false }],
+    };
+    expect(() =>
+      parseDiscussionMessagePage(legacy, validSnapshot.members),
+    ).toThrow("cannot infer legacy unread");
   });
 });

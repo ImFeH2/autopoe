@@ -212,12 +212,28 @@ export type MemberNamePolicy = {
   max_utf8_bytes: number;
 };
 
+export type DeliveryRecipient = {
+  member_id: number;
+  member_type_at_send: "human" | "agent";
+  member_name_at_send: string;
+  available: boolean;
+  mentioned: boolean;
+  read: boolean | null;
+  ack: "acked" | "pending" | "unknown" | "not_applicable";
+};
+
+export type MessageDelivery = {
+  recipients_known: boolean;
+  recipients: DeliveryRecipient[];
+};
+
 export type Message = {
   id: number;
   sender_id: number;
   sender_name?: string;
   body: string;
   created_at: string | null;
+  delivery?: MessageDelivery;
   references: MentionReference[];
   mentions: Mention[];
   human_mentions?: HumanMention[];
@@ -240,6 +256,11 @@ export type DiscussionSummary = {
   human_activity: HumanDiscussionActivity[];
 };
 
+export type DiscussionActivityFrontier = {
+  member_id: number;
+  latest_activity_message_id: number;
+};
+
 export type Discussion = {
   id: number;
   topic: string;
@@ -250,6 +271,7 @@ export type Discussion = {
   first_message_id?: number | null;
   latest_message_id?: number | null;
   human_activity?: HumanDiscussionActivity[];
+  activity_frontiers?: DiscussionActivityFrontier[];
 };
 
 export type DiscussionMessagePageMode =
@@ -274,7 +296,7 @@ export type DiscussionMessagePage = {
 };
 
 export type OrganizationSnapshot = {
-  organization: { id: 1 };
+  organization: { id: 1; current_human_member_id: number };
   working_directory: string;
   mention_syntax: MentionSyntax;
   member_name_policy: MemberNamePolicy;
@@ -509,6 +531,80 @@ function optionalMessageCreatedAt(value: unknown, path: string): string | null {
   return value;
 }
 
+function parseMessageDelivery(
+  value: unknown,
+  path: string,
+  senderId: number,
+): MessageDelivery {
+  const item = record(value, path);
+  const recipientsKnown = boolean(
+    item.recipients_known,
+    `${path}.recipients_known`,
+  );
+  const memberIds = new Set<number>();
+  const recipients = array(item.recipients, `${path}.recipients`).map(
+    (value, index) => {
+      const recipientPath = `${path}.recipients[${index}]`;
+      const recipient = record(value, recipientPath);
+      const memberId = positiveInteger(
+        recipient.member_id,
+        `${recipientPath}.member_id`,
+      );
+      if (memberId === senderId)
+        invalidSnapshot(`${recipientPath} cannot target the sender`);
+      if (memberIds.has(memberId))
+        invalidSnapshot(`${path}.recipients must contain unique Members`);
+      memberIds.add(memberId);
+      const memberType = recipient.member_type_at_send;
+      if (memberType !== "human" && memberType !== "agent")
+        invalidSnapshot(`${recipientPath}.member_type_at_send is invalid`);
+      const mentioned = boolean(
+        recipient.mentioned,
+        `${recipientPath}.mentioned`,
+      );
+      const read =
+        recipient.read === null
+          ? null
+          : boolean(recipient.read, `${recipientPath}.read`);
+      if (recipientsKnown && read === null)
+        invalidSnapshot(`${recipientPath}.read cannot be unknown`);
+      if (!recipientsKnown && read === false)
+        invalidSnapshot(`${recipientPath}.read cannot infer legacy unread`);
+      const ack = recipient.ack;
+      if (
+        ack !== "acked" &&
+        ack !== "pending" &&
+        ack !== "unknown" &&
+        ack !== "not_applicable"
+      )
+        invalidSnapshot(`${recipientPath}.ack is invalid`);
+      if (!mentioned && ack !== "not_applicable")
+        invalidSnapshot(`${recipientPath}.ack requires mentioned`);
+      if (mentioned && ack === "not_applicable")
+        invalidSnapshot(`${recipientPath}.mentioned requires an ack state`);
+      if (ack === "acked" && read === false)
+        invalidSnapshot(`${recipientPath}.acked cannot be unread`);
+      if (recipientsKnown && mentioned && ack === "unknown")
+        invalidSnapshot(
+          `${recipientPath}.known mention cannot have unknown ack`,
+        );
+      return {
+        member_id: memberId,
+        member_type_at_send: memberType,
+        member_name_at_send: nonEmptyString(
+          recipient.member_name_at_send,
+          `${recipientPath}.member_name_at_send`,
+        ),
+        available: boolean(recipient.available, `${recipientPath}.available`),
+        mentioned,
+        read,
+        ack,
+      } satisfies DeliveryRecipient;
+    },
+  );
+  return { recipients_known: recipientsKnown, recipients };
+}
+
 function parseMessage(
   value: unknown,
   discussionIndex: number,
@@ -533,6 +629,11 @@ function parseMessage(
   const createdAt = optionalMessageCreatedAt(
     item.created_at,
     `${path}.created_at`,
+  );
+  const delivery = parseMessageDelivery(
+    item.delivery,
+    `${path}.delivery`,
+    senderId,
   );
   const bodyCodePoints = [...body];
   let previousPositionedEnd = 0;
@@ -712,12 +813,53 @@ function parseMessage(
       );
     }
   }
+  const notifiedReferenceIds = new Set(
+    references
+      .filter((reference) => reference.notified)
+      .map((reference) => reference.member_id),
+  );
+  for (const recipient of delivery.recipients) {
+    if (recipient.mentioned && !notifiedReferenceIds.has(recipient.member_id)) {
+      invalidSnapshot(
+        `${path}.delivery mentioned recipient requires notified reference`,
+      );
+    }
+    if (
+      mentionedMemberIds.has(recipient.member_id) &&
+      recipient.member_type_at_send !== "agent"
+    ) {
+      invalidSnapshot(
+        `${path}.delivery Agent Mention recipient type is invalid`,
+      );
+    }
+    if (
+      humanMentionIds.has(recipient.member_id) &&
+      recipient.member_type_at_send !== "human"
+    ) {
+      invalidSnapshot(
+        `${path}.delivery Human Mention recipient type is invalid`,
+      );
+    }
+  }
+  if (delivery.recipients_known) {
+    for (const memberId of notifiedReferenceIds) {
+      const recipient = delivery.recipients.find(
+        (candidate) => candidate.member_id === memberId,
+      );
+      if (!recipient?.mentioned) {
+        invalidSnapshot(
+          `${path}.delivery must include every notified recipient`,
+        );
+      }
+    }
+  }
   return {
     id,
     sender_id: senderId,
     ...(senderName === undefined ? {} : { sender_name: senderName }),
     body,
     created_at: createdAt,
+    delivery,
     references,
     mentions,
     ...(item.human_mentions === undefined
@@ -1005,9 +1147,17 @@ export function parseOrganizationSnapshot(
   if (memberIds.size !== members.length) {
     invalidSnapshot("Member IDs must be unique");
   }
-  const currentHuman = members.find((member) => member.id === 1);
+  const currentHumanMemberId = positiveInteger(
+    organization.current_human_member_id,
+    "organization.current_human_member_id",
+  );
+  const currentHuman = members.find(
+    (member) => member.id === currentHumanMemberId,
+  );
   if (currentHuman?.type !== "human") {
-    invalidSnapshot("Member 1 must be the current Human");
+    invalidSnapshot(
+      "organization.current_human_member_id must target an active Human",
+    );
   }
 
   const membersById = new Map(members.map((member) => [member.id, member]));
@@ -1042,7 +1192,7 @@ export function parseOrganizationSnapshot(
   }
 
   return {
-    organization: { id: 1 },
+    organization: { id: 1, current_human_member_id: currentHumanMemberId },
     working_directory: nonEmptyString(
       snapshot.working_directory,
       "working_directory",
@@ -1848,6 +1998,7 @@ async function organizationRequest(
 export const backend = {
   getOrganization: () => organizationRequest("organization.get"),
   getDiscussionMessagesPage: async (
+    currentHumanMemberId: number,
     discussionId: number,
     members: Member[],
     cursor: {
@@ -1859,6 +2010,7 @@ export const backend = {
   ) =>
     parseDiscussionMessagePage(
       await request("human.discussion.messages.page", {
+        human_id: currentHumanMemberId,
         discussion_id: discussionId,
         limit,
         ...cursor,
@@ -1963,23 +2115,35 @@ export const backend = {
     organizationRequest("organization.pause_agent", { agent_id: agentId }),
   resumeAgent: (agentId: number) =>
     organizationRequest("organization.resume_agent", { agent_id: agentId }),
-  createDiscussion: (topic: string, memberIds: number[]) =>
+  createDiscussion: (
+    currentHumanMemberId: number,
+    topic: string,
+    memberIds: number[],
+  ) =>
     organizationRequest("discussion.create", {
       topic,
-      creator_id: 1,
+      creator_id: currentHumanMemberId,
       member_ids: memberIds,
     }),
   deleteDiscussion: (discussionId: number) =>
     organizationRequest("discussion.delete", { discussion_id: discussionId }),
-  sendMessage: (discussionId: number, body: string) =>
+  sendMessage: (
+    currentHumanMemberId: number,
+    discussionId: number,
+    body: string,
+  ) =>
     organizationRequest("discussion.send", {
       discussion_id: discussionId,
-      sender_id: 1,
+      sender_id: currentHumanMemberId,
       body,
     }),
-  seeHumanMessages: (discussionId: number, messageIds: number[]) =>
+  seeHumanMessages: (
+    humanId: number,
+    discussionId: number,
+    messageIds: number[],
+  ) =>
     organizationRequest("human.discussion.see_messages", {
-      human_id: 1,
+      human_id: humanId,
       discussion_id: discussionId,
       message_ids: messageIds,
     }),
@@ -1990,6 +2154,22 @@ export const backend = {
   ) =>
     organizationRequest("human.mention.read", {
       member_id: memberId,
+      discussion_id: discussionId,
+      message_id: messageId,
+    }),
+  markAllHumanMessagesRead: (
+    humanId: number,
+    discussionId: number,
+    throughMessageId: number,
+  ) =>
+    organizationRequest("human.discussion.mark_all_read", {
+      human_id: humanId,
+      discussion_id: discussionId,
+      through_message_id: throughMessageId,
+    }),
+  ackHumanMention: (humanId: number, discussionId: number, messageId: number) =>
+    organizationRequest("human.mention.ack", {
+      human_id: humanId,
       discussion_id: discussionId,
       message_id: messageId,
     }),

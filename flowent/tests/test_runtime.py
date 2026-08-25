@@ -14,6 +14,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     UserPromptPart,
 )
+from snapshot_helpers import without_delivery
 
 from flowent.diagnostics import configure_diagnostics, shutdown_diagnostics
 from flowent.domain import DomainError, OrganizationState, Reminder
@@ -74,7 +75,7 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
 
     created_at = state.snapshot()["discussions"][0]["messages"][0]["created_at"]
     read = context.discussion("read", discussion_id=1, end_message_id=1)
-    assert read == {
+    assert without_delivery(read) == {
         "discussion_id": 1,
         "messages": [
             {
@@ -527,7 +528,7 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
         ]
         assert runner.activations[0].mentions[0].message_id == 1
         assert snapshot["members"][1]["status"] == "idle"
-        assert snapshot["discussions"][0]["messages"] == [
+        assert without_delivery(snapshot["discussions"][0]["messages"]) == [
             {
                 "id": 1,
                 "sender_id": 1,
@@ -661,7 +662,7 @@ def test_known_runner_failure_sets_error_without_immediate_retry(
         }
         assert runner.calls == 1
         assert state.snapshot()["discussions"][0]["messages"][0]["mentions"] == [
-            {"member_id": 2, "status": "read"}
+            {"member_id": 2, "status": "pending"}
         ]
     finally:
         runtime.stop()

@@ -743,6 +743,7 @@ class PydanticAgentRunner:
         with capture_run_messages() as captured_messages:
             try:
                 with trace_context:
+                    context.record_reminder_context(reminder)
                     result = await self._agent.run(
                         prompt,
                         deps=context,

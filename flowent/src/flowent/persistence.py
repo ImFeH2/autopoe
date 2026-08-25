@@ -19,7 +19,8 @@ LEGACY_SCHEMA_VERSION = 11
 MESSAGE_IDENTITY_SCHEMA_VERSION = 12
 HUMAN_READ_STATE_SCHEMA_VERSION = 13
 MESSAGE_CREATED_AT_SCHEMA_VERSION = 14
-SCHEMA_VERSION = 15
+GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 DATA_DIRECTORY_ENV = "FLOWENT_DATA_DIR"
 
 
@@ -71,20 +72,27 @@ class SQLiteStore:
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
+                    self._migrate_version_fifteen(connection)
                 elif version == LEGACY_SCHEMA_VERSION:
                     self._migrate_version_eleven(connection)
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
+                    self._migrate_version_fifteen(connection)
                 elif version == MESSAGE_IDENTITY_SCHEMA_VERSION:
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
+                    self._migrate_version_fifteen(connection)
                 elif version == HUMAN_READ_STATE_SCHEMA_VERSION:
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
+                    self._migrate_version_fifteen(connection)
                 elif version == MESSAGE_CREATED_AT_SCHEMA_VERSION:
                     self._migrate_version_fourteen(connection)
+                    self._migrate_version_fifteen(connection)
+                elif version == GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION:
+                    self._migrate_version_fifteen(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Flowent database version: {version}"
@@ -190,6 +198,8 @@ class SQLiteStore:
                 sender_name TEXT NOT NULL,
                 body TEXT NOT NULL,
                 created_at TEXT,
+                recipient_snapshot_known INTEGER NOT NULL DEFAULT 0
+                    CHECK (recipient_snapshot_known IN (0, 1)),
                 PRIMARY KEY (discussion_id, id),
                 FOREIGN KEY (discussion_id) REFERENCES discussions (id)
                     ON DELETE CASCADE,
@@ -235,6 +245,76 @@ class SQLiteStore:
         SQLiteStore._create_mention_references_table(connection)
         SQLiteStore._create_human_mention_notifications_table(connection)
         SQLiteStore._create_human_read_state_tables(connection)
+        SQLiteStore._create_delivery_tables(connection)
+
+    @staticmethod
+    def _create_delivery_tables(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discussion_activity_frontiers (
+                member_id INTEGER NOT NULL,
+                discussion_id INTEGER NOT NULL,
+                latest_activity_message_id INTEGER NOT NULL DEFAULT 0
+                    CHECK (latest_activity_message_id >= 0),
+                PRIMARY KEY (member_id, discussion_id),
+                FOREIGN KEY (discussion_id, member_id)
+                    REFERENCES discussion_members (discussion_id, member_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_recipients (
+                discussion_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                member_type_at_send TEXT NOT NULL
+                    CHECK (member_type_at_send IN ('human', 'agent')),
+                member_name_at_send TEXT NOT NULL,
+                mentioned INTEGER NOT NULL DEFAULT 0 CHECK (mentioned IN (0, 1)),
+                PRIMARY KEY (discussion_id, message_id, member_id),
+                FOREIGN KEY (discussion_id, message_id)
+                    REFERENCES messages (discussion_id, id) ON DELETE CASCADE,
+                FOREIGN KEY (member_id) REFERENCES members (id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_read_receipts (
+                discussion_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                source TEXT NOT NULL CHECK (source IN (
+                    'human_viewport', 'human_mark_all',
+                    'agent_reminder_context', 'agent_discussion_read',
+                    'legacy_human_seen'
+                )),
+                agent_run_id TEXT,
+                PRIMARY KEY (discussion_id, message_id, member_id),
+                FOREIGN KEY (discussion_id, message_id)
+                    REFERENCES messages (discussion_id, id) ON DELETE CASCADE,
+                FOREIGN KEY (member_id) REFERENCES members (id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_mention_acknowledgements (
+                discussion_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                source TEXT NOT NULL CHECK (source IN (
+                    'human_explicit', 'agent_tool', 'legacy_agent_ack'
+                )),
+                PRIMARY KEY (discussion_id, message_id, member_id),
+                FOREIGN KEY (discussion_id, message_id)
+                    REFERENCES messages (discussion_id, id) ON DELETE CASCADE,
+                FOREIGN KEY (member_id) REFERENCES members (id)
+            )
+            """
+        )
 
     @staticmethod
     def _create_human_read_state_tables(connection: sqlite3.Connection) -> None:
@@ -763,6 +843,155 @@ class SQLiteStore:
                     )
                 """
             )
+            connection.execute(
+                f"PRAGMA user_version = {GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION}"
+            )
+
+    @staticmethod
+    def _migrate_version_fifteen(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(messages)")
+            }
+            if "recipient_snapshot_known" not in columns:
+                connection.execute(
+                    "ALTER TABLE messages ADD COLUMN recipient_snapshot_known INTEGER NOT NULL DEFAULT 0 CHECK (recipient_snapshot_known IN (0, 1))"
+                )
+            SQLiteStore._create_delivery_tables(connection)
+            connection.execute("UPDATE messages SET recipient_snapshot_known = 0")
+            connection.execute("DELETE FROM discussion_activity_frontiers")
+            connection.execute("DELETE FROM message_recipients")
+            connection.execute("DELETE FROM message_read_receipts")
+            connection.execute("DELETE FROM message_mention_acknowledgements")
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO message_read_receipts
+                    (discussion_id, message_id, member_id, source, agent_run_id)
+                SELECT messages.discussion_id, messages.id, states.human_id,
+                    'legacy_human_seen', NULL
+                FROM human_discussion_read_states AS states
+                JOIN discussion_members AS membership
+                    ON membership.discussion_id = states.discussion_id
+                    AND membership.member_id = states.human_id
+                JOIN messages ON messages.discussion_id = states.discussion_id
+                    AND messages.id <= states.read_through_message_id
+                    AND messages.id > membership.joined_after_message_id
+                    AND messages.sender_id != states.human_id
+                WHERE states.read_through_message_id IS NOT NULL
+                UNION
+                SELECT seen.discussion_id, seen.message_id, seen.human_id,
+                    'legacy_human_seen', NULL
+                FROM human_discussion_seen_messages AS seen
+                JOIN discussion_members AS membership
+                    ON membership.discussion_id = seen.discussion_id
+                    AND membership.member_id = seen.human_id
+                JOIN messages ON messages.discussion_id = seen.discussion_id
+                    AND messages.id = seen.message_id
+                    AND messages.sender_id != seen.human_id
+                WHERE seen.message_id > membership.joined_after_message_id
+                UNION
+                SELECT notifications.discussion_id, notifications.message_id,
+                    notifications.human_id, 'legacy_human_seen', NULL
+                FROM human_mention_notifications AS notifications
+                JOIN discussion_members AS membership
+                    ON membership.discussion_id = notifications.discussion_id
+                    AND membership.member_id = notifications.human_id
+                JOIN messages ON messages.discussion_id = notifications.discussion_id
+                    AND messages.id = notifications.message_id
+                    AND messages.sender_id != notifications.human_id
+                WHERE notifications.read = 1
+                    AND notifications.message_id > membership.joined_after_message_id
+                """
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO message_mention_acknowledgements
+                    (discussion_id, message_id, member_id, source)
+                SELECT discussion_id, message_id, member_id, 'legacy_agent_ack'
+                FROM mentions WHERE acked = 1
+                """
+            )
+            # Every Member already present when schema 15 is migrated receives an
+            # explicit transaction-time baseline. This is deliberately independent
+            # of membership cutoffs: absence of trusted seen facts means "no new
+            # activity since migration", not "seen through the join cutoff".
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO discussion_activity_frontiers
+                    (member_id, discussion_id, latest_activity_message_id)
+                SELECT membership.member_id, membership.discussion_id,
+                    COALESCE((
+                        SELECT MAX(messages.id) FROM messages
+                        WHERE messages.discussion_id = membership.discussion_id
+                    ), 0)
+                FROM discussion_members AS membership
+                JOIN members ON members.id = membership.member_id
+                WHERE membership.active = 1 AND members.deleted = 0
+                """
+            )
+            # Trusted legacy Human seen facts replace that baseline with the exact
+            # greatest seen position. Legacy Agent read flags are intentionally not
+            # receipts and therefore never participate here.
+            connection.execute(
+                """
+                UPDATE discussion_activity_frontiers AS frontier
+                SET latest_activity_message_id = MIN(
+                    frontier.latest_activity_message_id,
+                    MAX(
+                        CASE
+                            WHEN COALESCE(states.read_through_message_id, 0) >
+                                membership.joined_after_message_id
+                            THEN states.read_through_message_id
+                            ELSE 0
+                        END,
+                        COALESCE((
+                            SELECT MAX(seen.message_id)
+                            FROM human_discussion_seen_messages AS seen
+                            WHERE seen.human_id = membership.member_id
+                                AND seen.discussion_id = membership.discussion_id
+                                AND seen.message_id >
+                                    membership.joined_after_message_id
+                        ), 0),
+                        COALESCE((
+                            SELECT MAX(notification.message_id)
+                            FROM human_mention_notifications AS notification
+                            WHERE notification.human_id = membership.member_id
+                                AND notification.discussion_id = membership.discussion_id
+                                AND notification.read = 1
+                                AND notification.message_id >
+                                    membership.joined_after_message_id
+                        ), 0)
+                    )
+                )
+                FROM discussion_members AS membership
+                JOIN members ON members.id = membership.member_id
+                LEFT JOIN human_discussion_read_states AS states
+                    ON states.human_id = membership.member_id
+                    AND states.discussion_id = membership.discussion_id
+                WHERE frontier.member_id = membership.member_id
+                    AND frontier.discussion_id = membership.discussion_id
+                    AND members.type = 'human'
+                    AND (
+                        COALESCE(states.read_through_message_id, 0) >
+                            membership.joined_after_message_id
+                        OR EXISTS (
+                            SELECT 1 FROM human_discussion_seen_messages AS seen
+                            WHERE seen.human_id = membership.member_id
+                                AND seen.discussion_id = membership.discussion_id
+                                AND seen.message_id >
+                                    membership.joined_after_message_id
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM human_mention_notifications AS notification
+                            WHERE notification.human_id = membership.member_id
+                                AND notification.discussion_id = membership.discussion_id
+                                AND notification.read = 1
+                                AND notification.message_id >
+                                    membership.joined_after_message_id
+                        )
+                    )
+                """
+            )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -1021,7 +1250,7 @@ class SQLiteStore:
                 messages: list[dict[str, Any]] = []
                 for message in connection.execute(
                     """
-                    SELECT id, sender_id, sender_name, body, created_at FROM messages
+                    SELECT id, sender_id, sender_name, body, created_at, recipient_snapshot_known FROM messages
                     WHERE discussion_id = ? ORDER BY id
                     """,
                     (discussion_id,),
@@ -1077,6 +1306,48 @@ class SQLiteStore:
                             (discussion_id, message["id"]),
                         )
                     ]
+                    recipients = [
+                        {
+                            "member_id": recipient["member_id"],
+                            "member_type_at_send": recipient["member_type_at_send"],
+                            "member_name_at_send": recipient["member_name_at_send"],
+                            "mentioned": bool(recipient["mentioned"]),
+                        }
+                        for recipient in connection.execute(
+                            """
+                            SELECT member_id, member_type_at_send, member_name_at_send, mentioned
+                            FROM message_recipients
+                            WHERE discussion_id = ? AND message_id = ? ORDER BY member_id
+                            """,
+                            (discussion_id, message["id"]),
+                        )
+                    ]
+                    read_receipts = [
+                        {
+                            "member_id": receipt["member_id"],
+                            "source": receipt["source"],
+                            "agent_run_id": receipt["agent_run_id"],
+                        }
+                        for receipt in connection.execute(
+                            """
+                            SELECT member_id, source, agent_run_id
+                            FROM message_read_receipts
+                            WHERE discussion_id = ? AND message_id = ? ORDER BY member_id
+                            """,
+                            (discussion_id, message["id"]),
+                        )
+                    ]
+                    acknowledgements = [
+                        {"member_id": item["member_id"], "source": item["source"]}
+                        for item in connection.execute(
+                            """
+                            SELECT member_id, source
+                            FROM message_mention_acknowledgements
+                            WHERE discussion_id = ? AND message_id = ? ORDER BY member_id
+                            """,
+                            (discussion_id, message["id"]),
+                        )
+                    ]
                     messages.append(
                         {
                             "id": message["id"],
@@ -1087,6 +1358,12 @@ class SQLiteStore:
                             "references": references,
                             "mentions": mentions,
                             "human_mentions": human_mentions,
+                            "recipient_snapshot_known": bool(
+                                message["recipient_snapshot_known"]
+                            ),
+                            "recipients": recipients,
+                            "read_receipts": read_receipts,
+                            "mention_acknowledgements": acknowledgements,
                         }
                     )
                 human_read_states = [
@@ -1114,6 +1391,22 @@ class SQLiteStore:
                         (discussion_id,),
                     )
                 ]
+                activity_frontiers = [
+                    {
+                        "member_id": frontier["member_id"],
+                        "latest_activity_message_id": frontier[
+                            "latest_activity_message_id"
+                        ],
+                    }
+                    for frontier in connection.execute(
+                        """
+                        SELECT member_id, latest_activity_message_id
+                        FROM discussion_activity_frontiers
+                        WHERE discussion_id = ? ORDER BY member_id
+                        """,
+                        (discussion_id,),
+                    )
+                ]
                 discussions.append(
                     {
                         "id": discussion_id,
@@ -1121,6 +1414,7 @@ class SQLiteStore:
                         "memberships": memberships,
                         "messages": messages,
                         "human_read_states": human_read_states,
+                        "activity_frontiers": activity_frontiers,
                     }
                 )
             organization = {"members": members, "discussions": discussions}
@@ -1203,8 +1497,9 @@ class SQLiteStore:
                 connection.execute(
                     """
                     INSERT INTO messages
-                        (discussion_id, id, sender_id, sender_name, body, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (discussion_id, id, sender_id, sender_name, body, created_at,
+                         recipient_snapshot_known)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         discussion_id,
@@ -1213,6 +1508,7 @@ class SQLiteStore:
                         message.get("sender_name", member_names[message["sender_id"]]),
                         message["body"],
                         message.get("created_at"),
+                        int(message.get("recipient_snapshot_known", False)),
                     ),
                 )
                 for position, reference in enumerate(message.get("references", [])):
@@ -1278,6 +1574,65 @@ class SQLiteStore:
                             int(notification.get("read", False)),
                         ),
                     )
+                for recipient in message.get("recipients", []):
+                    connection.execute(
+                        """
+                        INSERT INTO message_recipients
+                            (discussion_id, message_id, member_id,
+                             member_type_at_send, member_name_at_send, mentioned)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            discussion_id,
+                            message["id"],
+                            recipient["member_id"],
+                            recipient["member_type_at_send"],
+                            recipient["member_name_at_send"],
+                            int(recipient.get("mentioned", False)),
+                        ),
+                    )
+                for receipt in message.get("read_receipts", []):
+                    connection.execute(
+                        """
+                        INSERT INTO message_read_receipts
+                            (discussion_id, message_id, member_id, source, agent_run_id)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            discussion_id,
+                            message["id"],
+                            receipt["member_id"],
+                            receipt["source"],
+                            receipt.get("agent_run_id"),
+                        ),
+                    )
+                for acknowledgement in message.get("mention_acknowledgements", []):
+                    connection.execute(
+                        """
+                        INSERT INTO message_mention_acknowledgements
+                            (discussion_id, message_id, member_id, source)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            discussion_id,
+                            message["id"],
+                            acknowledgement["member_id"],
+                            acknowledgement["source"],
+                        ),
+                    )
+            for frontier in discussion.get("activity_frontiers", []):
+                connection.execute(
+                    """
+                    INSERT INTO discussion_activity_frontiers
+                        (member_id, discussion_id, latest_activity_message_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    (
+                        frontier["member_id"],
+                        discussion_id,
+                        frontier["latest_activity_message_id"],
+                    ),
+                )
             for state in discussion.get("human_read_states", []):
                 connection.execute(
                     """

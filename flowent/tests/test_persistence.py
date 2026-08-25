@@ -5,6 +5,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from snapshot_helpers import without_delivery
 
 from flowent.domain import OrganizationState
 from flowent.model_runner import ModelRuntime
@@ -273,7 +274,7 @@ def test_restores_discussions_mentions_and_next_ids(tmp_path: Path) -> None:
         {"id": 1, "type": "human", "name": "You"},
         {"id": 2, "type": "agent", "name": "Ada", "status": "idle"},
     ]
-    assert restored.snapshot()["discussions"][0]["messages"] == [
+    assert without_delivery(restored.snapshot()["discussions"][0]["messages"]) == [
         {
             "id": 1,
             "sender_id": 1,
@@ -350,7 +351,7 @@ def test_deleted_agent_stays_hidden_while_discussion_messages_survive_restart(
     restored = persisted_state(store, tmp_path)
 
     assert restored.snapshot()["members"] == [{"id": 1, "type": "human", "name": "You"}]
-    assert restored.snapshot()["discussions"] == [
+    assert without_delivery(restored.snapshot()["discussions"]) == [
         {
             "id": 1,
             "topic": "Work",
@@ -394,7 +395,7 @@ def test_discussion_keeps_its_human_after_all_agents_are_deleted_and_restart(
     state.delete_agent(3)
     restored = persisted_state(store, tmp_path)
 
-    assert restored.snapshot()["discussions"] == [
+    assert without_delivery(restored.snapshot()["discussions"]) == [
         {
             "id": 1,
             "topic": "Agent archive",
@@ -578,7 +579,7 @@ def test_migrates_single_version_one_state_to_global_schema(tmp_path: Path) -> N
     restored = persisted_state(store, tmp_path / "new-launch-root")
 
     assert restored.snapshot()["members"][1]["name"] == "Ada"
-    assert restored.snapshot()["discussions"][0]["messages"] == [
+    assert without_delivery(restored.snapshot()["discussions"][0]["messages"]) == [
         {
             "id": 1,
             "sender_id": 1,
@@ -951,7 +952,7 @@ def test_migrates_version_fourteen_memberships_with_stable_human_cutoffs(
             WHERE discussion_id = 1 ORDER BY human_id
             """
         ).fetchall()
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16
     assert memberships == [(1, 1, 0), (2, 1, 0), (3, 1, 2)]
     assert read_states == [(1, 1), (3, None)]
 
@@ -1034,7 +1035,7 @@ def test_version_fourteen_membership_migration_rolls_back_and_reopens(
     monkeypatch.undo()
     reopened = SQLiteStore(data)
     with sqlite3.connect(reopened.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16
         columns = {
             row[1]
             for row in connection.execute("PRAGMA table_info(discussion_members)")
@@ -1380,3 +1381,252 @@ def test_rename_restart_preserves_historical_author_snapshot(tmp_path: Path) -> 
 
     assert restored["members"][0]["name"] == "Owner"
     assert message["sender_name"] == "You"
+
+
+def downgrade_delivery_schema_to_fifteen(path: Path) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE message_mention_acknowledgements")
+        connection.execute("DROP TABLE message_read_receipts")
+        connection.execute("DROP TABLE message_recipients")
+        connection.execute("DROP TABLE discussion_activity_frontiers")
+        connection.execute("ALTER TABLE messages DROP COLUMN recipient_snapshot_known")
+        connection.execute("PRAGMA user_version = 15")
+
+
+def test_schema_fifteen_to_sixteen_migrates_only_trusted_delivery_facts(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Legacy delivery", 1, [2])
+    state.send_message(1, 2, "@You seen")
+    state.see_human_messages(1, 1, [1])
+    state.send_message(1, 1, "@Ada claimed")
+    state.read_discussion(2, 1, start_message_id=2, limit=1)
+    state.send_message(1, 1, "@Ada acked")
+    state.read_discussion(2, 1, start_message_id=3, limit=1)
+    state.ack_messages(2, 1, [3])
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "INSERT INTO members (id, type, name, deleted, paused) VALUES (3, 'human', 'Guest', 0, 0)"
+        )
+        connection.execute(
+            """
+            INSERT INTO discussion_members
+                (discussion_id, position, member_id, active, joined_after_message_id)
+            VALUES (1, 2, 3, 1, 2)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO human_discussion_read_states
+                (human_id, discussion_id, read_through_message_id)
+            VALUES (3, 1, NULL)
+            """
+        )
+        connection.executemany(
+            "INSERT INTO members (id, type, name, deleted, paused) VALUES (?, 'agent', ?, ?, 0)",
+            [(4, "Inactive", 0), (5, "Deleted", 1)],
+        )
+        connection.executemany(
+            """
+            INSERT INTO discussion_members
+                (discussion_id, position, member_id, active, joined_after_message_id)
+            VALUES (1, ?, ?, ?, 0)
+            """,
+            [(3, 4, 0), (4, 5, 1)],
+        )
+    downgrade_delivery_schema_to_fifteen(store.path)
+
+    migrated = SQLiteStore(data)
+    restored = persisted_state(migrated, tmp_path).snapshot()["discussions"][0]
+    assert all(
+        message["delivery"]["recipients_known"] is False
+        for message in restored["messages"]
+    )
+    assert restored["messages"][0]["delivery"]["recipients"][0]["read"] is True
+    assert restored["messages"][1]["delivery"]["recipients"][0] == {
+        "member_id": 2,
+        "member_type_at_send": "agent",
+        "member_name_at_send": "Ada",
+        "available": True,
+        "mentioned": True,
+        "read": None,
+        "ack": "unknown",
+    }
+    assert restored["messages"][2]["delivery"]["recipients"][0]["read"] is None
+    assert restored["messages"][2]["delivery"]["recipients"][0]["ack"] == "acked"
+    frontiers = {
+        item["member_id"]: item["latest_activity_message_id"]
+        for item in restored["activity_frontiers"]
+    }
+    assert frontiers == {1: 3, 2: 3, 3: 3}
+    guest_state = next(
+        state for state in restored["human_read_states"] if state["member_id"] == 3
+    )
+    assert guest_state["joined_after_message_id"] == 2
+    assert frontiers[3] == 3  # migration-time latest baseline, not the cutoff
+    with sqlite3.connect(migrated.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert (
+            connection.execute("SELECT COUNT(*) FROM message_recipients").fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM message_read_receipts WHERE member_id = 3"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM message_read_receipts WHERE member_id = 2"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM message_read_receipts WHERE member_id = 1"
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM message_mention_acknowledgements WHERE member_id = 3"
+            ).fetchone()[0]
+            == 0
+        )
+        assert connection.execute(
+            """
+            SELECT discussion_id, message_id, member_id, source
+            FROM message_mention_acknowledgements
+            ORDER BY discussion_id, message_id, member_id
+            """
+        ).fetchall() == [(1, 3, 2, "legacy_agent_ack")]
+        assert (
+            connection.execute(
+                """
+            SELECT discussion_id, message_id, member_id, source
+            FROM message_read_receipts
+            WHERE member_id = 2
+            """
+            ).fetchall()
+            == []
+        )
+        assert connection.execute(
+            """
+            SELECT latest_activity_message_id
+            FROM discussion_activity_frontiers
+            WHERE member_id = 3 AND discussion_id = 1
+            """
+        ).fetchone() == (3,)
+        assert (
+            connection.execute(
+                """
+            SELECT member_id FROM discussion_activity_frontiers
+            WHERE member_id IN (4, 5)
+            ORDER BY member_id
+            """
+            ).fetchall()
+            == []
+        )
+
+
+def test_schema_sixteen_missing_frontier_remains_missing_across_restart(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("No inferred frontier", 1, [2])
+
+    assert state.snapshot()["discussions"][0]["activity_frontiers"] == []
+    reopened = persisted_state(store, tmp_path)
+    assert reopened.snapshot()["discussions"][0]["activity_frontiers"] == []
+    with sqlite3.connect(store.path) as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM discussion_activity_frontiers"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_human_frontier_and_receipts_survive_restart_without_implicit_ack(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Restart delivery", 1, [2])
+    state.send_message(1, 2, "@You first")
+    state.send_message(1, 2, "second")
+    state.mark_all_human_messages_read(1, 1, 2)
+
+    restored = persisted_state(store, tmp_path)
+    discussion = restored.snapshot()["discussions"][0]
+    assert discussion["activity_frontiers"] == [
+        {"member_id": 1, "latest_activity_message_id": 2},
+        {"member_id": 2, "latest_activity_message_id": 2},
+    ]
+    assert [
+        message["delivery"]["recipients"][0]["read"]
+        for message in discussion["messages"]
+    ] == [True, True]
+    assert discussion["messages"][0]["delivery"]["recipients"][0]["ack"] == "pending"
+
+    restored.send_message(1, 2, "third")
+    restored.see_human_messages(1, 1, [3])
+    reopened = persisted_state(store, tmp_path).snapshot()["discussions"][0]
+    assert reopened["activity_frontiers"][0] == {
+        "member_id": 1,
+        "latest_activity_message_id": 3,
+    }
+    assert reopened["messages"][2]["delivery"]["recipients"][0]["read"] is True
+    with sqlite3.connect(store.path) as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM message_mention_acknowledgements"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_schema_fifteen_delivery_migration_rolls_back_and_reopens(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    downgrade_delivery_schema_to_fifteen(store.path)
+
+    original = SQLiteStore._create_delivery_tables
+
+    def fail_delivery_tables(connection: sqlite3.Connection) -> None:
+        original(connection)
+        raise sqlite3.OperationalError("injected delivery migration failure")
+
+    monkeypatch.setattr(
+        SQLiteStore, "_create_delivery_tables", staticmethod(fail_delivery_tables)
+    )
+    with pytest.raises(sqlite3.OperationalError, match="injected delivery"):
+        SQLiteStore(data)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert "recipient_snapshot_known" not in {
+            row[1] for row in connection.execute("PRAGMA table_info(messages)")
+        }
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'message_recipients'"
+            ).fetchone()
+            is None
+        )
+
+    monkeypatch.undo()
+    reopened = SQLiteStore(data)
+    with sqlite3.connect(reopened.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16

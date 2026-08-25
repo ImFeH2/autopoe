@@ -40,6 +40,21 @@ class AgentRunContext:
         if self.history_compaction_sink is not None:
             self.history_compaction_sink(provider)
 
+    def record_reminder_context(self, reminder: Reminder) -> None:
+        try:
+            self.state.record_message_reads(
+                self.agent_id,
+                (
+                    (mention.discussion_id, mention.message_id)
+                    for mention in reminder.mentions
+                ),
+                source="agent_reminder_context",
+                agent_run_id=self.run_id,
+            )
+        except DomainError as error:
+            if error.code != "member_not_found":
+                raise
+
     def organization(self, action: str, **arguments: Any) -> Any:
         def operation() -> Any:
             if action == "list_members":

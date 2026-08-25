@@ -51,6 +51,11 @@ import {
 } from "./human-unread";
 import { type DraftMention, MessageComposer } from "./message-composer";
 import {
+  DeliveryCircle,
+  DeliveryPanel,
+  type DeliverySelection,
+} from "./message-delivery";
+import {
   FirstUnreadDivider,
   FirstUnreadJumpButton,
   NewMessageJumpButton,
@@ -127,9 +132,41 @@ export function positionInitialDiscussionMessages(
   return "first-unread";
 }
 
+export function preserveActivityBarScrollAnchor(
+  log: Pick<HTMLElement, "scrollHeight" | "scrollTop">,
+  previousHeight: number | null,
+  nextHeight: number,
+  followingBottom: boolean,
+): void {
+  if (previousHeight === null) {
+    return;
+  }
+  if (followingBottom) {
+    log.scrollTop = log.scrollHeight;
+    return;
+  }
+  log.scrollTop += nextHeight - previousHeight;
+}
+
+type ActivityBarResizeObserver = Pick<ResizeObserver, "disconnect" | "observe">;
+type ActivityBarResizeObserverFactory = (
+  callback: ResizeObserverCallback,
+) => ActivityBarResizeObserver;
+
+export function observeActivityBarHeight(
+  bar: HTMLElement,
+  onHeightChange: (height: number) => void,
+  observerFactory: ActivityBarResizeObserverFactory = (callback) =>
+    new ResizeObserver(callback),
+): () => void {
+  const observer = observerFactory(() => onHeightChange(bar.offsetHeight));
+  observer.observe(bar);
+  return () => observer.disconnect();
+}
+
 export function humanUnreadForDiscussion(
   discussion: Discussion,
-  humanMemberId = 1,
+  humanMemberId: number,
 ): HumanUnreadResult<number> {
   const activity = discussion.human_activity?.find(
     (candidate) => candidate.member_id === humanMemberId,
@@ -163,22 +200,38 @@ export function humanUnreadForDiscussion(
     (candidate) => candidate.member_id === humanMemberId,
   );
   const joinedAfterMessageId = state?.joined_after_message_id ?? 0;
-  const eligibleMessages = (discussion.messages ?? []).filter(
-    (message) => message.id > joinedAfterMessageId,
-  );
-  const readThrough = state?.read_through_message_id ?? null;
-  const readMessageIds = new Set(
-    readThrough === null
-      ? []
-      : eligibleMessages
-          .filter((message) => message.id <= readThrough)
-          .map((message) => message.id),
-  );
+  const frontier =
+    discussion.activity_frontiers?.find(
+      (candidate) => candidate.member_id === humanMemberId,
+    )?.latest_activity_message_id ??
+    Math.max(
+      state?.read_through_message_id ?? 0,
+      ...(state?.seen_message_ids ?? [0]),
+    );
+  const eligibleMessages = (discussion.messages ?? []).filter((message) => {
+    if (
+      message.id <= Math.max(joinedAfterMessageId, frontier) ||
+      message.sender_id === humanMemberId
+    ) {
+      return false;
+    }
+    const delivery = message.delivery;
+    return (
+      delivery === undefined ||
+      !delivery.recipients_known ||
+      delivery.recipients.some(
+        (recipient) => recipient.member_id === humanMemberId,
+      )
+    );
+  });
   const humanMentionMessageIds = new Set(
     eligibleMessages.flatMap((message) =>
+      message.delivery?.recipients.some(
+        (recipient) =>
+          recipient.member_id === humanMemberId && recipient.mentioned,
+      ) ||
       message.human_mentions?.some(
-        (mention) =>
-          mention.member_id === humanMemberId && mention.status === "unread",
+        (mention) => mention.member_id === humanMemberId,
       )
         ? [message.id]
         : [],
@@ -190,8 +243,8 @@ export function humanUnreadForDiscussion(
       id: message.id,
       authorMemberId: message.sender_id,
     })),
-    readMessageIds,
-    seenMessageIds: new Set(state?.seen_message_ids ?? []),
+    readMessageIds: new Set(),
+    seenMessageIds: new Set(),
     humanMentionMessageIds,
   });
 }
@@ -211,6 +264,7 @@ export function filterDiscussions(
 
 type DiscussionsPageProps = {
   agents: AgentMember[];
+  currentHumanMemberId: number;
   disabled: boolean;
   discussions: Discussion[];
   error: string | null;
@@ -235,6 +289,11 @@ type DiscussionsPageProps = {
   messagePageError?: string | null;
   initialScrollTop?: number;
   onMessageScrollState?: (scrollTop: number, followsLatest: boolean) => void;
+  onMarkAllRead?: (
+    discussionId: number,
+    throughMessageId: number,
+  ) => Promise<boolean>;
+  onAcknowledgeHumanMention?: (discussionId: number, messageId: number) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -251,6 +310,7 @@ type DiscussionsPageProps = {
 
 export function DiscussionsPage({
   agents,
+  currentHumanMemberId,
   disabled,
   discussions,
   error,
@@ -275,6 +335,8 @@ export function DiscussionsPage({
   messagePageError = null,
   initialScrollTop,
   onMessageScrollState,
+  onMarkAllRead,
+  onAcknowledgeHumanMention,
   onOpenMember,
   onSelectDiscussion,
   onSend,
@@ -353,7 +415,10 @@ export function DiscussionsPage({
           <div className="discussion-list-items">
             {filteredDiscussions.map((discussion) => {
               const selected = selectedDiscussion?.id === discussion.id;
-              const unread = humanUnreadForDiscussion(discussion);
+              const unread = humanUnreadForDiscussion(
+                discussion,
+                currentHumanMemberId,
+              );
               return (
                 <ListButton
                   active={selected}
@@ -437,6 +502,7 @@ export function DiscussionsPage({
         {selectedDiscussion ? (
           <section className="discussion-pane">
             <DiscussionView
+              currentHumanMemberId={currentHumanMemberId}
               discussion={selectedDiscussion}
               key={selectedDiscussion.id}
               disabled={disabled}
@@ -455,6 +521,8 @@ export function DiscussionsPage({
               messagePageError={messagePageError}
               initialScrollTop={initialScrollTop}
               onMessageScrollState={onMessageScrollState}
+              onMarkAllRead={onMarkAllRead}
+              onAcknowledgeHumanMention={onAcknowledgeHumanMention}
               onOpenMember={onOpenMember}
               onSend={onSend}
             />
@@ -635,6 +703,7 @@ function DiscussionMemberAvatar({
 }
 
 type DiscussionViewProps = {
+  currentHumanMemberId: number;
   discussion: Discussion;
   disabled: boolean;
   members: Member[];
@@ -652,6 +721,11 @@ type DiscussionViewProps = {
   messagePageError: string | null;
   initialScrollTop?: number;
   onMessageScrollState?: (scrollTop: number, followsLatest: boolean) => void;
+  onMarkAllRead?: (
+    discussionId: number,
+    throughMessageId: number,
+  ) => Promise<boolean>;
+  onAcknowledgeHumanMention?: (discussionId: number, messageId: number) => void;
   onOpenMember: (
     memberId: number,
     discussionId: number,
@@ -661,6 +735,7 @@ type DiscussionViewProps = {
 };
 
 function DiscussionView({
+  currentHumanMemberId,
   discussion,
   disabled,
   members,
@@ -678,22 +753,18 @@ function DiscussionView({
   messagePageError,
   initialScrollTop,
   onMessageScrollState,
+  onMarkAllRead,
+  onAcknowledgeHumanMention,
   onOpenMember,
   onSend,
 }: DiscussionViewProps) {
-  const currentHumanMemberId = members.find(
-    (member) => member.type === "human",
-  )?.id;
-  if (currentHumanMemberId === undefined) {
-    throw new Error("Discussion composer requires the current Human Member");
-  }
   const messageLogRef = useRef<HTMLDivElement>(null);
   const prependAnchorRef = useRef<StableScrollAnchor | null>(null);
   const prependMessageCountRef = useRef(0);
   const loadEarlierButtonRef = useRef<HTMLButtonElement>(null);
   const unread = useMemo(
-    () => humanUnreadForDiscussion(discussion),
-    [discussion],
+    () => humanUnreadForDiscussion(discussion, currentHumanMemberId),
+    [currentHumanMemberId, discussion],
   );
   const initialFirstUnreadMessageIdRef = useRef(unread.firstUnreadMessageId);
   const initialScrollTopRef = useRef(initialScrollTop);
@@ -714,6 +785,15 @@ function DiscussionView({
       (discussion.messages ?? []).map((message) => message.id),
     ),
   );
+  const discussionTitleRef = useRef<HTMLHeadingElement>(null);
+  const activityBarRef = useRef<HTMLElement>(null);
+  const previousActivityBarHeightRef = useRef<number | null>(null);
+  const [deliverySelection, setDeliverySelection] =
+    useState<DeliverySelection | null>(null);
+  const [activityFeedback, setActivityFeedback] = useState("");
+  const [markAllStatus, setMarkAllStatus] = useState<
+    "idle" | "pending" | "error"
+  >("idle");
   const unreadMessageIds = useMemo(
     () => new Set(unread.unreadMessageIds),
     [unread.unreadMessageIds],
@@ -790,6 +870,37 @@ function DiscussionView({
     }
   }, [discussion.messages]);
 
+  const updateActivityBarHeight = useCallback((nextHeight: number) => {
+    const previousHeight = previousActivityBarHeightRef.current;
+    previousActivityBarHeightRef.current = nextHeight;
+    const log = messageLogRef.current;
+    if (!log) {
+      return;
+    }
+    preserveActivityBarScrollAnchor(
+      log,
+      previousHeight,
+      nextHeight,
+      shouldFollowMessagesRef.current,
+    );
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: unread counts mount/unmount the bar; ResizeObserver handles every in-place pending/error/retry or responsive height change.
+  useLayoutEffect(() => {
+    const bar = activityBarRef.current;
+    updateActivityBarHeight(bar?.offsetHeight ?? 0);
+    if (!bar || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    return observeActivityBarHeight(bar, updateActivityBarHeight);
+  }, [
+    newMessageIndicator.pendingMessageIds.length,
+    unloadedNewMessageCount,
+    unread.unreadCount,
+    unread.unreadHumanMentionCount,
+    updateActivityBarHeight,
+  ]);
+
   function handleMessageScroll() {
     const log = messageLogRef.current;
     if (!log) {
@@ -862,6 +973,28 @@ function DiscussionView({
     void focusMessage(target);
   }
 
+  function closeDeliveryPanel() {
+    const triggerKey = deliverySelection?.triggerKey;
+    setDeliverySelection(null);
+    if (triggerKey) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() =>
+          document
+            .querySelector<HTMLElement>(
+              `[data-delivery-trigger-key="${CSS.escape(triggerKey)}"]`,
+            )
+            ?.focus(),
+        ),
+      );
+    }
+  }
+
+  const selectedDeliveryMessage = deliverySelection
+    ? (discussion.messages ?? []).find(
+        (message) => message.id === deliverySelection.messageId,
+      )
+    : undefined;
+
   return (
     <>
       <header className="border-border border-b px-6 py-4">
@@ -869,6 +1002,7 @@ function DiscussionView({
           <h2
             className="discussion-title m-0 font-semibold"
             data-discussion-focus-id={discussion.id}
+            ref={discussionTitleRef}
             tabIndex={-1}
           >
             {discussionLabel(discussion)}
@@ -886,6 +1020,98 @@ function DiscussionView({
           ))}
         </div>
       </header>
+      {unread.unreadCount > 0 ||
+      unread.unreadHumanMentionCount > 0 ||
+      newMessageIndicator.pendingMessageIds.length > 0 ||
+      unloadedNewMessageCount > 0 ? (
+        <section
+          aria-label="New Discussion activity"
+          className="human-unread-controls"
+          ref={activityBarRef}
+        >
+          <div className="human-activity-counts">
+            {unread.unreadCount > 0 ? (
+              <span className="human-activity-count">
+                {unread.unreadCount} new messages
+              </span>
+            ) : null}
+            {unread.unreadHumanMentionCount > 0 ? (
+              <span className="human-activity-count">
+                {unread.unreadHumanMentionCount} new mentions
+              </span>
+            ) : null}
+            {markAllStatus === "error" ? (
+              <span className="human-activity-error" role="alert">
+                Could not mark messages as read. Try again.
+              </span>
+            ) : null}
+          </div>
+          <div className="human-activity-actions">
+            <FirstUnreadJumpButton
+              onActivate={() => focusMessage(unread.firstUnreadMessageId)}
+              unreadCount={unread.unreadCount}
+            />
+            <NewMessageJumpButton
+              newMessageCount={
+                newMessageIndicator.pendingMessageIds.length +
+                unloadedNewMessageCount
+              }
+              onActivate={() => void focusNewMessages()}
+            />
+            <NextHumanMentionButton
+              onActivate={focusNextMention}
+              unreadMentionCount={unread.unreadHumanMentionCount}
+            />
+            {unread.unreadCount > 0 ? (
+              <button
+                aria-describedby={`mark-all-note-${discussion.id}`}
+                className="human-unread-control"
+                disabled={
+                  disabled || markAllStatus === "pending" || !onMarkAllRead
+                }
+                onClick={async () => {
+                  const latest =
+                    discussion.messages?.[discussion.messages.length - 1]?.id ??
+                    0;
+                  setMarkAllStatus("pending");
+                  setActivityFeedback("Marking all current messages as read");
+                  const succeeded = await onMarkAllRead?.(
+                    discussion.id,
+                    latest,
+                  );
+                  if (succeeded) {
+                    setMarkAllStatus("idle");
+                    setActivityFeedback(
+                      "All current messages marked as read; mentions were not acknowledged",
+                    );
+                    requestAnimationFrame(() =>
+                      discussionTitleRef.current?.focus(),
+                    );
+                  } else {
+                    setMarkAllStatus("error");
+                    setActivityFeedback(
+                      "Could not mark messages as read. Try again",
+                    );
+                  }
+                }}
+                type="button"
+              >
+                {markAllStatus === "pending"
+                  ? "Marking as read…"
+                  : markAllStatus === "error"
+                    ? "Retry mark all as read"
+                    : "Mark all as read"}
+              </button>
+            ) : null}
+          </div>
+          <p className="sr-only" id={`mark-all-note-${discussion.id}`}>
+            Marking all as read does not acknowledge mentions.
+          </p>
+        </section>
+      ) : null}
+      <span aria-live="polite" className="sr-only">
+        {activityFeedback}
+      </span>
       <div
         className="message-log min-h-0 overflow-y-auto px-6 py-2"
         aria-label="Messages"
@@ -928,30 +1154,6 @@ function DiscussionView({
           >
             {messagePageError}
           </p>
-        ) : null}
-        {unread.unreadCount > 0 ||
-        newMessageIndicator.pendingMessageIds.length > 0 ||
-        unloadedNewMessageCount > 0 ? (
-          <nav
-            aria-label="Unread message navigation"
-            className="human-unread-controls"
-          >
-            <FirstUnreadJumpButton
-              onActivate={() => void focusMessage(unread.firstUnreadMessageId)}
-              unreadCount={unread.unreadCount}
-            />
-            <NewMessageJumpButton
-              newMessageCount={
-                newMessageIndicator.pendingMessageIds.length +
-                unloadedNewMessageCount
-              }
-              onActivate={() => void focusNewMessages()}
-            />
-            <NextHumanMentionButton
-              onActivate={focusNextMention}
-              unreadMentionCount={unread.unreadHumanMentionCount}
-            />
-          </nav>
         ) : null}
         {(discussion.messages?.length ?? 0) === 0 ? (
           <div className="grid h-full place-items-center">
@@ -1052,10 +1254,25 @@ function DiscussionView({
                       </header>
                       <DiscussionMarkdown
                         body={message.body}
+                        delivery={message.delivery}
                         members={members}
                         messageId={message.id}
                         onOpenMember={handleOpenMember}
+                        onOpenMentionDetails={(memberId, triggerKey) =>
+                          setDeliverySelection({
+                            messageId: message.id,
+                            memberId,
+                            triggerKey,
+                          })
+                        }
                         references={message.references}
+                      />
+                      <DeliveryCircle
+                        isOwnMessage={
+                          message.sender_id === currentHumanMemberId
+                        }
+                        message={message}
+                        onOpen={setDeliverySelection}
                       />
                       {message.mentions.length > 0 ? (
                         <ul className="mention-statuses" aria-label="Mentions">
@@ -1096,6 +1313,31 @@ function DiscussionView({
           </ol>
         )}
       </div>
+      {deliverySelection && selectedDeliveryMessage ? (
+        <>
+          <button
+            aria-label="Dismiss delivery details"
+            className="delivery-panel-backdrop"
+            onClick={closeDeliveryPanel}
+            type="button"
+          />
+          <DeliveryPanel
+            currentHumanMemberId={currentHumanMemberId}
+            disabled={disabled}
+            members={members}
+            message={selectedDeliveryMessage}
+            onAcknowledge={(messageId) =>
+              onAcknowledgeHumanMention?.(discussion.id, messageId)
+            }
+            onClose={closeDeliveryPanel}
+            onOpenMember={(memberId, triggerKey) =>
+              onOpenMember(memberId, discussion.id, triggerKey)
+            }
+            returnTriggerKey={deliverySelection.triggerKey}
+            selectedMemberId={deliverySelection.memberId}
+          />
+        </>
+      ) : null}
       <MessageComposer
         agents={members}
         body={messageBody}

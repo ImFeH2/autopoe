@@ -14,7 +14,9 @@ export {
   formatMessageCount,
   formatMessageTimestamp,
   humanUnreadForDiscussion,
+  observeActivityBarHeight,
   positionInitialDiscussionMessages,
+  preserveActivityBarScrollAnchor,
 } from "./discussions-page";
 export type { DraftMention, MentionQuery } from "./message-composer";
 export {

@@ -47,6 +47,9 @@ def test_acknowledging_any_pending_mention_resets_unproductive_turns() -> None:
     assert state.claim_next_reminder()[0] is not None
     state.complete_turn(2)
     assert state.claim_next_reminder()[0] is not None
+    state.record_message_reads(
+        2, [(1, 1)], source="agent_reminder_context", agent_run_id="turn-2"
+    )
     state.ack_messages(2, 1, [1])
     state.complete_turn(2)
 

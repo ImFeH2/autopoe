@@ -1497,3 +1497,51 @@ def test_pydantic_model_errors_are_mapped_to_safe_message(tmp_path: Path) -> Non
 
     with pytest.raises(AgentRunFailure, match="^Model request failed$"):
         runner.run(activation, context)
+
+
+def test_pydantic_runner_records_exact_reminder_context_before_model_call(
+    tmp_path: Path,
+) -> None:
+    reminder, base_context = activation_context(tmp_path)
+    observed: list[dict[str, Any]] = []
+
+    class SuccessfulResult:
+        def __init__(self) -> None:
+            self.usage: dict[str, Any] = {}
+
+        def new_messages(self) -> tuple[ModelMessage, ...]:
+            return ()
+
+    class RecordingAgent:
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def run(self, *_args: Any, **_kwargs: Any) -> SuccessfulResult:
+            observed.append(base_context.state._persistence_data())
+            return SuccessfulResult()
+
+    runner = object.__new__(PydanticAgentRunner)
+    runner._observability = None  # type: ignore[attr-defined]
+    runner._api_type = "openai-chat"  # type: ignore[attr-defined]
+    runner._model_name = "test-model"  # type: ignore[attr-defined]
+    runner._agent = RecordingAgent()  # type: ignore[attr-defined]
+    context = AgentRunContext(
+        agent_id=2,
+        state=base_context.state,
+        host_tools=base_context.host_tools,
+        run_id="run-exact-123",
+    )
+
+    runner.run(reminder, context)
+
+    receipts = observed[0]["discussions"][0]["messages"][0]["read_receipts"]
+    assert receipts == [
+        {
+            "member_id": 2,
+            "source": "agent_reminder_context",
+            "agent_run_id": "run-exact-123",
+        }
+    ]

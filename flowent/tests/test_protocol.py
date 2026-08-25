@@ -201,7 +201,10 @@ def test_returns_structured_errors_without_stopping_the_stream() -> None:
         "code": "method_not_found",
         "message": "Unknown method: missing",
     }
-    assert responses[2]["result"]["organization"] == {"id": 1}
+    assert responses[2]["result"]["organization"] == {
+        "id": 1,
+        "current_human_member_id": 1,
+    }
 
 
 def test_rejects_boolean_request_id_without_stopping_the_stream() -> None:
@@ -214,7 +217,10 @@ def test_rejects_boolean_request_id_without_stopping_the_stream() -> None:
         "code": "invalid_request",
         "message": "Request id must be a positive integer",
     }
-    assert responses[1]["result"]["organization"] == {"id": 1}
+    assert responses[1]["result"]["organization"] == {
+        "id": 1,
+        "current_human_member_id": 1,
+    }
 
 
 def test_model_settings_are_shared_without_returning_the_api_key() -> None:
@@ -694,3 +700,52 @@ def test_dispatches_member_rename_and_returns_stable_error_codes() -> None:
 
     assert responses[1]["result"]["members"][1]["name"] == "Grace"
     assert responses[2]["error"]["code"] == "invalid_name"
+
+
+def test_dispatches_atomic_human_mark_all_and_explicit_ack() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Human", 1, [2])
+    state.send_message(1, 2, "@You review")
+    dispatcher = Dispatcher(state)
+
+    marked = dispatcher.dispatch(
+        {
+            "id": 1,
+            "method": "human.discussion.mark_all_read",
+            "params": {"human_id": 1, "discussion_id": 1, "through_message_id": 1},
+        }
+    )
+    marked_summary = marked["result"]["discussions"][0]
+    assert "messages" not in marked_summary
+    assert marked_summary["human_activity"][0]["unread_count"] == 0
+    page_after_read = dispatcher.dispatch(
+        {
+            "id": 2,
+            "method": "human.discussion.messages.page",
+            "params": {"discussion_id": 1},
+        }
+    )
+    recipient = page_after_read["result"]["messages"][0]["delivery"]["recipients"][0]
+    assert recipient["read"] is True
+    assert recipient["ack"] == "pending"
+
+    acknowledged = dispatcher.dispatch(
+        {
+            "id": 3,
+            "method": "human.mention.ack",
+            "params": {"human_id": 1, "discussion_id": 1, "message_id": 1},
+        }
+    )
+    assert "messages" not in acknowledged["result"]["discussions"][0]
+    page_after_ack = dispatcher.dispatch(
+        {
+            "id": 4,
+            "method": "human.discussion.messages.page",
+            "params": {"discussion_id": 1},
+        }
+    )
+    assert (
+        page_after_ack["result"]["messages"][0]["delivery"]["recipients"][0]["ack"]
+        == "acked"
+    )

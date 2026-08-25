@@ -23,7 +23,9 @@ import {
   formatMessageCount,
   formatMessageTimestamp,
   humanUnreadForDiscussion,
+  observeActivityBarHeight,
   positionInitialDiscussionMessages,
+  preserveActivityBarScrollAnchor,
 } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import {
@@ -242,12 +244,12 @@ describe("App", () => {
       ],
     };
 
-    expect(humanUnreadForDiscussion(discussion)).toEqual({
-      unreadMessageIds: [2, 5],
-      unreadHumanMentionMessageIds: [2],
-      unreadCount: 2,
-      unreadHumanMentionCount: 1,
-      firstUnreadMessageId: 2,
+    expect(humanUnreadForDiscussion(discussion, 1)).toEqual({
+      unreadMessageIds: [5],
+      unreadHumanMentionMessageIds: [],
+      unreadCount: 1,
+      unreadHumanMentionCount: 0,
+      firstUnreadMessageId: 5,
     });
   });
 
@@ -294,7 +296,7 @@ describe("App", () => {
       ],
     };
 
-    expect(humanUnreadForDiscussion(discussion)).toEqual({
+    expect(humanUnreadForDiscussion(discussion, 1)).toEqual({
       unreadMessageIds: [3],
       unreadHumanMentionMessageIds: [3],
       unreadCount: 1,
@@ -371,6 +373,7 @@ describe("App", () => {
       <TooltipProvider>
         <DiscussionsPage
           agents={[agent]}
+          currentHumanMemberId={1}
           disabled={false}
           discussions={discussions}
           error={null}
@@ -472,6 +475,7 @@ describe("App", () => {
       <TooltipProvider>
         <DiscussionsPage
           agents={agents}
+          currentHumanMemberId={1}
           disabled={false}
           discussions={[discussion]}
           error={null}
@@ -609,6 +613,7 @@ describe("App", () => {
       <TooltipProvider>
         <DiscussionsPage
           agents={agents}
+          currentHumanMemberId={1}
           disabled={false}
           discussions={[discussion]}
           error={null}
@@ -671,6 +676,7 @@ describe("App", () => {
       <TooltipProvider>
         <DiscussionsPage
           agents={[agent]}
+          currentHumanMemberId={1}
           disabled={false}
           discussions={[discussion]}
           error={null}
@@ -766,6 +772,7 @@ describe("App", () => {
       <TooltipProvider>
         <DiscussionsPage
           agents={[renamedAgent, laterSameNameAgent]}
+          currentHumanMemberId={1}
           disabled={false}
           discussions={[discussion]}
           error={null}
@@ -865,6 +872,66 @@ describe("App", () => {
     expect(log.querySelector).not.toHaveBeenCalled();
   });
 
+  it("preserves the message screen position or follows the bottom for every bar height change", () => {
+    const log = { scrollHeight: 1_200, scrollTop: 420 };
+    const messageOffsetTop = 600;
+    let logViewportTop = 200;
+    const messageViewportTop = () =>
+      logViewportTop + messageOffsetTop - log.scrollTop;
+
+    preserveActivityBarScrollAnchor(log, null, 64, false);
+    expect(log.scrollTop).toBe(420);
+    preserveActivityBarScrollAnchor(log, 64, 64, false);
+    expect(log.scrollTop).toBe(420);
+
+    const beforeRemoval = messageViewportTop();
+    logViewportTop -= 64;
+    preserveActivityBarScrollAnchor(log, 64, 0, false);
+    expect(messageViewportTop()).toBe(beforeRemoval);
+
+    const beforeRetryWrap = messageViewportTop();
+    logViewportTop += 96;
+    preserveActivityBarScrollAnchor(log, 0, 96, false);
+    expect(messageViewportTop()).toBe(beforeRetryWrap);
+
+    log.scrollHeight = 1_480;
+    preserveActivityBarScrollAnchor(log, 96, 120, true);
+    expect(log.scrollTop).toBe(1_480);
+  });
+
+  it("tracks real activity-bar height changes across pending, error, retry, and narrow wrapping", () => {
+    let notifyResize: () => void = () => undefined;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    let barHeight = 64;
+    const bar = {
+      get offsetHeight() {
+        return barHeight;
+      },
+    } as HTMLElement;
+    const heights: number[] = [];
+    const cleanup = observeActivityBarHeight(
+      bar,
+      (height) => heights.push(height),
+      (callback) => {
+        notifyResize = () => callback([], {} as ResizeObserver);
+        return { disconnect, observe };
+      },
+    );
+
+    expect(observe).toHaveBeenCalledWith(bar);
+    barHeight = 80;
+    notifyResize();
+    barHeight = 112;
+    notifyResize();
+    barHeight = 72;
+    notifyResize();
+    expect(heights).toEqual([80, 112, 72]);
+
+    cleanup();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
   it("renders unread badges, divider, and jump controls from props", () => {
     const agent = {
       id: 2,
@@ -900,6 +967,7 @@ describe("App", () => {
       <TooltipProvider>
         <DiscussionsPage
           agents={[agent]}
+          currentHumanMemberId={1}
           disabled={false}
           discussions={[discussion]}
           error={null}
@@ -931,7 +999,7 @@ describe("App", () => {
       'aria-label="Open Unread work. 1 unread message, including 1 unread mention for you."',
     );
     expect(markup).toContain('aria-label="1 unread messages"');
-    expect(markup).toContain('aria-label="Unread message navigation"');
+    expect(markup).toContain('aria-label="New Discussion activity"');
     expect(markup).toContain("Jump to first unread message (1 unread)");
     expect(markup).toContain("Jump to next unread mention (1 unread)");
     expect(markup).toContain('<hr aria-label="New messages"');
@@ -976,6 +1044,7 @@ describe("App", () => {
       <TooltipProvider>
         <DiscussionsPage
           agents={[agent]}
+          currentHumanMemberId={1}
           disabled={false}
           discussions={[discussion]}
           error={null}
@@ -1021,7 +1090,9 @@ describe("App", () => {
     expect(markup).not.toContain(
       '<span class="sr-only">RenamedAgent, Agent status: Idle</span>',
     );
-    expect(markup).toContain('aria-label="Open Owner in Members"');
+    expect(markup).toContain(
+      'aria-label="Open delivery details for @Owner: Status unknown ?"',
+    );
   });
 
   it("keeps the sidebar focused on global destinations", () => {

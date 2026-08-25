@@ -14,13 +14,16 @@ function render(
   members: readonly { id: number; name: string }[] = references
     .filter((reference) => !reference.deleted)
     .map((reference) => ({ id: reference.member_id, name: reference.name })),
+  delivery?: Parameters<typeof DiscussionMarkdown>[0]["delivery"],
 ) {
   return renderToStaticMarkup(
     <DiscussionMarkdown
       body={body}
+      delivery={delivery}
       members={members}
       messageId={7}
       onOpenMember={() => undefined}
+      onOpenMentionDetails={() => undefined}
       references={references}
     />,
   );
@@ -194,13 +197,79 @@ describe("DiscussionMarkdown", () => {
 
     expect(markup).toContain("<strong>ask <button");
     expect(markup).toContain("mention-reference--notified");
-    expect(markup).toContain('aria-label="Open Ada in Members"');
+    expect(markup).toContain(
+      'aria-label="Open delivery details for @Ada: Status unknown ?"',
+    );
     expect(markup).toContain('data-member-id="2"');
     expect(markup).toContain(
       `data-member-navigation-key="${mentionReferenceTriggerKey(7, 0, 8, 12)}"`,
     );
     expect(markup).toContain(">@Ada</button> now</strong>");
   });
+
+  it.each([
+    [false, undefined, "reference", "Open Ada in Members"],
+    [
+      true,
+      { read: false, ack: "pending" as const, available: true },
+      "unread",
+      "Open delivery details for @Ada: Unread •",
+    ],
+    [
+      true,
+      { read: true, ack: "pending" as const, available: true },
+      "pending",
+      "Open delivery details for @Ada: Read, awaiting acknowledgement ◷",
+    ],
+    [
+      true,
+      { read: true, ack: "acked" as const, available: true },
+      "acked",
+      "Open delivery details for @Ada: Acknowledged ✓",
+    ],
+    [
+      true,
+      { read: null, ack: "unknown" as const, available: true },
+      "unknown",
+      "Open delivery details for @Ada: Status unknown ?",
+    ],
+  ])(
+    "renders the %s notification state with visible and accessible evidence",
+    (notified, state, visualState, accessibleName) => {
+      const reference = {
+        member_id: 2,
+        name: "Ada",
+        start: 0,
+        end: 4,
+        in_discussion: true,
+        notified,
+        deleted: false,
+      };
+      const delivery = state
+        ? {
+            recipients_known: state.read !== null,
+            recipients: [
+              {
+                member_id: 2,
+                member_type_at_send: "agent" as const,
+                member_name_at_send: "Ada",
+                mentioned: true,
+                ...state,
+              },
+            ],
+          }
+        : undefined;
+      const markup = render(
+        "@Ada",
+        [reference],
+        [{ id: 2, name: "Ada" }],
+        delivery,
+      );
+
+      expect(markup).toContain(`mention-reference--${visualState}`);
+      expect(markup).toContain(`aria-label="${accessibleName}"`);
+    },
+  );
 
   it("only links structured active identities, including members outside the Discussion", () => {
     const body = "@Ada ask @Lin, not @Unknown or @Gone";
@@ -242,7 +311,9 @@ describe("DiscussionMarkdown", () => {
     );
 
     expect(markup.match(/<button/gu)).toHaveLength(2);
-    expect(markup).toContain('aria-label="Open Ada in Members"');
+    expect(markup).toContain(
+      'aria-label="Open delivery details for @Ada: Status unknown ?"',
+    );
     expect(markup).toContain('aria-label="Open Lin in Members"');
     expect(markup).toContain("mention-reference--group-out");
     expect(markup).toContain('aria-label="@Gone, Deleted member"');
@@ -270,7 +341,9 @@ describe("DiscussionMarkdown", () => {
     );
 
     expect(markup).toContain(">@CurrentName</button>");
-    expect(markup).toContain('aria-label="Open CurrentName in Members"');
+    expect(markup).toContain(
+      'aria-label="Open delivery details for @CurrentName: Status unknown ?"',
+    );
     expect(markup).toContain("@CurrentName · Notified");
     expect(markup).not.toContain(">@OldName</button>");
   });
@@ -473,5 +546,46 @@ describe("DiscussionMarkdown", () => {
         },
       ),
     ).toBe(false);
+  });
+});
+
+describe("DiscussionMarkdown delivery state", () => {
+  it("renders notified token state as text, shape class, and symbol contract", () => {
+    const markup = renderToStaticMarkup(
+      <DiscussionMarkdown
+        body="@You review"
+        delivery={{
+          recipients_known: true,
+          recipients: [
+            {
+              member_id: 1,
+              member_type_at_send: "human",
+              member_name_at_send: "You",
+              available: true,
+              mentioned: true,
+              read: true,
+              ack: "pending",
+            },
+          ],
+        }}
+        members={[{ id: 1, name: "You" }]}
+        messageId={9}
+        references={[
+          {
+            member_id: 1,
+            name: "You",
+            start: 0,
+            end: 4,
+            in_discussion: true,
+            notified: true,
+            deleted: false,
+          },
+        ]}
+      />,
+    );
+    expect(markup).toContain("mention-reference--pending");
+    expect(markup).toContain("Read, awaiting acknowledgement ◷");
+    expect(markup).toContain('data-notified="true"');
+    expect(markup).toContain('data-member-id="1"');
   });
 });

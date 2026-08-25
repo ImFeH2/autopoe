@@ -80,7 +80,9 @@ class Dispatcher:
             "discussion.send": self._send_message,
             "human.discussion.messages.page": self._get_human_discussion_messages_page,
             "human.discussion.see_messages": self._see_human_messages,
+            "human.discussion.mark_all_read": self._mark_all_human_messages_read,
             "human.mention.read": self._read_human_mention,
+            "human.mention.ack": self._ack_human_mention,
             "settings.get_model": self._get_model_settings,
             "settings.update_model": self._update_model_settings,
             "settings.get_observability": self._get_observability_settings,
@@ -394,6 +396,13 @@ class Dispatcher:
         )
         return self._state.summary()
 
+    def _mark_all_human_messages_read(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.mark_all_human_messages_read(
+            human_id=require_integer(params, "human_id"),
+            discussion_id=require_integer(params, "discussion_id"),
+            through_message_id=require_integer(params, "through_message_id"),
+        )
+
     def _read_human_mention(self, params: dict[str, Any]) -> dict[str, Any]:
         self._state.read_human_mention(
             member_id=require_integer(params, "member_id"),
@@ -401,6 +410,13 @@ class Dispatcher:
             message_id=require_integer(params, "message_id"),
         )
         return self._state.summary()
+
+    def _ack_human_mention(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._state.ack_human_mention(
+            human_id=require_integer(params, "human_id"),
+            discussion_id=require_integer(params, "discussion_id"),
+            message_id=require_integer(params, "message_id"),
+        )
 
 
 def require_string(params: dict[str, Any], key: str) -> str:

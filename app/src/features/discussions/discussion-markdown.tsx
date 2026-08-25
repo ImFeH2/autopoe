@@ -2,8 +2,9 @@ import { memo, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import type { Member, MentionReference } from "@/lib/backend";
+import type { Member, MentionReference, MessageDelivery } from "@/lib/backend";
 import { codePointRangeToUtf16 } from "@/lib/mention-normalization";
+import { mentionVisualState } from "./message-delivery";
 
 function isUnsafeUrlCharacter(character: string): boolean {
   const codePoint = character.codePointAt(0) ?? 0;
@@ -105,6 +106,7 @@ export function createMentionReferencePlugin(
   references: MentionReference[],
   members: readonly Pick<Member, "id" | "name">[],
   messageId?: number,
+  delivery?: MessageDelivery,
 ) {
   const activeMembersById = new Map(
     members.map((member) => [member.id, member] as const),
@@ -173,6 +175,20 @@ export function createMentionReferencePlugin(
           const activeMember = activeMembersById.get(reference.member_id);
           const active = !reference.deleted && Boolean(activeMember);
           const displayName = activeMember?.name ?? reference.name;
+          const recipient = delivery?.recipients.find(
+            (candidate) => candidate.member_id === reference.member_id,
+          );
+          const visualState = mentionVisualState(recipient, reference.notified);
+          const visualStateLabel =
+            visualState === "acked"
+              ? "Acknowledged ✓"
+              : visualState === "pending"
+                ? "Read, awaiting acknowledgement ◷"
+                : visualState === "unread"
+                  ? "Unread •"
+                  : visualState === "unknown"
+                    ? "Status unknown ?"
+                    : "Reference only ·";
           const triggerKey =
             messageId === undefined
               ? undefined
@@ -193,12 +209,12 @@ export function createMentionReferencePlugin(
             data: {
               hName: active ? "button" : "mark",
               hProperties: {
-                className: `${referenceClassName(reference)}${
+                className: `${referenceClassName(reference)} mention-reference--${visualState}${
                   !active && !reference.deleted
                     ? " mention-reference--unavailable"
                     : ""
                 }`,
-                title: `@${displayName} · ${stateLabel}${
+                title: `@${displayName} · ${stateLabel} · ${visualStateLabel}${
                   reference.deleted
                     ? " · Deleted member"
                     : !active
@@ -207,8 +223,15 @@ export function createMentionReferencePlugin(
                 }`,
                 ...(active
                   ? {
-                      "aria-label": `Open ${displayName} in Members`,
+                      "aria-label": reference.notified
+                        ? `Open delivery details for @${displayName}: ${visualStateLabel}`
+                        : `Open ${displayName} in Members`,
                       "data-member-id": reference.member_id,
+                      "data-mention-state": visualState,
+                      ...(triggerKey
+                        ? { "data-delivery-trigger-key": triggerKey }
+                        : {}),
+                      "data-notified": reference.notified ? "true" : "false",
                       ...(triggerKey
                         ? { "data-member-navigation-key": triggerKey }
                         : {}),
@@ -238,7 +261,9 @@ export type DiscussionMarkdownProps = {
   body: string;
   members?: readonly Pick<Member, "id" | "name">[];
   messageId?: number;
+  delivery?: MessageDelivery;
   onOpenMember?: (memberId: number, triggerKey: string) => void;
+  onOpenMentionDetails?: (memberId: number, triggerKey: string) => void;
   references: MentionReference[];
 };
 
@@ -249,7 +274,9 @@ export function areDiscussionMarkdownPropsEqual(
   return (
     previous.body === next.body &&
     previous.onOpenMember === next.onOpenMember &&
+    previous.onOpenMentionDetails === next.onOpenMentionDetails &&
     previous.messageId === next.messageId &&
+    JSON.stringify(previous.delivery) === JSON.stringify(next.delivery) &&
     (previous.members?.length ?? 0) === (next.members?.length ?? 0) &&
     (previous.members ?? []).every((member, index) => {
       const candidate = next.members?.[index];
@@ -275,7 +302,9 @@ export const DiscussionMarkdown = memo(function DiscussionMarkdown({
   body,
   members = [],
   messageId,
+  delivery,
   onOpenMember,
+  onOpenMentionDetails,
   references,
 }: DiscussionMarkdownProps) {
   return (
@@ -295,7 +324,10 @@ export const DiscussionMarkdown = memo(function DiscussionMarkdown({
               <button
                 {...props}
                 onClick={() => {
-                  if (Number.isSafeInteger(memberId) && triggerKey) {
+                  if (!Number.isSafeInteger(memberId) || !triggerKey) return;
+                  if (node?.properties["data-notified"] === "true") {
+                    onOpenMentionDetails?.(memberId, triggerKey);
+                  } else {
                     onOpenMember?.(memberId, triggerKey);
                   }
                 }}
@@ -315,7 +347,13 @@ export const DiscussionMarkdown = memo(function DiscussionMarkdown({
         remarkPlugins={[
           remarkGfm,
           remarkBreaks,
-          createMentionReferencePlugin(body, references, members, messageId),
+          createMentionReferencePlugin(
+            body,
+            references,
+            members,
+            messageId,
+            delivery,
+          ),
         ]}
         skipHtml
         urlTransform={(value) => safeDiscussionLink(value) ?? ""}

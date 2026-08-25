@@ -74,6 +74,7 @@ def main(
             working_directory,
             persisted=store.load_organization(),
             on_persist=store.save_organization,
+            current_human_member_id=1,
         )
         memories.remove_orphans(
             {
