@@ -68,6 +68,43 @@ describe("Discussions", () => {
     await composer.$("button=Send").click();
 
     await expect($("p=Document the release checklist.")).toBeDisplayed();
+    const messagePresentation = await browser.execute(() => {
+      const body = [...document.querySelectorAll(".message-markdown p")].find(
+        (candidate) =>
+          candidate.textContent === "Document the release checklist.",
+      );
+      const row = body?.closest("[data-message-id]");
+      const meta = row?.querySelector(".message-meta");
+      const timestamp = meta?.querySelector(".message-timestamp time");
+      return {
+        bodyText: body?.textContent ?? null,
+        directPlainSpanCount:
+          meta instanceof HTMLElement
+            ? [...meta.children].filter(
+                (child) =>
+                  child.tagName === "SPAN" &&
+                  child.getAttribute("class") === null,
+              ).length
+            : null,
+        metaText: meta?.textContent ?? null,
+        senderText: meta?.querySelector("strong")?.textContent ?? null,
+        sentText:
+          [...(meta?.querySelectorAll(".sr-only") ?? [])]
+            .map((candidate) => candidate.textContent)
+            .find((candidate) => candidate?.startsWith("Sent ")) ?? null,
+        timestamp: timestamp?.getAttribute("datetime") ?? null,
+      };
+    });
+    expect(messagePresentation.bodyText).toBe(
+      "Document the release checklist.",
+    );
+    expect(messagePresentation.metaText).not.toContain(
+      "Document the release checklist.",
+    );
+    expect(messagePresentation.directPlainSpanCount).toBe(0);
+    expect(messagePresentation.senderText).toBe("You");
+    expect(messagePresentation.timestamp).toMatch(/Z$/);
+    expect(messagePresentation.sentText).toMatch(/^Sent /);
     await expect($$("summary=Technical details")).toBeElementsArrayOfSize(0);
     await expect($$("aria/Copy Discussion ID")).toBeElementsArrayOfSize(0);
     await expect($$("aria/Copy Message ID")).toBeElementsArrayOfSize(0);

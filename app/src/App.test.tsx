@@ -766,6 +766,30 @@ describe("App", () => {
           ],
           mentions: [{ member_id: 3, status: "pending" as const }],
         },
+        {
+          id: 3,
+          sender_id: 1,
+          body: "  \n",
+          created_at: "2026-08-22T12:35:56.789Z",
+          references: [],
+          mentions: [],
+        },
+        {
+          id: 4,
+          sender_id: 1,
+          body: "Gray summary sentinel unique",
+          created_at: "2026-08-22T12:36:56.789Z",
+          references: [],
+          mentions: [],
+        },
+        {
+          id: 5,
+          sender_id: 1,
+          body: `Long body sentinel ${"x".repeat(120)}`,
+          created_at: "2026-08-22T12:37:56.789Z",
+          references: [],
+          mentions: [],
+        },
       ],
     };
     const markup = renderToStaticMarkup(
@@ -806,9 +830,23 @@ describe("App", () => {
 
     const markdownIndex = markup.indexOf("<strong>Bold request</strong>");
     const mentionIndex = markup.indexOf('class="mention-statuses"');
+    const messageMeta =
+      markup.match(/<header class="message-meta">[\s\S]*?<\/header>/gu) ?? [];
     expect(markdownIndex).toBeGreaterThan(-1);
     expect(markup).toContain("<br/>\nnext line");
     expect(mentionIndex).toBeGreaterThan(markdownIndex);
+    expect(messageMeta).toHaveLength(5);
+    for (const meta of messageMeta) {
+      expect(meta).not.toMatch(/<\/strong><span>/u);
+      expect(meta).not.toContain("Bold request");
+      expect(meta).not.toContain("next line");
+      expect(meta).not.toContain("No message content");
+      expect(meta).not.toContain("Gray summary sentinel unique");
+      expect(meta).not.toContain("Long body sentinel");
+    }
+    expect(markup.split("Gray summary sentinel unique")).toHaveLength(2);
+    expect(markup.split("Long body sentinel")).toHaveLength(2);
+    expect(markup.match(/class="message-markdown"/gu)).toHaveLength(5);
     expect(markup).toContain("@NewName · READ");
     expect(markup).toContain('title="@NewName · read"');
     expect(markup).not.toContain("@OldName");
@@ -816,10 +854,10 @@ describe("App", () => {
     expect(markup).toContain('title="@OldGone · pending · Deleted Agent"');
     expect(markup).not.toContain('aria-label="Open OldGone in Members"');
     expect(markup.match(/class="message-timestamp font-mono"/g)).toHaveLength(
-      2,
+      5,
     );
-    expect(markup.match(/<time aria-hidden="true" dateTime=/g)).toHaveLength(2);
-    expect(markup.match(/<span class="sr-only">Sent /g)).toHaveLength(2);
+    expect(markup.match(/<time aria-hidden="true" dateTime=/g)).toHaveLength(5);
+    expect(markup.match(/<span class="sr-only">Sent /g)).toHaveLength(5);
     expect(markup).not.toContain(", sent ");
     expect(markup).toContain("message-row--human");
     expect(markup).toContain("message-row--agent");

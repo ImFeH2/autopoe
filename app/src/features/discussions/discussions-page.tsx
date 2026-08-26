@@ -36,10 +36,7 @@ import type {
   Member,
   MentionSyntax,
 } from "@/lib/backend";
-import {
-  discussionLabel,
-  shortMessageSummary,
-} from "@/lib/humanized-identifiers";
+import { discussionLabel } from "@/lib/humanized-identifiers";
 import { DiscussionMarkdown } from "./discussion-markdown";
 import {
   calculateHumanUnread,
@@ -1240,14 +1237,6 @@ function DiscussionView({
                             senderName
                           )}
                         </strong>
-                        <span>
-                          {shortMessageSummary(
-                            message.body,
-                            96,
-                            message.references,
-                            members,
-                          )}
-                        </span>
                         {message.created_at ? (
                           <MessageTimestamp createdAt={message.created_at} />
                         ) : null}
