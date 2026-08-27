@@ -162,7 +162,7 @@ describe("Agent details layout", () => {
     if (!dataDirectory) {
       throw new Error("HUDDOL_DATA_DIR is required for layout fixtures");
     }
-    const database = join(dataDirectory, "flowent.sqlite3");
+    const database = join(dataDirectory, "huddol.sqlite3");
     seedHistory(
       database,
       agentId(database, "LayoutShort"),

@@ -132,7 +132,7 @@ fn resolve_data_directory() -> Option<PathBuf> {
     let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"));
     #[cfg(not(windows))]
     let home = env::var_os("HOME");
-    home.map(PathBuf::from).map(|path| path.join(".flowent"))
+    home.map(PathBuf::from).map(|path| path.join(".huddol"))
 }
 
 fn unix_timestamp_ms() -> u64 {

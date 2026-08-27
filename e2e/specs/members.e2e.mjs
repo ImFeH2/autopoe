@@ -38,7 +38,7 @@ describe("Members", () => {
       "# Release fixture\nSafe preview content\n",
     );
     execFileSync("sqlite3", [
-      join(dataDirectory, "flowent.sqlite3"),
+      join(dataDirectory, "huddol.sqlite3"),
       `INSERT INTO agent_todos
         (agent_id,id,subject,description,status,created_at,updated_at,completed_at)
        VALUES

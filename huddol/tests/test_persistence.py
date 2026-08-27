@@ -31,7 +31,7 @@ def create_version_one_database(
     conflicting_model: bool = False,
 ) -> Path:
     data.mkdir()
-    path = data / "flowent.sqlite3"
+    path = data / "huddol.sqlite3"
     connection = sqlite3.connect(path)
     connection.executescript(
         """
@@ -192,12 +192,12 @@ def downgrade_model_settings_schema(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE current_model_settings")
 
 
-def test_uses_flowent_directory_under_home(monkeypatch, tmp_path: Path) -> None:
+def test_uses_huddol_directory_under_home(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv(DATA_DIRECTORY_ENV, raising=False)
 
-    assert data_directory() == home / ".flowent"
+    assert data_directory() == home / ".huddol"
 
 
 def test_restores_renamed_human_identity_and_historical_notification_facts(

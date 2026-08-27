@@ -28,7 +28,7 @@ def data_directory() -> Path:
     override = os.environ.get(DATA_DIRECTORY_ENV)
     if override:
         return Path(override).expanduser().resolve()
-    return Path.home() / ".flowent"
+    return Path.home() / ".huddol"
 
 
 def organization_metrics(organization: dict[str, Any]) -> dict[str, int]:
@@ -44,7 +44,7 @@ class SQLiteStore:
     def __init__(self, directory: Path) -> None:
         started = time.monotonic()
         self.directory = directory
-        self.path = directory / "flowent.sqlite3"
+        self.path = directory / "huddol.sqlite3"
         log_event("database.open.started", database_path=str(self.path))
         version = -1
         try:
