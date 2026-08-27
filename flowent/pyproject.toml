@@ -1,7 +1,7 @@
 [project]
 name = "flowent"
 version = "0.0.0"
-description = "Just say what you need. Flowent gets it done."
+description = "Run your own organization of agents."
 authors = [
     { name = "ImFeH2", email = "i@feh2.im" }
 ]

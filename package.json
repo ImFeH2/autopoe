@@ -2,7 +2,7 @@
   "name": "flowent-workspace",
   "private": true,
   "version": "0.0.0",
-  "description": "Just say what you need. Flowent gets it done.",
+  "description": "Run your own organization of agents.",
   "packageManager": "pnpm@11.16.0",
   "type": "module",
   "scripts": {

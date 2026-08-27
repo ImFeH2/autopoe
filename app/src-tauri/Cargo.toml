@@ -1,7 +1,7 @@
 [package]
 name = "flowent-app"
 version = "0.0.0"
-description = "Just say what you need. Flowent gets it done."
+description = "Run your own organization of agents."
 authors = ["ImFeH2 <i@feh2.im>"]
 edition = "2024"
 
