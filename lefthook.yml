@@ -8,7 +8,7 @@ pre-commit:
   jobs:
     - name: app
       run: pnpm check:app && pnpm test:app
-    - name: flowent
-      run: pnpm check:flowent && pnpm test:flowent
+    - name: huddol
+      run: pnpm check:huddol && pnpm test:huddol
     - name: rust
       run: pnpm check:rust && pnpm test:rust

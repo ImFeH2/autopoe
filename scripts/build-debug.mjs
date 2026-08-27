@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const appDir = resolve(rootDir, "app");
-const targetDir = resolve(appDir, "src-tauri", "target", "flowent-debug");
+const targetDir = resolve(appDir, "src-tauri", "target", "huddol-debug");
 const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const child = spawn(
   packageManager,

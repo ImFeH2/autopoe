@@ -1,7 +1,7 @@
 // Copyright 2019-2023 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
-// Modified by Flowent: OS-released ownership, framed acknowledged IPC, and fail-closed handling.
+// Modified by Huddol: OS-released ownership, framed acknowledged IPC, and fail-closed handling.
 
 use std::{
     fs::{File, OpenOptions, Permissions},
@@ -231,7 +231,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("flowent-single-instance-{nonce}.lock"));
+        let path = std::env::temp_dir().join(format!("huddol-single-instance-{nonce}.lock"));
 
         let owner = acquire_ownership(&path).unwrap().unwrap();
         assert!(acquire_ownership(&path).unwrap().is_none());
@@ -251,7 +251,7 @@ mod tests {
         configure_stream(&sender).unwrap();
         configure_stream(&receiver).unwrap();
         let payload = Payload {
-            args: vec!["Flowent 测试".to_string()],
+            args: vec!["Huddol 测试".to_string()],
             cwd: "/tmp/space path".to_string(),
         };
 

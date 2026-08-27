@@ -75,7 +75,7 @@ describe("Agent history blocks", () => {
     const markup = renderToStaticMarkup(
       <HistoryBlock
         entry={entry({
-          content: '{"query":"Flowent"}',
+          content: '{"query":"Huddol"}',
           tool_name: "web_search",
           type: "tool_call",
         })}

@@ -97,7 +97,7 @@ const mockModelServer = createServer((request, response) => {
           id: "chatcmpl-human-mention",
           object: "chat.completion.chunk",
           created: 1,
-          model: "flowent-e2e-model",
+          model: "huddol-e2e-model",
           choices: [{ index: 0, delta, finish_reason: null }],
         })}\n\n`,
       );
@@ -106,7 +106,7 @@ const mockModelServer = createServer((request, response) => {
           id: "chatcmpl-human-mention",
           object: "chat.completion.chunk",
           created: 1,
-          model: "flowent-e2e-model",
+          model: "huddol-e2e-model",
           choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
         })}\n\n`,
       );
@@ -120,7 +120,7 @@ const mockModelServer = createServer((request, response) => {
         id: "chatcmpl-human-mention",
         object: "chat.completion",
         created: 1,
-        model: "flowent-e2e-model",
+        model: "huddol-e2e-model",
         choices: [
           {
             index: 0,
@@ -145,8 +145,8 @@ async function configureMockModel() {
   const model = await form.$("#model-name");
   await baseUrl.waitForEnabled();
   await baseUrl.setValue(mockModelBaseUrl);
-  await apiKey.setValue("flowent-e2e-key");
-  await model.setValue("flowent-e2e-model");
+  await apiKey.setValue("huddol-e2e-key");
+  await model.setValue("huddol-e2e-model");
   const save = await form.$("button=Save model");
   await save.waitForEnabled();
   await save.click();

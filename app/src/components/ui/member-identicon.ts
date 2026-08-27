@@ -1,4 +1,4 @@
-export const MEMBER_IDENTICON_NAMESPACE = "flowent-member-identicon";
+export const MEMBER_IDENTICON_NAMESPACE = "huddol-member-identicon";
 export const MEMBER_IDENTICON_VERSION = "v1";
 export const MEMBER_IDENTICON_PATTERN_BITS = 15;
 

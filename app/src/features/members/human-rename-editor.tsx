@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useReducer, useState } from "react";
 import { Button, Input } from "@/components/ui";
 import type { HumanMember, MemberNamePolicy } from "@/lib/backend";
-import { FlowentRequestError } from "@/lib/flowent";
+import { HuddolRequestError } from "@/lib/huddol";
 import {
   memberNameConstraints,
   memberNameCount,
@@ -96,7 +96,7 @@ export function HumanRenameEditor({
       dispatch({
         type: "error",
         message:
-          reason instanceof FlowentRequestError
+          reason instanceof HuddolRequestError
             ? (memberNameErrorMessage(reason.code, namePolicy) ??
               reason.message)
             : reason instanceof Error

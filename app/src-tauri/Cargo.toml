@@ -1,12 +1,12 @@
 [package]
-name = "flowent-app"
+name = "huddol-app"
 version = "0.0.0"
 description = "Run your own organization of agents."
 authors = ["ImFeH2 <i@feh2.im>"]
 edition = "2024"
 
 [lib]
-name = "flowent_app_lib"
+name = "huddol_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

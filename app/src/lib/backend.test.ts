@@ -168,7 +168,7 @@ describe("Agent history", () => {
       timestamp: "2026-08-15T00:00:01+00:00",
       type: "text_delta",
       part_id: "0-0",
-      content: "Flow",
+      content: "Hud",
     });
     const second = parseAgentHistoryEvent({
       agent_id: 2,
@@ -177,7 +177,7 @@ describe("Agent history", () => {
       timestamp: "2026-08-15T00:00:02+00:00",
       type: "text_delta",
       part_id: "0-0",
-      content: "ent",
+      content: "dol",
     });
 
     let history = applyAgentHistoryEvent({ agent_id: 2, runs: [] }, started);
@@ -185,7 +185,7 @@ describe("Agent history", () => {
     history = applyAgentHistoryEvent(history, second);
     const duplicate = applyAgentHistoryEvent(history, second);
 
-    expect(history.runs[0].entries[1].content).toBe("Flowent");
+    expect(history.runs[0].entries[1].content).toBe("Huddol");
     expect(duplicate).toBe(history);
   });
 

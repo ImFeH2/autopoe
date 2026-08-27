@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const app = resolve(root, "app");
-const core = resolve(root, "flowent");
+const core = resolve(root, "huddol");
 const [action, ...args] = process.argv.slice(2);
 if (action !== "dev" && action !== "build") {
   throw new Error("Expected app action: dev or build");
@@ -58,7 +58,7 @@ function findUv() {
 
 const env = {
   ...process.env,
-  FLOWENT_WORKING_DIRECTORY: process.cwd(),
+  HUDDOL_WORKING_DIRECTORY: process.cwd(),
 };
 if (action === "dev") {
   const uv = findUv() ?? (process.platform === "win32" ? "uv.exe" : "uv");
@@ -80,7 +80,7 @@ if (action === "dev") {
   if (!existsSync(python)) {
     throw new Error(`Huddol development Python not found: ${python}`);
   }
-  env.FLOWENT_DEVELOPMENT_PYTHON = python;
+  env.HUDDOL_DEVELOPMENT_PYTHON = python;
 }
 
 const require = createRequire(resolve(app, "package.json"));

@@ -158,9 +158,9 @@ describe("Agent details layout", () => {
     await createAgent("LayoutShort");
     await createAgent("LayoutLong");
 
-    const dataDirectory = process.env.FLOWENT_DATA_DIR;
+    const dataDirectory = process.env.HUDDOL_DATA_DIR;
     if (!dataDirectory) {
-      throw new Error("FLOWENT_DATA_DIR is required for layout fixtures");
+      throw new Error("HUDDOL_DATA_DIR is required for layout fixtures");
     }
     const database = join(dataDirectory, "flowent.sqlite3");
     seedHistory(

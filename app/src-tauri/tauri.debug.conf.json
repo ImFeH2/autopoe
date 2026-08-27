@@ -6,7 +6,7 @@
     "frontendDist": "../dist-debug"
   },
   "bundle": {
-    "externalBin": ["binaries/flowent"]
+    "externalBin": ["binaries/huddol"]
   },
   "app": {
     "windows": [

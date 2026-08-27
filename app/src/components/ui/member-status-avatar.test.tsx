@@ -116,7 +116,7 @@ describe("MemberStatusAvatar", () => {
     const messagePattern = message.match(
       /data-identicon-pattern="([^"]+)"/u,
     )?.[1];
-    expect(memberPattern).toBe("100/100/011/100/101");
+    expect(memberPattern).toBe("010/101/110/111/100");
     expect(messagePattern).toBe(memberPattern);
     expect(member).toContain('data-identicon-version="v1"');
     expect(message).toContain('data-member-id="2"');

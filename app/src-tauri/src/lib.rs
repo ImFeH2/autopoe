@@ -1,8 +1,8 @@
 mod bridge_diagnostics;
-mod flowent;
+mod huddol;
 mod single_instance;
 
-use flowent::FlowentProcess;
+use huddol::HuddolProcess;
 use serde_json::Value;
 use single_instance::{ActivationState, activate_main_window};
 use tauri::{Manager, ipc::Channel};
@@ -19,17 +19,17 @@ fn validate_frontend_message(message: &Value) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn send(flowent: tauri::State<'_, FlowentProcess>, message: Value) -> Result<(), String> {
+fn send(huddol: tauri::State<'_, HuddolProcess>, message: Value) -> Result<(), String> {
     validate_frontend_message(&message)?;
-    flowent.send(message)
+    huddol.send(message)
 }
 
 #[tauri::command]
 fn subscribe(
-    flowent: tauri::State<'_, FlowentProcess>,
+    huddol: tauri::State<'_, HuddolProcess>,
     channel: Channel<Value>,
 ) -> Result<(), String> {
-    flowent.subscribe(channel)
+    huddol.subscribe(channel)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -46,10 +46,10 @@ pub fn run() {
 
     let app = builder
         .plugin(tauri_plugin_shell::init())
-        .manage(FlowentProcess::default())
+        .manage(HuddolProcess::default())
         .invoke_handler(tauri::generate_handler![send, subscribe])
         .setup(|app| {
-            app.state::<FlowentProcess>()
+            app.state::<HuddolProcess>()
                 .start(app.handle())
                 .map_err(|error| std::io::Error::other(format!("{error:#}")))?;
 
@@ -70,7 +70,7 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
-            app_handle.state::<FlowentProcess>().stop();
+            app_handle.state::<HuddolProcess>().stop();
         }
     });
 }
@@ -82,7 +82,7 @@ mod tests {
     use super::validate_frontend_message;
 
     #[test]
-    fn reserves_internal_flowent_methods() {
+    fn reserves_internal_huddol_methods() {
         assert!(validate_frontend_message(&json!({"method": "organization.get"})).is_ok());
         assert_eq!(
             validate_frontend_message(&json!({"method": "system.shutdown"})).unwrap_err(),

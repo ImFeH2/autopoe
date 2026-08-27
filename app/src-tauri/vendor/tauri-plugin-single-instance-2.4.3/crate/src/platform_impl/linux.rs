@@ -1,7 +1,7 @@
 // Copyright 2019-2023 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
-// Modified by Flowent: fail-closed D-Bus ownership and notification handling.
+// Modified by Huddol: fail-closed D-Bus ownership and notification handling.
 
 #[cfg(feature = "semver")]
 use crate::semver_compat::semver_compat_string;
@@ -110,13 +110,13 @@ pub fn destroy<R: Runtime, M: Manager<R>>(manager: &M) {
 mod tests {
     #[test]
     fn dbus_path_normalizes_identifier() {
-        let name = "im.feh2.flowent-debug.SingleInstance";
+        let name = "im.feh2.huddol-debug.SingleInstance";
         let mut path = name.replace('.', "/").replace('-', "_");
         if !path.starts_with('/') {
             path = format!("/{path}");
         }
 
-        assert_eq!(path, "/im/feh2/flowent_debug/SingleInstance");
+        assert_eq!(path, "/im/feh2/huddol_debug/SingleInstance");
     }
 
     #[test]

@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { $, browser, expect } from "@wdio/globals";
 import { before, describe, it } from "mocha";
 
-const output = process.env.FLOWENT_TRACE_OUTPUT;
+const output = process.env.HUDDOL_TRACE_OUTPUT;
 
 async function createLocalAgent(name) {
   await $("aria/Members").click();
@@ -190,7 +190,7 @@ describe("Discussion shell trace", () => {
     );
     expect(C2.message.scrollTop).toBe(C.message.scrollTop);
     expect(C2.focus).toEqual(C.focus);
-    console.log(`FLOWENT_LAYOUT_TRACE ${JSON.stringify(data)}`);
+    console.log(`HUDDOL_LAYOUT_TRACE ${JSON.stringify(data)}`);
     if (output) writeFileSync(output, `${JSON.stringify(data, null, 2)}\n`);
   }).timeout(300_000);
 });

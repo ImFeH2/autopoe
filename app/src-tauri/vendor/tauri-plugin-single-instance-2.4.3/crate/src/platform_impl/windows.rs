@@ -1,7 +1,7 @@
 // Copyright 2019-2023 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
-// Modified by Flowent: race-safe receiver readiness, fail-closed IPC, and foreground handoff.
+// Modified by Huddol: race-safe receiver readiness, fail-closed IPC, and foreground handoff.
 
 #[cfg(feature = "semver")]
 use crate::semver_compat::semver_compat_string;
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn payload_preserves_spaces_unicode_and_delimiters() {
         let payload = Payload {
-            args: vec!["C:\\Program Files\\Flowent | 测试.exe".to_string()],
+            args: vec!["C:\\Program Files\\Huddol | 测试.exe".to_string()],
             cwd: "C:\\工作 目录".to_string(),
         };
 

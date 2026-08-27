@@ -34,7 +34,7 @@ import {
   backend,
   type OrganizationSnapshot,
 } from "@/lib/backend";
-import { FlowentRequestError } from "@/lib/flowent";
+import { HuddolRequestError } from "@/lib/huddol";
 
 type DiscussionSource = {
   discussionId: number;
@@ -588,7 +588,7 @@ function App() {
     const nextSnapshot = await mutate(
       () => backend.createAgent(agentName),
       (error) =>
-        error instanceof FlowentRequestError
+        error instanceof HuddolRequestError
           ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
             error.message)
           : errorMessage(error),
@@ -605,7 +605,7 @@ function App() {
     await mutate(
       () => backend.renameMember(memberId, name),
       (error) =>
-        error instanceof FlowentRequestError
+        error instanceof HuddolRequestError
           ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
             error.message)
           : errorMessage(error),
@@ -659,7 +659,7 @@ function App() {
     await mutate(
       () => backend.renameMember(memberId, name),
       (error) =>
-        error instanceof FlowentRequestError
+        error instanceof HuddolRequestError
           ? (memberNameErrorMessage(error.code, snapshot.member_name_policy) ??
             error.message)
           : errorMessage(error),

@@ -6,13 +6,13 @@ const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const artifactDir = resolve(rootDir, "artifacts", "e2e");
 const screenshotDir = resolve(artifactDir, "screenshots");
 const binaryName =
-  process.platform === "win32" ? "flowent-app.exe" : "flowent-app";
+  process.platform === "win32" ? "huddol-app.exe" : "huddol-app";
 const appBinary = resolve(
   rootDir,
   "app",
   "src-tauri",
   "target",
-  "flowent-debug",
+  "huddol-debug",
   "debug",
   binaryName,
 );

@@ -11,7 +11,7 @@ use std::{
 
 use serde_json::{Map, Value, json};
 
-const LOG_FILE_NAME: &str = "flowent-bridge.jsonl";
+const LOG_FILE_NAME: &str = "huddol-bridge.jsonl";
 const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
 const BACKUP_COUNT: usize = 5;
 
@@ -125,7 +125,7 @@ pub fn os_error_code(detail: &str) -> Option<i64> {
 }
 
 fn resolve_data_directory() -> Option<PathBuf> {
-    if let Some(directory) = env::var_os("FLOWENT_DATA_DIR").filter(|value| !value.is_empty()) {
+    if let Some(directory) = env::var_os("HUDDOL_DATA_DIR").filter(|value| !value.is_empty()) {
         return Some(PathBuf::from(directory));
     }
     #[cfg(windows)]
@@ -216,7 +216,7 @@ mod tests {
 
     fn temporary_directory(name: &str) -> PathBuf {
         env::temp_dir().join(format!(
-            "flowent-bridge-{name}-{}-{}",
+            "huddol-bridge-{name}-{}-{}",
             process::id(),
             unix_timestamp_ms()
         ))

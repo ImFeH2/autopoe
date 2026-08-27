@@ -17,7 +17,7 @@ const specs = [
 rmSync(artifactDir, { force: true, recursive: true });
 let failed = false;
 for (const spec of specs) {
-  const dataDirectory = mkdtempSync(resolve(tmpdir(), "flowent-e2e-"));
+  const dataDirectory = mkdtempSync(resolve(tmpdir(), "huddol-e2e-"));
   try {
     const result = spawnSync(
       packageManager,
@@ -33,8 +33,8 @@ for (const spec of specs) {
         cwd: rootDir,
         env: {
           ...process.env,
-          FLOWENT_DATA_DIR: dataDirectory,
-          FLOWENT_WORKING_DIRECTORY: rootDir,
+          HUDDOL_DATA_DIR: dataDirectory,
+          HUDDOL_WORKING_DIRECTORY: rootDir,
         },
         stdio: "inherit",
       },

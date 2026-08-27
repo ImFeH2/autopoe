@@ -1,4 +1,4 @@
-# Modified by Flowent: rust-version contract and macOS ownership dependency.
+# Modified by Huddol: rust-version contract and macOS ownership dependency.
 
 [package]
 name = "tauri-plugin-single-instance"

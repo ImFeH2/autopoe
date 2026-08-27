@@ -1,4 +1,4 @@
-import { flowent } from "@/lib/flowent";
+import { huddol } from "@/lib/huddol";
 import {
   codePointRangeToUtf16,
   normalizeMentionText,
@@ -1985,7 +1985,7 @@ async function request(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<unknown> {
-  return flowent.request(method, params);
+  return huddol.request(method, params);
 }
 
 async function organizationRequest(
@@ -2097,7 +2097,7 @@ export const backend = {
       await request("agent.todo.read", { agent_id: agentId, todo_id: todoId }),
     ),
   onAgentHistoryEvent: (listener: (event: AgentHistoryEvent) => void) =>
-    flowent.onEvent((event, data) => {
+    huddol.onEvent((event, data) => {
       if (event === "agent.history.updated") {
         listener(parseAgentHistoryEvent(data));
       }

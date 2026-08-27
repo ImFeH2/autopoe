@@ -7,7 +7,7 @@ import {
 } from "react";
 import { Button, Dialog, Input } from "@/components/ui";
 import type { AgentMember, MemberNamePolicy } from "@/lib/backend";
-import { FlowentRequestError } from "@/lib/flowent";
+import { HuddolRequestError } from "@/lib/huddol";
 import {
   agentRenameConfirmationCopy,
   agentRenameDisabledReason,
@@ -130,8 +130,8 @@ export function AgentRenameEditor({
     } catch (reason) {
       setError(
         agentRenameInlineError(
-          reason instanceof FlowentRequestError ? reason.code : "unknown",
-          reason instanceof FlowentRequestError
+          reason instanceof HuddolRequestError ? reason.code : "unknown",
+          reason instanceof HuddolRequestError
             ? memberNameErrorMessage(reason.code, namePolicy)
             : null,
         ),

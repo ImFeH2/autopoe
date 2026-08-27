@@ -546,7 +546,7 @@ describe("App", () => {
     );
     expect(
       markup.match(
-        /data-identicon-pattern="100\/100\/011\/100\/101" data-identicon-version="v1" data-member-id="2"/g,
+        /data-identicon-pattern="010\/101\/110\/111\/100" data-identicon-version="v1" data-member-id="2"/g,
       ),
     ).toHaveLength(2);
     for (const [name, label] of [

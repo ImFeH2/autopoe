@@ -1041,21 +1041,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flowent-app"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-shell",
- "tauri-plugin-single-instance",
- "tauri-plugin-wdio",
- "tauri-plugin-wdio-webdriver",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1636,6 +1621,21 @@ name = "httpdate"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
+name = "huddol-app"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-shell",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-wdio",
+ "tauri-plugin-wdio-webdriver",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "hyper"

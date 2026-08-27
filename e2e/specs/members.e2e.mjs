@@ -21,10 +21,10 @@ describe("Members", () => {
     await expect($$("aria/Copy Member ID")).toBeElementsArrayOfSize(0);
     await expect($$("button=Copy ID")).toBeElementsArrayOfSize(0);
 
-    const dataDirectory = process.env.FLOWENT_DATA_DIR;
+    const dataDirectory = process.env.HUDDOL_DATA_DIR;
     if (!dataDirectory) {
       throw new Error(
-        "FLOWENT_DATA_DIR is required for isolated Member fixtures",
+        "HUDDOL_DATA_DIR is required for isolated Member fixtures",
       );
     }
     const memoryDirectory = join(dataDirectory, "agents", "2", "memory");

@@ -56,20 +56,20 @@ function contrastRatio(foreground: HslColor, background: HslColor) {
 
 describe("member identicon v1", () => {
   it("locks the namespace, version, input bytes, and SHA-256 implementation", () => {
-    expect(MEMBER_IDENTICON_NAMESPACE).toBe("flowent-member-identicon");
+    expect(MEMBER_IDENTICON_NAMESPACE).toBe("huddol-member-identicon");
     expect(MEMBER_IDENTICON_VERSION).toBe("v1");
     expect(MEMBER_IDENTICON_PATTERN_BITS).toBe(15);
-    expect(memberIdenticonInput(2)).toBe("flowent-member-identicon|v1|2");
+    expect(memberIdenticonInput(2)).toBe("huddol-member-identicon|v1|2");
     expect(digestHex(memberIdenticonInput(2))).toBe(
-      "91cb23f7f951c035cc3848731f7c973606362dbbecf46d7d268bcec1c273ffeb",
+      "5779f566ce100301c356a6f3aac9aef0b8f7a9764686468f06d86700f53dac99",
     );
   });
 
   it("maps the first 15 most-significant bits into mirrored 5 by 5 rows", () => {
     const identicon = createMemberIdenticon(2);
 
-    expect(identicon.pattern).toBe("100/100/011/100/101");
-    expect(identicon.hue).toBe(150);
+    expect(identicon.pattern).toBe("010/101/110/111/100");
+    expect(identicon.hue).toBe(191);
     expect(identicon.cells).toHaveLength(25);
     for (let row = 0; row < 5; row += 1) {
       const offset = row * 5;
