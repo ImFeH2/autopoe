@@ -393,7 +393,7 @@ def test_marks_running_history_interrupted_after_restart(tmp_path: Path) -> None
     run = restored.load_agent_runs(2)[0]
     assert run["status"] == "interrupted"
     assert run["completed_at"] is not None
-    assert run["error"] == "Flowent stopped before this run completed"
+    assert run["error"] == "Huddol stopped before this run completed"
 
 
 def test_history_run_pages_and_entry_chunks_are_incremental(tmp_path: Path) -> None:

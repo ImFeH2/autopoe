@@ -624,7 +624,7 @@ def test_hard_killed_flowent_cleans_active_run(tmp_path: Path) -> None:
             {
                 "discussion_id": 1,
                 "sender_id": 1,
-                "body": "@Ada Run until Flowent is killed",
+                "body": "@Ada Run until Huddol is killed",
             },
         )
         pid_path = work / "long.pid"

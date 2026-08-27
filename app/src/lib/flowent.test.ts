@@ -109,7 +109,7 @@ describe("FlowentClient", () => {
     const invokeCommand = vi.fn(
       async (command: string, _args?: Record<string, unknown>) => {
         if (command === "send") {
-          throw new Error("Flowent stopped");
+          throw new Error("Huddol stopped");
         }
         return undefined;
       },
@@ -121,7 +121,7 @@ describe("FlowentClient", () => {
     });
 
     await expect(client.request("organization.get")).rejects.toThrow(
-      "Flowent stopped",
+      "Huddol stopped",
     );
   });
 
@@ -135,11 +135,11 @@ describe("FlowentClient", () => {
     await expect(response).rejects.toThrow("expected result or error");
   });
 
-  it("times out when Flowent does not return JSON for a request", async () => {
+  it("times out when Huddol does not return JSON for a request", async () => {
     vi.useFakeTimers();
     const { client } = createHarness();
     const response = expect(client.request("organization.get")).rejects.toThrow(
-      "Flowent response timed out: organization.get",
+      "Huddol response timed out: organization.get",
     );
     await vi.advanceTimersByTimeAsync(101);
 

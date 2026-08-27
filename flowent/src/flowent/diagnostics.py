@@ -77,7 +77,7 @@ def configure_diagnostics(
         handler.setFormatter(JsonFormatter())
     except OSError as error:
         print(
-            f"[Flowent] Diagnostic logging unavailable: {type(error).__name__}",
+            f"[Huddol] Diagnostic logging unavailable: {type(error).__name__}",
             file=sys.stderr,
         )
         return None
@@ -124,7 +124,7 @@ def log_event(event: str, *, level: int = logging.INFO, **fields: Any) -> None:
 
 
 def log_exception(event: str, error: BaseException, **fields: Any) -> None:
-    print(f"[Flowent] {event}: {type(error).__name__}", file=sys.stderr)
+    print(f"[Huddol] {event}: {type(error).__name__}", file=sys.stderr)
     error_types = exception_chain_types(error)
     stack = [
         f"{frame.filename}:{frame.lineno}:{frame.name}"

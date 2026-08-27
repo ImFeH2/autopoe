@@ -232,7 +232,7 @@ class WslHostTools:
             f"Your command and file environment is WSL {self._probe.distribution}.\n"
             f"The default working directory is {self._probe.home}.\n"
             "Use Linux commands and Linux paths. Windows drives are usually available under "
-            "/mnt/<drive-letter>. Flowent service tools such as discussion, memory, todo, "
+            "/mnt/<drive-letter>. Huddol service tools such as discussion, memory, todo, "
             "history, and web_search are not filesystem commands.\n"
             "</host_environment>"
         )

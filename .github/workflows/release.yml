@@ -94,7 +94,7 @@ jobs:
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
-          releaseName: Flowent ${{ github.ref_name }}
+          releaseName: Huddol ${{ github.ref_name }}
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
 

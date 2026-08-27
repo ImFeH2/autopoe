@@ -45,7 +45,7 @@ describe("App", () => {
   it("renders a clear startup state before the backend responds", () => {
     const markup = renderToStaticMarkup(<App />);
 
-    expect(markup).toContain("Starting Flowent");
+    expect(markup).toContain("Starting Huddol");
   });
 
   it("marks model settings dirty only when the saved values change", () => {

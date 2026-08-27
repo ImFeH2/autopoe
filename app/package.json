@@ -2,7 +2,7 @@
   "name": "flowent-app",
   "private": true,
   "version": "0.0.0",
-  "description": "Flowent desktop app.",
+  "description": "Huddol desktop app.",
   "type": "module",
   "scripts": {
     "dev": "vite",

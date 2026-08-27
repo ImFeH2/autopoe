@@ -34,7 +34,7 @@ fn resolve_flowent_executable(
     if is_dev {
         return development_python
             .map(FlowentExecutable::Development)
-            .context("Flowent development Python is not configured");
+            .context("Huddol development Python is not configured");
     }
     Ok(FlowentExecutable::Sidecar)
 }
@@ -146,7 +146,7 @@ impl FlowentProcess {
                                 "error_type": "shell_error",
                             }),
                         );
-                        return Err(error).context("create Flowent sidecar command");
+                        return Err(error).context("create Huddol sidecar command");
                     }
                 };
                 (command, "sidecar")
@@ -169,7 +169,7 @@ impl FlowentProcess {
                         "executable_kind": executable_kind,
                     }),
                 );
-                return Err(error).context("start Flowent");
+                return Err(error).context("start Huddol");
             }
         };
         let child_pid = child.pid();
@@ -186,7 +186,7 @@ impl FlowentProcess {
                         "child_pid": child_pid,
                     }),
                 );
-                return Err(anyhow::anyhow!("Flowent child lock poisoned"));
+                return Err(anyhow::anyhow!("Huddol child lock poisoned"));
             }
         }
         self.diagnostics.record(
@@ -216,7 +216,7 @@ impl FlowentProcess {
                                     serde_json::error::Category::Data => "data",
                                     serde_json::error::Category::Eof => "eof",
                                 };
-                                eprintln!("[Flowent] Invalid JSON: {error}");
+                                eprintln!("[Huddol] Invalid JSON: {error}");
                                 disconnect(
                                     &shared_child,
                                     &subscriber,
@@ -246,7 +246,7 @@ impl FlowentProcess {
                                 "bridge.message.forward_failed",
                                 json!({"reason": reason}),
                             );
-                            eprintln!("[Flowent] Forward message failed: {reason}");
+                            eprintln!("[Huddol] Forward message failed: {reason}");
                         }
                     }
                     CommandEvent::Stderr(line) => {
@@ -256,10 +256,10 @@ impl FlowentProcess {
                             "bridge.sidecar.stderr",
                             json!({"stderr_line_bytes": line.len()}),
                         );
-                        eprint!("[Flowent] {}", String::from_utf8_lossy(&line));
+                        eprint!("[Huddol] {}", String::from_utf8_lossy(&line));
                     }
                     CommandEvent::Error(error) => {
-                        eprintln!("[Flowent] {error}");
+                        eprintln!("[Huddol] {error}");
                         disconnect(
                             &shared_child,
                             &subscriber,
@@ -333,7 +333,7 @@ impl FlowentProcess {
                         "method": method,
                     }),
                 );
-                return Err("Flowent child lock poisoned".to_string());
+                return Err("Huddol child lock poisoned".to_string());
             }
         };
         let Some(process) = child.as_mut() else {
@@ -348,7 +348,7 @@ impl FlowentProcess {
                     }),
                 );
             }
-            return Err("Flowent is not running".to_string());
+            return Err("Huddol is not running".to_string());
         };
         let result = process.write(&encoded);
         drop(child);
@@ -394,7 +394,7 @@ impl FlowentProcess {
                         "os_error_code": os_error_code(&detail),
                     }),
                 );
-                Err(format!("Write Flowent message: {error}"))
+                Err(format!("Write Huddol message: {error}"))
             }
         }
     }
@@ -406,7 +406,7 @@ impl FlowentProcess {
                 "bridge.subscription.failed",
                 json!({"reason": "child_lock_poisoned"}),
             );
-            "Flowent child lock poisoned".to_string()
+            "Huddol child lock poisoned".to_string()
         })?;
         if child.is_none() {
             self.diagnostics.record(
@@ -414,7 +414,7 @@ impl FlowentProcess {
                 "bridge.subscription.failed",
                 json!({"reason": "not_running"}),
             );
-            return Err("Flowent is not running".to_string());
+            return Err("Huddol is not running".to_string());
         }
         drop(child);
         *self.subscriber.lock().map_err(|_| {
@@ -423,7 +423,7 @@ impl FlowentProcess {
                 "bridge.subscription.failed",
                 json!({"reason": "subscriber_lock_poisoned"}),
             );
-            "Flowent subscriber lock poisoned".to_string()
+            "Huddol subscriber lock poisoned".to_string()
         })? = Some(channel);
         self.diagnostics
             .record("INFO", "bridge.subscription.started", json!({}));
@@ -478,7 +478,7 @@ impl FlowentProcess {
 
 fn encode_message(message: &Value) -> Result<Vec<u8>, String> {
     let mut encoded =
-        serde_json::to_vec(message).map_err(|error| format!("Encode Flowent message: {error}"))?;
+        serde_json::to_vec(message).map_err(|error| format!("Encode Huddol message: {error}"))?;
     encoded.push(b'\n');
     Ok(encoded)
 }

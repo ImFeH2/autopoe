@@ -87,7 +87,7 @@ if (process.platform === "win32") {
       );
     } catch (error) {
       process.stderr.write(
-        `[Flowent] WSL host bridge was not built; this build will use the native host backend. ${error}\n`,
+        `[Huddol] WSL host bridge was not built; this build will use the native host backend. ${error}\n`,
       );
     }
   }
@@ -144,7 +144,7 @@ try {
 }
 if (smoke.error || smoke.status !== 0) {
   throw (
-    smoke.error ?? new Error(`Flowent smoke exited with status ${smoke.status}`)
+    smoke.error ?? new Error(`Huddol smoke exited with status ${smoke.status}`)
   );
 }
 const responses = smoke.stdout
@@ -158,7 +158,7 @@ if (
   responses[1].id !== 2 ||
   responses[1].result?.stopped !== true
 ) {
-  throw new Error("Flowent smoke returned an invalid response");
+  throw new Error("Huddol smoke returned an invalid response");
 }
 
 process.stdout.write(`${destination}\n`);

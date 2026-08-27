@@ -248,7 +248,7 @@ class PydanticAgentRunner:
             deps_type=AgentRunContext,
             name="flowent_agent",
             instructions=(
-                "You are an Agent in Flowent. All Agents are equal and use the same tools. "
+                "You are an Agent in Huddol. All Agents are equal and use the same tools. "
                 "Each Turn starts with a Reminder containing your current Pending Mentions. "
                 "Decide how to handle them and use discussion action=read when you need surrounding context. "
                 "Communicate only with discussion action=send. Mention an Agent by writing its exact "

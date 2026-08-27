@@ -29,7 +29,7 @@ impl ActivationState {
             let scheduler = app.clone();
             if let Err(error) = scheduler.run_on_main_thread(move || {
                 let drain = app.state::<ActivationState>().take_ready_activation();
-                eprintln!("[Flowent] single_instance.activation_drain={drain}");
+                eprintln!("[Huddol] single_instance.activation_drain={drain}");
                 if drain {
                     activate_main_window(&app);
                 }
@@ -161,7 +161,7 @@ fn activation_failure_payload(stage: &str, category: &str, detail: &str) -> Valu
 
 fn record_activation_failure(stage: &str, category: &str, detail: &str) {
     eprintln!(
-        "[Flowent] {}",
+        "[Huddol] {}",
         activation_failure_payload(stage, category, detail)
     );
 }

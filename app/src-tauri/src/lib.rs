@@ -13,7 +13,7 @@ fn validate_frontend_message(message: &Value) -> Result<(), String> {
         .and_then(Value::as_str)
         .is_some_and(|method| method.starts_with("system."))
     {
-        return Err("Internal Flowent method".to_string());
+        return Err("Internal Huddol method".to_string());
     }
     Ok(())
 }
@@ -86,7 +86,7 @@ mod tests {
         assert!(validate_frontend_message(&json!({"method": "organization.get"})).is_ok());
         assert_eq!(
             validate_frontend_message(&json!({"method": "system.shutdown"})).unwrap_err(),
-            "Internal Flowent method"
+            "Internal Huddol method"
         );
     }
 

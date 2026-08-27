@@ -41,10 +41,13 @@ export function AppSidebar({
   return (
     <aside className="app-sidebar border-border border-r bg-surface-subtle">
       <div className="sidebar-brand">
-        <span className="sidebar-brand-mark" aria-hidden="true">
-          F
-        </span>
-        <h1 className="app-brand m-0 font-semibold">Flowent</h1>
+        <img
+          alt=""
+          aria-hidden="true"
+          className="sidebar-brand-mark"
+          src="/icon.png"
+        />
+        <h1 className="app-brand m-0 font-semibold">Huddol</h1>
       </div>
 
       <nav className="sidebar-navigation" aria-label="Workspace">

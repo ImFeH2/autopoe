@@ -6,7 +6,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const core = resolve(root, "flowent");
 const args = process.argv.slice(2);
 if (args.length === 0) {
-  throw new Error("Expected a Flowent command");
+  throw new Error("Expected a Huddol command");
 }
 
 const command = process.platform === "win32" ? "uv.exe" : "uv";

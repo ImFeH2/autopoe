@@ -2,7 +2,7 @@ import { $, expect } from "@wdio/globals";
 import { describe, it } from "mocha";
 import { waitForWorkspace } from "../support/app.mjs";
 
-describe("Flowent startup", () => {
+describe("Huddol startup", () => {
   it("opens the real desktop application in its initial state", async () => {
     await waitForWorkspace();
 

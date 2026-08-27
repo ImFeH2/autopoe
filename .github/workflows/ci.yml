@@ -75,5 +75,5 @@ jobs:
           cache-dependency-glob: flowent/uv.lock
       - name: Install Python dependencies
         run: uv sync --project flowent --all-groups --frozen
-      - name: Verify host tools and Flowent lifecycle
+      - name: Verify host tools and Huddol lifecycle
         run: uv run --project flowent pytest flowent/tests/test_host_tools.py flowent/tests/test_runtime.py flowent/tests/test_process.py -q -W error

@@ -79,7 +79,7 @@ export class FlowentClient {
     const response = new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Flowent response timed out: ${method}`));
+        reject(new Error(`Huddol response timed out: ${method}`));
       }, this.timeoutMs);
       this.pending.set(id, { reject, resolve, timeout });
     });
@@ -115,7 +115,7 @@ export class FlowentClient {
   private receive(message: unknown) {
     const envelope = responseRecord(message);
     if (!envelope) {
-      this.rejectAll(new Error("Invalid Flowent response: expected an object"));
+      this.rejectAll(new Error("Invalid Huddol response: expected an object"));
       return;
     }
     if (Object.getOwnPropertyDescriptor(envelope, "event") !== undefined) {
@@ -125,7 +125,7 @@ export class FlowentClient {
         !event ||
         Object.getOwnPropertyDescriptor(envelope, "data") === undefined
       ) {
-        this.rejectAll(new Error("Invalid Flowent event"));
+        this.rejectAll(new Error("Invalid Huddol event"));
         return;
       }
       for (const listener of this.eventListeners) {
@@ -136,7 +136,7 @@ export class FlowentClient {
 
     const id = envelope.id;
     if (!Number.isSafeInteger(id) || typeof id !== "number" || id < 1) {
-      this.rejectAll(new Error("Invalid Flowent response id"));
+      this.rejectAll(new Error("Invalid Huddol response id"));
       return;
     }
     const pending = this.pending.get(id);
@@ -151,7 +151,7 @@ export class FlowentClient {
     if (hasResult === hasError) {
       this.rejectPending(
         id,
-        new Error("Invalid Flowent response: expected result or error"),
+        new Error("Invalid Huddol response: expected result or error"),
       );
       return;
     }
@@ -167,7 +167,7 @@ export class FlowentClient {
       typeof responseCode !== "string" ||
       typeof responseMessage !== "string"
     ) {
-      this.rejectPending(id, new Error("Invalid Flowent response error"));
+      this.rejectPending(id, new Error("Invalid Huddol response error"));
       return;
     }
     this.rejectPending(

@@ -78,7 +78,7 @@ if (action === "dev") {
     process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
   );
   if (!existsSync(python)) {
-    throw new Error(`Flowent development Python not found: ${python}`);
+    throw new Error(`Huddol development Python not found: ${python}`);
   }
   env.FLOWENT_DEVELOPMENT_PYTHON = python;
 }

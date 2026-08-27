@@ -358,7 +358,7 @@ class HostTools:
             "<host_environment>\n"
             f"Your command and file environment is native {system}.\n"
             f"The default working directory is {self.root}.\n"
-            "Prefer absolute paths. Flowent service tools such as discussion, memory, todo, "
+            "Prefer absolute paths. Huddol service tools such as discussion, memory, todo, "
             "history, and web_search are not filesystem commands.\n"
             "</host_environment>"
         )

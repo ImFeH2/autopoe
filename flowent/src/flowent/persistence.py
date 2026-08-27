@@ -95,7 +95,7 @@ class SQLiteStore:
                     self._migrate_version_fifteen(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
-                        f"Unsupported Flowent database version: {version}"
+                        f"Unsupported Huddol database version: {version}"
                     )
                 interrupted_runs = self._interrupt_running_agent_runs(connection)
                 orphaned_todos = self._delete_orphaned_agent_todos(connection)
@@ -1086,7 +1086,7 @@ class SQLiteStore:
                 """
                 UPDATE agent_runs
                 SET status = 'interrupted', completed_at = ?,
-                    error = 'Flowent stopped before this run completed'
+                    error = 'Huddol stopped before this run completed'
                 WHERE status = 'running'
                 """,
                 (datetime.now(UTC).isoformat(),),

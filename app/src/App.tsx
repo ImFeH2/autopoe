@@ -497,7 +497,7 @@ function App() {
   }, [selectedDiscussionId, workspaceView]);
 
   if (requestState.status === "loading") {
-    return <StatusPage label="Starting Flowent" />;
+    return <StatusPage label="Starting Huddol" />;
   }
 
   if (requestState.status === "error") {

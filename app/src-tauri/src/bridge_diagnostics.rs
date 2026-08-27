@@ -79,7 +79,7 @@ impl BridgeDiagnostics {
             .and_then(|_guard| self.write_record(path, &encoded));
         if let Err(error) = result {
             eprintln!(
-                "[Flowent] Bridge diagnostic logging unavailable: {:?}",
+                "[Huddol] Bridge diagnostic logging unavailable: {:?}",
                 error.kind()
             );
         }

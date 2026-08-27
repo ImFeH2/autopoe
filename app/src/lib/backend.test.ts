@@ -236,7 +236,7 @@ describe("parseModelSettings", () => {
     ).toThrow("fields are invalid");
   });
 
-  it("rejects API keys returned by Flowent", () => {
+  it("rejects API keys returned by Huddol", () => {
     expect(() =>
       parseModelSettings({
         api_type: "openai-responses",
@@ -271,7 +271,7 @@ describe("parseObservabilitySettings", () => {
     });
   });
 
-  it("rejects secret keys returned by Flowent", () => {
+  it("rejects secret keys returned by Huddol", () => {
     expect(() =>
       parseObservabilitySettings({
         enabled: true,
