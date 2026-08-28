@@ -29,6 +29,7 @@ import {
 } from "@/features/discussions";
 import { MembersPage } from "@/features/members";
 import {
+  isExecutionSettingsDirty,
   isModelSettingsDirty,
   isObservabilitySettingsDirty,
   parseContextWindow,
@@ -46,6 +47,21 @@ describe("App", () => {
     const markup = renderToStaticMarkup(<App />);
 
     expect(markup).toContain("Starting Huddol");
+  });
+
+  it("marks execution settings dirty only when the selection changes", () => {
+    const current = {
+      platform: "windows",
+      selected_backend: "native" as const,
+      active_backend: "native" as const,
+      wsl_available: true,
+      wsl_distribution: "Debian",
+      restart_required: false,
+    };
+
+    expect(isExecutionSettingsDirty(current, "native")).toBe(false);
+    expect(isExecutionSettingsDirty(current, "wsl")).toBe(true);
+    expect(isExecutionSettingsDirty(null, "native")).toBe(false);
   });
 
   it("marks model settings dirty only when the saved values change", () => {

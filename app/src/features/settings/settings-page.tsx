@@ -3,6 +3,8 @@ import { PageHeader } from "@/components/layout";
 import { Button, Checkbox, Input, SegmentedControl } from "@/components/ui";
 import {
   backend,
+  type ExecutionBackend,
+  type ExecutionSettings,
   type ModelApiType,
   type ModelSettings,
   type ObservabilitySettings,
@@ -34,6 +36,13 @@ const apiTypeOptions: Array<{ label: string; value: ModelApiType }> = [
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function isExecutionSettingsDirty(
+  current: ExecutionSettings | null,
+  backend: ExecutionBackend,
+): boolean {
+  return current !== null && backend !== current.selected_backend;
 }
 
 export function parseContextWindow(value: string): number | null {
@@ -76,6 +85,14 @@ export function isObservabilitySettingsDirty(
 }
 
 export function SettingsPage() {
+  const [executionSettings, setExecutionSettings] =
+    useState<ExecutionSettings | null>(null);
+  const [executionBackend, setExecutionBackend] =
+    useState<ExecutionBackend>("native");
+  const [executionStatus, setExecutionStatus] = useState<
+    "loading" | "ready" | "saving" | "saved"
+  >("loading");
+  const [executionError, setExecutionError] = useState<string | null>(null);
   const [modelSettings, setModelSettings] = useState<ModelSettings | null>(
     null,
   );
@@ -103,6 +120,22 @@ export function SettingsPage() {
 
   useEffect(() => {
     let active = true;
+    void backend
+      .getExecutionSettings()
+      .then((current) => {
+        if (!active) {
+          return;
+        }
+        setExecutionSettings(current);
+        setExecutionBackend(current.selected_backend);
+        setExecutionStatus("ready");
+      })
+      .catch((reason) => {
+        if (active) {
+          setExecutionError(errorMessage(reason));
+          setExecutionStatus("ready");
+        }
+      });
     void backend
       .getModelSettings()
       .then((current) => {
@@ -146,6 +179,23 @@ export function SettingsPage() {
       active = false;
     };
   }, []);
+
+  async function handleSaveExecution(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setExecutionStatus("saving");
+    setExecutionError(null);
+    try {
+      const current = await backend.updateExecutionSettings({
+        backend: executionBackend,
+      });
+      setExecutionSettings(current);
+      setExecutionBackend(current.selected_backend);
+      setExecutionStatus("saved");
+    } catch (reason) {
+      setExecutionError(errorMessage(reason));
+      setExecutionStatus("ready");
+    }
+  }
 
   async function handleSaveModel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -199,6 +249,26 @@ export function SettingsPage() {
     }
   }
 
+  const executionBusy =
+    executionStatus === "loading" || executionStatus === "saving";
+  const executionDirty = isExecutionSettingsDirty(
+    executionSettings,
+    executionBackend,
+  );
+  const executionOptions: Array<{
+    label: string;
+    value: ExecutionBackend;
+  }> = [
+    { label: "Windows", value: "native" },
+    ...(executionSettings?.wsl_available
+      ? [
+          {
+            label: `WSL · ${executionSettings.wsl_distribution}`,
+            value: "wsl" as const,
+          },
+        ]
+      : []),
+  ];
   const modelBusy = modelStatus === "loading" || modelStatus === "saving";
   const tracingBusy = tracingStatus === "loading" || tracingStatus === "saving";
   const modelDirty = isModelSettingsDirty(modelSettings, {
@@ -223,6 +293,58 @@ export function SettingsPage() {
     <section className="page-pane page-pane--settings">
       <PageHeader title="Settings" />
       <div className="settings-scroll">
+        {executionSettings?.platform === "windows" ? (
+          <section className="settings-section">
+            <h3 className="settings-section-title">Execution</h3>
+            <form
+              className="settings-form"
+              aria-label="Execution settings"
+              onSubmit={handleSaveExecution}
+            >
+              <fieldset className="settings-segmented-field">
+                <legend id="execution-environment-label">Environment</legend>
+                <SegmentedControl
+                  aria-labelledby="execution-environment-label"
+                  disabled={executionBusy}
+                  onValueChange={setExecutionBackend}
+                  options={executionOptions}
+                  value={executionBackend}
+                />
+              </fieldset>
+              <div className="settings-actions">
+                <Button
+                  disabled={executionBusy || !executionDirty}
+                  type="submit"
+                  variant="primary"
+                >
+                  {executionStatus === "saving" ? "Saving" : "Save execution"}
+                </Button>
+                {!executionDirty &&
+                (executionSettings.restart_required ||
+                  executionStatus === "saved") ? (
+                  <span
+                    className={
+                      executionSettings.restart_required
+                        ? "settings-restart-required"
+                        : undefined
+                    }
+                    role="status"
+                  >
+                    {executionSettings.restart_required
+                      ? "Restart required"
+                      : "Saved"}
+                  </span>
+                ) : null}
+              </div>
+              {executionError ? (
+                <p className="caption-text m-0 text-danger" role="alert">
+                  {executionError}
+                </p>
+              ) : null}
+            </form>
+          </section>
+        ) : null}
+
         <section className="settings-section">
           <h3 className="settings-section-title">Model</h3>
           <form
@@ -230,7 +352,7 @@ export function SettingsPage() {
             aria-label="Model settings"
             onSubmit={handleSaveModel}
           >
-            <fieldset className="settings-api-type">
+            <fieldset className="settings-segmented-field">
               <legend id="model-api-type-label">API type</legend>
               <SegmentedControl
                 aria-labelledby="model-api-type-label"

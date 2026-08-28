@@ -19,33 +19,9 @@ jobs:
     permissions:
       contents: read
 
-  wsl-host:
-    name: Build WSL host bridge
-    needs: quality
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: huddol-host -> target
-      - name: Install musl toolchain
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - name: Build WSL host bridge
-        run: cargo build --manifest-path huddol-host/Cargo.toml --release --target x86_64-unknown-linux-musl
-      - uses: actions/upload-artifact@v7
-        with:
-          name: huddol-wsl-host
-          path: huddol-host/target/x86_64-unknown-linux-musl/release/huddol-host
-          if-no-files-found: error
-
   build:
     name: Build (${{ matrix.os }})
-    needs:
-      - quality
-      - wsl-host
+    needs: quality
     strategy:
       fail-fast: false
       matrix:
@@ -70,11 +46,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri -> target
-      - uses: actions/download-artifact@v8
-        if: runner.os == 'Windows'
-        with:
-          name: huddol-wsl-host
-          path: ${{ runner.temp }}/huddol-wsl-host
       - name: Install system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -90,7 +61,6 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HUDDOL_WSL_HOST_BINARY: ${{ runner.os == 'Windows' && format('{0}/huddol-wsl-host/huddol-host', runner.temp) || '' }}
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}

@@ -11,6 +11,7 @@ from huddol.model_runner import ModelRuntime
 from huddol.persistence import SQLiteStore
 from huddol.protocol import Dispatcher, JsonLineWriter, serve
 from huddol.todos import AgentTodos
+from huddol.wsl_host_tools import ExecutionSettings, WslProbe
 
 
 def run_requests(*requests: object) -> list[dict[str, object]]:
@@ -220,6 +221,65 @@ def test_rejects_boolean_request_id_without_stopping_the_stream() -> None:
     assert responses[1]["result"]["organization"] == {
         "id": 1,
         "current_human_member_id": 1,
+    }
+
+
+def test_execution_settings_are_shared_and_saved_for_restart() -> None:
+    saved: list[str] = []
+    settings = ExecutionSettings(
+        "native",
+        "native",
+        WslProbe("Debian", "/home/ada", "x86_64"),
+        saved.append,
+    )
+    input_stream = io.StringIO(
+        "".join(
+            json.dumps(request) + "\n"
+            for request in [
+                {"id": 1, "method": "settings.get_execution", "params": {}},
+                {
+                    "id": 2,
+                    "method": "settings.update_execution",
+                    "params": {"backend": "wsl"},
+                },
+                {"id": 3, "method": "settings.get_execution", "params": {}},
+            ]
+        )
+    )
+    output_stream = io.StringIO()
+
+    serve(
+        input_stream,
+        output_stream,
+        OrganizationState(),
+        execution_settings=settings,
+    )
+
+    responses = [json.loads(line) for line in output_stream.getvalue().splitlines()]
+    assert responses[0]["result"]["selected_backend"] == "native"
+    assert responses[0]["result"]["restart_required"] is False
+    assert responses[1]["result"] == responses[2]["result"]
+    assert responses[2]["result"]["selected_backend"] == "wsl"
+    assert responses[2]["result"]["active_backend"] == "native"
+    assert responses[2]["result"]["restart_required"] is True
+    assert saved == ["wsl"]
+
+
+def test_execution_settings_reject_unavailable_wsl() -> None:
+    response = Dispatcher(
+        OrganizationState(),
+        execution_settings=ExecutionSettings("native", "native", None),
+    ).dispatch(
+        {
+            "id": 1,
+            "method": "settings.update_execution",
+            "params": {"backend": "wsl"},
+        }
+    )
+
+    assert response["error"] == {
+        "code": "invalid_request",
+        "message": "WSL is unavailable",
     }
 
 

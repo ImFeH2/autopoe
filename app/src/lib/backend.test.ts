@@ -10,6 +10,7 @@ import {
   parseAgentTodoDetail,
   parseAgentTodoPage,
   parseDiscussionMessagePage,
+  parseExecutionSettings,
   parseModelSettings,
   parseObservabilitySettings,
   parseOrganizationSnapshot,
@@ -202,6 +203,41 @@ describe("Agent history", () => {
 
     expect(event.content).toContain('"argv"');
     expect(event.tool_name).toBe("run");
+  });
+});
+
+describe("parseExecutionSettings", () => {
+  it("accepts a Windows WSL selection that needs restart", () => {
+    expect(
+      parseExecutionSettings({
+        platform: "windows",
+        selected_backend: "wsl",
+        active_backend: "native",
+        wsl_available: true,
+        wsl_distribution: "Debian",
+        restart_required: true,
+      }),
+    ).toEqual({
+      platform: "windows",
+      selected_backend: "wsl",
+      active_backend: "native",
+      wsl_available: true,
+      wsl_distribution: "Debian",
+      restart_required: true,
+    });
+  });
+
+  it("rejects contradictory WSL availability and restart state", () => {
+    expect(() =>
+      parseExecutionSettings({
+        platform: "windows",
+        selected_backend: "wsl",
+        active_backend: "native",
+        wsl_available: false,
+        wsl_distribution: null,
+        restart_required: false,
+      }),
+    ).toThrow("state is inconsistent");
   });
 });
 

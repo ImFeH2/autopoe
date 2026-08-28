@@ -498,6 +498,8 @@ fn diagnostic_method(message: &Value) -> &'static str {
         Some("discussion.create") => "discussion.create",
         Some("discussion.delete") => "discussion.delete",
         Some("discussion.send") => "discussion.send",
+        Some("settings.get_execution") => "settings.get_execution",
+        Some("settings.update_execution") => "settings.update_execution",
         Some("settings.get_model") => "settings.get_model",
         Some("settings.update_model") => "settings.update_model",
         Some("settings.get_observability") => "settings.get_observability",

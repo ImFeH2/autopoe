@@ -1,23 +1,20 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import platform
+import posixpath
 import subprocess
-import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from threading import Event, Lock, Thread
-from typing import Any, BinaryIO, Protocol
-from uuid import uuid4
+from pathlib import Path, PurePosixPath
+from threading import Lock
+from typing import Any, Literal
 
 from huddol.diagnostics import log_event
 from huddol.host_tools import AgentHostTools, HostToolError, HostTools
 
-HOST_BACKEND_ENV = "HUDDOL_HOST_BACKEND"
-HOST_BINARY_ENV = "HUDDOL_WSL_HOST_BINARY"
 WORKING_DIRECTORY_ENV = "HUDDOL_WORKING_DIRECTORY"
+ExecutionBackend = Literal["native", "wsl"]
 
 
 @dataclass(frozen=True)
@@ -27,199 +24,78 @@ class WslProbe:
     architecture: str
 
 
-class HostBridge(Protocol):
-    def call(
+class ExecutionSettings:
+    def __init__(
         self,
-        method: str,
-        params: dict[str, Any] | None = None,
-        timeout: float = 30,
-    ) -> dict[str, Any]: ...
+        selected_backend: ExecutionBackend,
+        active_backend: ExecutionBackend,
+        wsl_probe: WslProbe | None,
+        on_configure: Callable[[ExecutionBackend], None] | None = None,
+    ) -> None:
+        self._selected_backend = selected_backend
+        self._active_backend = active_backend
+        self._wsl_probe = wsl_probe
+        self._on_configure = on_configure
+        self._lock = Lock()
 
-    def close(self) -> None: ...
+    def settings(self) -> dict[str, Any]:
+        with self._lock:
+            selected = self._selected_backend
+            active = self._active_backend
+            probe = self._wsl_probe
+        return {
+            "platform": platform.system().lower(),
+            "selected_backend": selected,
+            "active_backend": active,
+            "wsl_available": probe is not None,
+            "wsl_distribution": probe.distribution if probe is not None else None,
+            "restart_required": selected != active,
+        }
 
-
-@dataclass
-class _PendingResponse:
-    event: Event
-    response: dict[str, Any] | None = None
-
-
-class _WslBridge:
-    def __init__(self, process: subprocess.Popen[bytes]) -> None:
-        if process.stdin is None or process.stdout is None:
-            raise HostToolError("WSL host bridge pipes are unavailable")
-        self._process = process
-        self._stdin: BinaryIO = process.stdin
-        self._stdout: BinaryIO = process.stdout
-        self._write_lock = Lock()
-        self._pending_lock = Lock()
-        self._close_lock = Lock()
-        self._pending: dict[int, _PendingResponse] = {}
-        self._next_id = 1
-        self._closed = False
-        self._reader = Thread(target=self._read_responses, daemon=True)
-        self._reader.start()
-
-    def call(
-        self,
-        method: str,
-        params: dict[str, Any] | None = None,
-        timeout: float = 30,
-    ) -> dict[str, Any]:
-        with self._pending_lock:
-            if self._closed:
-                raise HostToolError("Host tools are stopped")
-            request_id = self._next_id
-            self._next_id += 1
-            pending = _PendingResponse(Event())
-            self._pending[request_id] = pending
-        try:
-            encoded = (
-                json.dumps(
-                    {"id": request_id, "method": method, "params": params or {}},
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-                + b"\n"
-            )
-            with self._write_lock:
-                self._stdin.write(encoded)
-                self._stdin.flush()
-        except (OSError, UnicodeEncodeError) as error:
-            self._fail_pending(request_id)
-            raise HostToolError("Cannot write to WSL host bridge") from error
-        if not pending.event.wait(timeout):
-            self._fail_pending(request_id)
-            raise HostToolError("WSL host bridge did not respond")
-        response = pending.response
-        if response is None:
-            raise HostToolError("WSL host bridge stopped")
-        if error := response.get("error"):
-            message = error.get("message") if isinstance(error, dict) else None
-            raise HostToolError(message or "WSL host operation failed")
-        result = response.get("result")
-        if not isinstance(result, dict):
-            raise HostToolError("WSL host bridge returned an invalid result")
-        return result
-
-    def close(self) -> None:
-        with self._close_lock:
-            with self._pending_lock:
-                running = not self._closed
-            if running:
-                try:
-                    self.call("shutdown", timeout=12)
-                except HostToolError:
-                    pass
-            with self._pending_lock:
-                self._closed = True
-            try:
-                if not self._stdin.closed:
-                    self._stdin.close()
-            except OSError:
-                pass
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait(timeout=5)
-            self._reader.join(timeout=5)
-            self._fail_all()
-
-    def _read_responses(self) -> None:
-        try:
-            while line := self._stdout.readline():
-                try:
-                    response = json.loads(line.decode("utf-8", errors="strict"))
-                    request_id = response.get("id")
-                except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
-                    break
-                if not isinstance(request_id, int):
-                    break
-                with self._pending_lock:
-                    pending = self._pending.pop(request_id, None)
-                if pending is not None:
-                    pending.response = response
-                    pending.event.set()
-        finally:
-            with self._pending_lock:
-                self._closed = True
-            self._fail_all()
-
-    def _fail_pending(self, request_id: int) -> None:
-        with self._pending_lock:
-            pending = self._pending.pop(request_id, None)
-        if pending is not None:
-            pending.event.set()
-
-    def _fail_all(self) -> None:
-        with self._pending_lock:
-            pending = list(self._pending.values())
-            self._pending.clear()
-        for response in pending:
-            response.event.set()
+    def configure(self, backend: str) -> dict[str, Any]:
+        if backend not in ("native", "wsl"):
+            raise ValueError("backend must be native or wsl")
+        with self._lock:
+            if backend == "wsl" and self._wsl_probe is None:
+                raise ValueError("WSL is unavailable")
+            if self._on_configure is not None:
+                self._on_configure(backend)
+            self._selected_backend = backend
+        log_event("execution.config.updated", backend=backend)
+        return self.settings()
 
 
 class WslHostTools:
     def __init__(
         self,
-        bridge: HostBridge,
+        launcher: AgentHostTools,
         probe: WslProbe,
-        *,
-        output_limit: int = 65_536,
+        working_directory: str,
     ) -> None:
-        if output_limit < 2:
-            raise ValueError("output_limit must be at least 2")
-        self._bridge = bridge
+        self._launcher = launcher
         self._probe = probe
-        self._output_limit = output_limit
-        self._closed = False
-        self._lock = Lock()
-        self.process_owner = uuid4().hex
+        self._working_directory = working_directory
+        self.process_owner = launcher.process_owner
 
     @classmethod
-    def start(cls, binary_path: Path | None = None) -> WslHostTools:
-        probe = probe_wsl()
-        source = (binary_path or resolve_host_binary()).resolve()
-        installed = install_host_binary(probe, source)
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    def start(
+        cls,
+        root: Path,
+        probe: WslProbe | None = None,
+        *,
+        output_limit: int = 65_536,
+    ) -> WslHostTools:
+        active_probe = probe or probe_wsl()
+        working_directory = translate_working_directory(active_probe, root)
+        return cls(
+            HostTools(root, output_limit=output_limit),
+            active_probe,
+            working_directory,
         )
-        try:
-            process = subprocess.Popen(
-                [
-                    "wsl.exe",
-                    "--distribution",
-                    probe.distribution,
-                    "--cd",
-                    probe.home,
-                    "--exec",
-                    installed,
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                creationflags=creation_flags,
-            )
-        except OSError as error:
-            raise HostToolError("Cannot start WSL host bridge") from error
-        bridge = _WslBridge(process)
-        try:
-            hello = bridge.call("hello", timeout=15)
-            if (
-                hello.get("backend") != "wsl"
-                or hello.get("home") != probe.home
-                or hello.get("distribution") != probe.distribution
-            ):
-                raise HostToolError("WSL host bridge identity does not match the probe")
-        except BaseException:
-            bridge.close()
-            raise
-        return cls(bridge, probe)
 
     @property
     def working_directory(self) -> str:
-        return self._probe.home
+        return self._working_directory
 
     @property
     def execution_backend(self) -> str:
@@ -230,7 +106,7 @@ class WslHostTools:
         return (
             "<host_environment>\n"
             f"Your command and file environment is WSL {self._probe.distribution}.\n"
-            f"The default working directory is {self._probe.home}.\n"
+            f"The default working directory is {self._working_directory}.\n"
             "Use Linux commands and Linux paths. Windows drives are usually available under "
             "/mnt/<drive-letter>. Huddol service tools such as discussion, memory, todo, "
             "history, and web_search are not filesystem commands.\n"
@@ -250,17 +126,24 @@ class WslHostTools:
             raise HostToolError("cwd must be a string")
         if cwd is not None:
             self._require_utf8(cwd, "cwd")
-        self._require_open()
-        return self._bridge.call(
-            "run",
-            {
-                "argv": argv,
-                "cwd": cwd,
-                "timeout_seconds": timeout_seconds,
-                "output_limit": self._output_limit,
-            },
-            timeout=timeout_seconds + 15,
+        working_directory = self._resolve_directory(cwd)
+        result = self._launcher.run(
+            [
+                "wsl.exe",
+                "--distribution",
+                self._probe.distribution,
+                "--cd",
+                working_directory,
+                "--exec",
+                *argv,
+            ],
+            timeout_seconds=timeout_seconds,
         )
+        return {
+            **result,
+            "argv": argv,
+            "cwd": self._display_path(working_directory),
+        }
 
     def edit(
         self,
@@ -286,29 +169,70 @@ class WslHostTools:
             raise HostToolError("old_text is required")
         if old_text == new_text:
             raise HostToolError("old_text and new_text must differ")
-        self._require_open()
-        return self._bridge.call(
-            "edit",
-            {
-                "path": path,
-                "old_text": old_text,
-                "new_text": new_text,
-                "replace_all": replace_all,
-            },
+        linux_path = self._resolve_path(path)
+        resolved_path = _run_wsl(
+            [
+                "wsl.exe",
+                "--distribution",
+                self._probe.distribution,
+                "--cd",
+                self._working_directory,
+                "--exec",
+                "readlink",
+                "-f",
+                "--",
+                linux_path,
+            ],
             timeout=30,
+        ).stdout.strip()
+        if not resolved_path:
+            raise HostToolError("Edit path must identify an existing file")
+        windows_path = _run_wsl(
+            [
+                "wsl.exe",
+                "--distribution",
+                self._probe.distribution,
+                "--exec",
+                "wslpath",
+                "-w",
+                "--",
+                resolved_path,
+            ],
+            timeout=30,
+        ).stdout.strip()
+        if not windows_path:
+            raise HostToolError("Cannot translate the WSL edit path")
+        result = self._launcher.edit(
+            windows_path,
+            old_text,
+            new_text,
+            replace_all,
         )
+        return {
+            **result,
+            "path": self._display_path(resolved_path),
+        }
 
     def close(self) -> None:
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-        self._bridge.close()
+        self._launcher.close()
 
-    def _require_open(self) -> None:
-        with self._lock:
-            if self._closed:
-                raise HostToolError("Host tools are stopped")
+    def _resolve_directory(self, cwd: str | None) -> str:
+        if cwd is None:
+            return self._working_directory
+        return self._resolve_path(cwd)
+
+    def _resolve_path(self, path: str) -> str:
+        if PurePosixPath(path).is_absolute():
+            return posixpath.normpath(path)
+        return posixpath.normpath(posixpath.join(self._working_directory, path))
+
+    def _display_path(self, path: str) -> str:
+        try:
+            relative = PurePosixPath(path).relative_to(self._working_directory)
+        except ValueError:
+            return path
+        rendered = str(relative)
+        return rendered if rendered != "." else "."
 
     @staticmethod
     def _validate_argv(argv: list[str]) -> None:
@@ -327,32 +251,53 @@ class WslHostTools:
             raise HostToolError(f"{field} must be valid UTF-8") from error
 
 
-def create_host_tools() -> AgentHostTools:
-    working_directory = os.environ.get(WORKING_DIRECTORY_ENV)
-    preference = os.environ.get(HOST_BACKEND_ENV, "auto").strip().lower()
-    if preference not in ("auto", "native", "wsl"):
-        raise RuntimeError("HUDDOL_HOST_BACKEND must be auto, native, or wsl")
-    if working_directory:
-        tools = HostTools(Path(working_directory).expanduser())
-        _log_selected(tools)
-        return tools
-    if os.name == "nt" and preference != "native":
+def create_host_tools(
+    selected_backend: str,
+    on_configure: Callable[[ExecutionBackend], None] | None = None,
+) -> tuple[AgentHostTools, ExecutionSettings]:
+    if selected_backend not in ("native", "wsl"):
+        raise RuntimeError("Persisted execution backend is invalid")
+    root = Path(os.environ.get(WORKING_DIRECTORY_ENV) or Path.cwd()).expanduser()
+    probe: WslProbe | None = None
+    if os.name == "nt":
         try:
-            tools = WslHostTools.start()
+            probe = probe_wsl()
         except (HostToolError, OSError, ValueError) as error:
-            if preference == "wsl":
-                raise RuntimeError("WSL host backend is unavailable") from error
+            log_event("execution.wsl.unavailable", reason=type(error).__name__)
+    effective_backend: ExecutionBackend = selected_backend
+    if selected_backend == "wsl" and probe is None:
+        effective_backend = "native"
+        if on_configure is not None:
+            on_configure(effective_backend)
+        log_event("execution.config.fallback", requested="wsl", active="native")
+    tools: AgentHostTools
+    if effective_backend == "wsl" and probe is not None:
+        try:
+            tools = WslHostTools.start(root, probe)
+        except (HostToolError, OSError, ValueError) as error:
+            probe = None
+            effective_backend = "native"
+            if on_configure is not None:
+                on_configure(effective_backend)
             log_event(
-                "host.backend.fallback", requested="wsl", reason=type(error).__name__
+                "execution.config.fallback",
+                requested="wsl",
+                active="native",
+                reason=type(error).__name__,
             )
-        else:
-            _log_selected(tools)
-            return tools
-    elif preference == "wsl":
-        raise RuntimeError("WSL host backend is only available on Windows")
-    tools = HostTools(Path.home())
+            tools = HostTools(root)
+    else:
+        tools = HostTools(root)
     _log_selected(tools)
-    return tools
+    return (
+        tools,
+        ExecutionSettings(
+            effective_backend,
+            tools.execution_backend,
+            probe,
+            on_configure,
+        ),
+    )
 
 
 def probe_wsl() -> WslProbe:
@@ -379,27 +324,8 @@ def probe_wsl() -> WslProbe:
     return WslProbe(distribution, home, architecture)
 
 
-def resolve_host_binary() -> Path:
-    if override := os.environ.get(HOST_BINARY_ENV):
-        candidate = Path(override)
-    elif bundle_root := getattr(sys, "_MEIPASS", None):
-        candidate = Path(bundle_root) / "huddol-host"
-    else:
-        candidate = (
-            Path(__file__).resolve().parents[3]
-            / "app"
-            / "src-tauri"
-            / "binaries"
-            / "huddol-host"
-        )
-    if not candidate.is_file():
-        raise HostToolError("WSL host bridge binary is unavailable")
-    return candidate
-
-
-def install_host_binary(probe: WslProbe, source: Path) -> str:
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    source_path = _run_wsl(
+def translate_working_directory(probe: WslProbe, root: Path) -> str:
+    path = _run_wsl(
         [
             "wsl.exe",
             "--distribution",
@@ -407,31 +333,14 @@ def install_host_binary(probe: WslProbe, source: Path) -> str:
             "--exec",
             "wslpath",
             "-u",
-            str(source),
+            "--",
+            str(root.resolve()),
         ],
         timeout=15,
     ).stdout.strip()
-    if not source_path.startswith("/"):
-        raise HostToolError("Cannot translate the WSL host bridge path")
-    directory = f"{probe.home}/.cache/huddol/host/{digest}"
-    destination = f"{directory}/huddol-host"
-    _run_wsl(
-        [
-            "wsl.exe",
-            "--distribution",
-            probe.distribution,
-            "--exec",
-            "sh",
-            "-c",
-            'set -eu; mkdir -p "$1"; tmp="$3.tmp.$$"; trap \'rm -f "$tmp"\' EXIT; cp "$2" "$tmp"; chmod 700 "$tmp"; mv -f "$tmp" "$3"; trap - EXIT',
-            "huddol-host-install",
-            directory,
-            source_path,
-            destination,
-        ],
-        timeout=30,
-    )
-    return destination
+    if not path.startswith("/"):
+        raise HostToolError("Cannot translate the WSL working directory")
+    return path
 
 
 def _run_wsl(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -449,7 +358,7 @@ def _run_wsl(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[st
             check=False,
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
-        raise HostToolError("Cannot execute WSL probe") from error
+        raise HostToolError("Cannot execute WSL command") from error
     if result.returncode != 0:
         raise HostToolError("WSL command failed")
     return result

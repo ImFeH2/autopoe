@@ -304,6 +304,21 @@ export type OrganizationSnapshot = {
   discussions: Discussion[];
 };
 
+export type ExecutionBackend = "native" | "wsl";
+
+export type ExecutionSettings = {
+  platform: string;
+  selected_backend: ExecutionBackend;
+  active_backend: ExecutionBackend;
+  wsl_available: boolean;
+  wsl_distribution: string | null;
+  restart_required: boolean;
+};
+
+export type ExecutionSettingsUpdate = {
+  backend: ExecutionBackend;
+};
+
 export type ModelApiType =
   | "openai-chat"
   | "openai-responses"
@@ -1645,6 +1660,41 @@ export function applyAgentHistoryEvent(
   return { ...history, runs };
 }
 
+export function parseExecutionSettings(value: unknown): ExecutionSettings {
+  const settings = record(value, "execution settings");
+  const selectedBackend = settings.selected_backend;
+  const activeBackend = settings.active_backend;
+  const wslDistribution = settings.wsl_distribution;
+  if (
+    typeof settings.platform !== "string" ||
+    !settings.platform ||
+    (selectedBackend !== "native" && selectedBackend !== "wsl") ||
+    (activeBackend !== "native" && activeBackend !== "wsl") ||
+    typeof settings.wsl_available !== "boolean" ||
+    (wslDistribution !== null &&
+      (typeof wslDistribution !== "string" || !wslDistribution)) ||
+    typeof settings.restart_required !== "boolean"
+  ) {
+    throw new Error("Invalid execution settings: fields are invalid");
+  }
+  if (
+    settings.wsl_available !== (wslDistribution !== null) ||
+    (!settings.wsl_available &&
+      (selectedBackend === "wsl" || activeBackend === "wsl")) ||
+    settings.restart_required !== (selectedBackend !== activeBackend)
+  ) {
+    throw new Error("Invalid execution settings: state is inconsistent");
+  }
+  return {
+    platform: settings.platform,
+    selected_backend: selectedBackend,
+    active_backend: activeBackend,
+    wsl_available: settings.wsl_available,
+    wsl_distribution: wslDistribution,
+    restart_required: settings.restart_required,
+  };
+}
+
 export function parseObservabilitySettings(
   value: unknown,
 ): ObservabilitySettings {
@@ -2173,6 +2223,12 @@ export const backend = {
       discussion_id: discussionId,
       message_id: messageId,
     }),
+  getExecutionSettings: async () =>
+    parseExecutionSettings(await request("settings.get_execution")),
+  updateExecutionSettings: async (settings: ExecutionSettingsUpdate) =>
+    parseExecutionSettings(
+      await request("settings.update_execution", settings),
+    ),
   getModelSettings: async () =>
     parseModelSettings(await request("settings.get_model")),
   updateModelSettings: async (settings: ModelSettingsUpdate) =>

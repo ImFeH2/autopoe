@@ -49,7 +49,11 @@ def main(
     watcher: ProcessWatcher | None = None
     stop_reason = "startup_failure"
     try:
-        host_tools = create_host_tools()
+        store = SQLiteStore(storage_directory)
+        host_tools, execution_settings = create_host_tools(
+            store.load_execution_backend(),
+            store.save_execution_backend,
+        )
         working_directory = host_tools.working_directory
         log_event(
             "process.started",
@@ -61,7 +65,6 @@ def main(
             data_directory=str(storage_directory),
             frozen=bool(getattr(sys, "frozen", False)),
         )
-        store = SQLiteStore(storage_directory)
         writer = JsonLineWriter(sys.stdout)
         history = AgentHistory(
             store,
@@ -111,6 +114,7 @@ def main(
             todos,
             memories,
             operations,
+            execution_settings,
         )
     except BaseException as error:
         stop_reason = "exception"

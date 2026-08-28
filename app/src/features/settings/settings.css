@@ -26,7 +26,7 @@
   gap: 18px;
 }
 
-.settings-api-type {
+.settings-segmented-field {
   display: grid;
   gap: 8px;
   margin: 0;
@@ -34,7 +34,7 @@
   padding: 0;
 }
 
-.settings-api-type legend,
+.settings-segmented-field legend,
 .settings-field > span {
   color: var(--color-text-tertiary);
   font-size: 12px;
@@ -70,6 +70,10 @@
 .settings-actions > span {
   color: var(--color-success);
   font-size: 12px;
+}
+
+.settings-actions > .settings-restart-required {
+  color: var(--color-text-tertiary);
 }
 
 @media (max-width: 1100px) {

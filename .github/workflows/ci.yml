@@ -37,9 +37,7 @@ jobs:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            app/src-tauri -> target
-            huddol-host -> target
+          workspaces: app/src-tauri -> target
       - name: Install system dependencies
         run: |
           sudo apt-get update

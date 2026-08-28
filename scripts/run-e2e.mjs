@@ -9,6 +9,7 @@ const artifactDir = resolve(rootDir, "artifacts", "e2e");
 const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const specs = [
   "e2e/specs/startup.e2e.mjs",
+  "e2e/specs/execution-settings.e2e.mjs",
   "e2e/specs/members.e2e.mjs",
   "e2e/specs/discussion.e2e.mjs",
   "e2e/specs/discussion-shell-trace.e2e.mjs",

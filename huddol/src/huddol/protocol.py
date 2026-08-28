@@ -15,6 +15,7 @@ from huddol.memory import AgentMemory
 from huddol.model_runner import ModelRuntime
 from huddol.operations import OrganizationOperations
 from huddol.todos import AgentTodos
+from huddol.wsl_host_tools import ExecutionSettings
 
 
 class ProtocolError(Exception):
@@ -46,6 +47,7 @@ class Dispatcher:
         todos: AgentTodos | None = None,
         memories: AgentMemory | None = None,
         operations: OrganizationOperations | None = None,
+        execution_settings: ExecutionSettings | None = None,
     ) -> None:
         self._state = state
         self._on_shutdown = on_shutdown
@@ -58,6 +60,9 @@ class Dispatcher:
             history,
             todos,
             memories,
+        )
+        self._execution_settings = execution_settings or ExecutionSettings(
+            "native", "native", None
         )
         self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
@@ -83,6 +88,8 @@ class Dispatcher:
             "human.discussion.mark_all_read": self._mark_all_human_messages_read,
             "human.mention.read": self._read_human_mention,
             "human.mention.ack": self._ack_human_mention,
+            "settings.get_execution": self._get_execution_settings,
+            "settings.update_execution": self._update_execution_settings,
             "settings.get_model": self._get_model_settings,
             "settings.update_model": self._update_model_settings,
             "settings.get_observability": self._get_observability_settings,
@@ -199,6 +206,14 @@ class Dispatcher:
         if self._on_shutdown is not None:
             self._on_shutdown()
         return {"stopped": True}
+
+    def _get_execution_settings(self, params: dict[str, Any]) -> dict[str, Any]:
+        if params:
+            raise ProtocolError("settings.get_execution does not accept params")
+        return self._execution_settings.settings()
+
+    def _update_execution_settings(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._execution_settings.configure(require_string(params, "backend"))
 
     def _get_model_settings(self, params: dict[str, Any]) -> dict[str, Any]:
         if params:
@@ -478,6 +493,7 @@ def serve(
     todos: AgentTodos | None = None,
     memories: AgentMemory | None = None,
     operations: OrganizationOperations | None = None,
+    execution_settings: ExecutionSettings | None = None,
 ) -> str:
     dispatcher = Dispatcher(
         state,
@@ -487,6 +503,7 @@ def serve(
         todos,
         memories,
         operations,
+        execution_settings,
     )
     protocol_writer = writer or JsonLineWriter(output_stream)
     input_line_count = 0

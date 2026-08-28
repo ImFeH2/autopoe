@@ -423,6 +423,39 @@ def test_discussion_keeps_its_human_after_all_agents_are_deleted_and_restart(
     ]
 
 
+def test_persists_execution_backend(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+
+    assert store.load_execution_backend() == "native"
+    store.save_execution_backend("wsl")
+
+    assert SQLiteStore(tmp_path / "data").load_execution_backend() == "wsl"
+    with pytest.raises(ValueError, match="backend must be native or wsl"):
+        store.save_execution_backend("invalid")
+
+
+def test_schema_sixteen_adds_execution_settings_without_changing_state(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TABLE execution_settings")
+        connection.execute("PRAGMA user_version = 16")
+
+    migrated = SQLiteStore(data)
+
+    assert migrated.load_execution_backend() == "native"
+    assert migrated.load_organization()["members"][1]["name"] == "Ada"
+    with sqlite3.connect(migrated.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'execution_settings'"
+        ).fetchone() == ("execution_settings",)
+
+
 def test_persists_model_config_without_exposing_its_secret(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
     runtime = ModelRuntime(on_configure=store.save_model_config)
@@ -952,7 +985,7 @@ def test_migrates_version_fourteen_memberships_with_stable_human_cutoffs(
             WHERE discussion_id = 1 ORDER BY human_id
             """
         ).fetchall()
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert memberships == [(1, 1, 0), (2, 1, 0), (3, 1, 2)]
     assert read_states == [(1, 1), (3, None)]
 
@@ -1035,7 +1068,7 @@ def test_version_fourteen_membership_migration_rolls_back_and_reopens(
     monkeypatch.undo()
     reopened = SQLiteStore(data)
     with sqlite3.connect(reopened.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         columns = {
             row[1]
             for row in connection.execute("PRAGMA table_info(discussion_members)")
@@ -1470,7 +1503,7 @@ def test_schema_fifteen_to_sixteen_migrates_only_trusted_delivery_facts(
     assert guest_state["joined_after_message_id"] == 2
     assert frontiers[3] == 3  # migration-time latest baseline, not the cutoff
     with sqlite3.connect(migrated.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert (
             connection.execute("SELECT COUNT(*) FROM message_recipients").fetchone()[0]
             == 0
@@ -1629,4 +1662,4 @@ def test_schema_fifteen_delivery_migration_rolls_back_and_reopens(
     monkeypatch.undo()
     reopened = SQLiteStore(data)
     with sqlite3.connect(reopened.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION

@@ -20,7 +20,8 @@ MESSAGE_IDENTITY_SCHEMA_VERSION = 12
 HUMAN_READ_STATE_SCHEMA_VERSION = 13
 MESSAGE_CREATED_AT_SCHEMA_VERSION = 14
 GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION = 15
-SCHEMA_VERSION = 16
+DELIVERY_SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIR"
 
 
@@ -73,26 +74,34 @@ class SQLiteStore:
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
+                    self._migrate_version_sixteen(connection)
                 elif version == LEGACY_SCHEMA_VERSION:
                     self._migrate_version_eleven(connection)
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
+                    self._migrate_version_sixteen(connection)
                 elif version == MESSAGE_IDENTITY_SCHEMA_VERSION:
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
+                    self._migrate_version_sixteen(connection)
                 elif version == HUMAN_READ_STATE_SCHEMA_VERSION:
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
+                    self._migrate_version_sixteen(connection)
                 elif version == MESSAGE_CREATED_AT_SCHEMA_VERSION:
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
+                    self._migrate_version_sixteen(connection)
                 elif version == GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION:
                     self._migrate_version_fifteen(connection)
+                    self._migrate_version_sixteen(connection)
+                elif version == DELIVERY_SCHEMA_VERSION:
+                    self._migrate_version_sixteen(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Huddol database version: {version}"
@@ -232,6 +241,14 @@ class SQLiteStore:
                 environment TEXT NOT NULL,
                 capture_content INTEGER NOT NULL
                     CHECK (capture_content IN (0, 1)),
+                FOREIGN KEY (id) REFERENCES application_state (id)
+                    ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE execution_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                backend TEXT NOT NULL CHECK (backend IN ('native', 'wsl')),
                 FOREIGN KEY (id) REFERENCES application_state (id)
                     ON DELETE CASCADE
             )
@@ -992,6 +1009,21 @@ class SQLiteStore:
                     )
                 """
             )
+            connection.execute(f"PRAGMA user_version = {DELIVERY_SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_sixteen(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS execution_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    backend TEXT NOT NULL CHECK (backend IN ('native', 'wsl')),
+                    FOREIGN KEY (id) REFERENCES application_state (id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -1655,6 +1687,29 @@ class SQLiteStore:
                         """,
                         (state["member_id"], discussion_id, message_id),
                     )
+
+    def load_execution_backend(self) -> str:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT backend FROM execution_settings WHERE id = 1"
+            ).fetchone()
+        backend = row["backend"] if row is not None else "native"
+        log_event("database.execution_config.loaded", backend=backend)
+        return backend
+
+    def save_execution_backend(self, backend: str) -> None:
+        if backend not in ("native", "wsl"):
+            raise ValueError("backend must be native or wsl")
+        with self._connect() as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO execution_settings (id, backend) VALUES (1, ?)
+                ON CONFLICT (id) DO UPDATE SET backend = excluded.backend
+                """,
+                (backend,),
+            )
+        self.path.chmod(0o600)
+        log_event("database.execution_config.saved", backend=backend)
 
     def load_model_config(self) -> dict[str, Any] | None:
         with self._connect() as connection:
