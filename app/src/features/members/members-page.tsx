@@ -246,7 +246,7 @@ export function MembersPage({
                           member.status === "pausing"
                         }
                         size="icon"
-                        variant="quiet"
+                        variant="danger"
                       >
                         <Trash2 aria-hidden="true" size={14} />
                       </Button>

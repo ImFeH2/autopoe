@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import stat
+from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -12,6 +15,11 @@ from huddol.model_runner import ModelRuntime
 from huddol.persistence import (
     DATA_DIRECTORY_ENV,
     SCHEMA_VERSION,
+    AuditUnavailableError,
+    AuthorizationDataError,
+    ManagementRevisionConflict,
+    OrganizationAdminAssignment,
+    OrganizationAuditEvent,
     SQLiteStore,
     data_directory,
 )
@@ -190,6 +198,51 @@ def downgrade_model_settings_schema(connection: sqlite3.Connection) -> None:
         """
     )
     connection.execute("DROP TABLE current_model_settings")
+
+
+def downgrade_authorization_schema_to_seventeen(path: Path) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TRIGGER organization_audit_events_no_update")
+        connection.execute("DROP TRIGGER organization_audit_events_no_delete")
+        connection.execute("DROP TABLE organization_admin_assignments")
+        connection.execute("DROP TABLE organization_audit_events")
+        connection.execute(
+            "ALTER TABLE application_state DROP COLUMN management_revision"
+        )
+        connection.execute("PRAGMA user_version = 17")
+
+
+def organization_audit_event(
+    *,
+    result: str = "success",
+    action: str = "organization.role.grant",
+    target_type: str = "member",
+    target_id: int = 2,
+    reason_code: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> OrganizationAuditEvent:
+    return OrganizationAuditEvent(
+        occurred_at="2026-08-26T12:00:00+00:00",
+        actor_id=1,
+        actor_type="human",
+        actor_name="You",
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        result=result,
+        reason_code=reason_code,
+        metadata=metadata,
+    )
+
+
+def authorization_database_snapshot(
+    store: SQLiteStore,
+) -> tuple[object, object, object]:
+    return (
+        store.load_organization(),
+        store.load_authorization_state(),
+        store.load_audit_events(),
+    )
 
 
 def test_uses_huddol_directory_under_home(monkeypatch, tmp_path: Path) -> None:
@@ -441,6 +494,7 @@ def test_schema_sixteen_adds_execution_settings_without_changing_state(
     store = SQLiteStore(data)
     state = persisted_state(store, tmp_path)
     state.create_agent("Ada")
+    downgrade_authorization_schema_to_seventeen(store.path)
     with sqlite3.connect(store.path) as connection:
         connection.execute("DROP TABLE execution_settings")
         connection.execute("PRAGMA user_version = 16")
@@ -449,6 +503,7 @@ def test_schema_sixteen_adds_execution_settings_without_changing_state(
 
     assert migrated.load_execution_backend() == "native"
     assert migrated.load_organization()["members"][1]["name"] == "Ada"
+    assert migrated.load_authorization_state().management_revision == 0
     with sqlite3.connect(migrated.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute(
@@ -1663,3 +1718,905 @@ def test_schema_fifteen_delivery_migration_rolls_back_and_reopens(
     reopened = SQLiteStore(data)
     with sqlite3.connect(reopened.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+def authorization_schema_objects(path: Path) -> dict[str, str]:
+    names = (
+        "organization_admin_assignments",
+        "organization_audit_events",
+        "organization_audit_events_no_update",
+        "organization_audit_events_no_delete",
+    )
+    with sqlite3.connect(path) as connection:
+        return {
+            name: sql
+            for name, sql in connection.execute(
+                f"SELECT name, sql FROM sqlite_master WHERE name IN ({','.join('?' for _ in names)})",
+                names,
+            )
+        }
+
+
+def test_schema_seventeen_to_eighteen_matches_fresh_authorization_schema(
+    tmp_path: Path,
+) -> None:
+    fresh = SQLiteStore(tmp_path / "fresh")
+    expected_objects = authorization_schema_objects(fresh.path)
+
+    data = tmp_path / "migrated"
+    legacy = SQLiteStore(data)
+    legacy.save_execution_backend("wsl")
+    downgrade_authorization_schema_to_seventeen(legacy.path)
+
+    migrated = SQLiteStore(data)
+
+    assert authorization_schema_objects(migrated.path) == expected_objects
+    assert migrated.load_execution_backend() == "wsl"
+    assert migrated.load_authorization_state().management_revision == 0
+    assert migrated.load_authorization_state().admin_assignments == ()
+    assert migrated.load_audit_events() == ()
+    with sqlite3.connect(migrated.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        revision_column = next(
+            row
+            for row in connection.execute("PRAGMA table_info(application_state)")
+            if row[1] == "management_revision"
+        )
+        assert revision_column[2:6] == ("INTEGER", 1, "0", 0)
+
+
+def test_schema_seventeen_authorization_migration_rolls_back_and_reopens(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    downgrade_authorization_schema_to_seventeen(store.path)
+    original = SQLiteStore._create_authorization_tables
+
+    def fail_after_authorization_ddl(connection: sqlite3.Connection) -> None:
+        original(connection)
+        raise sqlite3.OperationalError("injected authorization migration failure")
+
+    monkeypatch.setattr(
+        SQLiteStore,
+        "_create_authorization_tables",
+        staticmethod(fail_after_authorization_ddl),
+    )
+    with pytest.raises(sqlite3.OperationalError, match="injected authorization"):
+        SQLiteStore(data)
+
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert "management_revision" not in {
+            row[1] for row in connection.execute("PRAGMA table_info(application_state)")
+        }
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'organization_%'"
+            ).fetchone()[0]
+            == 0
+        )
+
+    monkeypatch.undo()
+    reopened = SQLiteStore(data)
+    assert reopened.load_authorization_state() == (
+        reopened.load_authorization_state().__class__(0, ())
+    )
+
+
+def test_schema_seventeen_authorization_migration_rolls_back_base_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    downgrade_authorization_schema_to_seventeen(store.path)
+    original = SQLiteStore._create_authorization_tables
+
+    def interrupt_after_authorization_ddl(connection: sqlite3.Connection) -> None:
+        original(connection)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        SQLiteStore,
+        "_create_authorization_tables",
+        staticmethod(interrupt_after_authorization_ddl),
+    )
+    with pytest.raises(KeyboardInterrupt):
+        SQLiteStore(data)
+
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert "management_revision" not in {
+            row[1] for row in connection.execute("PRAGMA table_info(application_state)")
+        }
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'organization_%'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+@pytest.mark.parametrize(
+    ("assignment", "message"),
+    [
+        (
+            OrganizationAdminAssignment(999, "2026-08-26T12:00:00+00:00", 1),
+            "active Agent",
+        ),
+        (
+            OrganizationAdminAssignment(1, "2026-08-26T12:00:00+00:00", 1),
+            "active Agent",
+        ),
+        (
+            OrganizationAdminAssignment(2, "not-a-timestamp", 1),
+            "UTC timestamp",
+        ),
+        (
+            OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 999),
+            "must be a Human",
+        ),
+    ],
+)
+def test_authorization_restore_rejects_corrupt_assignments(
+    tmp_path: Path,
+    assignment: OrganizationAdminAssignment,
+    message: str,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO organization_admin_assignments
+                (agent_id, granted_at, granted_by_human_id)
+            VALUES (?, ?, ?)
+            """,
+            (
+                assignment.agent_id,
+                assignment.granted_at,
+                assignment.granted_by_human_id,
+            ),
+        )
+
+    with pytest.raises(AuthorizationDataError, match=message):
+        SQLiteStore(data)
+
+
+def test_authorization_restore_rejects_deleted_agent_assignment(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.delete_agent(2)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO organization_admin_assignments
+                (agent_id, granted_at, granted_by_human_id)
+            VALUES (2, '2026-08-26T12:00:00+00:00', 1)
+            """
+        )
+
+    with pytest.raises(AuthorizationDataError, match="active Agent"):
+        SQLiteStore(data)
+
+
+def test_authorization_restore_allows_soft_deleted_human_granter(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("UPDATE members SET deleted = 1 WHERE id = 1")
+
+    reopened = SQLiteStore(data)
+
+    assert reopened.load_authorization_state().admin_assignments == (assignment,)
+
+
+def test_authorization_restore_rejects_agent_granter(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_agent("Grace")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO organization_admin_assignments
+                (agent_id, granted_at, granted_by_human_id)
+            VALUES (2, '2026-08-26T12:00:00+00:00', 3)
+            """
+        )
+
+    with pytest.raises(AuthorizationDataError, match="must be a Human"):
+        SQLiteStore(data)
+
+
+@pytest.mark.parametrize(
+    "metadata_json",
+    [
+        "not-json",
+        '{"body":"secret"}',
+        '{ "member_count":1}',
+        '{"member_count":1,"member_count":2}',
+    ],
+)
+def test_authorization_restore_rejects_corrupt_audit_metadata(
+    tmp_path: Path,
+    metadata_json: str,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO organization_audit_events (
+                occurred_at, actor_id, actor_type, actor_name, action,
+                target_type, target_id, result, reason_code, metadata_json
+            ) VALUES (
+                '2026-08-26T12:00:00+00:00', 1, 'human', 'You',
+                'discussion.delete', 'discussion', 1, 'failure',
+                'invalid_request', ?
+            )
+            """,
+            (metadata_json,),
+        )
+
+    with pytest.raises(AuthorizationDataError, match="audit metadata"):
+        SQLiteStore(data)
+
+
+@pytest.mark.parametrize(
+    ("action", "actor_id", "actor_type", "actor_name", "message"),
+    [
+        ("invalid.action", 1, "human", "You", "action is invalid"),
+        ("discussion.delete", None, "human", "You", "anonymous actor fields"),
+    ],
+)
+def test_authorization_restore_rejects_corrupt_audit_enum_or_actor(
+    tmp_path: Path,
+    action: str,
+    actor_id: int | None,
+    actor_type: str | None,
+    actor_name: str | None,
+    message: str,
+) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("PRAGMA ignore_check_constraints = ON")
+        connection.execute(
+            """
+            INSERT INTO organization_audit_events (
+                occurred_at, actor_id, actor_type, actor_name, action,
+                target_type, target_id, result, reason_code, metadata_json
+            ) VALUES (
+                '2026-08-26T12:00:00+00:00', ?, ?, ?, ?,
+                'discussion', 1, 'success', NULL, '{}'
+            )
+            """,
+            (actor_id, actor_type, actor_name, action),
+        )
+
+    with pytest.raises(AuthorizationDataError, match=message):
+        SQLiteStore(data)
+
+
+@pytest.mark.parametrize(
+    "sensitive_key",
+    ["body", "preview", "read", "ack", "recipients", "memory", "history", "secret"],
+)
+def test_audit_metadata_rejects_sensitive_or_unfrozen_fields(
+    tmp_path: Path,
+    sensitive_key: str,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    event = organization_audit_event(
+        result="failure",
+        reason_code="invalid_request",
+        metadata={sensitive_key: "not allowed"},
+    )
+
+    with pytest.raises(AuthorizationDataError, match="unsupported fields"):
+        store.append_failure_audit(event)
+    assert store.load_audit_events() == ()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("discussion_topic", "Restricted"),
+        ("member_ids", [1, 2]),
+        ("member_count", 2),
+        ("message_count", 3),
+        ("latest_message_id", 3),
+        ("last_activity_at", "2026-08-26T12:00:00+00:00"),
+        ("before_admin_agent_ids", [2]),
+        ("after_admin_agent_ids", [3]),
+        ("before_agent_member_ids", [2]),
+        ("after_agent_member_ids", [2, 3]),
+    ],
+)
+def test_failure_audit_rejects_all_resource_metadata_before_insert(
+    tmp_path: Path,
+    key: str,
+    value: object,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    before = authorization_database_snapshot(store)
+
+    with pytest.raises(AuthorizationDataError, match="metadata must be empty"):
+        store.append_failure_audit(
+            organization_audit_event(
+                result="failure",
+                reason_code="invalid_request",
+                metadata={key: value},
+            )
+        )
+
+    assert authorization_database_snapshot(store) == before
+
+
+def test_success_audit_persists_all_metadata_as_canonical_json(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    metadata = {
+        "discussion_topic": "Allowed",
+        "member_ids": [1, 2],
+        "member_count": 2,
+        "message_count": 3,
+        "latest_message_id": 3,
+        "last_activity_at": "2026-08-26T12:00:00+00:00",
+        "before_admin_agent_ids": [],
+        "after_admin_agent_ids": [2],
+        "before_agent_member_ids": [],
+        "after_agent_member_ids": [2],
+    }
+
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[],
+        audit_event=organization_audit_event(metadata=metadata),
+    )
+
+    with sqlite3.connect(store.path) as connection:
+        stored = connection.execute(
+            "SELECT metadata_json FROM organization_audit_events"
+        ).fetchone()[0]
+    assert stored == json.dumps(
+        metadata,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    assert store.load_audit_events()[0].event.metadata == metadata
+
+
+def test_ordinary_organization_save_preserves_authorization_facts(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+
+    with sqlite3.connect(store.path) as connection:
+        before = (
+            connection.execute(
+                "SELECT management_revision FROM application_state WHERE id = 1"
+            ).fetchone(),
+            connection.execute(
+                "SELECT * FROM organization_admin_assignments ORDER BY agent_id"
+            ).fetchall(),
+            connection.execute(
+                "SELECT * FROM organization_audit_events ORDER BY id"
+            ).fetchall(),
+        )
+
+    state.rename_member(2, "Grace")
+
+    with sqlite3.connect(store.path) as connection:
+        after = (
+            connection.execute(
+                "SELECT management_revision FROM application_state WHERE id = 1"
+            ).fetchone(),
+            connection.execute(
+                "SELECT * FROM organization_admin_assignments ORDER BY agent_id"
+            ).fetchall(),
+            connection.execute(
+                "SELECT * FROM organization_audit_events ORDER BY id"
+            ).fetchall(),
+        )
+    assert after == before
+
+
+def test_ordinary_save_permission_preflight_failure_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[],
+        audit_event=organization_audit_event(),
+    )
+    state = persisted_state(store, tmp_path)
+    before_domain = state.snapshot()
+    before_database = authorization_database_snapshot(store)
+
+    def deny_permissions() -> None:
+        raise PermissionError("injected permission failure")
+
+    monkeypatch.setattr(store, "_preflight_database_permissions", deny_permissions)
+    with pytest.raises(PermissionError, match="injected permission"):
+        state.rename_member(2, "Must_not_persist")
+
+    assert state.snapshot() == before_domain
+    assert authorization_database_snapshot(store) == before_database
+
+
+def test_failure_audit_permission_preflight_failure_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    before = authorization_database_snapshot(store)
+
+    def deny_permissions() -> None:
+        raise PermissionError("injected permission failure")
+
+    monkeypatch.setattr(store, "_preflight_database_permissions", deny_permissions)
+    with pytest.raises(PermissionError, match="injected permission"):
+        store.append_failure_audit(
+            organization_audit_event(
+                result="failure",
+                reason_code="invalid_request",
+            )
+        )
+
+    assert authorization_database_snapshot(store) == before
+
+
+def test_organization_writes_have_no_permission_step_after_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    candidate = deepcopy(state._persistence_data())
+    original_chmod = Path.chmod
+    calls = 0
+
+    def allow_only_preflight(path: Path, mode: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise PermissionError("post-commit chmod must not run")
+        original_chmod(path, mode)
+
+    monkeypatch.setattr(Path, "chmod", allow_only_preflight)
+
+    store.save_organization(candidate)
+    assert calls == 1
+
+    calls = 0
+    store.append_failure_audit(
+        organization_audit_event(
+            result="failure",
+            reason_code="invalid_request",
+        )
+    )
+    assert calls == 1
+
+    calls = 0
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=candidate,
+        admin_assignments=[],
+        audit_event=organization_audit_event(),
+    )
+    assert calls == 1
+
+
+def test_management_permission_preflight_failure_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    candidate = deepcopy(state._persistence_data())
+    candidate["members"][1]["name"] = "Must not persist"
+    before = authorization_database_snapshot(store)
+
+    def deny_permissions() -> None:
+        raise PermissionError("injected permission failure")
+
+    monkeypatch.setattr(store, "_preflight_database_permissions", deny_permissions)
+    with pytest.raises(PermissionError, match="injected permission"):
+        store.commit_management_mutation(
+            expected_revision=0,
+            organization=candidate,
+            admin_assignments=[],
+            audit_event=organization_audit_event(),
+        )
+
+    assert authorization_database_snapshot(store) == before
+
+
+def test_management_cas_success_and_stale_revision_are_atomic(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    candidate = deepcopy(state._persistence_data())
+
+    revision = store.commit_management_mutation(
+        expected_revision=0,
+        organization=candidate,
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+
+    assert revision == 1
+    assert store.load_authorization_state().management_revision == 1
+    assert store.load_authorization_state().admin_assignments == (assignment,)
+    assert len(store.load_audit_events()) == 1
+    before_organization = store.load_organization()
+    stale_candidate = deepcopy(candidate)
+    stale_candidate["discussions"][0]["topic"] = "Must not persist"
+
+    with pytest.raises(ManagementRevisionConflict, match="stale"):
+        store.commit_management_mutation(
+            expected_revision=0,
+            organization=stale_candidate,
+            admin_assignments=[],
+            audit_event=organization_audit_event(
+                action="discussion.delete",
+                target_type="discussion",
+                target_id=1,
+            ),
+        )
+
+    assert store.load_organization() == before_organization
+    assert store.load_authorization_state().management_revision == 1
+    assert store.load_authorization_state().admin_assignments == (assignment,)
+    assert len(store.load_audit_events()) == 1
+
+
+def test_organization_write_failure_rolls_back_management_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+    before = authorization_database_snapshot(store)
+    candidate = deepcopy(before[0])
+    candidate["members"][1]["name"] = "Must roll back"
+    original = SQLiteStore._write_organization
+
+    def fail_after_organization_write(
+        connection: sqlite3.Connection,
+        organization: dict[str, object],
+    ) -> None:
+        original(connection, organization)
+        raise sqlite3.OperationalError("injected Organization write failure")
+
+    monkeypatch.setattr(
+        SQLiteStore,
+        "_write_organization",
+        staticmethod(fail_after_organization_write),
+    )
+    with pytest.raises(sqlite3.OperationalError, match="Organization write"):
+        store.commit_management_mutation(
+            expected_revision=1,
+            organization=candidate,
+            admin_assignments=[],
+            audit_event=organization_audit_event(),
+        )
+
+    assert authorization_database_snapshot(store) == before
+
+
+def test_assignment_rewrite_failure_rolls_back_management_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+    before = authorization_database_snapshot(store)
+    candidate = deepcopy(before[0])
+    candidate["members"][1]["name"] = "Must roll back"
+    original = SQLiteStore._replace_admin_assignments
+
+    def fail_after_assignment_rewrite(
+        connection: sqlite3.Connection,
+        assignments: Sequence[OrganizationAdminAssignment],
+    ) -> None:
+        original(connection, assignments)
+        raise sqlite3.OperationalError("injected assignment rewrite failure")
+
+    monkeypatch.setattr(
+        SQLiteStore,
+        "_replace_admin_assignments",
+        staticmethod(fail_after_assignment_rewrite),
+    )
+    with pytest.raises(sqlite3.OperationalError, match="assignment rewrite"):
+        store.commit_management_mutation(
+            expected_revision=1,
+            organization=candidate,
+            admin_assignments=[],
+            audit_event=organization_audit_event(),
+        )
+
+    assert authorization_database_snapshot(store) == before
+
+
+def test_success_audit_failure_rolls_back_management_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+    before_organization = store.load_organization()
+    before_authorization = store.load_authorization_state()
+    before_audit = store.load_audit_events()
+    candidate = deepcopy(before_organization)
+    candidate["discussions"][0]["topic"] = "Must roll back"
+
+    def fail_audit_insert(
+        _connection: sqlite3.Connection,
+        _event: OrganizationAuditEvent,
+    ) -> int:
+        raise sqlite3.OperationalError("injected audit failure")
+
+    monkeypatch.setattr(
+        SQLiteStore, "_insert_audit_event", staticmethod(fail_audit_insert)
+    )
+    with pytest.raises(AuditUnavailableError, match="unavailable"):
+        store.commit_management_mutation(
+            expected_revision=1,
+            organization=candidate,
+            admin_assignments=[],
+            audit_event=organization_audit_event(
+                action="discussion.delete",
+                target_type="discussion",
+                target_id=1,
+            ),
+        )
+
+    assert store.load_organization() == before_organization
+    assert store.load_authorization_state() == before_authorization
+    assert store.load_audit_events() == before_audit
+
+
+def test_failure_audit_is_independent_and_append_only(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    before_revision = store.load_authorization_state().management_revision
+    event_id = store.append_failure_audit(
+        organization_audit_event(
+            result="failure",
+            reason_code="revision_conflict",
+        )
+    )
+
+    assert event_id == 1
+    assert store.load_authorization_state().management_revision == before_revision
+    with sqlite3.connect(store.path) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            connection.execute(
+                "UPDATE organization_audit_events SET actor_name = 'Changed' WHERE id = 1"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            connection.execute("DELETE FROM organization_audit_events WHERE id = 1")
+    assert len(store.load_audit_events()) == 1
+
+
+def test_failure_audit_insert_error_reports_unavailable_without_revision_change(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    before_revision = store.load_authorization_state().management_revision
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """
+            CREATE TRIGGER reject_organization_audit_insert
+            BEFORE INSERT ON organization_audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'injected audit unavailable');
+            END
+            """
+        )
+
+    with pytest.raises(AuditUnavailableError, match="unavailable"):
+        store.append_failure_audit(
+            organization_audit_event(
+                result="failure",
+                reason_code="invalid_request",
+            )
+        )
+    assert store.load_authorization_state().management_revision == before_revision
+    assert store.load_audit_events() == ()
+
+
+def test_management_agent_delete_explicitly_revokes_admin_assignment(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+    candidate = OrganizationState(persisted=store.load_organization())
+    candidate.delete_agent(2)
+
+    store.commit_management_mutation(
+        expected_revision=1,
+        organization=deepcopy(candidate._persistence_data()),
+        admin_assignments=[],
+        audit_event=organization_audit_event(
+            action="organization.agent.delete",
+            target_type="member",
+            target_id=2,
+        ),
+    )
+
+    assert store.load_authorization_state().management_revision == 2
+    assert store.load_authorization_state().admin_assignments == ()
+    assert store.load_organization()["members"][1]["deleted"] is True
+
+
+def test_discussion_management_delete_cascades_content_but_preserves_audit(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    state = persisted_state(store, tmp_path)
+    state.create_agent("Ada")
+    state.create_discussion("Delete", 1, [2])
+    state.create_discussion("Keep", 1, [2])
+    state.send_message(1, 1, "@Ada review")
+    state.read_discussion(2, 1)
+    state.ack_messages(2, 1, [1])
+    state.send_message(2, 1, "@Ada keep")
+    state.read_discussion(2, 2)
+    state.ack_messages(2, 2, [1])
+    assignment = OrganizationAdminAssignment(2, "2026-08-26T12:00:00+00:00", 1)
+    store.commit_management_mutation(
+        expected_revision=0,
+        organization=deepcopy(state._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(),
+    )
+    candidate = OrganizationState(persisted=store.load_organization())
+    candidate.delete_discussion(1)
+
+    store.commit_management_mutation(
+        expected_revision=1,
+        organization=deepcopy(candidate._persistence_data()),
+        admin_assignments=[assignment],
+        audit_event=organization_audit_event(
+            action="discussion.delete",
+            target_type="discussion",
+            target_id=1,
+            metadata={
+                "discussion_topic": "Delete",
+                "member_ids": [1, 2],
+                "member_count": 2,
+                "message_count": 1,
+                "latest_message_id": 1,
+                "last_activity_at": None,
+            },
+        ),
+    )
+
+    discussion_tables = (
+        "discussion_members",
+        "messages",
+        "mentions",
+        "mention_references",
+        "human_mention_notifications",
+        "human_discussion_read_states",
+        "human_discussion_seen_messages",
+        "discussion_activity_frontiers",
+        "message_recipients",
+        "message_read_receipts",
+        "message_mention_acknowledgements",
+    )
+    with sqlite3.connect(store.path) as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM discussions WHERE id = 1"
+            ).fetchone()[0]
+            == 0
+        )
+        for table in discussion_tables:
+            assert (
+                connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE discussion_id = 1"
+                ).fetchone()[0]
+                == 0
+            )
+        expected_kept_counts = {
+            "discussion_members": 2,
+            "messages": 1,
+            "mentions": 1,
+            "mention_references": 1,
+            "discussion_activity_frontiers": 2,
+            "message_recipients": 1,
+            "message_read_receipts": 1,
+            "message_mention_acknowledgements": 1,
+        }
+        for table, expected_count in expected_kept_counts.items():
+            assert (
+                connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE discussion_id = 2"
+                ).fetchone()[0]
+                == expected_count
+            )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM organization_audit_events"
+            ).fetchone()[0]
+            == 2
+        )

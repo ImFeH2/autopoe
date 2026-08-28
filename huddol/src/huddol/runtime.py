@@ -14,7 +14,7 @@ from huddol.domain import DomainError, OrganizationState, Reminder
 from huddol.history import AgentHistory, AgentHistoryRun
 from huddol.host_tools import AgentHostTools, HostToolError
 from huddol.memory import AgentMemory
-from huddol.operations import OrganizationOperations
+from huddol.operations import ActorContext, OrganizationOperations
 from huddol.todos import AgentTodos, wrap_tool_result
 
 
@@ -55,37 +55,56 @@ class AgentRunContext:
             if error.code != "member_not_found":
                 raise
 
+    @property
+    def actor(self) -> ActorContext:
+        return ActorContext.agent(self.agent_id, self.run_id)
+
     def organization(self, action: str, **arguments: Any) -> Any:
         def operation() -> Any:
-            if action == "list_members":
-                return self.state.list_members()
-            if action == "create_agent":
-                snapshot = self.state.create_agent(name=arguments["name"])
-                return snapshot["members"][-1]
             if self.operations is None:
                 raise RuntimeError("Organization operations are unavailable")
+            if action == "list_members":
+                return self.operations.members(self.actor)
+            if action == "permissions":
+                return self.operations.permissions(self.actor)
+            if action == "metadata":
+                return self.operations.metadata(self.actor)
+            if action == "audit":
+                return self.operations.audit(self.actor)
+            expected_revision = arguments["expected_revision"]
+            if action == "create_agent":
+                snapshot = self.operations.create_agent(
+                    self.actor, expected_revision, arguments["name"]
+                )
+                return snapshot["members"][-1]
             if action == "delete_agent":
-                if arguments["agent_id"] == self.agent_id:
-                    raise DomainError("self_delete", "An Agent cannot delete itself")
-                self.operations.delete_agent(arguments["agent_id"])
+                self.operations.delete_agent(
+                    self.actor, expected_revision, arguments["agent_id"]
+                )
                 return {"agent_id": arguments["agent_id"], "deleted": True}
             if action == "pause_agent":
-                snapshot = self.operations.pause_agent(arguments["agent_id"])
-                member = next(
-                    item
-                    for item in snapshot["members"]
-                    if item["id"] == arguments["agent_id"]
+                snapshot = self.operations.pause_agent(
+                    self.actor, expected_revision, arguments["agent_id"]
                 )
-                return member
-            if action == "resume_agent":
-                snapshot = self.operations.resume_agent(arguments["agent_id"])
-                member = next(
-                    item
-                    for item in snapshot["members"]
-                    if item["id"] == arguments["agent_id"]
+            elif action == "resume_agent":
+                snapshot = self.operations.resume_agent(
+                    self.actor, expected_revision, arguments["agent_id"]
                 )
-                return member
-            raise ValueError(f"Unknown organization action: {action}")
+            elif action == "grant_admin":
+                return self.operations.grant_admin(
+                    self.actor, expected_revision, arguments["agent_id"]
+                )
+            elif action == "revoke_admin":
+                return self.operations.revoke_admin(
+                    self.actor, expected_revision, arguments["agent_id"]
+                )
+            else:
+                raise ValueError(f"Unknown organization action: {action}")
+            return next(
+                item
+                for item in snapshot["members"]
+                if item["id"] == arguments["agent_id"]
+            )
 
         return self._call_tool("organization", action, operation)
 
@@ -245,56 +264,30 @@ class AgentRunContext:
         raise ValueError(f"Unknown todo action: {action}")
 
     def _discussion(self, action: str, arguments: dict[str, Any]) -> Any:
+        if self.operations is None:
+            raise RuntimeError("Organization operations are unavailable")
         if action == "create":
-            snapshot = self.state.create_discussion(
-                topic=arguments["topic"],
-                creator_id=self.agent_id,
-                member_ids=arguments["member_ids"],
+            before = {item["id"] for item in self.state.snapshot()["discussions"]}
+            snapshot = self.operations.create_discussion(
+                self.actor,
+                arguments["expected_revision"],
+                arguments["topic"],
+                arguments["member_ids"],
             )
-            return {"discussion_id": snapshot["discussions"][-1]["id"]}
-        if action == "send":
-            discussion_id = arguments["discussion_id"]
-            snapshot = self.state.send_message(
-                discussion_id=discussion_id,
-                sender_id=self.agent_id,
-                body=arguments["body"],
+            created = next(
+                item for item in snapshot["discussions"] if item["id"] not in before
             )
-            discussion = next(
-                item for item in snapshot["discussions"] if item["id"] == discussion_id
-            )
-            message = discussion["messages"][-1]
-            return {
-                "discussion_id": discussion_id,
-                "message_id": message["id"],
-                "mentioned_agent_ids": [
-                    mention["member_id"] for mention in message["mentions"]
-                ],
-            }
+            return {"discussion_id": created["id"]}
         if action == "list":
+            scope = self.operations.discussion_content_scope(self.actor)
             return [
                 discussion_summary(discussion)
                 for discussion in self.state.list_discussions(self.agent_id)
+                if discussion["id"] in scope
             ]
-        if action == "info":
-            return self.state.discussion_info(
-                member_id=self.agent_id,
-                discussion_id=arguments["discussion_id"],
-            )
-        if action == "read":
-            return self.state.read_discussion(
-                agent_id=self.agent_id,
-                discussion_id=arguments["discussion_id"],
-                start_message_id=arguments.get("start_message_id"),
-                end_message_id=arguments.get("end_message_id"),
-                limit=arguments.get("limit", 100),
-            )
-        if action == "ack":
-            return self.state.ack_messages(
-                agent_id=self.agent_id,
-                discussion_id=arguments["discussion_id"],
-                message_ids=arguments["message_ids"],
-            )
-        if action == "search":
+        discussion_id = arguments.get("discussion_id")
+        if action == "search" and discussion_id is None:
+            scope = self.operations.discussion_content_scope(self.actor)
             return [
                 {
                     "discussion_id": result["discussion_id"],
@@ -303,23 +296,88 @@ class AgentRunContext:
                 }
                 for result in self.state.search_messages(
                     query=arguments["query"],
-                    discussion_id=arguments.get("discussion_id"),
                     sender_id=arguments.get("sender_id"),
                     member_id=self.agent_id,
                 )
+                if result["discussion_id"] in scope
             ]
-        if action == "delete":
-            if self.operations is None:
-                raise RuntimeError("Organization operations are unavailable")
-            self.operations.delete_discussion(
-                arguments["discussion_id"],
-                actor_id=self.agent_id,
+        if not isinstance(discussion_id, int):
+            raise TypeError("discussion_id is required")
+
+        def content_operation() -> Any:
+            if action == "send":
+                snapshot = self.state.send_message(
+                    discussion_id=discussion_id,
+                    sender_id=self.agent_id,
+                    body=arguments["body"],
+                )
+                discussion = next(
+                    item
+                    for item in snapshot["discussions"]
+                    if item["id"] == discussion_id
+                )
+                message = discussion["messages"][-1]
+                return {
+                    "discussion_id": discussion_id,
+                    "message_id": message["id"],
+                    "mentioned_agent_ids": [
+                        mention["member_id"] for mention in message["mentions"]
+                    ],
+                }
+            if action == "info":
+                return self.state.discussion_info(self.agent_id, discussion_id)
+            if action == "read":
+                return self.state.read_discussion(
+                    agent_id=self.agent_id,
+                    discussion_id=discussion_id,
+                    start_message_id=arguments.get("start_message_id"),
+                    end_message_id=arguments.get("end_message_id"),
+                    limit=arguments.get("limit", 100),
+                )
+            if action == "ack":
+                return self.state.ack_messages(
+                    agent_id=self.agent_id,
+                    discussion_id=discussion_id,
+                    message_ids=arguments["message_ids"],
+                )
+            if action == "search":
+                return [
+                    {
+                        "discussion_id": result["discussion_id"],
+                        "message_id": result["id"],
+                        "sender_id": result["sender_id"],
+                    }
+                    for result in self.state.search_messages(
+                        query=arguments["query"],
+                        discussion_id=discussion_id,
+                        sender_id=arguments.get("sender_id"),
+                        member_id=self.agent_id,
+                    )
+                ]
+            raise ValueError(f"Unknown discussion action: {action}")
+
+        if action == "update_members":
+            self.operations.update_discussion_members(
+                self.actor,
+                arguments["expected_revision"],
+                discussion_id,
+                arguments["member_ids"],
             )
             return {
-                "discussion_id": arguments["discussion_id"],
-                "deleted": True,
+                "discussion_id": discussion_id,
+                "member_ids": arguments["member_ids"],
             }
-        raise ValueError(f"Unknown discussion action: {action}")
+        if action == "delete":
+            self.operations.delete_discussion(
+                self.actor,
+                arguments["expected_revision"],
+                discussion_id,
+                arguments["confirm_topic"],
+            )
+            return {"discussion_id": discussion_id, "deleted": True}
+        return self.operations.require_discussion_content(
+            self.actor, discussion_id, content_operation
+        )
 
     def _call_tool(
         self,
@@ -451,12 +509,7 @@ class AgentRuntime:
         self._history = history
         self._todos = todos
         self._memories = memories
-        self._operations = operations or OrganizationOperations(
-            state,
-            history,
-            todos,
-            memories,
-        )
+        self._operations = operations
         self._stop_event = Event()
         self._stop_lock = Lock()
         self._stop_completed = False

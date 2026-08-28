@@ -10,6 +10,7 @@ export {
   Plus,
   Search,
   Settings2,
+  ShieldCheck,
   Trash2,
   TriangleAlert,
   Users,

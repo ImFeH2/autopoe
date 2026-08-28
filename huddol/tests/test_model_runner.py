@@ -54,7 +54,7 @@ from huddol.observability import (
     PydanticAIObservability,
     create_pydantic_ai_observability,
 )
-from huddol.operations import OrganizationOperations
+from huddol.operations import ActorContext, OrganizationOperations
 from huddol.persistence import SQLiteStore
 from huddol.runtime import AgentRunContext, AgentRunFailure
 from huddol.todos import TODO_STATUS_START, AgentTodos
@@ -445,17 +445,33 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
     assert "@Name" in discussion.description
 
 
-def test_pydantic_runner_executes_agent_management_tools(tmp_path: Path) -> None:
+def test_pydantic_runner_executes_admin_discussion_tools(tmp_path: Path) -> None:
     calls = 0
 
     async def respond(_messages: list[ModelMessage], _info: AgentInfo):
         nonlocal calls
         calls += 1
         tool_calls = (
-            ("organization", {"action": "pause_agent", "agent_id": 3}),
-            ("organization", {"action": "resume_agent", "agent_id": 3}),
-            ("discussion", {"action": "delete", "discussion_id": 1}),
-            ("organization", {"action": "delete_agent", "agent_id": 3}),
+            ("organization", {"action": "permissions"}),
+            ("organization", {"action": "metadata"}),
+            (
+                "discussion",
+                {
+                    "action": "update_members",
+                    "discussion_id": 2,
+                    "member_ids": [2, 3],
+                    "expected_revision": 1,
+                },
+            ),
+            (
+                "discussion",
+                {
+                    "action": "delete",
+                    "discussion_id": 2,
+                    "expected_revision": 2,
+                    "confirm_topic": "Cleanup",
+                },
+            ),
         )
         if calls <= len(tool_calls):
             name, arguments = tool_calls[calls - 1]
@@ -474,13 +490,22 @@ def test_pydantic_runner_executes_agent_management_tools(tmp_path: Path) -> None
     state.create_agent("Ada")
     state.create_agent("Lin")
     state.create_discussion("Work", 1, [2])
+    state.create_discussion("Cleanup", 1, [3])
     state.send_message(1, 1, "@Ada Manage the Organization")
-    reminder, _ = state.claim_next_reminder()
-    assert reminder is not None
+    store.save_organization(state.prepare_management_replacement().persistence_data)
     history = AgentHistory(store)
     todos = AgentTodos(store)
     memories = AgentMemory(tmp_path / "data")
-    operations = OrganizationOperations(state, history, todos, memories)
+    operations = OrganizationOperations(
+        state,
+        store,
+        history=history,
+        todos=todos,
+        memories=memories,
+    )
+    operations.grant_admin(ActorContext.current_human(state), 0, 2)
+    reminder, _ = state.claim_next_reminder()
+    assert reminder is not None
     context = AgentRunContext(
         2,
         state,
@@ -502,8 +527,11 @@ def test_pydantic_runner_executes_agent_management_tools(tmp_path: Path) -> None
     assert [member["name"] for member in state.snapshot()["members"]] == [
         "You",
         "Ada",
+        "Lin",
     ]
-    assert state.snapshot()["discussions"] == []
+    assert [discussion["topic"] for discussion in state.snapshot()["discussions"]] == [
+        "Work"
+    ]
     assert "Management completed" in str(outcome.messages)
 
 
@@ -535,7 +563,17 @@ def test_runner_recovers_after_tool_execution_is_interrupted(tmp_path: Path) -> 
     state.send_message(1, 1, "@Ada Continue")
     reminder, _ = state.claim_next_reminder()
     assert reminder is not None
-    context = AgentRunContext(2, state, HostTools(tmp_path))
+    authorization_store = SQLiteStore(tmp_path / "authorization")
+    authorization_store.save_organization(
+        state.prepare_management_replacement().persistence_data
+    )
+    operations = OrganizationOperations(state, authorization_store)
+    context = AgentRunContext(
+        2,
+        state,
+        HostTools(tmp_path),
+        operations=operations,
+    )
     runner = PydanticAgentRunner(
         ModelConfig(
             api_type="openai-chat",
@@ -578,6 +616,7 @@ def test_runner_recovers_after_tool_execution_is_interrupted(tmp_path: Path) -> 
                 state,
                 HostTools(tmp_path),
                 message_history=caught.value.messages,
+                operations=operations,
             ),
         )
 

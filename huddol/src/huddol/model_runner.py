@@ -325,26 +325,41 @@ class PydanticAgentRunner:
             ctx: RunContext[AgentRunContext],
             action: Literal[
                 "list_members",
+                "permissions",
+                "metadata",
+                "audit",
                 "create_agent",
                 "delete_agent",
                 "pause_agent",
                 "resume_agent",
+                "grant_admin",
+                "revoke_admin",
             ],
             name: str | None = None,
             agent_id: int | None = None,
+            expected_revision: int | None = None,
         ) -> Any:
-            """List Members or create, delete, pause, or resume an Agent."""
+            """Inspect permissions or manage Agents and explicit Admin assignments."""
             try:
-                if action == "create_agent":
-                    if not name:
-                        raise ModelRetry("name is required for create_agent")
-                    result = ctx.deps.organization(action, name=name)
-                elif action in ("delete_agent", "pause_agent", "resume_agent"):
-                    if agent_id is None:
-                        raise ModelRetry(f"agent_id is required for {action}")
-                    result = ctx.deps.organization(action, agent_id=agent_id)
-                else:
+                if action in {"list_members", "permissions", "metadata", "audit"}:
                     result = ctx.deps.organization(action)
+                else:
+                    if expected_revision is None:
+                        raise ModelRetry(f"expected_revision is required for {action}")
+                    if action == "create_agent":
+                        if not name:
+                            raise ModelRetry("name is required for create_agent")
+                        result = ctx.deps.organization(
+                            action, name=name, expected_revision=expected_revision
+                        )
+                    else:
+                        if agent_id is None:
+                            raise ModelRetry(f"agent_id is required for {action}")
+                        result = ctx.deps.organization(
+                            action,
+                            agent_id=agent_id,
+                            expected_revision=expected_revision,
+                        )
                 return model_result(ctx, result)
             except DomainError as error:
                 raise ModelRetry(error.message) from error
@@ -506,6 +521,7 @@ class PydanticAgentRunner:
                 "read",
                 "ack",
                 "search",
+                "update_members",
                 "delete",
             ],
             discussion_id: int | None = None,
@@ -518,16 +534,21 @@ class PydanticAgentRunner:
             limit: int | None = None,
             query: str | None = None,
             sender_id: int | None = None,
+            expected_revision: int | None = None,
+            confirm_topic: str | None = None,
         ) -> Any:
-            """Create, send, list, inspect, read, acknowledge, search, or delete Discussions. In a sent Message, exact @Name text mentions that Discussion Agent."""
+            """Create, send, list, inspect, read, acknowledge, search, manage Agent members, or delete Discussions. In a sent Message, exact @Name text mentions that Discussion Agent."""
             try:
                 if action == "create":
                     if not topic or not member_ids:
                         raise ModelRetry("topic and member_ids are required for create")
+                    if expected_revision is None:
+                        raise ModelRetry("expected_revision is required for create")
                     result = ctx.deps.discussion(
                         action,
                         topic=topic,
                         member_ids=member_ids,
+                        expected_revision=expected_revision,
                     )
                 elif action == "send":
                     if discussion_id is None or not body:
@@ -566,12 +587,37 @@ class PydanticAgentRunner:
                         discussion_id=discussion_id,
                         message_ids=message_ids,
                     )
-                elif action == "delete":
-                    if discussion_id is None:
-                        raise ModelRetry("discussion_id is required for delete")
+                elif action == "update_members":
+                    if (
+                        discussion_id is None
+                        or member_ids is None
+                        or expected_revision is None
+                    ):
+                        raise ModelRetry(
+                            "discussion_id, member_ids, and expected_revision "
+                            "are required for update_members"
+                        )
                     result = ctx.deps.discussion(
                         action,
                         discussion_id=discussion_id,
+                        member_ids=member_ids,
+                        expected_revision=expected_revision,
+                    )
+                elif action == "delete":
+                    if (
+                        discussion_id is None
+                        or expected_revision is None
+                        or confirm_topic is None
+                    ):
+                        raise ModelRetry(
+                            "discussion_id, expected_revision, and confirm_topic "
+                            "are required for delete"
+                        )
+                    result = ctx.deps.discussion(
+                        action,
+                        discussion_id=discussion_id,
+                        expected_revision=expected_revision,
+                        confirm_topic=confirm_topic,
                     )
                 else:
                     if not query:

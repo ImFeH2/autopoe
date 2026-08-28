@@ -46,6 +46,11 @@
   overflow-y: auto;
 }
 
+.discussion-list-actions {
+  display: flex;
+  gap: 2px;
+}
+
 .discussion-list-empty {
   margin: 0;
   padding: 18px 16px;

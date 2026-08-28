@@ -3,11 +3,16 @@ import {
   Button,
   MessageSquare,
   Settings2,
+  ShieldCheck,
   Tooltip,
   Users,
 } from "@/components/ui";
 
-export type WorkspaceView = "discussions" | "members" | "settings";
+export type WorkspaceView =
+  | "discussions"
+  | "members"
+  | "permissions"
+  | "settings";
 
 type AppSidebarProps = {
   discussionCount: number;
@@ -24,6 +29,11 @@ const navigation = [
     view: "discussions",
   },
   { count: "members", icon: Users, label: "Members", view: "members" },
+  {
+    icon: ShieldCheck,
+    label: "Permissions",
+    view: "permissions",
+  },
   { icon: Settings2, label: "Settings", view: "settings" },
 ] as const;
 
@@ -33,7 +43,10 @@ export function AppSidebar({
   onSelectView,
   view,
 }: AppSidebarProps) {
-  const counts: Record<Exclude<WorkspaceView, "settings">, number> = {
+  const counts: Record<
+    Exclude<WorkspaceView, "permissions" | "settings">,
+    number
+  > = {
     discussions: discussionCount,
     members: memberCount,
   };

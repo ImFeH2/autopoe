@@ -19,6 +19,7 @@ import {
   Search,
   Tooltip,
   Trash2,
+  Users,
 } from "@/components/ui";
 import {
   getMemberAvatarDescription,
@@ -275,7 +276,14 @@ type DiscussionsPageProps = {
   onDialogCloseAutoFocus: () => boolean;
   onDialogOpenChange: (open: boolean) => void;
   onCreateAgent: () => void;
-  onDeleteDiscussion: (discussionId: number) => void;
+  onDeleteDiscussion: (
+    discussionId: number,
+    confirmTopic: string,
+  ) => Promise<boolean> | undefined;
+  onUpdateDiscussionMembers?: (
+    discussionId: number,
+    memberIds: number[],
+  ) => Promise<boolean>;
   onMessageChange: (body: string, mentions: DraftMention[]) => void;
   onMessagesSeen?: (discussionId: number, messageIds: number[]) => void;
   onLoadEarlier?: () => Promise<void>;
@@ -322,6 +330,7 @@ export function DiscussionsPage({
   onDialogCloseAutoFocus,
   onDialogOpenChange,
   onDeleteDiscussion,
+  onUpdateDiscussionMembers,
   onMessageChange,
   onMessagesSeen = () => undefined,
   onLoadEarlier,
@@ -347,7 +356,33 @@ export function DiscussionsPage({
   const [deletingDiscussionId, setDeletingDiscussionId] = useState<
     number | null
   >(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [managingDiscussionId, setManagingDiscussionId] = useState<
+    number | null
+  >(null);
+  const [managedMemberIds, setManagedMemberIds] = useState<number[]>([]);
   const filteredDiscussions = filterDiscussions(discussions, query);
+
+  async function saveManagedMembers(
+    event: FormEvent<HTMLFormElement>,
+    discussionId: number,
+  ) {
+    event.preventDefault();
+    if (
+      onUpdateDiscussionMembers &&
+      (await onUpdateDiscussionMembers(discussionId, managedMemberIds))
+    ) {
+      setManagingDiscussionId(null);
+    }
+  }
+
+  async function deleteDiscussion(discussionId: number) {
+    const deleted = await onDeleteDiscussion(discussionId, deleteConfirmation);
+    if (deleted !== false) {
+      setDeletingDiscussionId(null);
+      setDeleteConfirmation("");
+    }
+  }
 
   return (
     <section className="discussions-workspace">
@@ -418,6 +453,7 @@ export function DiscussionsPage({
               );
               return (
                 <ListButton
+                  actionSize={onUpdateDiscussionMembers ? "double" : "single"}
                   active={selected}
                   aria-label={discussionEntryAccessibleLabel(
                     discussion.topic,
@@ -426,47 +462,157 @@ export function DiscussionsPage({
                   )}
                   key={discussion.id}
                   action={
-                    <Dialog
-                      description={`Delete ${discussion.topic} and all of its messages.`}
-                      onOpenChange={(open) =>
-                        setDeletingDiscussionId(open ? discussion.id : null)
-                      }
-                      open={deletingDiscussionId === discussion.id}
-                      title="Delete discussion"
-                      trigger={
-                        <Button
-                          aria-label={`Delete ${discussion.topic}`}
-                          disabled={disabled}
-                          size="icon"
-                          variant="quiet"
+                    <div className="discussion-list-actions">
+                      {onUpdateDiscussionMembers ? (
+                        <Dialog
+                          description={`Choose the Agents who belong to ${discussion.topic}.`}
+                          onOpenChange={(open) => {
+                            setManagingDiscussionId(
+                              open ? discussion.id : null,
+                            );
+                            setManagedMemberIds(
+                              open
+                                ? discussion.member_ids.filter((memberId) =>
+                                    agents.some(
+                                      (agent) => agent.id === memberId,
+                                    ),
+                                  )
+                                : [],
+                            );
+                          }}
+                          open={managingDiscussionId === discussion.id}
+                          title="Manage members"
+                          trigger={
+                            <Button
+                              aria-label={`Manage ${discussion.topic} members`}
+                              disabled={disabled}
+                              size="icon"
+                              variant="quiet"
+                            >
+                              <Users aria-hidden="true" size={14} />
+                            </Button>
+                          }
+                          triggerTooltip="Manage members"
                         >
-                          <Trash2 aria-hidden="true" size={14} />
-                        </Button>
-                      }
-                      triggerTooltip="Delete"
-                    >
-                      <div className="discussion-delete-confirmation">
-                        <p>Delete this discussion and all of its messages?</p>
-                        <div className="discussion-form-actions">
-                          <Button
-                            onClick={() => setDeletingDiscussionId(null)}
-                            variant="quiet"
+                          <form
+                            aria-label={`Manage ${discussion.topic} members`}
+                            className="discussion-form"
+                            onSubmit={(event) =>
+                              void saveManagedMembers(event, discussion.id)
+                            }
                           >
-                            Cancel
-                          </Button>
+                            <DiscussionMembersFieldset
+                              agents={agents}
+                              disabled={disabled}
+                              humans={members.filter(
+                                (member) => member.type === "human",
+                              )}
+                              idPrefix={`discussion-${discussion.id}-member`}
+                              onToggleMember={(memberId) =>
+                                setManagedMemberIds((current) =>
+                                  current.includes(memberId)
+                                    ? current.filter((id) => id !== memberId)
+                                    : [...current, memberId],
+                                )
+                              }
+                              selectedMemberIds={managedMemberIds}
+                            />
+                            {error ? (
+                              <p
+                                className="caption-text m-0 text-danger"
+                                role="alert"
+                              >
+                                {error}
+                              </p>
+                            ) : null}
+                            <div className="discussion-form-actions">
+                              <Button
+                                disabled={disabled}
+                                onClick={() => setManagingDiscussionId(null)}
+                                variant="secondary"
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                disabled={
+                                  disabled || managedMemberIds.length === 0
+                                }
+                                type="submit"
+                                variant="primary"
+                              >
+                                Save
+                              </Button>
+                            </div>
+                          </form>
+                        </Dialog>
+                      ) : null}
+                      <Dialog
+                        description={`Permanently delete ${discussion.topic}. Copied content may remain in other records.`}
+                        onOpenChange={(open) => {
+                          setDeletingDiscussionId(open ? discussion.id : null);
+                          setDeleteConfirmation("");
+                        }}
+                        open={deletingDiscussionId === discussion.id}
+                        title="Delete discussion"
+                        trigger={
                           <Button
+                            aria-label={`Delete ${discussion.topic}`}
                             disabled={disabled}
-                            onClick={() => {
-                              onDeleteDiscussion(discussion.id);
-                              setDeletingDiscussionId(null);
-                            }}
+                            size="icon"
                             variant="danger"
                           >
-                            Delete
+                            <Trash2 aria-hidden="true" size={14} />
                           </Button>
+                        }
+                        triggerTooltip="Delete"
+                      >
+                        <div className="discussion-delete-confirmation">
+                          <p>
+                            This discussion and its messages will be permanently
+                            deleted and cannot be recovered. Content previously
+                            copied to Agent History, Memory, or other records
+                            may remain.
+                          </p>
+                          <label
+                            className="discussion-form-field"
+                            htmlFor={`delete-discussion-${discussion.id}`}
+                          >
+                            <span>Type {discussion.topic} to confirm</span>
+                            <Input
+                              autoComplete="off"
+                              autoFocus
+                              disabled={disabled}
+                              id={`delete-discussion-${discussion.id}`}
+                              onChange={(event) =>
+                                setDeleteConfirmation(event.target.value)
+                              }
+                              value={deleteConfirmation}
+                            />
+                          </label>
+                          <div className="discussion-form-actions">
+                            <Button
+                              disabled={disabled}
+                              onClick={() => setDeletingDiscussionId(null)}
+                              variant="secondary"
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              disabled={
+                                disabled ||
+                                deleteConfirmation !== discussion.topic
+                              }
+                              onClick={() =>
+                                void deleteDiscussion(discussion.id)
+                              }
+                              variant="danger"
+                            >
+                              Delete
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    </Dialog>
+                      </Dialog>
+                    </div>
                   }
                   meta={
                     <>
@@ -558,6 +704,55 @@ export function DiscussionsPage({
   );
 }
 
+type DiscussionMembersFieldsetProps = {
+  agents: Array<{ id: number; name: string }>;
+  disabled: boolean;
+  humans: Array<{ id: number; name: string }>;
+  idPrefix: string;
+  onToggleMember: (memberId: number) => void;
+  selectedMemberIds: number[];
+};
+
+function DiscussionMembersFieldset({
+  agents,
+  disabled,
+  humans,
+  idPrefix,
+  onToggleMember,
+  selectedMemberIds,
+}: DiscussionMembersFieldsetProps) {
+  return (
+    <fieldset className="discussion-members">
+      <legend>Members</legend>
+      <section
+        aria-label="Inherent Human participants"
+        className="discussion-inherent-members"
+      >
+        <span>Always included</span>
+        {humans.map((human) => (
+          <span key={human.id}>{human.name} · Human</span>
+        ))}
+      </section>
+      <div className="discussion-member-options">
+        {agents.map((agent) => {
+          const checkboxId = `${idPrefix}-${agent.id}`;
+          return (
+            <label htmlFor={checkboxId} key={agent.id}>
+              <Checkbox
+                checked={selectedMemberIds.includes(agent.id)}
+                disabled={disabled}
+                id={checkboxId}
+                onChange={() => onToggleMember(agent.id)}
+              />
+              {agent.name}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 type DiscussionFormProps = {
   agents: Array<{ id: number; name: string }>;
   humans: Array<{ id: number; name: string }>;
@@ -601,34 +796,14 @@ export function DiscussionForm({
           value={topic}
         />
       </label>
-      <fieldset className="discussion-members">
-        <legend>Members</legend>
-        <section
-          aria-label="Inherent Human participants"
-          className="discussion-inherent-members"
-        >
-          <span>Always included</span>
-          {humans.map((human) => (
-            <span key={human.id}>{human.name} · Human</span>
-          ))}
-        </section>
-        <div className="discussion-member-options">
-          {agents.map((agent) => {
-            const checkboxId = `discussion-member-${agent.id}`;
-            return (
-              <label htmlFor={checkboxId} key={agent.id}>
-                <Checkbox
-                  checked={selectedMemberIds.includes(agent.id)}
-                  disabled={disabled}
-                  id={checkboxId}
-                  onChange={() => onToggleMember(agent.id)}
-                />
-                {agent.name}
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
+      <DiscussionMembersFieldset
+        agents={agents}
+        disabled={disabled}
+        humans={humans}
+        idPrefix="discussion-member"
+        onToggleMember={onToggleMember}
+        selectedMemberIds={selectedMemberIds}
+      />
       {error ? (
         <p className="caption-text m-0 text-danger" role="alert">
           {error}

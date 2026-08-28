@@ -13,6 +13,8 @@ import {
   parseExecutionSettings,
   parseModelSettings,
   parseObservabilitySettings,
+  parseOrganizationAudit,
+  parseOrganizationPermissions,
   parseOrganizationSnapshot,
 } from "@/lib/backend";
 
@@ -319,6 +321,82 @@ describe("parseObservabilitySettings", () => {
         secret_key: "secret",
       }),
     ).toThrow("secret key must not be returned");
+  });
+});
+
+describe("organization permission payloads", () => {
+  it("parses the Super Admin role and explicit Agent Admin assignments", () => {
+    expect(
+      parseOrganizationPermissions({
+        management_revision: 4,
+        member_id: 1,
+        role: "super_admin",
+        capabilities: ["organization.role.manage", "organization.audit.read"],
+        admin_agent_ids: [2],
+      }),
+    ).toEqual({
+      management_revision: 4,
+      member_id: 1,
+      role: "super_admin",
+      capabilities: ["organization.role.manage", "organization.audit.read"],
+      admin_agent_ids: [2],
+    });
+  });
+
+  it("rejects unknown capabilities and Admin-visible assignment lists", () => {
+    expect(() =>
+      parseOrganizationPermissions({
+        management_revision: 0,
+        member_id: 2,
+        role: "member",
+        capabilities: ["organization.secret.read"],
+        admin_agent_ids: [],
+      }),
+    ).toThrow("capability");
+    expect(() =>
+      parseOrganizationPermissions({
+        management_revision: 1,
+        member_id: 2,
+        role: "admin",
+        capabilities: ["organization.permissions.read"],
+        admin_agent_ids: [2],
+      }),
+    ).toThrow("membership");
+  });
+
+  it("parses non-sensitive audit metadata and rejects failure leakage", () => {
+    const event = {
+      id: 1,
+      occurred_at: "2026-08-27T12:00:00.000+00:00",
+      actor_id: 1,
+      actor_type: "human",
+      actor_name: "You",
+      action: "organization.role.grant",
+      target_type: "member",
+      target_id: 2,
+      result: "success",
+      reason_code: null,
+      metadata: {
+        before_admin_agent_ids: [],
+        after_admin_agent_ids: [2],
+      },
+    };
+
+    expect(parseOrganizationAudit({ events: [event] }).events[0]).toEqual(
+      event,
+    );
+    expect(() =>
+      parseOrganizationAudit({
+        events: [
+          {
+            ...event,
+            result: "failure",
+            reason_code: "invalid_request",
+            metadata: { discussion_topic: "Private" },
+          },
+        ],
+      }),
+    ).toThrow("audit event");
   });
 });
 

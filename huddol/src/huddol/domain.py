@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -179,6 +181,17 @@ class AgentExecution:
 
 
 @dataclass(frozen=True)
+class PreparedOrganizationState:
+    members: dict[int, Member]
+    discussions: dict[int, Discussion]
+    agent_execution: dict[int, AgentExecution]
+    next_member_id: int
+    next_discussion_id: int
+    persistence_data: dict[str, Any]
+    summary: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ReminderMention:
     discussion_id: int
     message_id: int
@@ -246,15 +259,19 @@ class OrganizationState:
                 for member in self._members.values()
             ):
                 raise DomainError("duplicate_name", "Member names must be unique")
-            member_id = self._next_member_id
-            self._next_member_id += 1
-            self._members[member_id] = Member(
-                id=member_id,
-                type="agent",
-                name=normalized_name,
-            )
-            self._agent_execution[member_id] = AgentExecution()
-            self._changed(persist=True)
+
+            def mutate() -> bool:
+                member_id = self._next_member_id
+                self._next_member_id += 1
+                self._members[member_id] = Member(
+                    id=member_id,
+                    type="agent",
+                    name=normalized_name,
+                )
+                self._agent_execution[member_id] = AgentExecution()
+                return True
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def rename_member(self, member_id: int, new_name: str) -> dict[str, Any]:
@@ -286,14 +303,18 @@ class OrganizationState:
                 raise DomainError("duplicate_name", "Member names must be unique")
             if member.name == normalized_name:
                 return self._snapshot()
-            self._members[member_id] = Member(
-                id=member.id,
-                type=member.type,
-                name=normalized_name,
-                deleted=member.deleted,
-                paused=member.paused,
-            )
-            self._changed(persist=True)
+
+            def mutate() -> bool:
+                self._members[member_id] = Member(
+                    id=member.id,
+                    type=member.type,
+                    name=normalized_name,
+                    deleted=member.deleted,
+                    paused=member.paused,
+                )
+                return True
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def delete_agent(self, agent_id: int) -> dict[str, Any]:
@@ -303,30 +324,34 @@ class OrganizationState:
             if execution.status == "running":
                 raise DomainError("agent_running", "Running Agents cannot be deleted")
             member = self._members[agent_id]
-            self._members[agent_id] = Member(
-                id=member.id,
-                type=member.type,
-                name=member.name,
-                deleted=True,
-                paused=member.paused,
-            )
-            for discussion in self._discussions.values():
-                for message in discussion.messages:
-                    for reference in message.references:
-                        if reference.member_id == agent_id:
-                            reference.deleted = True
-                discussion.memberships = [
-                    DiscussionMembership(
-                        member_id=membership.member_id,
-                        active=False,
-                        joined_after_message_id=membership.joined_after_message_id,
-                    )
-                    if membership.member_id == agent_id
-                    else membership
-                    for membership in discussion.memberships
-                ]
-            del self._agent_execution[agent_id]
-            self._changed(persist=True)
+
+            def mutate() -> bool:
+                self._members[agent_id] = Member(
+                    id=member.id,
+                    type=member.type,
+                    name=member.name,
+                    deleted=True,
+                    paused=member.paused,
+                )
+                for discussion in self._discussions.values():
+                    for message in discussion.messages:
+                        for reference in message.references:
+                            if reference.member_id == agent_id:
+                                reference.deleted = True
+                    discussion.memberships = [
+                        DiscussionMembership(
+                            member_id=membership.member_id,
+                            active=False,
+                            joined_after_message_id=membership.joined_after_message_id,
+                        )
+                        if membership.member_id == agent_id
+                        else membership
+                        for membership in discussion.memberships
+                    ]
+                del self._agent_execution[agent_id]
+                return True
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def pause_agent(self, agent_id: int) -> dict[str, Any]:
@@ -334,13 +359,17 @@ class OrganizationState:
             member = self._require_agent(agent_id)
             if member.paused:
                 return self._snapshot()
-            self._members[agent_id] = Member(
-                id=member.id,
-                type=member.type,
-                name=member.name,
-                paused=True,
-            )
-            self._changed(persist=True)
+
+            def mutate() -> bool:
+                self._members[agent_id] = Member(
+                    id=member.id,
+                    type=member.type,
+                    name=member.name,
+                    paused=True,
+                )
+                return True
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def resume_agent(self, agent_id: int) -> dict[str, Any]:
@@ -348,18 +377,22 @@ class OrganizationState:
             member = self._require_agent(agent_id)
             if not member.paused:
                 return self._snapshot()
-            self._members[agent_id] = Member(
-                id=member.id,
-                type=member.type,
-                name=member.name,
-            )
-            execution = self._agent_execution[agent_id]
-            if execution.status != "running":
-                execution.status = "idle"
-                execution.error = None
-                execution.acknowledged_in_turn = 0
-                execution.consecutive_unproductive_turns = 0
-            self._changed(persist=True)
+
+            def mutate() -> bool:
+                self._members[agent_id] = Member(
+                    id=member.id,
+                    type=member.type,
+                    name=member.name,
+                )
+                execution = self._agent_execution[agent_id]
+                if execution.status != "running":
+                    execution.status = "idle"
+                    execution.error = None
+                    execution.acknowledged_in_turn = 0
+                    execution.consecutive_unproductive_turns = 0
+                return True
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def create_discussion(
@@ -389,29 +422,94 @@ class OrganizationState:
                     "A Discussion requires at least two Members",
                 )
 
-            discussion_id = self._next_discussion_id
-            self._next_discussion_id += 1
-            self._discussions[discussion_id] = Discussion(
-                id=discussion_id,
-                topic=normalized_topic,
-                memberships=[
-                    DiscussionMembership(member_id=member_id)
-                    for member_id in participants
-                ],
-                human_read_states={
-                    member_id: HumanReadState(member_id)
-                    for member_id in participants
-                    if self._members[member_id].type == "human"
-                },
-            )
-            self._changed(persist=True)
+            def mutate() -> bool:
+                discussion_id = self._next_discussion_id
+                self._next_discussion_id += 1
+                self._discussions[discussion_id] = Discussion(
+                    id=discussion_id,
+                    topic=normalized_topic,
+                    memberships=[
+                        DiscussionMembership(member_id=member_id)
+                        for member_id in participants
+                    ],
+                    human_read_states={
+                        member_id: HumanReadState(member_id)
+                        for member_id in participants
+                        if self._members[member_id].type == "human"
+                    },
+                )
+                return True
+
+            self._persisted_mutation(mutate)
+            return self._snapshot()
+
+    def update_discussion_members(
+        self,
+        discussion_id: int,
+        member_ids: Iterable[int],
+    ) -> dict[str, Any]:
+        with self._condition:
+            discussion = self._require_discussion(discussion_id)
+            requested = tuple(dict.fromkeys(member_ids))
+            self._require_members(requested)
+            participants = tuple(dict.fromkeys((*self._active_human_ids(), *requested)))
+            if len(participants) < 2:
+                raise DomainError(
+                    "invalid_members",
+                    "A Discussion requires at least two Members",
+                )
+            active_ids = frozenset(participants)
+            latest_message_id = discussion.messages[-1].id if discussion.messages else 0
+
+            def mutate() -> bool:
+                changed = False
+                existing = {
+                    membership.member_id: membership
+                    for membership in discussion.memberships
+                }
+                memberships: list[DiscussionMembership] = []
+                for membership in discussion.memberships:
+                    active = membership.member_id in active_ids
+                    joined_after = membership.joined_after_message_id
+                    if active and not membership.active:
+                        joined_after = latest_message_id
+                    replacement = DiscussionMembership(
+                        member_id=membership.member_id,
+                        active=active,
+                        joined_after_message_id=joined_after,
+                    )
+                    memberships.append(replacement)
+                    changed = changed or replacement != membership
+                for member_id in participants:
+                    if member_id in existing:
+                        continue
+                    memberships.append(
+                        DiscussionMembership(
+                            member_id=member_id,
+                            joined_after_message_id=latest_message_id,
+                        )
+                    )
+                    changed = True
+                discussion.memberships = memberships
+                for member_id in participants:
+                    if self._members[member_id].type == "human":
+                        discussion.human_read_states.setdefault(
+                            member_id, HumanReadState(member_id)
+                        )
+                return changed
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def delete_discussion(self, discussion_id: int) -> dict[str, Any]:
         with self._condition:
             self._require_discussion(discussion_id)
-            del self._discussions[discussion_id]
-            self._changed(persist=True)
+
+            def mutate() -> bool:
+                del self._discussions[discussion_id]
+                return True
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def send_message(
@@ -503,53 +601,28 @@ class OrganizationState:
                 recipient_snapshot_known=True,
                 recipients=recipients,
             )
-            discussion.messages.append(message)
-            previous_sender_frontier = discussion.activity_frontiers.get(sender_id)
-            discussion.activity_frontiers[sender_id] = message.id
-            previous_execution = {
-                target_id: (
-                    self._agent_execution[target_id].status,
-                    self._agent_execution[target_id].error,
-                )
-                for target_id in agent_targets
-            }
-            previous_human_read_state = None
-            if self._members[sender_id].type == "human":
-                previous_human_read_state = discussion.human_read_states.get(sender_id)
-                state = discussion.human_read_states.setdefault(
-                    sender_id, HumanReadState(sender_id)
-                )
-                discussion.human_read_states[sender_id] = mark_human_messages_seen(
-                    state,
-                    human_member_id=sender_id,
-                    ordered_message_ids=[item.id for item in discussion.messages],
-                    message_ids=[message.id],
-                )
-            for target_id in agent_targets:
-                execution = self._agent_execution[target_id]
-                if execution.status == "error":
-                    execution.status = "idle"
-                    execution.error = None
-            try:
-                self._changed(persist=True)
-            except BaseException:
-                discussion.messages.pop()
-                if previous_sender_frontier is None:
-                    discussion.activity_frontiers.pop(sender_id, None)
-                else:
-                    discussion.activity_frontiers[sender_id] = previous_sender_frontier
+
+            def mutate() -> bool:
+                discussion.messages.append(message)
+                discussion.activity_frontiers[sender_id] = message.id
                 if self._members[sender_id].type == "human":
-                    if previous_human_read_state is None:
-                        discussion.human_read_states.pop(sender_id, None)
-                    else:
-                        discussion.human_read_states[sender_id] = (
-                            previous_human_read_state
-                        )
-                for target_id, (status, error) in previous_execution.items():
+                    state = discussion.human_read_states.setdefault(
+                        sender_id, HumanReadState(sender_id)
+                    )
+                    discussion.human_read_states[sender_id] = mark_human_messages_seen(
+                        state,
+                        human_member_id=sender_id,
+                        ordered_message_ids=[item.id for item in discussion.messages],
+                        message_ids=[message.id],
+                    )
+                for target_id in agent_targets:
                     execution = self._agent_execution[target_id]
-                    execution.status = status
-                    execution.error = error
-                raise
+                    if execution.status == "error":
+                        execution.status = "idle"
+                        execution.error = None
+                return True
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def list_members(self) -> list[dict[str, Any]]:
@@ -626,13 +699,16 @@ class OrganizationState:
                     and (end_message_id is None or message.id <= end_message_id)
                 ]
                 selected_messages = candidates[:limit]
-            self._record_message_reads_locked(
-                agent_id,
-                ((discussion_id, message.id) for message in selected_messages),
-                source="agent_discussion_read",
-                agent_run_id=None,
-                persist=True,
-            )
+
+            def mutate() -> bool:
+                return self._record_message_reads_locked(
+                    agent_id,
+                    ((discussion_id, message.id) for message in selected_messages),
+                    source="agent_discussion_read",
+                    agent_run_id=None,
+                )
+
+            self._persisted_mutation(mutate)
             return self._discussion_selection_data(discussion, selected_messages)
 
     def human_discussion_messages_page(
@@ -672,20 +748,16 @@ class OrganizationState:
     ) -> dict[str, Any]:
         with self._condition:
             self._require_member(member_id)
-            changed = self._record_message_reads_locked(
-                member_id,
-                coordinates,
-                source=source,
-                agent_run_id=agent_run_id,
-                persist=False,
-            )
-            if changed:
-                try:
-                    self._changed(persist=True)
-                except Exception:  # noqa: BLE001
-                    # The receipt is already present in memory. Preserve model-call
-                    # recovery so a later state change can retry durable persistence.
-                    self._changed(persist=False)
+
+            def mutate() -> bool:
+                return self._record_message_reads_locked(
+                    member_id,
+                    coordinates,
+                    source=source,
+                    agent_run_id=agent_run_id,
+                )
+
+            self._persisted_mutation(mutate, ignore_persistence_failure=True)
             return self._snapshot()
 
     @staticmethod
@@ -710,7 +782,6 @@ class OrganizationState:
         *,
         source: ReadReceiptSource,
         agent_run_id: str | None,
-        persist: bool,
     ) -> bool:
         targets = tuple(dict.fromkeys(coordinates))
         if not targets:
@@ -771,8 +842,6 @@ class OrganizationState:
                 if next_state != state:
                     discussion.human_read_states[member_id] = next_state
                     changed = True
-        if changed and persist:
-            self._changed(persist=True)
         return changed
 
     def see_human_messages(
@@ -788,13 +857,16 @@ class OrganizationState:
             member = self._require_member(human_id)
             if member.type != "human":
                 raise DomainError("not_a_human", "Member is not a Human")
-            self._record_message_reads_locked(
-                human_id,
-                ((discussion_id, message_id) for message_id in target_ids),
-                source="human_viewport",
-                agent_run_id=None,
-                persist=True,
-            )
+
+            def mutate() -> bool:
+                return self._record_message_reads_locked(
+                    human_id,
+                    ((discussion_id, message_id) for message_id in target_ids),
+                    source="human_viewport",
+                    agent_run_id=None,
+                )
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def mark_all_human_messages_read(
@@ -827,18 +899,20 @@ class OrganizationState:
                 ):
                     continue
                 coordinates.append((discussion_id, message.id))
-            changed = self._record_message_reads_locked(
-                human_id,
-                coordinates,
-                source="human_mark_all",
-                agent_run_id=None,
-                persist=False,
-            )
-            if through_message_id > discussion.activity_frontiers.get(human_id, 0):
-                discussion.activity_frontiers[human_id] = through_message_id
-                changed = True
-            if changed:
-                self._changed(persist=True)
+
+            def mutate() -> bool:
+                changed = self._record_message_reads_locked(
+                    human_id,
+                    coordinates,
+                    source="human_mark_all",
+                    agent_run_id=None,
+                )
+                if through_message_id > discussion.activity_frontiers.get(human_id, 0):
+                    discussion.activity_frontiers[human_id] = through_message_id
+                    changed = True
+                return changed
+
+            self._persisted_mutation(mutate)
             return self._summary_snapshot()
 
     def read_human_mention(
@@ -855,13 +929,16 @@ class OrganizationState:
                 raise DomainError(
                     "invalid_human_mention", "Message did not notify this Human"
                 )
-            self._record_message_reads_locked(
-                member_id,
-                [(discussion_id, message_id)],
-                source="human_viewport",
-                agent_run_id=None,
-                persist=True,
-            )
+
+            def mutate() -> bool:
+                return self._record_message_reads_locked(
+                    member_id,
+                    [(discussion_id, message_id)],
+                    source="human_viewport",
+                    agent_run_id=None,
+                )
+
+            self._persisted_mutation(mutate)
             return self._snapshot()
 
     def ack_human_mention(
@@ -872,9 +949,13 @@ class OrganizationState:
             if member.type != "human":
                 raise DomainError("not_a_human", "Member is not a Human")
             discussion = self._require_discussion_member(human_id, discussion_id)
-            self._ack_message_mention_locked(
-                human_id, discussion, message_id, source="human_explicit"
-            )
+
+            def mutate() -> bool:
+                return self._ack_message_mention_locked(
+                    human_id, discussion, message_id, source="human_explicit"
+                )
+
+            self._persisted_mutation(mutate)
             return self._summary_snapshot()
 
     def _ack_message_mention_locked(
@@ -884,7 +965,6 @@ class OrganizationState:
         message_id: int,
         *,
         source: AckSource,
-        persist: bool = True,
     ) -> bool:
         if message_id < 1 or message_id > len(discussion.messages):
             raise DomainError("message_not_found", "Message not found")
@@ -914,8 +994,6 @@ class OrganizationState:
         mention = message.mentions.get(member_id)
         if mention is not None:
             mention.acked = True
-        if persist:
-            self._changed(persist=True)
         return True
 
     def ack_messages(
@@ -940,21 +1018,23 @@ class OrganizationState:
                     and agent_id not in message.read_receipts
                 ):
                     raise DomainError("invalid_ack", "Message must be read before ack")
-            newly_acked = sum(
-                self._ack_message_mention_locked(
-                    agent_id,
-                    discussion,
-                    message_id,
-                    source="agent_tool",
-                    persist=False,
+
+            def mutate() -> bool:
+                newly_acked = sum(
+                    self._ack_message_mention_locked(
+                        agent_id,
+                        discussion,
+                        message_id,
+                        source="agent_tool",
+                    )
+                    for message_id in target_ids
                 )
-                for message_id in target_ids
-            )
-            execution = self._agent_execution[agent_id]
-            if execution.status == "running":
-                execution.acknowledged_in_turn += newly_acked
-            if newly_acked:
-                self._changed(persist=True)
+                execution = self._agent_execution[agent_id]
+                if execution.status == "running":
+                    execution.acknowledged_in_turn += newly_acked
+                return newly_acked > 0
+
+            self._persisted_mutation(mutate)
             return {"acked_message_ids": list(target_ids)}
 
     def search_messages(
@@ -1014,17 +1094,25 @@ class OrganizationState:
                 mentions = self._pending_reminder_mentions(member.id)
                 if not mentions:
                     continue
-                for item in mentions:
-                    mention = (
-                        self._discussions[item.discussion_id]
-                        .messages[item.message_id - 1]
-                        .mentions[member.id]
-                    )
-                    mention.reminded = True
-                execution.status = "running"
-                execution.error = None
-                execution.acknowledged_in_turn = 0
-                self._changed(persist=True)
+
+                def mutate(
+                    member_id: int = member.id,
+                    reminder_mentions: tuple[ReminderMention, ...] = mentions,
+                    agent_execution: AgentExecution = execution,
+                ) -> bool:
+                    for item in reminder_mentions:
+                        mention = (
+                            self._discussions[item.discussion_id]
+                            .messages[item.message_id - 1]
+                            .mentions[member_id]
+                        )
+                        mention.reminded = True
+                    agent_execution.status = "running"
+                    agent_execution.error = None
+                    agent_execution.acknowledged_in_turn = 0
+                    return True
+
+                self._persisted_mutation(mutate)
                 return Reminder(member.id, mentions), self._revision
             return None, self._revision
 
@@ -1075,6 +1163,49 @@ class OrganizationState:
     def wake(self) -> None:
         with self._condition:
             self._condition.notify_all()
+
+    @property
+    def current_human_member_id(self) -> int:
+        return self._current_human_member_id
+
+    @contextmanager
+    def management_guard(self) -> Iterator[None]:
+        with self._condition:
+            yield
+
+    def management_candidate(self) -> OrganizationState:
+        with self._condition:
+            return OrganizationState(
+                self._working_directory,
+                persisted=self._persistence_data(),
+                message_clock=self._message_clock,
+                current_human_member_id=self._current_human_member_id,
+            )
+
+    def prepare_management_replacement(self) -> PreparedOrganizationState:
+        with self._condition:
+            return PreparedOrganizationState(
+                members=deepcopy(self._members),
+                discussions=deepcopy(self._discussions),
+                agent_execution=deepcopy(self._agent_execution),
+                next_member_id=self._next_member_id,
+                next_discussion_id=self._next_discussion_id,
+                persistence_data=self._persistence_data(),
+                summary=self._summary_snapshot(),
+            )
+
+    def publish_management_replacement(
+        self,
+        replacement: PreparedOrganizationState,
+    ) -> dict[str, Any]:
+        with self._condition:
+            self._members = replacement.members
+            self._discussions = replacement.discussions
+            self._agent_execution = replacement.agent_execution
+            self._next_member_id = replacement.next_member_id
+            self._next_discussion_id = replacement.next_discussion_id
+            self._changed()
+            return replacement.summary
 
     def member(self, member_id: int) -> dict[str, Any]:
         with self._condition:
@@ -1930,8 +2061,46 @@ class OrganizationState:
             )
         return discussion
 
-    def _changed(self, persist: bool = False) -> None:
-        if persist and self._on_persist is not None:
-            self._on_persist(self._persistence_data())
+    def _persisted_mutation(
+        self,
+        mutation: Callable[[], bool],
+        *,
+        ignore_persistence_failure: bool = False,
+    ) -> bool:
+        before_members = deepcopy(self._members)
+        before_discussions = deepcopy(self._discussions)
+        before_agent_execution = deepcopy(self._agent_execution)
+        before_next_member_id = self._next_member_id
+        before_next_discussion_id = self._next_discussion_id
+
+        def restore() -> None:
+            self._members = before_members
+            self._discussions = before_discussions
+            self._agent_execution = before_agent_execution
+            self._next_member_id = before_next_member_id
+            self._next_discussion_id = before_next_discussion_id
+
+        try:
+            changed = mutation()
+        except BaseException:
+            restore()
+            raise
+        if not changed:
+            return False
+        try:
+            if self._on_persist is not None:
+                self._on_persist(self._persistence_data())
+        except Exception:
+            restore()
+            if ignore_persistence_failure:
+                return False
+            raise
+        except BaseException:
+            restore()
+            raise
+        self._changed()
+        return True
+
+    def _changed(self) -> None:
         self._revision += 1
         self._condition.notify_all()

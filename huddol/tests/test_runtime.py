@@ -21,30 +21,74 @@ from huddol.domain import DomainError, OrganizationState, Reminder
 from huddol.history import AgentHistory
 from huddol.host_tools import HostTools
 from huddol.memory import AgentMemory
-from huddol.operations import OrganizationOperations
+from huddol.operations import ActorContext, OrganizationOperations
 from huddol.persistence import SQLiteStore
 from huddol.runtime import AgentRunContext, AgentRunFailure, AgentRuntime
 from huddol.todos import AgentTodos
 
 
-def test_agent_organization_tool_uses_member_name_mutation_policy(
-    tmp_path: Path,
-) -> None:
+def authorization_operations(
+    state: OrganizationState, data_directory: Path
+) -> OrganizationOperations:
+    store = SQLiteStore(data_directory)
+    store.save_organization(state.prepare_management_replacement().persistence_data)
+    return OrganizationOperations(state, store)
+
+
+def test_ordinary_agent_cannot_create_agents(tmp_path: Path) -> None:
     state = OrganizationState()
     state.create_agent("Ada")
     context = AgentRunContext(
         agent_id=2,
         state=state,
         host_tools=HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
     )
 
-    with pytest.raises(DomainError) as too_long:
-        context.organization("create_agent", name="x" * 33)
-    assert too_long.value.code == "name_too_long"
+    with pytest.raises(DomainError) as denied:
+        context.organization("create_agent", name="Lin", expected_revision=0)
+    assert denied.value.code == "permission_denied"
 
-    with pytest.raises(DomainError) as too_large:
-        context.organization("create_agent", name="\U00010400" * 32 + "a")
-    assert too_large.value.code == "name_too_large"
+
+def test_member_can_create_discussion_but_only_admin_can_manage_members(
+    tmp_path: Path,
+) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Lin private", 1, [3])
+    operations = authorization_operations(state, tmp_path / "auth")
+    context = AgentRunContext(
+        agent_id=2,
+        state=state,
+        host_tools=HostTools(tmp_path),
+        operations=operations,
+    )
+
+    created = context.discussion(
+        "create",
+        topic="Ada room",
+        member_ids=[2],
+        expected_revision=0,
+    )
+    assert created == {"discussion_id": 2}
+    with pytest.raises(DomainError) as denied:
+        context.discussion(
+            "update_members",
+            discussion_id=1,
+            member_ids=[2, 3],
+            expected_revision=1,
+        )
+    assert denied.value.code == "permission_denied"
+
+    operations.grant_admin(ActorContext.current_human(state), 1, 2)
+    assert context.discussion(
+        "update_members",
+        discussion_id=1,
+        member_ids=[2, 3],
+        expected_revision=2,
+    ) == {"discussion_id": 1, "member_ids": [2, 3]}
+    assert state.discussion_info(2, 1)["id"] == 1
 
 
 def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> None:
@@ -56,15 +100,14 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
         agent_id=2,
         state=state,
         host_tools=HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
     )
 
     projections = [
-        context.organization("create_agent", name="Lin"),
         context.discussion("list"),
         context.discussion("info", discussion_id=1),
         context.discussion("search", query="private"),
         context.discussion("send", discussion_id=1, body="response metadata"),
-        context.discussion("create", topic="Another", member_ids=[1]),
     ]
     serialized = json.dumps(projections)
     assert "private request" not in serialized
@@ -105,47 +148,34 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
     }
 
 
-def test_agent_can_manage_other_agents_and_owned_discussions(tmp_path: Path) -> None:
+def test_admin_agent_can_manage_discussions_but_not_agents(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
     state = OrganizationState(
         tmp_path,
         persisted=store.load_organization(),
         on_persist=store.save_organization,
     )
-    state.create_agent("Ada")
-    state.create_agent("Lin")
-    state.create_discussion("Ada work", 1, [2])
-    state.create_discussion("Lin work", 1, [3])
-    history = AgentHistory(store)
-    todos = AgentTodos(store)
-    memories = AgentMemory(tmp_path / "data")
-    todos.create(3, "Lin work")
-    memories.write(3, "MEMORY.md", "Lin private Memory")
-    operations = OrganizationOperations(state, history, todos, memories)
+    human = ActorContext.current_human(state)
+    operations = OrganizationOperations(state, store)
+    operations.create_agent(human, 0, "Ada")
+    operations.create_agent(human, 1, "Lin")
+    operations.create_discussion(human, 2, "Ada work", [2])
+    operations.create_discussion(human, 3, "Lin work", [3])
+    operations.grant_admin(human, 4, 2)
     context = AgentRunContext(
-        2,
-        state,
-        HostTools(tmp_path),
-        operations=operations,
+        2, state, HostTools(tmp_path), run_id="run", operations=operations
     )
 
-    assert context.organization("pause_agent", agent_id=3)["status"] == "paused"
-    assert context.organization("resume_agent", agent_id=3)["status"] == "idle"
-    assert context.discussion("delete", discussion_id=1) == {
-        "discussion_id": 1,
-        "deleted": True,
-    }
-    with pytest.raises(DomainError, match="Only Discussion Members"):
-        context.discussion("delete", discussion_id=2)
-    with pytest.raises(DomainError, match="cannot delete itself"):
-        context.organization("delete_agent", agent_id=2)
-
-    assert context.organization("delete_agent", agent_id=3) == {
-        "agent_id": 3,
-        "deleted": True,
-    }
-    assert todos.list(3)["todos"] == []
-    assert memories.list(3)["paths"] == []
+    with pytest.raises(DomainError) as agent_denied:
+        context.organization("pause_agent", agent_id=3, expected_revision=5)
+    assert agent_denied.value.code == "permission_denied"
+    assert context.discussion(
+        "delete",
+        discussion_id=2,
+        expected_revision=5,
+        confirm_topic="Lin work",
+    ) == {"discussion_id": 2, "deleted": True}
+    assert context.discussion("list") == [{"id": 1, "topic": "Ada work"}]
 
 
 def test_agent_edit_tool_replaces_exact_file_content(tmp_path: Path) -> None:
@@ -273,7 +303,12 @@ def test_agent_discussion_send_derives_mentions_from_body(tmp_path: Path) -> Non
     state.create_agent("Ada")
     state.create_agent("Lin")
     state.create_discussion("Work", 1, [2, 3])
-    context = AgentRunContext(2, state, HostTools(tmp_path))
+    context = AgentRunContext(
+        2,
+        state,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
 
     result = context.discussion("send", discussion_id=1, body="@Lin please review")
 
@@ -295,17 +330,22 @@ def test_agent_discussion_tools_are_restricted_to_members(tmp_path: Path) -> Non
     state.create_discussion("Lin work", 1, [3])
     state.send_message(1, 1, "Ada context")
     state.send_message(2, 1, "Lin private context")
-    context = AgentRunContext(2, state, HostTools(tmp_path))
+    context = AgentRunContext(
+        2,
+        state,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
 
     assert context.discussion("list") == [{"id": 1, "topic": "Ada work"}]
     assert context.discussion("search", query="context") == [
         {"discussion_id": 1, "message_id": 1, "sender_id": 1}
     ]
-    with pytest.raises(DomainError, match="Only Discussion Members"):
+    with pytest.raises(DomainError, match="Resource is unavailable"):
         context.discussion("info", discussion_id=2)
-    with pytest.raises(DomainError, match="Only Discussion Members"):
+    with pytest.raises(DomainError, match="Resource is unavailable"):
         context.discussion("read", discussion_id=2)
-    with pytest.raises(DomainError, match="Only Discussion Members"):
+    with pytest.raises(DomainError, match="Resource is unavailable"):
         context.discussion("search", discussion_id=2, query="private")
 
 
@@ -365,7 +405,12 @@ def test_runtime_starts_a_follow_up_turn_for_a_new_mention(tmp_path: Path) -> No
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
     runner = FollowUpRunner()
-    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime = AgentRuntime(
+        state,
+        runner,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
     runtime.start()
 
     try:
@@ -387,7 +432,12 @@ def test_runtime_finishes_current_turn_before_pausing(tmp_path: Path) -> None:
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
     runner = FollowUpRunner()
-    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime = AgentRuntime(
+        state,
+        runner,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
     runtime.start()
 
     try:
@@ -431,7 +481,12 @@ def test_runtime_stops_after_three_turns_without_ack(tmp_path: Path) -> None:
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
     runner = UnproductiveRunner()
-    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime = AgentRuntime(
+        state,
+        runner,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
     runtime.start()
 
     try:
@@ -514,7 +569,12 @@ def test_runtime_wakes_immediately_and_completes_discussion_flow(
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
     runner = RecordingRunner()
-    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime = AgentRuntime(
+        state,
+        runner,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
     runtime.start()
 
     try:
@@ -568,7 +628,12 @@ def test_runtime_stop_terminates_running_exec_and_worker(tmp_path: Path) -> None
     state.create_discussion("Work", 1, [2])
     pid_path = tmp_path / "agent.pid"
     runner = ExecutingRunner(pid_path)
-    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime = AgentRuntime(
+        state,
+        runner,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
     runtime.start()
     state.send_message(1, 1, "@Ada Run a command")
     assert runner.started.wait(timeout=1)
@@ -620,7 +685,12 @@ def test_runtime_records_late_failure_after_ack(tmp_path: Path) -> None:
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
     runner = AckThenFailRunner()
-    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime = AgentRuntime(
+        state,
+        runner,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
     runtime.start()
 
     try:
@@ -646,7 +716,12 @@ def test_known_runner_failure_sets_error_without_immediate_retry(
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
     runner = FailingRunner()
-    runtime = AgentRuntime(state, runner, HostTools(tmp_path))
+    runtime = AgentRuntime(
+        state,
+        runner,
+        HostTools(tmp_path),
+        operations=authorization_operations(state, tmp_path / "auth"),
+    )
     runtime.start()
 
     try:

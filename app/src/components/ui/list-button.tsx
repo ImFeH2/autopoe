@@ -6,6 +6,7 @@ type ListButtonProps = Omit<
   "children"
 > & {
   action?: ReactNode;
+  actionSize?: "single" | "double";
   active?: boolean;
   meta: ReactNode;
   title: string;
@@ -13,6 +14,7 @@ type ListButtonProps = Omit<
 
 export function ListButton({
   action,
+  actionSize = "single",
   active = false,
   className = "",
   meta,
@@ -23,7 +25,7 @@ export function ListButton({
 
   return (
     <div
-      className={`ui-list-item${focusWithin ? " ui-list-item--focused" : ""}`}
+      className={`ui-list-item ui-list-item--${actionSize}-action${focusWithin ? " ui-list-item--focused" : ""}`}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) {
           setFocusWithin(false);

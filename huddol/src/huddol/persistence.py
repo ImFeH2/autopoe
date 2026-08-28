@@ -4,11 +4,12 @@ import json
 import os
 import sqlite3
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from huddol.diagnostics import log_event, log_exception
 from huddol.history import RunStatus
@@ -21,8 +22,124 @@ HUMAN_READ_STATE_SCHEMA_VERSION = 13
 MESSAGE_CREATED_AT_SCHEMA_VERSION = 14
 GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION = 15
 DELIVERY_SCHEMA_VERSION = 16
-SCHEMA_VERSION = 17
+EXECUTION_SETTINGS_SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIR"
+
+AuditAction = Literal[
+    "organization.agent.create",
+    "organization.agent.delete",
+    "organization.agent.pause",
+    "organization.agent.resume",
+    "organization.role.grant",
+    "organization.role.revoke",
+    "discussion.create",
+    "discussion.members.update",
+    "discussion.delete",
+]
+AuditActorType = Literal["human", "agent"]
+AuditTargetType = Literal["organization", "member", "discussion"]
+AuditResult = Literal["success", "failure"]
+AuditReasonCode = Literal[
+    "invalid_request",
+    "resource_unavailable",
+    "revision_conflict",
+    "invalid_target",
+    "invalid_state",
+    "persistence_failure",
+]
+
+AUDIT_ACTIONS = (
+    "organization.agent.create",
+    "organization.agent.delete",
+    "organization.agent.pause",
+    "organization.agent.resume",
+    "organization.role.grant",
+    "organization.role.revoke",
+    "discussion.create",
+    "discussion.members.update",
+    "discussion.delete",
+)
+AUDIT_ACTOR_TYPES = ("human", "agent")
+AUDIT_TARGET_TYPES = ("organization", "member", "discussion")
+AUDIT_RESULTS = ("success", "failure")
+AUDIT_REASON_CODES = (
+    "invalid_request",
+    "resource_unavailable",
+    "revision_conflict",
+    "invalid_target",
+    "invalid_state",
+    "persistence_failure",
+)
+AUDIT_METADATA_KEYS = frozenset(
+    {
+        "discussion_topic",
+        "member_ids",
+        "member_count",
+        "message_count",
+        "latest_message_id",
+        "last_activity_at",
+        "before_admin_agent_ids",
+        "after_admin_agent_ids",
+        "before_agent_member_ids",
+        "after_agent_member_ids",
+    }
+)
+_AUDIT_ID_LIST_KEYS = frozenset(
+    {
+        "member_ids",
+        "before_admin_agent_ids",
+        "after_admin_agent_ids",
+        "before_agent_member_ids",
+        "after_agent_member_ids",
+    }
+)
+_AUDIT_COUNT_KEYS = frozenset({"member_count", "message_count", "latest_message_id"})
+
+
+@dataclass(frozen=True)
+class OrganizationAdminAssignment:
+    agent_id: int
+    granted_at: str
+    granted_by_human_id: int
+
+
+@dataclass(frozen=True)
+class OrganizationAuditEvent:
+    occurred_at: str
+    actor_id: int | None
+    actor_type: AuditActorType | None
+    actor_name: str | None
+    action: AuditAction
+    target_type: AuditTargetType
+    target_id: int
+    result: AuditResult
+    reason_code: AuditReasonCode | None = None
+    metadata: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class PersistedOrganizationAuditEvent:
+    id: int
+    event: OrganizationAuditEvent
+
+
+@dataclass(frozen=True)
+class OrganizationAuthorizationState:
+    management_revision: int
+    admin_assignments: tuple[OrganizationAdminAssignment, ...]
+
+
+class AuthorizationDataError(RuntimeError):
+    pass
+
+
+class ManagementRevisionConflict(RuntimeError):
+    pass
+
+
+class AuditUnavailableError(RuntimeError):
+    pass
 
 
 def data_directory() -> Path:
@@ -39,6 +156,170 @@ def organization_metrics(organization: dict[str, Any]) -> dict[str, int]:
         "discussion_count": len(discussions),
         "message_count": sum(len(item["messages"]) for item in discussions),
     }
+
+
+def _positive_integer(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise AuthorizationDataError(f"{label} must be a positive integer")
+    return value
+
+
+def _nonnegative_integer(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise AuthorizationDataError(f"{label} must be a nonnegative integer")
+    return value
+
+
+def _utc_timestamp(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise AuthorizationDataError(f"{label} must be a UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise AuthorizationDataError(f"{label} must be a UTC timestamp") from error
+    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise AuthorizationDataError(f"{label} must be a UTC timestamp")
+    return value
+
+
+def _audit_metadata(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise AuthorizationDataError("Organization audit metadata must be an object")
+    unknown = set(value) - AUDIT_METADATA_KEYS
+    if unknown:
+        raise AuthorizationDataError(
+            "Organization audit metadata contains unsupported fields: "
+            + ", ".join(sorted(str(item) for item in unknown))
+        )
+    normalized: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise AuthorizationDataError(
+                "Organization audit metadata keys must be strings"
+            )
+        if key == "discussion_topic":
+            if not isinstance(item, str):
+                raise AuthorizationDataError(
+                    "Organization audit discussion_topic must be text"
+                )
+            normalized[key] = item
+        elif key == "last_activity_at":
+            normalized[key] = (
+                None
+                if item is None
+                else _utc_timestamp(item, "Organization audit last_activity_at")
+            )
+        elif key in _AUDIT_COUNT_KEYS:
+            normalized[key] = _nonnegative_integer(item, f"Organization audit {key}")
+        elif key in _AUDIT_ID_LIST_KEYS:
+            if isinstance(item, (str, bytes)) or not isinstance(item, Sequence):
+                raise AuthorizationDataError(
+                    f"Organization audit {key} must be an ID list"
+                )
+            ids = tuple(
+                _positive_integer(member_id, f"Organization audit {key} item")
+                for member_id in item
+            )
+            if len(ids) != len(set(ids)):
+                raise AuthorizationDataError(
+                    f"Organization audit {key} must not contain duplicates"
+                )
+            normalized[key] = list(ids)
+    return normalized
+
+
+def _canonical_audit_metadata_json(metadata: Mapping[str, object]) -> str:
+    return json.dumps(
+        metadata,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _load_audit_metadata_json(value: object) -> dict[str, object]:
+    if not isinstance(value, str):
+        raise AuthorizationDataError(
+            "Persisted Organization audit metadata JSON is invalid"
+        )
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise AuthorizationDataError(
+                    "Persisted Organization audit metadata contains duplicate keys"
+                )
+            result[key] = item
+        return result
+
+    try:
+        parsed = json.loads(
+            value,
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                AuthorizationDataError(
+                    "Persisted Organization audit metadata JSON is invalid"
+                )
+            ),
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise AuthorizationDataError(
+            "Persisted Organization audit metadata JSON is invalid"
+        ) from error
+    metadata = _audit_metadata(parsed)
+    if _canonical_audit_metadata_json(metadata) != value:
+        raise AuthorizationDataError(
+            "Persisted Organization audit metadata JSON is not canonical"
+        )
+    return metadata
+
+
+def _validated_audit_event(event: OrganizationAuditEvent) -> OrganizationAuditEvent:
+    occurred_at = _utc_timestamp(event.occurred_at, "Organization audit occurred_at")
+    if event.action not in AUDIT_ACTIONS:
+        raise AuthorizationDataError("Organization audit action is invalid")
+    if event.target_type not in AUDIT_TARGET_TYPES:
+        raise AuthorizationDataError("Organization audit target type is invalid")
+    target_id = _positive_integer(event.target_id, "Organization audit target_id")
+    if event.result not in AUDIT_RESULTS:
+        raise AuthorizationDataError("Organization audit result is invalid")
+    if event.reason_code is not None and event.reason_code not in AUDIT_REASON_CODES:
+        raise AuthorizationDataError("Organization audit reason code is invalid")
+    metadata = _audit_metadata({} if event.metadata is None else event.metadata)
+    if event.result == "failure" and metadata:
+        raise AuthorizationDataError(
+            "Organization failure audit metadata must be empty"
+        )
+    if event.actor_id is None:
+        if event.actor_type is not None or event.actor_name is not None:
+            raise AuthorizationDataError(
+                "Organization audit anonymous actor fields are invalid"
+            )
+        actor_id = None
+        actor_type = None
+        actor_name = None
+    else:
+        actor_id = _positive_integer(event.actor_id, "Organization audit actor_id")
+        if event.actor_type not in AUDIT_ACTOR_TYPES:
+            raise AuthorizationDataError("Organization audit actor type is invalid")
+        if not isinstance(event.actor_name, str) or not event.actor_name:
+            raise AuthorizationDataError("Organization audit actor name is invalid")
+        actor_type = event.actor_type
+        actor_name = event.actor_name
+    return OrganizationAuditEvent(
+        occurred_at=occurred_at,
+        actor_id=actor_id,
+        actor_type=actor_type,
+        actor_name=actor_name,
+        action=event.action,
+        target_type=event.target_type,
+        target_id=target_id,
+        result=event.result,
+        reason_code=event.reason_code,
+        metadata=metadata,
+    )
 
 
 class SQLiteStore:
@@ -75,6 +356,7 @@ class SQLiteStore:
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
                     self._migrate_version_sixteen(connection)
+                    self._migrate_version_seventeen(connection)
                 elif version == LEGACY_SCHEMA_VERSION:
                     self._migrate_version_eleven(connection)
                     self._migrate_version_twelve(connection)
@@ -82,30 +364,39 @@ class SQLiteStore:
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
                     self._migrate_version_sixteen(connection)
+                    self._migrate_version_seventeen(connection)
                 elif version == MESSAGE_IDENTITY_SCHEMA_VERSION:
                     self._migrate_version_twelve(connection)
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
                     self._migrate_version_sixteen(connection)
+                    self._migrate_version_seventeen(connection)
                 elif version == HUMAN_READ_STATE_SCHEMA_VERSION:
                     self._migrate_version_thirteen(connection)
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
                     self._migrate_version_sixteen(connection)
+                    self._migrate_version_seventeen(connection)
                 elif version == MESSAGE_CREATED_AT_SCHEMA_VERSION:
                     self._migrate_version_fourteen(connection)
                     self._migrate_version_fifteen(connection)
                     self._migrate_version_sixteen(connection)
+                    self._migrate_version_seventeen(connection)
                 elif version == GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION:
                     self._migrate_version_fifteen(connection)
                     self._migrate_version_sixteen(connection)
+                    self._migrate_version_seventeen(connection)
                 elif version == DELIVERY_SCHEMA_VERSION:
                     self._migrate_version_sixteen(connection)
+                    self._migrate_version_seventeen(connection)
+                elif version == EXECUTION_SETTINGS_SCHEMA_VERSION:
+                    self._migrate_version_seventeen(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Huddol database version: {version}"
                     )
+                self._validate_authorization_storage(connection)
                 interrupted_runs = self._interrupt_running_agent_runs(connection)
                 orphaned_todos = self._delete_orphaned_agent_todos(connection)
             self.path.chmod(0o600)
@@ -139,6 +430,9 @@ class SQLiteStore:
         finally:
             connection.close()
 
+    def _preflight_database_permissions(self) -> None:
+        self.path.chmod(0o600)
+
     @staticmethod
     @contextmanager
     def _migration_transaction(connection: sqlite3.Connection) -> Iterator[None]:
@@ -166,7 +460,9 @@ class SQLiteStore:
             CREATE TABLE application_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 organization_saved INTEGER NOT NULL DEFAULT 0
-                    CHECK (organization_saved IN (0, 1))
+                    CHECK (organization_saved IN (0, 1)),
+                management_revision INTEGER NOT NULL DEFAULT 0
+                    CHECK (management_revision >= 0)
             )
             """,
             """
@@ -263,6 +559,85 @@ class SQLiteStore:
         SQLiteStore._create_human_mention_notifications_table(connection)
         SQLiteStore._create_human_read_state_tables(connection)
         SQLiteStore._create_delivery_tables(connection)
+        SQLiteStore._create_authorization_tables(connection)
+
+    @staticmethod
+    def _create_authorization_tables(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS organization_admin_assignments (
+                agent_id INTEGER PRIMARY KEY CHECK (agent_id > 0),
+                granted_at TEXT NOT NULL,
+                granted_by_human_id INTEGER NOT NULL
+                    CHECK (granted_by_human_id > 0)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS organization_audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at TEXT NOT NULL,
+                actor_id INTEGER,
+                actor_type TEXT CHECK (
+                    actor_type IS NULL OR actor_type IN ('human', 'agent')
+                ),
+                actor_name TEXT,
+                action TEXT NOT NULL CHECK (action IN (
+                    'organization.agent.create',
+                    'organization.agent.delete',
+                    'organization.agent.pause',
+                    'organization.agent.resume',
+                    'organization.role.grant',
+                    'organization.role.revoke',
+                    'discussion.create',
+                    'discussion.members.update',
+                    'discussion.delete'
+                )),
+                target_type TEXT NOT NULL CHECK (
+                    target_type IN ('organization', 'member', 'discussion')
+                ),
+                target_id INTEGER NOT NULL CHECK (target_id > 0),
+                result TEXT NOT NULL CHECK (result IN ('success', 'failure')),
+                reason_code TEXT CHECK (reason_code IS NULL OR reason_code IN (
+                    'invalid_request',
+                    'resource_unavailable',
+                    'revision_conflict',
+                    'invalid_target',
+                    'invalid_state',
+                    'persistence_failure'
+                )),
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                CHECK (
+                    (actor_id IS NULL AND actor_type IS NULL AND actor_name IS NULL)
+                    OR (
+                        actor_id > 0
+                        AND actor_type IS NOT NULL
+                        AND actor_name IS NOT NULL
+                        AND length(actor_name) > 0
+                    )
+                )
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS organization_audit_events_no_update
+            BEFORE UPDATE ON organization_audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'organization audit events are append-only');
+            END
+            """
+        )
+        connection.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS organization_audit_events_no_delete
+            BEFORE DELETE ON organization_audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'organization audit events are append-only');
+            END
+            """
+        )
 
     @staticmethod
     def _create_delivery_tables(connection: sqlite3.Connection) -> None:
@@ -1024,6 +1399,26 @@ class SQLiteStore:
                 )
                 """
             )
+            connection.execute(
+                f"PRAGMA user_version = {EXECUTION_SETTINGS_SCHEMA_VERSION}"
+            )
+
+    @staticmethod
+    def _migrate_version_seventeen(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(application_state)")
+            }
+            if "management_revision" not in columns:
+                connection.execute(
+                    """
+                    ALTER TABLE application_state
+                    ADD COLUMN management_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK (management_revision >= 0)
+                    """
+                )
+            SQLiteStore._create_authorization_tables(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -1231,6 +1626,303 @@ class SQLiteStore:
                 }
             )
         return {"members": members, "discussions": discussions}
+
+    @staticmethod
+    def _member_rows_by_id(
+        connection: sqlite3.Connection,
+    ) -> dict[int, sqlite3.Row]:
+        return {
+            row["id"]: row
+            for row in connection.execute(
+                "SELECT id, type, name, deleted FROM members ORDER BY id"
+            )
+        }
+
+    @staticmethod
+    def _organization_members_by_id(
+        organization: Mapping[str, object],
+    ) -> dict[int, Mapping[str, object]]:
+        members = organization.get("members")
+        if isinstance(members, (str, bytes)) or not isinstance(members, Sequence):
+            raise AuthorizationDataError("Organization members are invalid")
+        result: dict[int, Mapping[str, object]] = {}
+        for member in members:
+            if not isinstance(member, Mapping):
+                raise AuthorizationDataError("Organization member is invalid")
+            member_id = _positive_integer(member.get("id"), "Organization member id")
+            if member_id in result:
+                raise AuthorizationDataError("Organization member IDs must be unique")
+            member_type = member.get("type")
+            if member_type not in ("human", "agent"):
+                raise AuthorizationDataError("Organization member type is invalid")
+            deleted = member.get("deleted", False)
+            if not isinstance(deleted, bool):
+                raise AuthorizationDataError(
+                    "Organization member deleted state is invalid"
+                )
+            result[member_id] = {
+                "id": member_id,
+                "type": member_type,
+                "deleted": deleted,
+            }
+        return result
+
+    @staticmethod
+    def _validated_admin_assignments(
+        assignments: Sequence[OrganizationAdminAssignment],
+        members: Mapping[int, Mapping[str, object] | sqlite3.Row],
+    ) -> tuple[OrganizationAdminAssignment, ...]:
+        validated: list[OrganizationAdminAssignment] = []
+        seen: set[int] = set()
+        for assignment in assignments:
+            agent_id = _positive_integer(
+                assignment.agent_id, "Organization Admin assignment agent_id"
+            )
+            if agent_id in seen:
+                raise AuthorizationDataError(
+                    "Organization Admin assignments contain duplicates"
+                )
+            seen.add(agent_id)
+            agent = members.get(agent_id)
+            if agent is None or agent["type"] != "agent" or bool(agent["deleted"]):
+                raise AuthorizationDataError(
+                    "Organization Admin assignment target must be an active Agent"
+                )
+            granter_id = _positive_integer(
+                assignment.granted_by_human_id,
+                "Organization Admin assignment granted_by_human_id",
+            )
+            granter = members.get(granter_id)
+            if granter is None or granter["type"] != "human":
+                raise AuthorizationDataError(
+                    "Organization Admin assignment granter must be a Human"
+                )
+            validated.append(
+                OrganizationAdminAssignment(
+                    agent_id=agent_id,
+                    granted_at=_utc_timestamp(
+                        assignment.granted_at,
+                        "Organization Admin assignment granted_at",
+                    ),
+                    granted_by_human_id=granter_id,
+                )
+            )
+        return tuple(sorted(validated, key=lambda item: item.agent_id))
+
+    @classmethod
+    def _load_admin_assignments(
+        cls,
+        connection: sqlite3.Connection,
+    ) -> tuple[OrganizationAdminAssignment, ...]:
+        assignments = tuple(
+            OrganizationAdminAssignment(
+                agent_id=row["agent_id"],
+                granted_at=row["granted_at"],
+                granted_by_human_id=row["granted_by_human_id"],
+            )
+            for row in connection.execute(
+                """
+                SELECT agent_id, granted_at, granted_by_human_id
+                FROM organization_admin_assignments ORDER BY agent_id
+                """
+            )
+        )
+        return cls._validated_admin_assignments(
+            assignments,
+            cls._member_rows_by_id(connection),
+        )
+
+    @staticmethod
+    def _audit_event_from_row(row: sqlite3.Row) -> PersistedOrganizationAuditEvent:
+        event_id = _positive_integer(row["id"], "Organization audit event id")
+        event = _validated_audit_event(
+            OrganizationAuditEvent(
+                occurred_at=row["occurred_at"],
+                actor_id=row["actor_id"],
+                actor_type=row["actor_type"],
+                actor_name=row["actor_name"],
+                action=row["action"],
+                target_type=row["target_type"],
+                target_id=row["target_id"],
+                result=row["result"],
+                reason_code=row["reason_code"],
+                metadata=_load_audit_metadata_json(row["metadata_json"]),
+            )
+        )
+        return PersistedOrganizationAuditEvent(event_id, event)
+
+    @classmethod
+    def _load_audit_events(
+        cls,
+        connection: sqlite3.Connection,
+    ) -> tuple[PersistedOrganizationAuditEvent, ...]:
+        return tuple(
+            cls._audit_event_from_row(row)
+            for row in connection.execute(
+                """
+                SELECT id, occurred_at, actor_id, actor_type, actor_name, action,
+                    target_type, target_id, result, reason_code, metadata_json
+                FROM organization_audit_events ORDER BY id
+                """
+            )
+        )
+
+    @classmethod
+    def _validate_authorization_storage(
+        cls,
+        connection: sqlite3.Connection,
+    ) -> None:
+        row = connection.execute(
+            "SELECT management_revision FROM application_state WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            raise AuthorizationDataError(
+                "Persisted Organization application state is missing"
+            )
+        _nonnegative_integer(
+            row["management_revision"], "Organization management revision"
+        )
+        cls._load_admin_assignments(connection)
+        cls._load_audit_events(connection)
+
+    def load_authorization_state(self) -> OrganizationAuthorizationState:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT management_revision FROM application_state WHERE id = 1"
+            ).fetchone()
+            if row is None:
+                raise AuthorizationDataError(
+                    "Persisted Organization application state is missing"
+                )
+            revision = _nonnegative_integer(
+                row["management_revision"], "Organization management revision"
+            )
+            assignments = self._load_admin_assignments(connection)
+        return OrganizationAuthorizationState(revision, assignments)
+
+    def load_audit_events(self) -> tuple[PersistedOrganizationAuditEvent, ...]:
+        with self._connect() as connection:
+            return self._load_audit_events(connection)
+
+    @staticmethod
+    def _replace_admin_assignments(
+        connection: sqlite3.Connection,
+        assignments: Sequence[OrganizationAdminAssignment],
+    ) -> None:
+        connection.execute("DELETE FROM organization_admin_assignments")
+        connection.executemany(
+            """
+            INSERT INTO organization_admin_assignments
+                (agent_id, granted_at, granted_by_human_id)
+            VALUES (?, ?, ?)
+            """,
+            (
+                (
+                    assignment.agent_id,
+                    assignment.granted_at,
+                    assignment.granted_by_human_id,
+                )
+                for assignment in assignments
+            ),
+        )
+
+    @staticmethod
+    def _insert_audit_event(
+        connection: sqlite3.Connection,
+        event: OrganizationAuditEvent,
+    ) -> int:
+        validated = _validated_audit_event(event)
+        cursor = connection.execute(
+            """
+            INSERT INTO organization_audit_events (
+                occurred_at, actor_id, actor_type, actor_name, action,
+                target_type, target_id, result, reason_code, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                validated.occurred_at,
+                validated.actor_id,
+                validated.actor_type,
+                validated.actor_name,
+                validated.action,
+                validated.target_type,
+                validated.target_id,
+                validated.result,
+                validated.reason_code,
+                _canonical_audit_metadata_json(validated.metadata or {}),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+    def append_failure_audit(self, event: OrganizationAuditEvent) -> int:
+        validated = _validated_audit_event(event)
+        if validated.result != "failure":
+            raise AuthorizationDataError(
+                "Failure audit append requires a failure result"
+            )
+        self._preflight_database_permissions()
+        try:
+            with self._connect() as connection, connection:
+                event_id = self._insert_audit_event(connection, validated)
+        except sqlite3.Error as error:
+            raise AuditUnavailableError(
+                "Organization audit store is unavailable"
+            ) from error
+        return event_id
+
+    def commit_management_mutation(
+        self,
+        *,
+        expected_revision: int,
+        organization: dict[str, Any],
+        admin_assignments: Sequence[OrganizationAdminAssignment],
+        audit_event: OrganizationAuditEvent,
+    ) -> int:
+        expected = _nonnegative_integer(
+            expected_revision, "Expected Organization management revision"
+        )
+        members = self._organization_members_by_id(organization)
+        assignments = self._validated_admin_assignments(admin_assignments, members)
+        event = _validated_audit_event(audit_event)
+        if event.result != "success":
+            raise AuthorizationDataError(
+                "Management mutation requires a success audit event"
+            )
+        self._preflight_database_permissions()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = connection.execute(
+                    """
+                    UPDATE application_state
+                    SET management_revision = management_revision + 1
+                    WHERE id = 1 AND management_revision = ?
+                    """,
+                    (expected,),
+                )
+                if cursor.rowcount != 1:
+                    raise ManagementRevisionConflict(
+                        "Organization management revision is stale"
+                    )
+                connection.execute(
+                    "UPDATE application_state SET organization_saved = 1 WHERE id = 1"
+                )
+                connection.execute("DELETE FROM discussions")
+                connection.execute("DELETE FROM members")
+                self._write_organization(connection, organization)
+                self._replace_admin_assignments(connection, assignments)
+                try:
+                    self._insert_audit_event(connection, event)
+                except sqlite3.Error as error:
+                    raise AuditUnavailableError(
+                        "Organization audit store is unavailable"
+                    ) from error
+            except BaseException:
+                connection.rollback()
+                raise
+            else:
+                connection.commit()
+        return expected + 1
 
     def load_organization(self) -> dict[str, Any] | None:
         started = time.monotonic()
@@ -1460,6 +2152,7 @@ class SQLiteStore:
 
     def save_organization(self, organization: dict[str, Any]) -> None:
         started = time.monotonic()
+        self._preflight_database_permissions()
         with self._connect() as connection, connection:
             connection.execute(
                 "UPDATE application_state SET organization_saved = 1 WHERE id = 1"
@@ -1467,7 +2160,6 @@ class SQLiteStore:
             connection.execute("DELETE FROM discussions")
             connection.execute("DELETE FROM members")
             self._write_organization(connection, organization)
-        self.path.chmod(0o600)
         log_event(
             "database.organization.saved",
             duration_ms=round((time.monotonic() - started) * 1000),

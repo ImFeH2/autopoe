@@ -92,7 +92,13 @@ def main(
             on_configure=store.save_model_config,
             on_configure_observability=store.save_observability_config,
         )
-        operations = OrganizationOperations(state, history, todos, memories)
+        operations = OrganizationOperations(
+            state,
+            store,
+            history=history,
+            todos=todos,
+            memories=memories,
+        )
         runtime = AgentRuntime(
             state,
             model_runtime,

@@ -319,6 +319,59 @@ export type ExecutionSettingsUpdate = {
   backend: ExecutionBackend;
 };
 
+export type OrganizationRole = "super_admin" | "admin" | "member";
+
+export type OrganizationCapability =
+  | "organization.agent.manage"
+  | "organization.role.manage"
+  | "organization.members.read"
+  | "organization.permissions.read"
+  | "organization.metadata.read"
+  | "organization.audit.read"
+  | "organization.audit.read_own"
+  | "discussion.create"
+  | "discussion.manage";
+
+export type OrganizationPermissions = {
+  management_revision: number;
+  member_id: number;
+  role: OrganizationRole;
+  capabilities: OrganizationCapability[];
+  admin_agent_ids: number[];
+};
+
+export type OrganizationAuditEvent = {
+  id: number;
+  occurred_at: string;
+  actor_id: number | null;
+  actor_type: "human" | "agent" | null;
+  actor_name: string | null;
+  action:
+    | "organization.agent.create"
+    | "organization.agent.delete"
+    | "organization.agent.pause"
+    | "organization.agent.resume"
+    | "organization.role.grant"
+    | "organization.role.revoke"
+    | "discussion.create"
+    | "discussion.members.update"
+    | "discussion.delete";
+  target_type: "organization" | "member" | "discussion";
+  target_id: number;
+  result: "success" | "failure";
+  reason_code:
+    | "invalid_request"
+    | "resource_unavailable"
+    | "revision_conflict"
+    | "invalid_target"
+    | "invalid_state"
+    | "persistence_failure"
+    | null;
+  metadata: Record<string, unknown>;
+};
+
+export type OrganizationAudit = { events: OrganizationAuditEvent[] };
+
 export type ModelApiType =
   | "openai-chat"
   | "openai-responses"
@@ -2045,10 +2098,216 @@ async function organizationRequest(
   return parseOrganizationSnapshot(await request(method, params));
 }
 
+const organizationCapabilities = new Set<OrganizationCapability>([
+  "organization.agent.manage",
+  "organization.role.manage",
+  "organization.members.read",
+  "organization.permissions.read",
+  "organization.metadata.read",
+  "organization.audit.read",
+  "organization.audit.read_own",
+  "discussion.create",
+  "discussion.manage",
+]);
+const organizationAuditActions = new Set<OrganizationAuditEvent["action"]>([
+  "organization.agent.create",
+  "organization.agent.delete",
+  "organization.agent.pause",
+  "organization.agent.resume",
+  "organization.role.grant",
+  "organization.role.revoke",
+  "discussion.create",
+  "discussion.members.update",
+  "discussion.delete",
+]);
+const organizationAuditReasons = new Set<
+  Exclude<OrganizationAuditEvent["reason_code"], null>
+>([
+  "invalid_request",
+  "resource_unavailable",
+  "revision_conflict",
+  "invalid_target",
+  "invalid_state",
+  "persistence_failure",
+]);
+const organizationAuditMetadataKeys = new Set([
+  "discussion_topic",
+  "member_ids",
+  "member_count",
+  "message_count",
+  "latest_message_id",
+  "last_activity_at",
+  "before_admin_agent_ids",
+  "after_admin_agent_ids",
+  "before_agent_member_ids",
+  "after_agent_member_ids",
+]);
+
+function managementRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function managementInteger(value: unknown, label: string, minimum: number) {
+  if (!Number.isSafeInteger(value) || Number(value) < minimum) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return Number(value);
+}
+
+export function parseOrganizationPermissions(
+  value: unknown,
+): OrganizationPermissions {
+  const item = managementRecord(value, "organization permissions");
+  if (
+    item.role !== "super_admin" &&
+    item.role !== "admin" &&
+    item.role !== "member"
+  ) {
+    throw new Error("Invalid organization permissions role");
+  }
+  if (
+    !Array.isArray(item.capabilities) ||
+    !Array.isArray(item.admin_agent_ids)
+  ) {
+    throw new Error("Invalid organization permissions lists");
+  }
+  const capabilities = item.capabilities.map((capability) => {
+    if (
+      typeof capability !== "string" ||
+      !organizationCapabilities.has(capability as OrganizationCapability)
+    ) {
+      throw new Error("Invalid organization capability");
+    }
+    return capability as OrganizationCapability;
+  });
+  const adminAgentIds = item.admin_agent_ids.map((memberId) =>
+    managementInteger(memberId, "Admin Agent ID", 1),
+  );
+  if (
+    new Set(capabilities).size !== capabilities.length ||
+    new Set(adminAgentIds).size !== adminAgentIds.length ||
+    (item.role !== "super_admin" && adminAgentIds.length > 0)
+  ) {
+    throw new Error("Invalid organization permissions membership");
+  }
+  return {
+    management_revision: managementInteger(
+      item.management_revision,
+      "management revision",
+      0,
+    ),
+    member_id: managementInteger(item.member_id, "permission member ID", 1),
+    role: item.role,
+    capabilities,
+    admin_agent_ids: adminAgentIds,
+  };
+}
+
+export function parseOrganizationAudit(value: unknown): OrganizationAudit {
+  const root = managementRecord(value, "organization audit");
+  if (!Array.isArray(root.events)) {
+    throw new Error("Invalid organization audit events");
+  }
+  const events = root.events.map((value) => {
+    const item = managementRecord(value, "organization audit event");
+    const metadata = managementRecord(
+      item.metadata,
+      "organization audit metadata",
+    );
+    if (
+      typeof item.occurred_at !== "string" ||
+      !Number.isFinite(Date.parse(item.occurred_at)) ||
+      typeof item.action !== "string" ||
+      !organizationAuditActions.has(
+        item.action as OrganizationAuditEvent["action"],
+      ) ||
+      (item.target_type !== "organization" &&
+        item.target_type !== "member" &&
+        item.target_type !== "discussion") ||
+      (item.result !== "success" && item.result !== "failure") ||
+      (item.reason_code !== null &&
+        (typeof item.reason_code !== "string" ||
+          !organizationAuditReasons.has(
+            item.reason_code as Exclude<
+              OrganizationAuditEvent["reason_code"],
+              null
+            >,
+          ))) ||
+      (item.result === "success" && item.reason_code !== null) ||
+      (item.result === "failure" && item.reason_code === null) ||
+      Object.keys(metadata).some(
+        (key) => !organizationAuditMetadataKeys.has(key),
+      ) ||
+      (item.result === "failure" && Object.keys(metadata).length > 0)
+    ) {
+      throw new Error("Invalid organization audit event");
+    }
+    const anonymous = item.actor_id === null;
+    let actorId: number | null = null;
+    if (anonymous) {
+      if (item.actor_type !== null || item.actor_name !== null) {
+        throw new Error("Invalid organization audit actor");
+      }
+    } else {
+      actorId = managementInteger(item.actor_id, "audit actor ID", 1);
+      if (
+        (item.actor_type !== "human" && item.actor_type !== "agent") ||
+        typeof item.actor_name !== "string" ||
+        !item.actor_name
+      ) {
+        throw new Error("Invalid organization audit actor");
+      }
+    }
+    return {
+      id: managementInteger(item.id, "audit event ID", 1),
+      occurred_at: item.occurred_at,
+      actor_id: actorId,
+      actor_type: item.actor_type as "human" | "agent" | null,
+      actor_name: item.actor_name as string | null,
+      action: item.action as OrganizationAuditEvent["action"],
+      target_type: item.target_type,
+      target_id: managementInteger(item.target_id, "audit target ID", 1),
+      result: item.result,
+      reason_code: item.reason_code as OrganizationAuditEvent["reason_code"],
+      metadata: { ...metadata },
+    } satisfies OrganizationAuditEvent;
+  });
+  if (new Set(events.map((event) => event.id)).size !== events.length) {
+    throw new Error("Invalid organization audit event IDs");
+  }
+  return { events };
+}
+
+async function currentManagementRevision(): Promise<number> {
+  return parseOrganizationPermissions(
+    await request("organization.permissions.get"),
+  ).management_revision;
+}
+
+async function managementOrganizationRequest(
+  method: string,
+  params: Record<string, unknown>,
+): Promise<OrganizationSnapshot> {
+  return organizationRequest(method, {
+    ...params,
+    expected_revision: await currentManagementRevision(),
+  });
+}
+
 export const backend = {
   getOrganization: () => organizationRequest("organization.get"),
+  getPermissions: async () =>
+    parseOrganizationPermissions(await request("organization.permissions.get")),
+  getAudit: async () =>
+    parseOrganizationAudit(await request("organization.audit.get")),
   getDiscussionMessagesPage: async (
-    currentHumanMemberId: number,
+    _currentHumanMemberId: number,
     discussionId: number,
     members: Member[],
     cursor: {
@@ -2060,7 +2319,6 @@ export const backend = {
   ) =>
     parseDiscussionMessagePage(
       await request("human.discussion.messages.page", {
-        human_id: currentHumanMemberId,
         discussion_id: discussionId,
         limit,
         ...cursor,
@@ -2153,73 +2411,96 @@ export const backend = {
       }
     }),
   createAgent: (name: string) =>
-    organizationRequest("organization.create_agent", { name }),
+    managementOrganizationRequest("organization.create_agent", { name }),
+  grantAdmin: (agentId: number, expectedRevision: number) =>
+    organizationRequest("organization.grant_admin", {
+      agent_id: agentId,
+      expected_revision: expectedRevision,
+    }),
+  revokeAdmin: (agentId: number, expectedRevision: number) =>
+    organizationRequest("organization.revoke_admin", {
+      agent_id: agentId,
+      expected_revision: expectedRevision,
+    }),
   renameMember: (memberId: number, name: string) =>
     organizationRequest("organization.rename_member", {
       member_id: memberId,
       name,
     }),
   deleteAgent: (agentId: number) =>
-    organizationRequest("organization.delete_agent", { agent_id: agentId }),
+    managementOrganizationRequest("organization.delete_agent", {
+      agent_id: agentId,
+    }),
   pauseAgent: (agentId: number) =>
-    organizationRequest("organization.pause_agent", { agent_id: agentId }),
+    managementOrganizationRequest("organization.pause_agent", {
+      agent_id: agentId,
+    }),
   resumeAgent: (agentId: number) =>
-    organizationRequest("organization.resume_agent", { agent_id: agentId }),
+    managementOrganizationRequest("organization.resume_agent", {
+      agent_id: agentId,
+    }),
   createDiscussion: (
-    currentHumanMemberId: number,
+    _currentHumanMemberId: number,
     topic: string,
     memberIds: number[],
   ) =>
-    organizationRequest("discussion.create", {
+    managementOrganizationRequest("discussion.create", {
       topic,
-      creator_id: currentHumanMemberId,
       member_ids: memberIds,
     }),
-  deleteDiscussion: (discussionId: number) =>
-    organizationRequest("discussion.delete", { discussion_id: discussionId }),
+  updateDiscussionMembers: (discussionId: number, memberIds: number[]) =>
+    managementOrganizationRequest("discussion.members.update", {
+      discussion_id: discussionId,
+      member_ids: memberIds,
+    }),
+  deleteDiscussion: async (discussionId: number, confirmTopic: string) =>
+    organizationRequest("discussion.delete", {
+      discussion_id: discussionId,
+      expected_revision: await currentManagementRevision(),
+      confirm_topic: confirmTopic,
+    }),
   sendMessage: (
-    currentHumanMemberId: number,
+    _currentHumanMemberId: number,
     discussionId: number,
     body: string,
   ) =>
     organizationRequest("discussion.send", {
       discussion_id: discussionId,
-      sender_id: currentHumanMemberId,
       body,
     }),
   seeHumanMessages: (
-    humanId: number,
+    _humanId: number,
     discussionId: number,
     messageIds: number[],
   ) =>
     organizationRequest("human.discussion.see_messages", {
-      human_id: humanId,
       discussion_id: discussionId,
       message_ids: messageIds,
     }),
   readHumanMention: (
-    memberId: number,
+    _memberId: number,
     discussionId: number,
     messageId: number,
   ) =>
     organizationRequest("human.mention.read", {
-      member_id: memberId,
       discussion_id: discussionId,
       message_id: messageId,
     }),
   markAllHumanMessagesRead: (
-    humanId: number,
+    _humanId: number,
     discussionId: number,
     throughMessageId: number,
   ) =>
     organizationRequest("human.discussion.mark_all_read", {
-      human_id: humanId,
       discussion_id: discussionId,
       through_message_id: throughMessageId,
     }),
-  ackHumanMention: (humanId: number, discussionId: number, messageId: number) =>
+  ackHumanMention: (
+    _humanId: number,
+    discussionId: number,
+    messageId: number,
+  ) =>
     organizationRequest("human.mention.ack", {
-      human_id: humanId,
       discussion_id: discussionId,
       message_id: messageId,
     }),

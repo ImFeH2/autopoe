@@ -187,22 +187,23 @@ def test_huddol_writes_private_diagnostics_without_request_content(
                 "capture_content": False,
             },
         )
-        request(process, 3, "organization.create_agent", {"name": "Ada"})
+        request(
+            process,
+            3,
+            "organization.create_agent",
+            {"name": "Ada", "expected_revision": 0},
+        )
         request(
             process,
             4,
             "discussion.create",
-            {"topic": "Diagnostics", "creator_id": 1, "member_ids": [2]},
+            {"topic": "Diagnostics", "member_ids": [2], "expected_revision": 1},
         )
         request(
             process,
             5,
             "discussion.send",
-            {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": message_body,
-            },
+            {"discussion_id": 1, "body": message_body},
         )
         assert request(process, 6, "system.shutdown", {}) == {"stopped": True}
         assert process.wait(timeout=10) == 0
@@ -235,22 +236,23 @@ def test_huddol_accepts_utf8_jsonl_messages(tmp_path: Path) -> None:
     process = start_huddol(tmp_path / "data")
 
     try:
-        request(process, 1, "organization.create_agent", {"name": "Ada"})
+        request(
+            process,
+            1,
+            "organization.create_agent",
+            {"name": "Ada", "expected_revision": 0},
+        )
         request(
             process,
             2,
             "discussion.create",
-            {"topic": "Work", "creator_id": 1, "member_ids": [2]},
+            {"topic": "Work", "member_ids": [2], "expected_revision": 1},
         )
         snapshot = request(
             process,
             3,
             "discussion.send",
-            {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "你在哪个目录下？",
-            },
+            {"discussion_id": 1, "body": "你在哪个目录下？"},
         )
 
         assert snapshot["discussions"][0]["message_count"] == 1
@@ -338,22 +340,27 @@ def test_persists_state_and_uses_each_launch_directory(
     first = start_huddol(data, first_directory)
 
     try:
-        request(first, 1, "organization.create_agent", {"name": "Ada"})
+        request(
+            first,
+            1,
+            "organization.create_agent",
+            {"name": "Ada", "expected_revision": 0},
+        )
         request(
             first,
             2,
             "discussion.create",
-            {"topic": "Persistent work", "creator_id": 1, "member_ids": [2]},
+            {
+                "topic": "Persistent work",
+                "member_ids": [2],
+                "expected_revision": 1,
+            },
         )
         request(
             first,
             3,
             "discussion.send",
-            {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "Still here after restart",
-            },
+            {"discussion_id": 1, "body": "Still here after restart"},
         )
         settings = request(
             first,
@@ -468,22 +475,23 @@ def test_agent_model_history_continues_across_process_restarts(
 
     first = start_huddol(data, tmp_path, environment)
     try:
-        request(first, 1, "organization.create_agent", {"name": "Ada"})
+        request(
+            first,
+            1,
+            "organization.create_agent",
+            {"name": "Ada", "expected_revision": 0},
+        )
         request(
             first,
             2,
             "discussion.create",
-            {"topic": "Identity", "creator_id": 1, "member_ids": [2]},
+            {"topic": "Identity", "member_ids": [2], "expected_revision": 1},
         )
         request(
             first,
             3,
             "discussion.send",
-            {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "@Ada Remember this",
-            },
+            {"discussion_id": 1, "body": "@Ada Remember this"},
         )
         request_id = 4
         deadline = time.monotonic() + 5
@@ -527,11 +535,7 @@ def test_agent_model_history_continues_across_process_restarts(
             second,
             1,
             "discussion.send",
-            {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "@Ada Continue as the same Agent",
-            },
+            {"discussion_id": 1, "body": "@Ada Continue as the same Agent"},
         )
         page = request(
             second,
@@ -610,22 +614,23 @@ def test_hard_killed_huddol_cleans_active_run(tmp_path: Path) -> None:
     process = start_huddol(tmp_path / "data", tmp_path, environment)
 
     try:
-        request(process, 1, "organization.create_agent", {"name": "Ada"})
+        request(
+            process,
+            1,
+            "organization.create_agent",
+            {"name": "Ada", "expected_revision": 0},
+        )
         request(
             process,
             2,
             "discussion.create",
-            {"topic": "Kill test", "creator_id": 1, "member_ids": [2]},
+            {"topic": "Kill test", "member_ids": [2], "expected_revision": 1},
         )
         request(
             process,
             3,
             "discussion.send",
-            {
-                "discussion_id": 1,
-                "sender_id": 1,
-                "body": "@Ada Run until Huddol is killed",
-            },
+            {"discussion_id": 1, "body": "@Ada Run until Huddol is killed"},
         )
         pid_path = work / "long.pid"
         assert wait_until(pid_path.exists)

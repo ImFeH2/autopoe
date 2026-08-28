@@ -13,7 +13,7 @@ from huddol.domain import DomainError, OrganizationState
 from huddol.history import AgentHistory
 from huddol.memory import AgentMemory
 from huddol.model_runner import ModelRuntime
-from huddol.operations import OrganizationOperations
+from huddol.operations import ActorContext, OrganizationOperations
 from huddol.todos import AgentTodos
 from huddol.wsl_host_tools import ExecutionSettings
 
@@ -55,19 +55,20 @@ class Dispatcher:
         self._history = history
         self._todos = todos
         self._memories = memories
-        self._operations = operations or OrganizationOperations(
-            state,
-            history,
-            todos,
-            memories,
-        )
+        self._operations = operations
+        self._actor = ActorContext.current_human(state)
         self._execution_settings = execution_settings or ExecutionSettings(
             "native", "native", None
         )
         self.shutdown_requested = False
         self._handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "organization.get": lambda _params: self._state.summary(),
+            "organization.permissions.get": self._get_permissions,
+            "organization.management_metadata.get": self._get_management_metadata,
+            "organization.audit.get": self._get_audit,
             "organization.create_agent": self._create_agent,
+            "organization.grant_admin": self._grant_admin,
+            "organization.revoke_admin": self._revoke_admin,
             "organization.rename_member": self._rename_member,
             "organization.delete_agent": self._delete_agent,
             "organization.pause_agent": self._pause_agent,
@@ -81,6 +82,7 @@ class Dispatcher:
             "agent.todo.list": self._list_agent_todos,
             "agent.todo.read": self._read_agent_todo,
             "discussion.create": self._create_discussion,
+            "discussion.members.update": self._update_discussion_members,
             "discussion.delete": self._delete_discussion,
             "discussion.send": self._send_message,
             "human.discussion.messages.page": self._get_human_discussion_messages_page,
@@ -250,9 +252,46 @@ class Dispatcher:
             capture_content=require_boolean(params, "capture_content"),
         )
 
+    def _require_operations(self) -> OrganizationOperations:
+        if self._operations is None:
+            raise RuntimeError("Organization operations are unavailable")
+        return self._operations
+
+    @staticmethod
+    def _reject_actor_fields(params: dict[str, Any], *fields: str) -> None:
+        present = [field for field in fields if field in params]
+        if present:
+            raise ProtocolError(
+                f"Trusted actor fields are not accepted: {', '.join(present)}"
+            )
+
+    def _get_permissions(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type", "human_id")
+        if params:
+            raise ProtocolError("organization.permissions.get does not accept params")
+        return self._require_operations().permissions(self._actor)
+
+    def _get_management_metadata(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type", "human_id")
+        if params:
+            raise ProtocolError(
+                "organization.management_metadata.get does not accept params"
+            )
+        return self._require_operations().metadata(self._actor)
+
+    def _get_audit(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type", "human_id")
+        if params:
+            raise ProtocolError("organization.audit.get does not accept params")
+        return self._require_operations().audit(self._actor)
+
     def _create_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._state.create_agent(name=require_string(params, "name"))
-        return self._state.summary()
+        self._reject_actor_fields(params, "actor_id", "actor_type", "creator_id")
+        return self._require_operations().create_agent(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_string(params, "name"),
+        )
 
     def _rename_member(self, params: dict[str, Any]) -> dict[str, Any]:
         self._state.rename_member(
@@ -262,16 +301,44 @@ class Dispatcher:
         return self._state.summary()
 
     def _delete_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._operations.delete_agent(require_integer(params, "agent_id"))
-        return self._state.summary()
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_operations().delete_agent(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_integer(params, "agent_id"),
+        )
 
     def _pause_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._operations.pause_agent(require_integer(params, "agent_id"))
-        return self._state.summary()
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_operations().pause_agent(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_integer(params, "agent_id"),
+        )
 
     def _resume_agent(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._operations.resume_agent(require_integer(params, "agent_id"))
-        return self._state.summary()
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_operations().resume_agent(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_integer(params, "agent_id"),
+        )
+
+    def _grant_admin(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_operations().grant_admin(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_integer(params, "agent_id"),
+        )
+
+    def _revoke_admin(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_operations().revoke_admin(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_integer(params, "agent_id"),
+        )
 
     def _get_agent_history(self, params: dict[str, Any]) -> dict[str, Any]:
         agent_id = require_integer(params, "agent_id")
@@ -364,73 +431,128 @@ class Dispatcher:
         return self._todos.read(agent_id, require_integer(params, "todo_id"))
 
     def _create_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._state.create_discussion(
-            topic=require_string(params, "topic"),
-            creator_id=require_integer(params, "creator_id"),
-            member_ids=require_integer_list(params, "member_ids"),
+        self._reject_actor_fields(params, "actor_id", "actor_type", "creator_id")
+        return self._require_operations().create_discussion(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_string(params, "topic"),
+            require_integer_list(params, "member_ids"),
         )
-        return self._state.summary()
+
+    def _update_discussion_members(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_operations().update_discussion_members(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_integer(params, "discussion_id"),
+            require_integer_list(params, "member_ids"),
+        )
 
     def _delete_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._operations.delete_discussion(
-            discussion_id=require_integer(params, "discussion_id")
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_operations().delete_discussion(
+            self._actor,
+            require_integer(params, "expected_revision"),
+            require_integer(params, "discussion_id"),
+            require_string(params, "confirm_topic"),
         )
-        return self._state.summary()
 
     def _send_message(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._state.send_message(
-            discussion_id=require_integer(params, "discussion_id"),
-            sender_id=require_integer(params, "sender_id"),
-            body=require_string(params, "body"),
+        self._reject_actor_fields(params, "actor_id", "actor_type", "sender_id")
+        discussion_id = require_integer(params, "discussion_id")
+        return self._require_operations().require_discussion_content(
+            self._actor,
+            discussion_id,
+            lambda: (
+                self._state.send_message(
+                    discussion_id=discussion_id,
+                    sender_id=self._actor.member_id,
+                    body=require_string(params, "body"),
+                ),
+                self._state.summary(),
+            )[1],
         )
-        return self._state.summary()
 
     def _get_human_discussion_messages_page(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:
-        return self._state.human_discussion_messages_page(
-            human_id=require_optional_integer(params, "human_id", minimum=1) or 1,
-            discussion_id=require_integer(params, "discussion_id"),
-            limit=require_optional_integer(params, "limit", minimum=1) or 50,
-            before_message_id=require_optional_integer(
-                params, "before_message_id", minimum=1
-            ),
-            after_message_id=require_optional_integer(
-                params, "after_message_id", minimum=1
-            ),
-            anchor_message_id=require_optional_integer(
-                params, "anchor_message_id", minimum=1
+        self._reject_actor_fields(params, "actor_id", "actor_type", "human_id")
+        discussion_id = require_integer(params, "discussion_id")
+        return self._require_operations().require_discussion_content(
+            self._actor,
+            discussion_id,
+            lambda: self._state.human_discussion_messages_page(
+                human_id=self._actor.member_id,
+                discussion_id=discussion_id,
+                limit=require_optional_integer(params, "limit", minimum=1) or 50,
+                before_message_id=require_optional_integer(
+                    params, "before_message_id", minimum=1
+                ),
+                after_message_id=require_optional_integer(
+                    params, "after_message_id", minimum=1
+                ),
+                anchor_message_id=require_optional_integer(
+                    params, "anchor_message_id", minimum=1
+                ),
             ),
         )
 
     def _see_human_messages(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._state.see_human_messages(
-            human_id=require_integer(params, "human_id"),
-            discussion_id=require_integer(params, "discussion_id"),
-            message_ids=require_integer_list(params, "message_ids"),
+        self._reject_actor_fields(params, "actor_id", "actor_type", "human_id")
+        discussion_id = require_integer(params, "discussion_id")
+        return self._require_operations().require_discussion_content(
+            self._actor,
+            discussion_id,
+            lambda: (
+                self._state.see_human_messages(
+                    human_id=self._actor.member_id,
+                    discussion_id=discussion_id,
+                    message_ids=require_integer_list(params, "message_ids"),
+                ),
+                self._state.summary(),
+            )[1],
         )
-        return self._state.summary()
 
     def _mark_all_human_messages_read(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.mark_all_human_messages_read(
-            human_id=require_integer(params, "human_id"),
-            discussion_id=require_integer(params, "discussion_id"),
-            through_message_id=require_integer(params, "through_message_id"),
+        self._reject_actor_fields(params, "actor_id", "actor_type", "human_id")
+        discussion_id = require_integer(params, "discussion_id")
+        return self._require_operations().require_discussion_content(
+            self._actor,
+            discussion_id,
+            lambda: self._state.mark_all_human_messages_read(
+                human_id=self._actor.member_id,
+                discussion_id=discussion_id,
+                through_message_id=require_integer(params, "through_message_id"),
+            ),
         )
 
     def _read_human_mention(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._state.read_human_mention(
-            member_id=require_integer(params, "member_id"),
-            discussion_id=require_integer(params, "discussion_id"),
-            message_id=require_integer(params, "message_id"),
+        self._reject_actor_fields(params, "actor_id", "actor_type", "member_id")
+        discussion_id = require_integer(params, "discussion_id")
+        return self._require_operations().require_discussion_content(
+            self._actor,
+            discussion_id,
+            lambda: (
+                self._state.read_human_mention(
+                    member_id=self._actor.member_id,
+                    discussion_id=discussion_id,
+                    message_id=require_integer(params, "message_id"),
+                ),
+                self._state.summary(),
+            )[1],
         )
-        return self._state.summary()
 
     def _ack_human_mention(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._state.ack_human_mention(
-            human_id=require_integer(params, "human_id"),
-            discussion_id=require_integer(params, "discussion_id"),
-            message_id=require_integer(params, "message_id"),
+        self._reject_actor_fields(params, "actor_id", "actor_type", "human_id")
+        discussion_id = require_integer(params, "discussion_id")
+        return self._require_operations().require_discussion_content(
+            self._actor,
+            discussion_id,
+            lambda: self._state.ack_human_mention(
+                human_id=self._actor.member_id,
+                discussion_id=discussion_id,
+                message_id=require_integer(params, "message_id"),
+            ),
         )
 
 

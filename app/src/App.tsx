@@ -28,6 +28,7 @@ import {
   memberNameErrorMessage,
   memberNameValidationMessage,
 } from "@/features/members/member-name-policy";
+import { PermissionsPage } from "@/features/permissions";
 import { SettingsPage } from "@/features/settings";
 import {
   type AgentMember,
@@ -675,9 +676,23 @@ function App() {
     await mutate(() => backend.resumeAgent(agentId));
   }
 
-  async function handleDeleteDiscussion(discussionId: number) {
+  async function handleUpdateDiscussionMembers(
+    discussionId: number,
+    memberIds: number[],
+  ) {
+    return Boolean(
+      await mutate(() =>
+        backend.updateDiscussionMembers(discussionId, memberIds),
+      ),
+    );
+  }
+
+  async function handleDeleteDiscussion(
+    discussionId: number,
+    confirmTopic: string,
+  ) {
     const nextSnapshot = await mutate(() =>
-      backend.deleteDiscussion(discussionId),
+      backend.deleteDiscussion(discussionId, confirmTopic),
     );
     if (nextSnapshot) {
       setDiscussionCaches((current) => {
@@ -697,6 +712,7 @@ function App() {
       restoreDiscussionFocusRef.current = null;
       setDiscussionSource(null);
     }
+    return nextSnapshot !== null;
   }
 
   async function handleMessagesSeen(
@@ -940,6 +956,9 @@ function App() {
             sourceDiscussionTopic={sourceDiscussion?.topic}
           />
         ) : null}
+        {workspaceView === "permissions" ? (
+          <PermissionsPage members={snapshot.members} />
+        ) : null}
         {workspaceView === "settings" ? <SettingsPage /> : null}
         {workspaceView === "discussions" ? (
           <DiscussionsPage
@@ -958,6 +977,7 @@ function App() {
             onDialogCloseAutoFocus={focusAfterDiscussionDialogClose}
             onDialogOpenChange={changeDiscussionDialog}
             onDeleteDiscussion={handleDeleteDiscussion}
+            onUpdateDiscussionMembers={handleUpdateDiscussionMembers}
             onMessageChange={changeMessageDraft}
             onMessagesSeen={(discussionId, messageIds) =>
               void handleMessagesSeen(discussionId, messageIds)

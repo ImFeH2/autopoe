@@ -402,6 +402,7 @@ describe("App", () => {
           onCreateAgent={() => undefined}
           onCreateDiscussion={() => undefined}
           onDeleteDiscussion={() => undefined}
+          onUpdateDiscussionMembers={async () => true}
           onDialogCloseAutoFocus={() => false}
           onDialogOpenChange={() => undefined}
           onMessageChange={() => undefined}
@@ -422,6 +423,7 @@ describe("App", () => {
       markup.match(/aria-label="1 unread mentions for you"/gu),
     ).toHaveLength(1);
     expect(markup).toContain(">@1</span>");
+    expect(markup.match(/aria-label="Manage [^"]+ members"/gu)).toHaveLength(3);
   });
 
   it("presents the transitional pausing state as Running in Discussions", () => {
@@ -1169,6 +1171,7 @@ describe("App", () => {
     expect(markup).not.toContain('aria-label="Mentions"');
     expect(markup).toContain(">Members<");
     expect(markup).not.toContain(">Agents<");
+    expect(markup).toContain(">Permissions<");
     expect(markup).toContain(">Settings<");
     expect(markup).not.toContain("Recent");
     expect(markup).not.toContain("Launch narrative");
@@ -1179,7 +1182,7 @@ describe("App", () => {
     const navigationButtons = [...markup.matchAll(/class="([^"]+)"/g)].filter(
       ([, className]) => className.split(" ").includes("sidebar-nav-button"),
     );
-    expect(navigationButtons).toHaveLength(3);
+    expect(navigationButtons).toHaveLength(4);
   });
 
   it("renders Members as a selectable list with Agent details", () => {

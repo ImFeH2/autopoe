@@ -1,4 +1,6 @@
+from copy import deepcopy
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 from snapshot_helpers import without_delivery
@@ -180,6 +182,179 @@ def test_failed_persistence_does_not_leave_a_message_or_consume_its_id() -> None
             "seen_message_ids": [],
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "create_agent",
+        "rename_member",
+        "delete_agent",
+        "pause_agent",
+        "resume_agent",
+        "create_discussion",
+        "delete_discussion",
+        "send_message",
+        "agent_read",
+        "record_message_reads",
+        "human_see",
+        "human_mark_all",
+        "human_read_mention",
+        "human_ack_mention",
+        "agent_ack",
+        "claim_reminder",
+    ],
+)
+def test_persisted_mutations_restore_all_state_when_persistence_fails(
+    action: str,
+) -> None:
+    state = OrganizationState(message_clock=lambda: "2026-08-26T12:00:00.000Z")
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+    state.send_message(1, 1, "@Ada @Lin Start")
+    state.send_message(1, 2, "@You Update")
+
+    if action == "resume_agent":
+        state.pause_agent(3)
+    elif action == "human_ack_mention":
+        state.read_human_mention(1, 1, 2)
+    elif action == "agent_ack":
+        state.read_discussion(2, 1, start_message_id=1, end_message_id=1)
+
+    callbacks = 0
+
+    def fail_persistence(_snapshot: dict[str, object]) -> None:
+        nonlocal callbacks
+        callbacks += 1
+        raise OSError("disk unavailable")
+
+    state._on_persist = fail_persistence
+    before_persistence = deepcopy(state._persistence_data())
+    before_execution = deepcopy(state._agent_execution)
+    before_next_member_id = state._next_member_id
+    before_next_discussion_id = state._next_discussion_id
+    before_revision = state._revision
+
+    operations = {
+        "create_agent": lambda: state.create_agent("Grace"),
+        "rename_member": lambda: state.rename_member(2, "Ada_Lovelace"),
+        "delete_agent": lambda: state.delete_agent(3),
+        "pause_agent": lambda: state.pause_agent(3),
+        "resume_agent": lambda: state.resume_agent(3),
+        "create_discussion": lambda: state.create_discussion("New", 1, [2]),
+        "delete_discussion": lambda: state.delete_discussion(1),
+        "send_message": lambda: state.send_message(1, 2, "Progress"),
+        "agent_read": lambda: state.read_discussion(
+            3, 1, start_message_id=1, end_message_id=1
+        ),
+        "record_message_reads": lambda: state.record_message_reads(
+            3,
+            [(1, 1)],
+            source="agent_discussion_read",
+        ),
+        "human_see": lambda: state.see_human_messages(1, 1, [2]),
+        "human_mark_all": lambda: state.mark_all_human_messages_read(1, 1, 2),
+        "human_read_mention": lambda: state.read_human_mention(1, 1, 2),
+        "human_ack_mention": lambda: state.ack_human_mention(1, 1, 2),
+        "agent_ack": lambda: state.ack_messages(2, 1, [1]),
+        "claim_reminder": state.claim_next_reminder,
+    }
+
+    if action == "record_message_reads":
+        operations[action]()
+    else:
+        with pytest.raises(OSError, match="disk unavailable"):
+            operations[action]()
+
+    assert callbacks == 1
+    assert state._persistence_data() == before_persistence
+    assert state._agent_execution == before_execution
+    assert state._next_member_id == before_next_member_id
+    assert state._next_discussion_id == before_next_discussion_id
+    assert state._revision == before_revision
+
+
+@pytest.mark.parametrize(
+    ("coordinates", "error_code"),
+    [
+        ([(999, 1)], "discussion_not_found"),
+        ([(1, 999)], "message_not_found"),
+        ([(1, 1)], "invalid_read"),
+    ],
+)
+def test_record_message_reads_propagates_validation_errors_without_persisting(
+    coordinates: list[tuple[int, int]],
+    error_code: str,
+) -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_agent("Lin")
+    state.create_discussion("Work", 1, [2, 3])
+    state.send_message(1, 1, "@Ada Start")
+    membership = state._discussions[1].memberships[2]
+    state._discussions[1].memberships[2] = type(membership)(
+        member_id=3,
+        joined_after_message_id=1,
+    )
+    callbacks = 0
+
+    def persist(_snapshot: dict[str, object]) -> None:
+        nonlocal callbacks
+        callbacks += 1
+
+    state._on_persist = persist
+    with pytest.raises(DomainError) as error:
+        state.record_message_reads(
+            3,
+            coordinates,
+            source="agent_discussion_read",
+        )
+
+    assert error.value.code == error_code
+    assert callbacks == 0
+
+
+def test_failed_record_message_reads_does_not_publish_and_can_retry() -> None:
+    state = OrganizationState()
+    state.create_agent("Ada")
+    state.create_discussion("Work", 1, [2])
+    state.send_message(1, 1, "@Ada Start")
+    before_persistence = deepcopy(state._persistence_data())
+    before_revision = state._revision
+    waiting = Event()
+    completed = Event()
+    stop = Event()
+
+    def wait_for_change() -> None:
+        waiting.set()
+        state.wait_for_change(before_revision, stop)
+        completed.set()
+
+    waiter = Thread(target=wait_for_change)
+    waiter.start()
+    assert waiting.wait(1)
+
+    def fail_persistence(_snapshot: dict[str, object]) -> None:
+        raise OSError("disk unavailable")
+
+    state._on_persist = fail_persistence
+    state.record_message_reads(2, [(1, 1)], source="agent_discussion_read")
+
+    assert state._persistence_data() == before_persistence
+    assert not completed.wait(0.05)
+    assert state._revision == before_revision
+
+    persisted = []
+    state._on_persist = persisted.append
+    state.record_message_reads(2, [(1, 1)], source="agent_discussion_read")
+
+    assert len(persisted) == 1
+    assert completed.wait(1)
+    assert state._revision == before_revision + 1
+    stop.set()
+    waiter.join(1)
+    assert completed.is_set()
 
 
 def test_legacy_message_timestamp_can_be_missing_but_malformed_is_rejected() -> None:

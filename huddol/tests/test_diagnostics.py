@@ -16,6 +16,7 @@ from huddol.diagnostics import (
 from huddol.domain import OrganizationState
 from huddol.host_tools import HostTools
 from huddol.memory import AgentMemory
+from huddol.operations import OrganizationOperations
 from huddol.persistence import SQLiteStore
 from huddol.protocol import Dispatcher
 from huddol.runtime import AgentRunContext
@@ -149,6 +150,7 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         run_id="turn-1",
         todos=AgentTodos(store),
         memories=AgentMemory(tmp_path),
+        operations=OrganizationOperations(state, store),
     )
 
     try:

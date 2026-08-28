@@ -163,12 +163,6 @@ textarea {
 .ui-list-item__action .ui-button {
   width: var(--control-height-compact);
   height: var(--control-height-compact);
-  color: var(--color-danger);
-}
-
-.ui-list-item__action .ui-button:hover:not(:disabled) {
-  background: var(--color-danger-subtle);
-  color: var(--color-danger);
 }
 
 .ui-list-button {
@@ -181,6 +175,10 @@ textarea {
   gap: 3px;
   padding: 8px 42px 8px 10px;
   text-align: left;
+}
+
+.ui-list-item--double-action .ui-list-button {
+  padding-right: 72px;
 }
 
 .ui-list-button__title {
