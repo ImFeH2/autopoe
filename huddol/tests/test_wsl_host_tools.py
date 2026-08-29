@@ -34,6 +34,12 @@ class FakeLauncher:
     def write_directories(self) -> tuple[str, ...]:
         return ()
 
+    def configure_write_directories(
+        self,
+        _write_directories: list[str] | tuple[str, ...],
+    ) -> None:
+        pass
+
     def run(
         self,
         argv: list[str],
@@ -121,6 +127,29 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
     assert "WSL Debian" in tools.environment_context
     tools.close()
     assert launcher.closed is True
+
+
+def test_wsl_write_directory_updates_apply_to_each_run() -> None:
+    launcher = FakeLauncher()
+    tools = WslHostTools(
+        launcher,
+        WslProbe("Debian", "/home/ada", "x86_64"),
+        "/home/ada",
+    )
+
+    tools.run(["true"])
+    tools.configure_write_directories(("/workspace/repository",))
+    tools.run(["true"])
+    tools.configure_write_directories(())
+    tools.run(["true"])
+
+    commands = [call[0] for call in launcher.run_calls]
+    assert "--bind" not in commands[0]
+    assert commands[1][commands[1].index("--bind") + 1 :][:2] == [
+        "/workspace/repository",
+        "/workspace/repository",
+    ]
+    assert "--bind" not in commands[2]
 
 
 def test_wsl_host_tools_start_uses_backend_home(
@@ -278,16 +307,23 @@ def test_execution_settings_reject_relative_or_missing_wsl_directories(
     assert settings.settings()["write_directories"] == []
 
 
-def test_write_directory_change_requires_restart(tmp_path: Path) -> None:
+def test_write_directory_change_applies_without_restart(tmp_path: Path) -> None:
     writable = tmp_path / "writable"
     writable.mkdir()
-    settings = ExecutionSettings("native", "native", None)
+    applied: list[tuple[str, ...]] = []
+    settings = ExecutionSettings(
+        "native",
+        "native",
+        None,
+        on_apply=applied.append,
+    )
 
     updated = settings.configure("native", [str(writable)])
 
+    assert applied == [(str(writable),)]
     assert updated["active_backend"] == "native"
     assert updated["write_directories"] == [str(writable)]
-    assert updated["restart_required"] is True
+    assert updated["restart_required"] is False
 
 
 def test_execution_settings_remain_unchanged_when_save_fails(
@@ -306,6 +342,26 @@ def test_execution_settings_remain_unchanged_when_save_fails(
         settings.configure("wsl", [str(tmp_path)])
 
     assert settings.settings()["selected_backend"] == "native"
+    assert settings.settings()["write_directories"] == []
+    assert settings.settings()["restart_required"] is False
+
+
+def test_execution_settings_restore_saved_values_when_apply_fails(
+    tmp_path: Path,
+) -> None:
+    saved: list[tuple[str, tuple[str, ...]]] = []
+    settings = ExecutionSettings(
+        "native",
+        "native",
+        None,
+        on_configure=lambda backend, paths: saved.append((backend, paths)),
+        on_apply=lambda _paths: (_ for _ in ()).throw(OSError("cannot apply")),
+    )
+
+    with pytest.raises(OSError, match="cannot apply"):
+        settings.configure("native", [str(tmp_path)])
+
+    assert saved == [("native", (str(tmp_path),)), ("native", ())]
     assert settings.settings()["write_directories"] == []
     assert settings.settings()["restart_required"] is False
 
@@ -465,7 +521,13 @@ def test_create_host_tools_uses_user_home_for_native_backend(
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
     tools, settings = wsl_host_tools.create_host_tools("native")
+    writable = tmp_path / "writable"
+    writable.mkdir()
+
+    updated = settings.configure("native", [str(writable)])
 
     assert tools.execution_backend == "native"
     assert tools.working_directory == str(native_home)
-    assert settings.settings()["active_backend"] == "native"
+    assert tools.write_directories == (str(writable),)
+    assert updated["active_backend"] == "native"
+    assert updated["restart_required"] is False

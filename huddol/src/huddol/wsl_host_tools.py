@@ -91,6 +91,7 @@ class ExecutionSettings:
         wsl_probe: WslProbe | None,
         write_directories: tuple[str, ...] = (),
         on_configure: Callable[[ExecutionBackend, tuple[str, ...]], None] | None = None,
+        on_apply: Callable[[tuple[str, ...]], None] | None = None,
     ) -> None:
         self._selected_backend = selected_backend
         self._active_backend = active_backend
@@ -98,6 +99,7 @@ class ExecutionSettings:
         self._write_directories = write_directories
         self._active_write_directories = write_directories
         self._on_configure = on_configure
+        self._on_apply = on_apply
         self._lock = Lock()
 
     def settings(self) -> dict[str, Any]:
@@ -146,10 +148,21 @@ class ExecutionSettings:
                     )
                 )
             )
+            previous_backend = self._selected_backend
+            previous_directories = self._write_directories
             if self._on_configure is not None:
                 self._on_configure(backend, normalized)
+            try:
+                if backend == self._active_backend and self._on_apply is not None:
+                    self._on_apply(normalized)
+            except Exception:
+                if self._on_configure is not None:
+                    self._on_configure(previous_backend, previous_directories)
+                raise
             self._selected_backend = backend
             self._write_directories = normalized
+            if backend == self._active_backend:
+                self._active_write_directories = normalized
         log_event(
             "execution.config.updated",
             backend=backend,
@@ -172,6 +185,7 @@ class WslHostTools:
         self._working_directory = working_directory
         self._write_directories = write_directories
         self._configured_write_directories = configured_write_directories
+        self._write_lock = Lock()
         self.process_owner = launcher.process_owner
 
     @classmethod
@@ -211,7 +225,21 @@ class WslHostTools:
 
     @property
     def write_directories(self) -> tuple[str, ...]:
-        return self._configured_write_directories
+        with self._write_lock:
+            return self._configured_write_directories
+
+    def configure_write_directories(
+        self,
+        write_directories: list[str] | tuple[str, ...],
+    ) -> None:
+        normalized = normalize_wsl_write_directories(
+            write_directories,
+            self._probe,
+            require_existing=False,
+        )
+        with self._write_lock:
+            self._write_directories = normalized
+            self._configured_write_directories = normalized
 
     @property
     def environment_context(self) -> str:
@@ -241,10 +269,12 @@ class WslHostTools:
         if cwd is not None:
             self._require_utf8(cwd, "cwd")
         working_directory = self._resolve_directory(cwd)
+        with self._write_lock:
+            write_directories = self._write_directories
         sandboxed_argv = linux_write_sandbox_command(
             argv,
             working_directory,
-            self._write_directories,
+            write_directories,
             bwrap="bwrap",
         )
         result = self._launcher.run(
@@ -308,10 +338,12 @@ class WslHostTools:
         if not resolved_path:
             raise HostToolError("Edit path must identify an existing file")
         resolved = PurePosixPath(resolved_path)
+        with self._write_lock:
+            write_directories = self._write_directories
         if not any(
             resolved == PurePosixPath(root)
             or resolved.is_relative_to(PurePosixPath(root))
-            for root in self._write_directories
+            for root in write_directories
         ):
             raise HostToolError("Path is outside the configured writable directories")
         windows_path = _run_wsl(
@@ -429,6 +461,7 @@ def create_host_tools(
             probe,
             tools.write_directories,
             on_configure,
+            tools.configure_write_directories,
         ),
     )
 

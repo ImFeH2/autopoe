@@ -512,6 +512,35 @@ def test_empty_write_directories_make_run_and_edit_read_only(tmp_path: Path) -> 
     assert target.read_text() == "before\n"
 
 
+def test_write_directory_updates_apply_to_each_run_and_edit(tmp_path: Path) -> None:
+    writable = tmp_path / "writable"
+    writable.mkdir()
+    target = writable / "source.txt"
+    target.write_text("before\n")
+    tools = BaseHostTools(tmp_path, write_directories=[])
+    command = [
+        sys.executable,
+        "-c",
+        "import pathlib; pathlib.Path('created.txt').write_text('written')",
+    ]
+
+    tools.configure_write_directories((str(writable),))
+
+    allowed = tools.run(command, cwd=str(writable))
+    tools.edit(str(target), "before", "after")
+    assert allowed["exit_code"] == 0
+    assert (writable / "created.txt").read_text() == "written"
+    assert target.read_text() == "after\n"
+
+    tools.configure_write_directories(())
+
+    denied = tools.run(command, cwd=str(writable))
+    assert denied["exit_code"] != 0
+    with pytest.raises(HostToolError, match="configured writable directories"):
+        tools.edit(str(target), "after", "again")
+    assert target.read_text() == "after\n"
+
+
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="Linux Bubblewrap",

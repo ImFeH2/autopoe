@@ -63,6 +63,16 @@ class WriteAccessPolicy:
         with self._lock:
             return tuple(str(path) for path in self._roots)
 
+    def configure(self, write_directories: Sequence[str]) -> None:
+        roots = normalize_write_directories(
+            write_directories,
+            require_existing=False,
+        )
+        with self._lock:
+            if self._windows is not None:
+                self._windows.configure(roots)
+            self._roots = roots
+
     def require_writable(self, path: Path) -> None:
         if not self._enforce:
             return

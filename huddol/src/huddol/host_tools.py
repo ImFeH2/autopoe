@@ -132,6 +132,11 @@ class AgentHostTools(Protocol):
     @property
     def write_directories(self) -> tuple[str, ...]: ...
 
+    def configure_write_directories(
+        self,
+        write_directories: list[str] | tuple[str, ...],
+    ) -> None: ...
+
     def run(
         self,
         argv: list[str],
@@ -366,6 +371,12 @@ class HostTools:
     @property
     def write_directories(self) -> tuple[str, ...]:
         return self._write_access.directories
+
+    def configure_write_directories(
+        self,
+        write_directories: list[str] | tuple[str, ...],
+    ) -> None:
+        self._write_access.configure(write_directories)
 
     @property
     def environment_context(self) -> str:
