@@ -1072,10 +1072,17 @@ def test_memory_index_is_fresh_runtime_only_context(tmp_path: Path) -> None:
             ),
         )
 
-    assert "<host_environment>" in str(seen_messages[0])
-    assert str(tmp_path) in str(seen_messages[0])
-    assert "<memory>" in str(seen_messages[0])
-    assert "Fresh private insight" in str(seen_messages[0])
+    runtime_context = "\n".join(
+        str(part.content)
+        for message in seen_messages[0]
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, UserPromptPart)
+    )
+    assert "<host_environment>" in runtime_context
+    assert str(tmp_path) in runtime_context
+    assert "<memory>" in runtime_context
+    assert "Fresh private insight" in runtime_context
     assert "<host_environment>" not in str(outcome.messages)
     assert "<memory>" not in str(outcome.messages)
     assert "Fresh private insight" not in str(outcome.messages)

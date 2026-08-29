@@ -13,15 +13,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  quality:
-    name: Quality
+  ci:
+    name: CI
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
   build:
     name: Build (${{ matrix.os }})
-    needs: quality
+    needs: ci
     strategy:
       fail-fast: false
       matrix:

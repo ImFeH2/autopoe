@@ -401,7 +401,8 @@ def test_persists_state_and_uses_each_backend_home(
         snapshot = request(second, 1, "organization.get", {})
         settings = request(second, 2, "settings.get_model", {})
         tracing = request(second, 3, "settings.get_observability", {})
-        assert snapshot["working_directory"] == str(second_directory)
+        expected_home = Path.home() if os.name == "nt" else second_directory
+        assert snapshot["working_directory"] == str(expected_home)
         assert snapshot["members"][1]["name"] == "Ada"
         assert snapshot["discussions"][0]["topic"] == "Persistent work"
         page = request(
@@ -604,7 +605,7 @@ def test_hard_killed_huddol_cleans_active_run(tmp_path: Path) -> None:
         "end_message_id=activation.mentions[0].message_id)\n"
         "        context.run([sys.executable, '-c', \"import os,pathlib,time; "
         "pathlib.Path('long.pid').write_text(str(os.getpid())); time.sleep(60)\"], "
-        "'artifacts/desktop/process-work', 60)\n"
+        f"{str(work)!r}, 60)\n"
         "model_runner.create_runner = lambda **kwargs: LongRunRunner()\n"
     )
     environment = os.environ.copy()

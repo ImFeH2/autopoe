@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -66,14 +67,14 @@ def test_schema_nineteen_migrates_to_library_without_changing_existing_data(
     tmp_path: Path,
 ) -> None:
     store = SQLiteStore(tmp_path / "data")
-    with sqlite3.connect(store.path) as connection:
+    with closing(sqlite3.connect(store.path)) as connection, connection:
         connection.execute("DROP TABLE library_documents")
         connection.execute("PRAGMA user_version = 19")
         connection.execute("CREATE TABLE migration_fixture (value TEXT NOT NULL)")
         connection.execute("INSERT INTO migration_fixture VALUES ('preserved')")
 
     migrated = SQLiteStore(store.directory)
-    with sqlite3.connect(migrated.path) as connection:
+    with closing(sqlite3.connect(migrated.path)) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("SELECT value FROM migration_fixture").fetchone() == (
             "preserved",

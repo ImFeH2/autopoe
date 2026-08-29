@@ -155,6 +155,9 @@ def test_memory_rejects_escaping_non_markdown_and_symlink_paths(
         with pytest.raises(DomainError, match="Memory (path|files)"):
             memory.write(2, path, "content")
 
+    if os.name == "nt":
+        pytest.skip("Windows symlink privilege")
+
     agent_root = tmp_path / "data" / "agents" / "2"
     agent_root.mkdir(parents=True)
     (agent_root / "memory").symlink_to(tmp_path)
@@ -216,6 +219,7 @@ def test_memory_atomic_failure_preserves_original_and_permissions(
         assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlink privilege")
 def test_memory_deletion_and_startup_cleanup_do_not_follow_symlinks(
     tmp_path: Path,
 ) -> None:

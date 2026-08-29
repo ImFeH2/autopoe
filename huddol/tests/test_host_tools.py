@@ -477,6 +477,7 @@ def test_edit_follows_symbolic_links_outside_launch_root(tmp_path: Path) -> None
     assert target.read_text() == "after\n"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlink privilege")
 def test_edit_rejects_symbolic_link_outside_writable_directories(
     tmp_path: Path,
 ) -> None:
@@ -668,6 +669,7 @@ def test_macos_run_writes_only_configured_directories(tmp_path: Path) -> None:
     assert not (outside / "created.txt").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows path syntax")
 def test_macos_profile_denies_writes_outside_parameterized_roots(
     tmp_path: Path,
 ) -> None:

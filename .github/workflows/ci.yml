@@ -16,9 +16,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Quality
-    runs-on: ubuntu-22.04
+  ci:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu x64
+            os: ubuntu-22.04
+          - name: Windows x64
+            os: windows-latest
+          - name: macOS Apple Silicon
+            os: macos-15
+          - name: macOS Intel
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
     env:
       TAURI_CONFIG: '{"bundle":{"externalBin":[]}}'
     steps:
@@ -39,6 +51,7 @@ jobs:
         with:
           workspaces: app/src-tauri -> target
       - name: Install system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
@@ -48,8 +61,10 @@ jobs:
           LEFTHOOK: 0
       - name: Install Python dependencies
         run: uv sync --project huddol --all-groups --frozen
-      - name: Verify repository
-        run: pnpm verify
+      - name: Check
+        run: pnpm check
+      - name: Test
+        run: pnpm test
       - name: Build frontend
         run: pnpm build:frontend
       - name: Check release build

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import stat
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 from snapshot_helpers import without_delivery
@@ -23,6 +25,25 @@ from huddol.persistence import (
     SQLiteStore,
     data_directory,
 )
+
+
+@pytest.fixture(autouse=True)
+def close_test_sqlite_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
+    original_connect = sqlite3.connect
+    connections: list[sqlite3.Connection] = []
+
+    def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        kwargs.setdefault("check_same_thread", False)
+        connection = original_connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    yield
+    for connection in connections:
+        connection.close()
 
 
 def persisted_state(store: SQLiteStore, working_directory: Path) -> OrganizationState:
@@ -248,7 +269,7 @@ def authorization_database_snapshot(
 
 def test_uses_huddol_directory_under_home(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE" if os.name == "nt" else "HOME", str(home))
     monkeypatch.delenv(DATA_DIRECTORY_ENV, raising=False)
 
     assert data_directory() == home / ".huddol"
@@ -878,6 +899,7 @@ def test_organization_persistence_does_not_rewrite_agent_history(
     assert store.load_agent_runs(2)[0]["run_id"] == "persistent-run"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
 def test_restricts_data_directory_and_database_permissions(tmp_path: Path) -> None:
     data = tmp_path / "data"
     store = SQLiteStore(data)
@@ -1002,13 +1024,14 @@ def test_version_thirteen_timestamp_migration_rolls_back_and_reopens(
         connection.execute("ALTER TABLE messages ADD COLUMN created_at TEXT")
         raise sqlite3.OperationalError("injected timestamp migration failure")
 
-    monkeypatch.setattr(
-        SQLiteStore,
-        "_add_message_created_at_column",
-        staticmethod(fail_after_adding_column),
-    )
-    with pytest.raises(sqlite3.OperationalError, match="injected timestamp"):
-        SQLiteStore(data)
+    with monkeypatch.context() as migration_patch:
+        migration_patch.setattr(
+            SQLiteStore,
+            "_add_message_created_at_column",
+            staticmethod(fail_after_adding_column),
+        )
+        with pytest.raises(sqlite3.OperationalError, match="injected timestamp"):
+            SQLiteStore(data)
 
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
@@ -1016,7 +1039,6 @@ def test_version_thirteen_timestamp_migration_rolls_back_and_reopens(
             row[1] for row in connection.execute("PRAGMA table_info(messages)")
         }
 
-    monkeypatch.undo()
     reopened = SQLiteStore(data)
     restored = persisted_state(reopened, tmp_path).snapshot()
     assert restored["discussions"][0]["messages"][0]["created_at"] is None
@@ -1127,13 +1149,14 @@ def test_version_fourteen_membership_migration_rolls_back_and_reopens(
         )
         raise sqlite3.OperationalError("injected membership migration failure")
 
-    monkeypatch.setattr(
-        SQLiteStore,
-        "_add_discussion_membership_columns",
-        staticmethod(fail_after_adding_column),
-    )
-    with pytest.raises(sqlite3.OperationalError, match="injected membership"):
-        SQLiteStore(data)
+    with monkeypatch.context() as migration_patch:
+        migration_patch.setattr(
+            SQLiteStore,
+            "_add_discussion_membership_columns",
+            staticmethod(fail_after_adding_column),
+        )
+        with pytest.raises(sqlite3.OperationalError, match="injected membership"):
+            SQLiteStore(data)
 
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
@@ -1144,7 +1167,6 @@ def test_version_fourteen_membership_migration_rolls_back_and_reopens(
         assert "active" not in columns
         assert "joined_after_message_id" not in columns
 
-    monkeypatch.undo()
     reopened = SQLiteStore(data)
     with sqlite3.connect(reopened.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
@@ -1721,11 +1743,12 @@ def test_schema_fifteen_delivery_migration_rolls_back_and_reopens(
         original(connection)
         raise sqlite3.OperationalError("injected delivery migration failure")
 
-    monkeypatch.setattr(
-        SQLiteStore, "_create_delivery_tables", staticmethod(fail_delivery_tables)
-    )
-    with pytest.raises(sqlite3.OperationalError, match="injected delivery"):
-        SQLiteStore(data)
+    with monkeypatch.context() as migration_patch:
+        migration_patch.setattr(
+            SQLiteStore, "_create_delivery_tables", staticmethod(fail_delivery_tables)
+        )
+        with pytest.raises(sqlite3.OperationalError, match="injected delivery"):
+            SQLiteStore(data)
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 15
         assert "recipient_snapshot_known" not in {
@@ -1738,7 +1761,6 @@ def test_schema_fifteen_delivery_migration_rolls_back_and_reopens(
             is None
         )
 
-    monkeypatch.undo()
     reopened = SQLiteStore(data)
     with sqlite3.connect(reopened.path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION

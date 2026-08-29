@@ -27,10 +27,9 @@
     "test:app": "pnpm --dir app test",
     "test:e2e": "pnpm build:debug && pnpm test:e2e:run",
     "test:e2e:run": "node scripts/run-e2e.mjs",
-    "test:huddol": "node scripts/huddol.mjs pytest",
+    "test:huddol": "node scripts/huddol.mjs pytest -W error",
     "test:rust": "node scripts/cargo.mjs test",
-    "typecheck": "pnpm --dir app typecheck",
-    "verify": "lefthook run pre-commit --force"
+    "typecheck": "pnpm --dir app typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",

@@ -327,8 +327,18 @@ def test_write_directory_change_applies_without_restart(tmp_path: Path) -> None:
 
 
 def test_execution_settings_remain_unchanged_when_save_fails(
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "_run_wsl",
+        lambda argv, timeout: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout="/workspace/repository",
+            stderr="",
+        ),
+    )
     settings = ExecutionSettings(
         "native",
         "native",
@@ -339,7 +349,7 @@ def test_execution_settings_remain_unchanged_when_save_fails(
     )
 
     with pytest.raises(OSError, match="cannot save"):
-        settings.configure("wsl", [str(tmp_path)])
+        settings.configure("wsl", ["/workspace/repository"])
 
     assert settings.settings()["selected_backend"] == "native"
     assert settings.settings()["write_directories"] == []
