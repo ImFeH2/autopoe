@@ -1533,7 +1533,7 @@ class OrganizationState:
                 if member_id == message.sender_id or member_id in recipients:
                     continue
                 member = self._members.get(member_id)
-                reference = next(
+                matching_reference = next(
                     (
                         item
                         for item in message.references
@@ -1547,8 +1547,8 @@ class OrganizationState:
                         member.type if member is not None else "agent"
                     ),
                     member_name_at_send=(
-                        reference.name
-                        if reference is not None
+                        matching_reference.name
+                        if matching_reference is not None
                         else member.name
                         if member is not None
                         else str(member_id)
@@ -1556,7 +1556,10 @@ class OrganizationState:
                     mentioned=(
                         member_id in message.mentions
                         or member_id in message.human_mentions
-                        or (reference is not None and reference.notified)
+                        or (
+                            matching_reference is not None
+                            and matching_reference.notified
+                        )
                     ),
                 )
         recipient_data = []
@@ -1743,8 +1746,8 @@ class OrganizationState:
                 member_id = membership_item["member_id"]
                 if member_id in membership_ids:
                     raise RuntimeError("Persisted Discussion membership is duplicated")
-                member = self._members.get(member_id)
-                if member is None:
+                membership_member = self._members.get(member_id)
+                if membership_member is None:
                     raise RuntimeError("Persisted Discussion membership is unknown")
                 joined_after_message_id = membership_item.get(
                     "joined_after_message_id", 0
@@ -1762,7 +1765,7 @@ class OrganizationState:
                     raise RuntimeError(
                         "Persisted Discussion membership active is invalid"
                     )
-                if member.deleted and active:
+                if membership_member.deleted and active:
                     active = False
                     repaired_memberships = True
                 memberships.append(
@@ -1826,7 +1829,7 @@ class OrganizationState:
             human_read_states: dict[int, HumanReadState] = {}
             for state_data in item.get("human_read_states", []):
                 human_id = state_data["member_id"]
-                member = self._members.get(human_id)
+                human_member = self._members.get(human_id)
                 membership = next(
                     (
                         candidate
@@ -1836,8 +1839,8 @@ class OrganizationState:
                     None,
                 )
                 if (
-                    member is None
-                    or member.type != "human"
+                    human_member is None
+                    or human_member.type != "human"
                     or membership is None
                     or human_id in human_read_states
                 ):

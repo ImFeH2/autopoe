@@ -27,6 +27,7 @@ from pydantic_ai.messages import (
     CompactionPart,
     ModelMessage,
     ModelRequest,
+    ModelRequestPart,
     ModelResponse,
     NativeToolCallPart,
     NativeToolReturnPart,
@@ -36,6 +37,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
     post_compaction_window,
 )
+from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import (
     AnthropicCompaction,
     AnthropicModel,
@@ -52,6 +54,7 @@ from pydantic_ai.native_tools import WebSearchTool
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import Tool
 from pydantic_core import to_jsonable_python
 
@@ -152,7 +155,7 @@ def _web_search_capability(model: Any) -> WebSearch:
 
     async def web_search(ctx: RunContext[AgentRunContext], query: str) -> Any:
         started = time.monotonic()
-        fields = {
+        fields: dict[str, Any] = {
             "agent_id": ctx.deps.agent_id,
             "turn_id": ctx.deps.run_id,
             "tool_name": "web_search",
@@ -202,6 +205,7 @@ class PydanticAgentRunner:
         observability: PydanticAIObservability | None = None,
         request_policy: ModelRequestPolicy | None = None,
     ) -> None:
+        model: Model
         if config.api_type == "anthropic":
             model = AnthropicModel(
                 cast(AnthropicModelName, config.model),
@@ -838,7 +842,7 @@ class PydanticAgentRunner:
                         prompt,
                         deps=context,
                         metadata=run_metadata,
-                        model_settings=model_settings,
+                        model_settings=cast(ModelSettings | None, model_settings),
                         message_history=message_history,
                         run_id=context.run_id,
                         event_stream_handler=handle_events,
@@ -953,7 +957,7 @@ def clean_runtime_context(
         if not isinstance(message, ModelRequest):
             cleaned.append(message)
             continue
-        parts = []
+        parts: list[ModelRequestPart] = []
         for part in message.parts:
             if (
                 isinstance(part, UserPromptPart)

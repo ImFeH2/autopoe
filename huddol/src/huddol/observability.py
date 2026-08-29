@@ -106,7 +106,8 @@ class LangfuseSpanProcessor(SpanProcessor):
     ) -> None:
         del parent_context
         trace = _active_trace.get()
-        if trace is None or span.instrumentation_scope.name != "pydantic-ai":
+        scope = span.instrumentation_scope
+        if trace is None or scope is None or scope.name != "pydantic-ai":
             return
         span.set_attribute("langfuse.trace.name", "Agent turn")
         span.set_attribute("langfuse.trace.tags", ["huddol", "agent"])

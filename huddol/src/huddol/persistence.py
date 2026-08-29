@@ -1909,7 +1909,9 @@ class SQLiteStore:
                 _canonical_audit_metadata_json(validated.metadata or {}),
             ),
         )
-        return int(cursor.lastrowid)
+        if cursor.lastrowid is None:
+            raise RuntimeError("Organization audit event was not saved")
+        return cursor.lastrowid
 
     def append_failure_audit(self, event: OrganizationAuditEvent) -> int:
         validated = _validated_audit_event(event)
@@ -2932,7 +2934,9 @@ class SQLiteStore:
                 """,
                 (title, content, created_at, created_at),
             )
-            document_id = int(cursor.lastrowid)
+            if cursor.lastrowid is None:
+                raise RuntimeError("Library document was not saved")
+            document_id = cursor.lastrowid
         self.path.chmod(0o600)
         document = self.load_library_document(document_id)
         if document is None:

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from io import TextIOWrapper
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from huddol.model_runner import ModelRuntime
@@ -29,8 +30,8 @@ def main(
             run_restricted_command(sys.argv[2], sys.argv[4:], str(Path.cwd()))
         )
 
-    sys.stdin.reconfigure(encoding="utf-8", errors="strict")
-    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+    cast(TextIOWrapper, sys.stdin).reconfigure(encoding="utf-8", errors="strict")
+    cast(TextIOWrapper, sys.stdout).reconfigure(encoding="utf-8", errors="strict")
 
     from huddol.diagnostics import (
         configure_diagnostics,

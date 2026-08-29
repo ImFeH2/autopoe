@@ -416,7 +416,7 @@ class AgentRunContext:
         operation: Callable[[], Any],
     ) -> Any:
         started = time.monotonic()
-        fields = {
+        fields: dict[str, Any] = {
             "agent_id": self.agent_id,
             "turn_id": self.run_id,
             "tool_name": tool_name,

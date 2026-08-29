@@ -24,9 +24,21 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["huddol.host_tools", "huddol.windows_write_access"]
+disable_error_code = ["attr-defined"]
+
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "pyinstaller>=6.21.0",
     "pytest>=9.1.1",
     "ruff>=0.16.0",
+    "types-psutil>=7.2.2.20260827",
 ]

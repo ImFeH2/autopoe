@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from threading import Lock
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from huddol.diagnostics import log_event
 from huddol.host_tools import AgentHostTools, HostToolError, HostTools
@@ -131,15 +131,17 @@ class ExecutionSettings:
         if not isinstance(write_directories, list):
             raise TypeError("write_directories must be a list")
         with self._lock:
-            if backend == "wsl" and self._wsl_probe is None:
+            probe = self._wsl_probe
+            if backend == "wsl" and probe is None:
                 raise ValueError("WSL is unavailable")
+            selected_backend = cast(ExecutionBackend, backend)
             normalized = (
                 normalize_wsl_write_directories(
                     write_directories,
-                    self._wsl_probe,
+                    cast(WslProbe, probe),
                     require_existing=True,
                 )
-                if backend == "wsl"
+                if selected_backend == "wsl"
                 else tuple(
                     str(path)
                     for path in normalize_write_directories(
@@ -151,21 +153,24 @@ class ExecutionSettings:
             previous_backend = self._selected_backend
             previous_directories = self._write_directories
             if self._on_configure is not None:
-                self._on_configure(backend, normalized)
+                self._on_configure(selected_backend, normalized)
             try:
-                if backend == self._active_backend and self._on_apply is not None:
+                if (
+                    selected_backend == self._active_backend
+                    and self._on_apply is not None
+                ):
                     self._on_apply(normalized)
             except Exception:
                 if self._on_configure is not None:
                     self._on_configure(previous_backend, previous_directories)
                 raise
-            self._selected_backend = backend
+            self._selected_backend = selected_backend
             self._write_directories = normalized
-            if backend == self._active_backend:
+            if selected_backend == self._active_backend:
                 self._active_write_directories = normalized
         log_event(
             "execution.config.updated",
-            backend=backend,
+            backend=selected_backend,
             write_directory_count=len(normalized),
         )
         return self.settings()
@@ -424,7 +429,7 @@ def create_host_tools(
             probe = probe_wsl()
         except (HostToolError, OSError, ValueError) as error:
             log_event("execution.wsl.unavailable", reason=type(error).__name__)
-    effective_backend: ExecutionBackend = selected_backend
+    effective_backend = cast(ExecutionBackend, selected_backend)
     if selected_backend == "wsl" and probe is None:
         effective_backend = "native"
         if on_configure is not None:
@@ -457,7 +462,7 @@ def create_host_tools(
         tools,
         ExecutionSettings(
             effective_backend,
-            tools.execution_backend,
+            cast(ExecutionBackend, tools.execution_backend),
             probe,
             tools.write_directories,
             on_configure,

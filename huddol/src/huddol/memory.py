@@ -23,6 +23,7 @@ MEMORY_LIST_MAX_LIMIT = 500
 HUMAN_READ_MAX_BYTES = 64 * 1024
 MEMORY_CONTEXT_START = "<memory>"
 MEMORY_CONTEXT_END = "</memory>"
+MemoryPathList = list[str]
 
 
 class AgentMemory:
@@ -378,7 +379,7 @@ class AgentMemory:
             raise RuntimeError("Agent Memory directory could not be created") from error
 
     @classmethod
-    def _list_paths(cls, root: Path) -> list[str]:
+    def _list_paths(cls, root: Path) -> MemoryPathList:
         paths: list[str] = []
         try:
             for directory, names, files in os.walk(root, followlinks=False):

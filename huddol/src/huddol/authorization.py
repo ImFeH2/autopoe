@@ -560,7 +560,7 @@ class OrganizationOperations:
         expected_revision: int,
         agent_id: int,
         action: AuditAction,
-        operation: Callable[[OrganizationState], None],
+        operation: Callable[[OrganizationState], object],
         *,
         revoke_deleted_agent: bool = False,
     ) -> dict[str, Any]:
