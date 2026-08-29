@@ -171,7 +171,9 @@ fn write_payload(stream: &mut UnixStream, payload: &Payload) -> Result<(), Error
     if encoded.len() > MAX_PAYLOAD_BYTES {
         return Err(Error::other("single-instance payload exceeds limit"));
     }
-    let length = u32::try_from(encoded.len())?.to_be_bytes();
+    let length = u32::try_from(encoded.len())
+        .map_err(Error::other)?
+        .to_be_bytes();
     stream.write_all(&length)?;
     stream.write_all(&encoded)?;
     stream.flush()
@@ -180,7 +182,7 @@ fn write_payload(stream: &mut UnixStream, payload: &Payload) -> Result<(), Error
 fn read_payload(stream: &mut UnixStream) -> Result<Payload, Error> {
     let mut length = [0; 4];
     stream.read_exact(&mut length)?;
-    let length = usize::try_from(u32::from_be_bytes(length))?;
+    let length = usize::try_from(u32::from_be_bytes(length)).map_err(Error::other)?;
     if length == 0 || length > MAX_PAYLOAD_BYTES {
         return Err(Error::other("single-instance payload length is invalid"));
     }
