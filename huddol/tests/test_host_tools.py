@@ -583,8 +583,24 @@ def test_windows_run_writes_only_configured_directories(tmp_path: Path) -> None:
     existing.write_text("before")
     tools = BaseHostTools(tmp_path, write_directories=[str(allowed)])
     sid = tools._write_access._windows.sid
+    logon_sid = tools._write_access._windows.logon_sid
 
     try:
+        active_acl = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                "& { param($path) (Get-Acl -LiteralPath $path).Sddl }",
+                str(allowed),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert sid in active_acl
+        assert logon_sid in active_acl
         result = tools.run(
             [
                 sys.executable,
@@ -607,12 +623,20 @@ def test_windows_run_writes_only_configured_directories(tmp_path: Path) -> None:
     assert existing.read_text() == "after"
     assert not (outside / "created.txt").exists()
     acl = subprocess.run(
-        ["icacls", str(allowed)],
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-Command",
+            "& { param($path) (Get-Acl -LiteralPath $path).Sddl }",
+            str(allowed),
+        ],
         check=True,
         capture_output=True,
         text=True,
     ).stdout
     assert sid not in acl
+    assert logon_sid not in acl
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS Seatbelt")

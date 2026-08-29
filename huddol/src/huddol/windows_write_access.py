@@ -12,6 +12,7 @@ TOKEN_ACCESS = 0x0001 | 0x0002 | 0x0008 | 0x0080 | 0x0100
 TOKEN_FLAGS = 0x1 | 0x4 | 0x8
 DACL_SECURITY_INFORMATION = 0x4
 SE_FILE_OBJECT = 1
+SE_WINDOW_OBJECT = 7
 SET_ACCESS = 2
 REVOKE_ACCESS = 4
 TRUSTEE_IS_SID = 0
@@ -20,6 +21,8 @@ MODIFY_ACCESS = 0x120089 | 0x120116 | 0x1200A0 | 0x10000
 STARTF_USESTDHANDLES = 0x100
 HANDLE_FLAG_INHERIT = 0x1
 CREATE_UNICODE_ENVIRONMENT = 0x400
+WINDOW_STATION_ACCESS = 0x000F037F
+DESKTOP_ACCESS = 0x000F01FF
 INFINITE = 0xFFFFFFFF
 
 
@@ -83,7 +86,9 @@ class ProcessInformation(ctypes.Structure):
 
 _advapi = ctypes.WinDLL("advapi32", use_last_error=True)
 _kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
 _kernel.GetCurrentProcess.restype = wintypes.HANDLE
+_kernel.GetCurrentThreadId.restype = wintypes.DWORD
 _kernel.GetStdHandle.argtypes = [wintypes.DWORD]
 _kernel.GetStdHandle.restype = wintypes.HANDLE
 _kernel.SetHandleInformation.argtypes = [
@@ -116,6 +121,17 @@ _advapi.GetNamedSecurityInfoW.argtypes = [
     ctypes.POINTER(ctypes.c_void_p),
 ]
 _advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+_advapi.GetSecurityInfo.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_int,
+    wintypes.DWORD,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.c_void_p,
+    ctypes.POINTER(ctypes.c_void_p),
+]
+_advapi.GetSecurityInfo.restype = wintypes.DWORD
 _advapi.SetEntriesInAclW.argtypes = [
     wintypes.ULONG,
     ctypes.POINTER(ExplicitAccess),
@@ -133,6 +149,16 @@ _advapi.SetNamedSecurityInfoW.argtypes = [
     ctypes.c_void_p,
 ]
 _advapi.SetNamedSecurityInfoW.restype = wintypes.DWORD
+_advapi.SetSecurityInfo.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_int,
+    wintypes.DWORD,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+_advapi.SetSecurityInfo.restype = wintypes.DWORD
 _advapi.OpenProcessToken.argtypes = [
     wintypes.HANDLE,
     wintypes.DWORD,
@@ -165,6 +191,9 @@ _advapi.CreateProcessAsUserW.argtypes = [
     ctypes.POINTER(ProcessInformation),
 ]
 _advapi.CreateProcessAsUserW.restype = wintypes.BOOL
+_user32.GetProcessWindowStation.restype = wintypes.HANDLE
+_user32.GetThreadDesktop.argtypes = [wintypes.DWORD]
+_user32.GetThreadDesktop.restype = wintypes.HANDLE
 
 
 def _raise_if_error(code: int) -> None:
@@ -181,6 +210,38 @@ def _sid_pointer(value: str) -> ctypes.c_void_p:
     sid = ctypes.c_void_p()
     _require(_advapi.ConvertStringSidToSidW(value, ctypes.byref(sid)))
     return sid
+
+
+def _updated_acl(
+    old_acl: ctypes.c_void_p,
+    sid: ctypes.c_void_p,
+    mode: int,
+    permissions: int,
+    inheritance: int,
+) -> ctypes.c_void_p:
+    trustee = Trustee(
+        None,
+        0,
+        TRUSTEE_IS_SID,
+        0,
+        ctypes.cast(sid, wintypes.LPWSTR),
+    )
+    access = ExplicitAccess(
+        permissions if mode == SET_ACCESS else 0,
+        mode,
+        inheritance,
+        trustee,
+    )
+    new_acl = ctypes.c_void_p()
+    _raise_if_error(
+        _advapi.SetEntriesInAclW(
+            1,
+            ctypes.byref(access),
+            old_acl,
+            ctypes.byref(new_acl),
+        )
+    )
+    return new_acl
 
 
 def _change_ace(path: Path, sid: ctypes.c_void_p, mode: int) -> None:
@@ -200,26 +261,12 @@ def _change_ace(path: Path, sid: ctypes.c_void_p, mode: int) -> None:
         )
     )
     try:
-        trustee = Trustee(
-            None,
-            0,
-            TRUSTEE_IS_SID,
-            0,
-            ctypes.cast(sid, wintypes.LPWSTR),
-        )
-        access = ExplicitAccess(
-            MODIFY_ACCESS if mode == SET_ACCESS else 0,
+        new_acl = _updated_acl(
+            old_acl,
+            sid,
             mode,
+            MODIFY_ACCESS,
             SUB_CONTAINERS_AND_OBJECTS_INHERIT,
-            trustee,
-        )
-        _raise_if_error(
-            _advapi.SetEntriesInAclW(
-                1,
-                ctypes.byref(access),
-                old_acl,
-                ctypes.byref(new_acl),
-            )
         )
         _raise_if_error(
             _advapi.SetNamedSecurityInfoW(
@@ -239,33 +286,122 @@ def _change_ace(path: Path, sid: ctypes.c_void_p, mode: int) -> None:
             _kernel.LocalFree(descriptor)
 
 
+def _change_user_object_ace(
+    handle: wintypes.HANDLE,
+    sid: ctypes.c_void_p,
+    mode: int,
+    permissions: int,
+) -> None:
+    old_acl = ctypes.c_void_p()
+    descriptor = ctypes.c_void_p()
+    new_acl = ctypes.c_void_p()
+    _raise_if_error(
+        _advapi.GetSecurityInfo(
+            handle,
+            SE_WINDOW_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            ctypes.byref(old_acl),
+            None,
+            ctypes.byref(descriptor),
+        )
+    )
+    try:
+        new_acl = _updated_acl(old_acl, sid, mode, permissions, 0)
+        _raise_if_error(
+            _advapi.SetSecurityInfo(
+                handle,
+                SE_WINDOW_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                new_acl,
+                None,
+            )
+        )
+    finally:
+        if new_acl:
+            _kernel.LocalFree(new_acl)
+        if descriptor:
+            _kernel.LocalFree(descriptor)
+
+
+def _current_logon_sid() -> str:
+    value = subprocess.run(
+        ["whoami.exe", "/logonid"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if not value.startswith("S-1-5-5-"):
+        raise OSError("Windows logon SID is unavailable")
+    return value
+
+
 class WindowsWriteAccess:
     def __init__(self, roots: Sequence[Path]) -> None:
         values = [secrets.randbits(30) + 1 for _ in range(4)]
         self.sid = "S-1-5-21-" + "-".join(str(value) for value in values)
+        self.logon_sid = _current_logon_sid()
         self._sid = _sid_pointer(self.sid)
+        self._logon_sid = _sid_pointer(self.logon_sid)
+        self._window_station = _user32.GetProcessWindowStation()
+        self._desktop = _user32.GetThreadDesktop(_kernel.GetCurrentThreadId())
         self._roots: tuple[Path, ...] = ()
         self._lock = Lock()
-        self.configure(roots)
+        granted: list[tuple[wintypes.HANDLE, int]] = []
+        try:
+            for handle, permissions in (
+                (self._window_station, WINDOW_STATION_ACCESS),
+                (self._desktop, DESKTOP_ACCESS),
+            ):
+                _require(handle)
+                _change_user_object_ace(handle, self._sid, SET_ACCESS, permissions)
+                granted.append((handle, permissions))
+            self.configure(roots)
+        except OSError:
+            for handle, permissions in reversed(granted):
+                try:
+                    _change_user_object_ace(
+                        handle,
+                        self._sid,
+                        REVOKE_ACCESS,
+                        permissions,
+                    )
+                except OSError:
+                    pass
+            _kernel.LocalFree(self._logon_sid)
+            _kernel.LocalFree(self._sid)
+            raise
 
     def configure(self, roots: Sequence[Path]) -> None:
         updated = tuple(roots)
         with self._lock:
             added = tuple(path for path in updated if path not in self._roots)
             removed = tuple(path for path in self._roots if path not in updated)
-            granted: list[Path] = []
+            granted: list[tuple[Path, ctypes.c_void_p]] = []
+            revoked: list[tuple[Path, ctypes.c_void_p]] = []
             try:
                 for path in added:
                     if path.is_dir():
-                        _change_ace(path, self._sid, SET_ACCESS)
-                        granted.append(path)
+                        for sid in (self._sid, self._logon_sid):
+                            _change_ace(path, sid, SET_ACCESS)
+                            granted.append((path, sid))
                 for path in removed:
                     if path.exists():
-                        _change_ace(path, self._sid, REVOKE_ACCESS)
+                        for sid in (self._sid, self._logon_sid):
+                            _change_ace(path, sid, REVOKE_ACCESS)
+                            revoked.append((path, sid))
             except OSError:
-                for path in granted:
+                for path, sid in reversed(revoked):
                     try:
-                        _change_ace(path, self._sid, REVOKE_ACCESS)
+                        _change_ace(path, sid, SET_ACCESS)
+                    except OSError:
+                        pass
+                for path, sid in reversed(granted):
+                    try:
+                        _change_ace(path, sid, REVOKE_ACCESS)
                     except OSError:
                         pass
                 raise
@@ -276,13 +412,31 @@ class WindowsWriteAccess:
             roots = self._roots
             self._roots = ()
             sid = self._sid
+            logon_sid = self._logon_sid
             self._sid = ctypes.c_void_p()
+            self._logon_sid = ctypes.c_void_p()
         for path in roots:
             if path.exists():
-                try:
-                    _change_ace(path, sid, REVOKE_ACCESS)
-                except OSError:
-                    pass
+                for value in (sid, logon_sid):
+                    try:
+                        _change_ace(path, value, REVOKE_ACCESS)
+                    except OSError:
+                        pass
+        for handle, permissions in (
+            (self._desktop, DESKTOP_ACCESS),
+            (self._window_station, WINDOW_STATION_ACCESS),
+        ):
+            try:
+                _change_user_object_ace(
+                    handle,
+                    sid,
+                    REVOKE_ACCESS,
+                    permissions,
+                )
+            except OSError:
+                pass
+        if logon_sid:
+            _kernel.LocalFree(logon_sid)
         if sid:
             _kernel.LocalFree(sid)
 
