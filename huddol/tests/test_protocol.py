@@ -1,10 +1,14 @@
 import io
 import json
 import sqlite3
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 
+import pytest
+
+from huddol import wsl_host_tools
 from huddol.domain import OrganizationState
 from huddol.history import AgentHistory
 from huddol.library import Library
@@ -341,13 +345,21 @@ def test_rejects_boolean_request_id_without_stopping_the_stream() -> None:
 
 
 def test_execution_settings_are_shared_and_saved_for_restart(
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    first = tmp_path / "project"
-    second = tmp_path / "output"
-    first.mkdir()
-    second.mkdir()
+    first = "/mnt/c/workspace/repository"
+    second = "/workspace/repository"
     saved: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "_run_wsl",
+        lambda argv, timeout: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=argv[-1],
+            stderr="",
+        ),
+    )
     settings = ExecutionSettings(
         "native",
         "native",
@@ -364,7 +376,7 @@ def test_execution_settings_are_shared_and_saved_for_restart(
                     "method": "settings.update_execution",
                     "params": {
                         "backend": "wsl",
-                        "write_directories": [str(first), str(second)],
+                        "write_directories": [first, second],
                     },
                 },
                 {"id": 3, "method": "settings.get_execution", "params": {}},
@@ -386,12 +398,9 @@ def test_execution_settings_are_shared_and_saved_for_restart(
     assert responses[1]["result"] == responses[2]["result"]
     assert responses[2]["result"]["selected_backend"] == "wsl"
     assert responses[2]["result"]["active_backend"] == "native"
-    assert responses[2]["result"]["write_directories"] == [
-        str(first),
-        str(second),
-    ]
+    assert responses[2]["result"]["write_directories"] == [first, second]
     assert responses[2]["result"]["restart_required"] is True
-    assert saved == [("wsl", (str(first), str(second)))]
+    assert saved == [("wsl", (first, second))]
 
 
 def test_execution_settings_reject_unavailable_wsl() -> None:

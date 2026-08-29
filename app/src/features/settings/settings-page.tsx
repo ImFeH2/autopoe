@@ -354,7 +354,8 @@ export function SettingsPage() {
                     }
                   }}
                   placeholder={
-                    executionSettings?.platform === "windows"
+                    executionSettings?.platform === "windows" &&
+                    executionBackend === "native"
                       ? "C:\\Projects"
                       : "/path/to/project"
                   }

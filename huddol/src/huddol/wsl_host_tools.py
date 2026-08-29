@@ -27,6 +27,62 @@ class WslProbe:
     architecture: str
 
 
+def normalize_wsl_write_directories(
+    values: list[str] | tuple[str, ...],
+    probe: WslProbe,
+    *,
+    require_existing: bool,
+) -> tuple[str, ...]:
+    normalized: list[str] = []
+    identities: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or not value:
+            raise ValueError("write_directories must contain non-empty strings")
+        if "\0" in value:
+            raise ValueError("Writable directories must be valid paths")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ValueError("Writable directories must be valid UTF-8") from error
+        candidate = PurePosixPath(value)
+        if not candidate.is_absolute():
+            raise ValueError("Writable directories must be absolute paths")
+        rendered = posixpath.normpath(value)
+        if require_existing:
+            try:
+                result = _run_wsl(
+                    [
+                        "wsl.exe",
+                        "--distribution",
+                        probe.distribution,
+                        "--exec",
+                        "sh",
+                        "-c",
+                        (
+                            'resolved=$(readlink -f -- "$1") && '
+                            '[ -d "$resolved" ] && printf %s "$resolved"'
+                        ),
+                        "sh",
+                        rendered,
+                    ],
+                    timeout=15,
+                )
+            except HostToolError as error:
+                raise ValueError(
+                    "Writable directories must identify existing directories"
+                ) from error
+            rendered = result.stdout
+            if not rendered or not PurePosixPath(rendered).is_absolute():
+                raise ValueError(
+                    "Writable directories must identify existing directories"
+                )
+        if rendered in identities:
+            continue
+        identities.add(rendered)
+        normalized.append(rendered)
+    return tuple(normalized)
+
+
 class ExecutionSettings:
     def __init__(
         self,
@@ -75,11 +131,19 @@ class ExecutionSettings:
         with self._lock:
             if backend == "wsl" and self._wsl_probe is None:
                 raise ValueError("WSL is unavailable")
-            normalized = tuple(
-                str(path)
-                for path in normalize_write_directories(
+            normalized = (
+                normalize_wsl_write_directories(
                     write_directories,
+                    self._wsl_probe,
                     require_existing=True,
+                )
+                if backend == "wsl"
+                else tuple(
+                    str(path)
+                    for path in normalize_write_directories(
+                        write_directories,
+                        require_existing=True,
+                    )
                 )
             )
             if self._on_configure is not None:
@@ -120,12 +184,10 @@ class WslHostTools:
         write_directories: list[str] | tuple[str, ...] = (),
     ) -> WslHostTools:
         active_probe = probe or probe_wsl()
-        normalized = normalize_write_directories(
+        normalized = normalize_wsl_write_directories(
             write_directories,
+            active_probe,
             require_existing=False,
-        )
-        translated = tuple(
-            translate_working_directory(active_probe, path) for path in normalized
         )
         return cls(
             HostTools(
@@ -135,8 +197,8 @@ class WslHostTools:
             ),
             active_probe,
             active_probe.home,
-            translated,
-            tuple(str(path) for path in normalized),
+            normalized,
+            normalized,
         )
 
     @property

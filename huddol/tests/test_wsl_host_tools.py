@@ -143,10 +143,18 @@ def test_wsl_host_tools_start_uses_backend_home(
         lambda _probe, _root: (_ for _ in ()).throw(AssertionError("unexpected")),
     )
 
-    tools = WslHostTools.start(native_home, probe)
+    tools = WslHostTools.start(
+        native_home,
+        probe,
+        write_directories=("/mnt/c/workspace/repository", "/workspace/repository"),
+    )
 
     assert roots == [native_home]
     assert tools.working_directory == "/home/ada"
+    assert tools.write_directories == (
+        "/mnt/c/workspace/repository",
+        "/workspace/repository",
+    )
 
 
 def test_wsl_host_tools_edit_reuses_native_atomic_edit(
@@ -206,15 +214,23 @@ def test_wsl_host_tools_reject_invalid_inputs_before_launch() -> None:
     assert launcher.edit_calls == []
 
 
-def test_execution_settings_persist_selection_and_require_restart(
+def test_execution_settings_save_wsl_absolute_directories_for_restart(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    writable = tmp_path / "writable"
-    writable.mkdir()
     saved: list[tuple[str, tuple[str, ...]]] = []
     probe = WslProbe("Debian", "/home/ada", "x86_64")
+    directories = ("/mnt/c/workspace/repository", "/workspace/repository")
     monkeypatch.setattr(wsl_host_tools.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "_run_wsl",
+        lambda argv, timeout: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=argv[-1],
+            stderr="",
+        ),
+    )
     settings = ExecutionSettings(
         "native",
         "native",
@@ -222,18 +238,44 @@ def test_execution_settings_persist_selection_and_require_restart(
         on_configure=lambda backend, paths: saved.append((backend, paths)),
     )
 
-    updated = settings.configure("wsl", [str(writable)])
+    updated = settings.configure("wsl", list(directories))
 
-    assert saved == [("wsl", (str(writable),))]
+    assert saved == [("wsl", directories)]
     assert updated == {
         "platform": "windows",
         "selected_backend": "wsl",
         "active_backend": "native",
         "wsl_available": True,
         "wsl_distribution": "Debian",
-        "write_directories": [str(writable)],
+        "write_directories": list(directories),
         "restart_required": True,
     }
+
+
+def test_execution_settings_reject_relative_or_missing_wsl_directories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = ExecutionSettings(
+        "native",
+        "native",
+        WslProbe("Debian", "/home/ada", "x86_64"),
+    )
+
+    with pytest.raises(ValueError, match="absolute paths"):
+        settings.configure("wsl", ["project"])
+
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "_run_wsl",
+        lambda _argv, timeout: (_ for _ in ()).throw(
+            HostToolError("WSL command failed")
+        ),
+    )
+    with pytest.raises(ValueError, match="existing directories"):
+        settings.configure("wsl", ["/missing"])
+
+    assert settings.settings()["selected_backend"] == "native"
+    assert settings.settings()["write_directories"] == []
 
 
 def test_write_directory_change_requires_restart(tmp_path: Path) -> None:
