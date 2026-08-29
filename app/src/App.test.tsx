@@ -1191,7 +1191,7 @@ describe("App", () => {
     expect(markup).toContain(">Settings<");
     expect(markup).not.toContain("Recent");
     expect(markup).not.toContain("Launch narrative");
-    expect(markup).not.toContain("/project/flowent");
+    expect(markup).not.toContain("/project/huddol");
     expect(markup).not.toContain(">You<");
     expect(markup).not.toContain("sidebar-settings-button");
     expect(markup).toContain("sidebar-nav-button--bottom");

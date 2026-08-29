@@ -20,7 +20,7 @@ import {
 
 const validSnapshot: OrganizationSnapshot = {
   organization: { id: 1, current_human_member_id: 1 },
-  working_directory: "/project/flowent",
+  working_directory: "/project/huddol",
   mention_syntax: { enabled: true, issues: [] },
   member_name_policy: {
     normalization: "NFKC",
