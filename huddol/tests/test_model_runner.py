@@ -38,6 +38,7 @@ from pydantic_ai.native_tools import WebSearchTool
 from huddol.domain import OrganizationState, Reminder, ReminderMention
 from huddol.history import AgentHistory
 from huddol.host_tools import HostTools
+from huddol.library import Library
 from huddol.memory import AgentMemory
 from huddol.model_execution import RetryingModel
 from huddol.model_runner import (
@@ -441,6 +442,7 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
         "discussion",
         "edit",
         "history",
+        "library",
         "memory",
         "organization",
         "run",
@@ -449,6 +451,12 @@ def test_pydantic_runner_exposes_only_current_tool_names() -> None:
     discussion = runner._agent._function_toolset.tools["discussion"]
     assert "mention_ids" not in discussion.function_schema.json_schema["properties"]
     assert "@Name" in discussion.description
+    library = runner._agent._function_toolset.tools["library"]
+    assert library.function_schema.json_schema["properties"]["action"]["enum"] == [
+        "list",
+        "read",
+        "write",
+    ]
 
 
 def test_pydantic_runner_executes_admin_discussion_tools(tmp_path: Path) -> None:
@@ -889,6 +897,80 @@ def test_pydantic_runner_executes_memory_tools(tmp_path: Path) -> None:
     assert [
         data["tool_name"] for event_type, data in events if event_type == "tool_result"
     ] == ["memory", "memory", "memory"]
+
+
+def test_pydantic_runner_executes_shared_library_tools(tmp_path: Path) -> None:
+    calls = 0
+
+    async def respond(_messages: list[ModelMessage], _info: AgentInfo):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            yield {
+                0: DeltaToolCall(
+                    name="library",
+                    json_args=json.dumps({"action": "list"}),
+                    tool_call_id="library-list-1",
+                )
+            }
+        elif calls == 2:
+            yield {
+                0: DeltaToolCall(
+                    name="library",
+                    json_args=json.dumps(
+                        {
+                            "action": "write",
+                            "title": "Shared guide",
+                            "content": "# Organization guide",
+                        }
+                    ),
+                    tool_call_id="library-write-1",
+                )
+            }
+        elif calls == 3:
+            yield {
+                0: DeltaToolCall(
+                    name="library",
+                    json_args=json.dumps({"action": "read", "document_id": 1}),
+                    tool_call_id="library-read-1",
+                )
+            }
+        else:
+            yield "Library updated"
+
+    store = SQLiteStore(tmp_path / "data")
+    library = Library(store)
+    runner = PydanticAgentRunner(
+        ModelConfig(
+            api_type="openai-chat",
+            base_url="https://example.invalid",
+            api_key="test-key",
+            model="test-model",
+        )
+    )
+    reminder, context = activation_context(tmp_path)
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    with runner._agent.override(model=FunctionModel(stream_function=respond)):
+        outcome = runner.run(
+            reminder,
+            AgentRunContext(
+                context.agent_id,
+                context.state,
+                context.host_tools,
+                history_event_sink=lambda event_type, **data: events.append(
+                    (event_type, data)
+                ),
+                library_store=library,
+            ),
+        )
+
+    assert calls == 4
+    assert library.read(1)["document"]["content"] == "# Organization guide"
+    assert "Library updated" in str(outcome.messages)
+    assert [
+        data["tool_name"] for event_type, data in events if event_type == "tool_result"
+    ] == ["library", "library", "library"]
 
 
 def test_pydantic_runner_reads_compacted_history_without_repersisting_content(

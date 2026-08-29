@@ -20,6 +20,7 @@ from huddol.diagnostics import configure_diagnostics, shutdown_diagnostics
 from huddol.domain import DomainError, OrganizationState, Reminder
 from huddol.history import AgentHistory
 from huddol.host_tools import HostTools
+from huddol.library import Library
 from huddol.memory import AgentMemory
 from huddol.operations import ActorContext, OrganizationOperations
 from huddol.persistence import SQLiteStore
@@ -262,6 +263,50 @@ def test_agent_memory_tool_is_private_and_exposes_current_index(tmp_path: Path) 
     assert context.memory("read", path="patterns.md")["content"] == ("Private insight")
     assert "Read patterns.md" in context.memory_index_context()
     assert memories.list(3) == {"paths": [], "count": 0}
+
+
+def test_agent_library_tool_shares_documents_and_enforces_revisions(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    library = Library(store)
+    first = AgentRunContext(
+        2,
+        OrganizationState(),
+        HostTools(tmp_path),
+        library_store=library,
+    )
+    second = AgentRunContext(
+        3,
+        OrganizationState(),
+        HostTools(tmp_path),
+        library_store=library,
+    )
+
+    created = first.library("write", title="Shared guide", content="# Guide")[
+        "document"
+    ]
+    assert second.library("list")["documents"][0]["id"] == created["id"]
+    assert (
+        second.library("read", document_id=created["id"])["document"]["content"]
+        == "# Guide"
+    )
+    updated = second.library(
+        "write",
+        document_id=created["id"],
+        expected_revision=1,
+        title="Shared guide",
+        content="# Updated",
+    )["document"]
+    assert updated["revision"] == 2
+    with pytest.raises(DomainError, match="changed; reload"):
+        first.library(
+            "write",
+            document_id=created["id"],
+            expected_revision=1,
+            title="Shared guide",
+            content="# Stale",
+        )
 
 
 def test_agent_history_tool_only_reads_its_own_compacted_context(

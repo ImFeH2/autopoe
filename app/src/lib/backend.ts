@@ -101,6 +101,23 @@ export type AgentHistory = {
   runs: AgentHistoryRun[];
 };
 
+export type LibraryDocumentSummary = {
+  id: number;
+  title: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibraryDocument = LibraryDocumentSummary & {
+  content: string;
+};
+
+export type LibraryDocumentList = {
+  documents: LibraryDocumentSummary[];
+  count: number;
+};
+
 export type AgentMemoryList = {
   paths: string[];
   count: number;
@@ -1896,6 +1913,62 @@ function parseAgentTodo(value: unknown, path: string): AgentTodo {
   };
 }
 
+function parseLibraryDocumentSummary(
+  value: unknown,
+  path: string,
+): LibraryDocumentSummary {
+  const item = record(value, path);
+  return {
+    id: positiveInteger(item.id, `${path}.id`),
+    title: nonEmptyString(item.title, `${path}.title`),
+    revision: positiveInteger(item.revision, `${path}.revision`),
+    created_at: nonEmptyString(item.created_at, `${path}.created_at`),
+    updated_at: nonEmptyString(item.updated_at, `${path}.updated_at`),
+  };
+}
+
+export function parseLibraryDocumentList(value: unknown): LibraryDocumentList {
+  const item = record(value, "library document list");
+  const documents = array(
+    item.documents,
+    "library document list.documents",
+  ).map((document, index) =>
+    parseLibraryDocumentSummary(
+      document,
+      `library document list.documents[${index}]`,
+    ),
+  );
+  const count = nonNegativeInteger(item.count, "library document list.count");
+  if (
+    count !== documents.length ||
+    new Set(documents.map((document) => document.id)).size !== documents.length
+  ) {
+    invalidSnapshot("library document list contents are inconsistent");
+  }
+  return { documents, count };
+}
+
+export function parseLibraryDocument(value: unknown): LibraryDocument {
+  const item = record(value, "library document response");
+  const documentValue = record(item.document, "library document");
+  const content =
+    typeof documentValue.content === "string"
+      ? documentValue.content
+      : invalidSnapshot("library document.content must be a string");
+  return {
+    ...parseLibraryDocumentSummary(documentValue, "library document"),
+    content,
+  };
+}
+
+export function parseDeletedLibraryDocument(value: unknown): number {
+  const item = record(value, "deleted library document");
+  return positiveInteger(
+    item.deleted_document_id,
+    "deleted library document.deleted_document_id",
+  );
+}
+
 export function parseAgentMemoryList(value: unknown): AgentMemoryList {
   const item = record(value, "agent memory list");
   const paths = array(item.paths, "agent memory list.paths").map(
@@ -2411,6 +2484,35 @@ export const backend = {
   readAgentTodo: async (agentId: number, todoId: number) =>
     parseAgentTodoDetail(
       await request("agent.todo.read", { agent_id: agentId, todo_id: todoId }),
+    ),
+  listLibraryDocuments: async () =>
+    parseLibraryDocumentList(await request("library.list")),
+  readLibraryDocument: async (documentId: number) =>
+    parseLibraryDocument(
+      await request("library.read", { document_id: documentId }),
+    ),
+  createLibraryDocument: async (title: string, content: string) =>
+    parseLibraryDocument(await request("library.create", { title, content })),
+  updateLibraryDocument: async (
+    documentId: number,
+    expectedRevision: number,
+    title: string,
+    content: string,
+  ) =>
+    parseLibraryDocument(
+      await request("library.update", {
+        document_id: documentId,
+        expected_revision: expectedRevision,
+        title,
+        content,
+      }),
+    ),
+  deleteLibraryDocument: async (documentId: number, expectedRevision: number) =>
+    parseDeletedLibraryDocument(
+      await request("library.delete", {
+        document_id: documentId,
+        expected_revision: expectedRevision,
+      }),
     ),
   onAgentHistoryEvent: (listener: (event: AgentHistoryEvent) => void) =>
     huddol.onEvent((event, data) => {

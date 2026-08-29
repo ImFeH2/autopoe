@@ -15,6 +15,7 @@ from huddol.diagnostics import (
 )
 from huddol.domain import OrganizationState
 from huddol.host_tools import HostTools
+from huddol.library import Library
 from huddol.memory import AgentMemory
 from huddol.operations import OrganizationOperations
 from huddol.persistence import SQLiteStore
@@ -151,6 +152,7 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         todos=AgentTodos(store),
         memories=AgentMemory(tmp_path),
         operations=OrganizationOperations(state, store),
+        library_store=Library(store),
     )
 
     try:
@@ -167,6 +169,10 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
         context.todo("create", subject=secret, description=secret)
         context.memory("write", path=f"{secret}.md", content=secret)
         context.memory("read", path=f"{secret}.md")
+        document = context.library("write", title=f"Shared {secret}", content=secret)[
+            "document"
+        ]
+        context.library("read", document_id=document["id"])
     finally:
         tools.close()
         shutdown_diagnostics()
@@ -205,6 +211,13 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
     assert any(
         record["event"] == "tool.completed"
         and record["tool_name"] == "memory"
+        and record["action"] == "read"
+        and record["content_bytes"] > 0
+        for record in records
+    )
+    assert any(
+        record["event"] == "tool.completed"
+        and record["tool_name"] == "library"
         and record["action"] == "read"
         and record["content_bytes"] > 0
         for record in records

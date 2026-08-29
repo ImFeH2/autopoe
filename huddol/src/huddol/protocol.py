@@ -11,6 +11,7 @@ from typing import Any, TextIO
 from huddol.diagnostics import log_event, log_exception
 from huddol.domain import DomainError, OrganizationState
 from huddol.history import AgentHistory
+from huddol.library import Library
 from huddol.memory import AgentMemory
 from huddol.model_runner import ModelRuntime
 from huddol.operations import ActorContext, OrganizationOperations
@@ -48,6 +49,7 @@ class Dispatcher:
         memories: AgentMemory | None = None,
         operations: OrganizationOperations | None = None,
         execution_settings: ExecutionSettings | None = None,
+        library: Library | None = None,
     ) -> None:
         self._state = state
         self._on_shutdown = on_shutdown
@@ -57,6 +59,7 @@ class Dispatcher:
         self._memories = memories
         self._operations = operations
         self._actor = ActorContext.current_human(state)
+        self._library = library
         self._execution_settings = execution_settings or ExecutionSettings(
             "native", "native", None
         )
@@ -81,6 +84,11 @@ class Dispatcher:
             "agent.memory.read": self._read_agent_memory,
             "agent.todo.list": self._list_agent_todos,
             "agent.todo.read": self._read_agent_todo,
+            "library.list": self._list_library_documents,
+            "library.read": self._read_library_document,
+            "library.create": self._create_library_document,
+            "library.update": self._update_library_document,
+            "library.delete": self._delete_library_document,
             "discussion.create": self._create_discussion,
             "discussion.members.update": self._update_discussion_members,
             "discussion.delete": self._delete_discussion,
@@ -121,6 +129,8 @@ class Dispatcher:
                 "agent.memory.read",
                 "agent.todo.list",
                 "agent.todo.read",
+                "library.list",
+                "library.read",
             )
             else logging.INFO
         )
@@ -433,6 +443,44 @@ class Dispatcher:
             raise RuntimeError("Agent Todos are unavailable")
         return self._todos.read(agent_id, require_integer(params, "todo_id"))
 
+    def _require_library(self) -> Library:
+        if self._library is None:
+            raise RuntimeError("Library is unavailable")
+        return self._library
+
+    def _list_library_documents(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        if params:
+            raise ProtocolError("library.list does not accept params")
+        return self._require_library().list()
+
+    def _read_library_document(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_library().read(require_integer(params, "document_id"))
+
+    def _create_library_document(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_library().create(
+            require_string(params, "title"),
+            require_string(params, "content"),
+        )
+
+    def _update_library_document(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_library().update(
+            require_integer(params, "document_id"),
+            require_integer(params, "expected_revision"),
+            require_string(params, "title"),
+            require_string(params, "content"),
+        )
+
+    def _delete_library_document(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._reject_actor_fields(params, "actor_id", "actor_type")
+        return self._require_library().delete(
+            require_integer(params, "document_id"),
+            require_integer(params, "expected_revision"),
+        )
+
     def _create_discussion(self, params: dict[str, Any]) -> dict[str, Any]:
         self._reject_actor_fields(params, "actor_id", "actor_type", "creator_id")
         return self._require_operations().create_discussion(
@@ -626,6 +674,7 @@ def serve(
     memories: AgentMemory | None = None,
     operations: OrganizationOperations | None = None,
     execution_settings: ExecutionSettings | None = None,
+    library: Library | None = None,
 ) -> str:
     dispatcher = Dispatcher(
         state,
@@ -636,6 +685,7 @@ def serve(
         memories,
         operations,
         execution_settings,
+        library,
     )
     protocol_writer = writer or JsonLineWriter(output_stream)
     input_line_count = 0

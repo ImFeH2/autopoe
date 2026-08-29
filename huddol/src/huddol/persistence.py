@@ -24,7 +24,8 @@ GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION = 15
 DELIVERY_SCHEMA_VERSION = 16
 EXECUTION_SETTINGS_SCHEMA_VERSION = 17
 AUTHORIZATION_SCHEMA_VERSION = 18
-SCHEMA_VERSION = 19
+LIBRARY_SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIR"
 
 AuditAction = Literal[
@@ -395,6 +396,8 @@ class SQLiteStore:
                     self._migrate_version_seventeen(connection)
                 elif version == AUTHORIZATION_SCHEMA_VERSION:
                     self._migrate_version_eighteen(connection)
+                elif version == LIBRARY_SCHEMA_VERSION:
+                    self._migrate_version_nineteen(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Huddol database version: {version}"
@@ -404,6 +407,11 @@ class SQLiteStore:
                     == AUTHORIZATION_SCHEMA_VERSION
                 ):
                     self._migrate_version_eighteen(connection)
+                if (
+                    connection.execute("PRAGMA user_version").fetchone()[0]
+                    == LIBRARY_SCHEMA_VERSION
+                ):
+                    self._migrate_version_nineteen(connection)
                 self._validate_authorization_storage(connection)
                 interrupted_runs = self._interrupt_running_agent_runs(connection)
                 orphaned_todos = self._delete_orphaned_agent_todos(connection)
@@ -574,6 +582,22 @@ class SQLiteStore:
         SQLiteStore._create_human_read_state_tables(connection)
         SQLiteStore._create_delivery_tables(connection)
         SQLiteStore._create_authorization_tables(connection)
+        SQLiteStore._create_library_documents_table(connection)
+
+    @staticmethod
+    def _create_library_documents_table(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK (length(title) > 0),
+                content TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
     @staticmethod
     def _create_authorization_tables(connection: sqlite3.Connection) -> None:
@@ -1446,6 +1470,12 @@ class SQLiteStore:
                 )
                 """
             )
+            connection.execute(f"PRAGMA user_version = {LIBRARY_SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_nineteen(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            SQLiteStore._create_library_documents_table(connection)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -2861,6 +2891,100 @@ class SQLiteStore:
             "updated_at": row["updated_at"],
             "completed_at": row["completed_at"],
         }
+
+    def list_library_documents(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, title, revision, created_at, updated_at
+                FROM library_documents ORDER BY title COLLATE NOCASE, id
+                """
+            )
+            return [self._library_document_data(row) for row in rows]
+
+    def load_library_document(self, document_id: int) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, title, content, revision, created_at, updated_at
+                FROM library_documents WHERE id = ?
+                """,
+                (document_id,),
+            ).fetchone()
+        return (
+            None
+            if row is None
+            else self._library_document_data(row, include_content=True)
+        )
+
+    def create_library_document(
+        self,
+        title: str,
+        content: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with self._connect() as connection, connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO library_documents
+                    (title, content, revision, created_at, updated_at)
+                VALUES (?, ?, 1, ?, ?)
+                """,
+                (title, content, created_at, created_at),
+            )
+            document_id = int(cursor.lastrowid)
+        self.path.chmod(0o600)
+        document = self.load_library_document(document_id)
+        if document is None:
+            raise RuntimeError("Library document was not saved")
+        return document
+
+    def update_library_document(
+        self,
+        document_id: int,
+        title: str,
+        content: str,
+        updated_at: str,
+    ) -> dict[str, Any]:
+        with self._connect() as connection, connection:
+            cursor = connection.execute(
+                """
+                UPDATE library_documents
+                SET title = ?, content = ?, revision = revision + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (title, content, updated_at, document_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Library document does not exist")
+        self.path.chmod(0o600)
+        document = self.load_library_document(document_id)
+        if document is None:
+            raise RuntimeError("Library document was not saved")
+        return document
+
+    def delete_library_document(self, document_id: int) -> bool:
+        with self._connect() as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM library_documents WHERE id = ?", (document_id,)
+            )
+        self.path.chmod(0o600)
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def _library_document_data(
+        row: sqlite3.Row, *, include_content: bool = False
+    ) -> dict[str, Any]:
+        document = {
+            "id": row["id"],
+            "title": row["title"],
+            "revision": row["revision"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        if include_content:
+            document["content"] = row["content"]
+        return document
 
     def load_observability_config(self) -> dict[str, Any] | None:
         with self._connect() as connection:

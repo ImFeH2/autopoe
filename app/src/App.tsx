@@ -23,6 +23,7 @@ import {
   type DiscussionMessageCache,
   mergeDiscussionMessagePage,
 } from "@/features/incremental/discussion-message-cache";
+import { LibraryPage } from "@/features/library";
 import { MembersPage } from "@/features/members";
 import {
   memberNameErrorMessage,
@@ -892,6 +893,7 @@ function App() {
       />
 
       <section className="workspace-main bg-surface">
+        {workspaceView === "library" ? <LibraryPage /> : null}
         {workspaceView === "members" ? (
           <MembersPage
             agentName={agentName}

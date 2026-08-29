@@ -11,6 +11,8 @@ import {
   parseAgentTodoPage,
   parseDiscussionMessagePage,
   parseExecutionSettings,
+  parseLibraryDocument,
+  parseLibraryDocumentList,
   parseModelSettings,
   parseObservabilitySettings,
   parseOrganizationAudit,
@@ -87,6 +89,43 @@ const validMessagePage: DiscussionMessagePage = {
   next_before_message_id: null,
   next_after_message_id: null,
 };
+
+describe("Library documents", () => {
+  it("parses document summaries separately from Markdown content", () => {
+    const summary = {
+      id: 1,
+      title: "Team guide",
+      revision: 2,
+      created_at: "2026-08-29T00:00:00+00:00",
+      updated_at: "2026-08-29T01:00:00+00:00",
+    };
+
+    expect(
+      parseLibraryDocumentList({ documents: [summary], count: 1 }),
+    ).toEqual({ documents: [summary], count: 1 });
+    expect(
+      parseLibraryDocument({
+        document: { ...summary, content: "# Guide" },
+      }),
+    ).toEqual({ ...summary, content: "# Guide" });
+  });
+
+  it("rejects duplicate IDs and non-text content", () => {
+    const summary = {
+      id: 1,
+      title: "Guide",
+      revision: 1,
+      created_at: "now",
+      updated_at: "now",
+    };
+    expect(() =>
+      parseLibraryDocumentList({ documents: [summary, summary], count: 2 }),
+    ).toThrow("contents are inconsistent");
+    expect(() =>
+      parseLibraryDocument({ document: { ...summary, content: null } }),
+    ).toThrow("content must be a string");
+  });
+});
 
 describe("Agent history", () => {
   it("parses complete persistent history without exposing thinking content", () => {

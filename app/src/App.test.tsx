@@ -27,6 +27,7 @@ import {
   positionInitialDiscussionMessages,
   preserveActivityBarScrollAnchor,
 } from "@/features/discussions";
+import { formatLibraryTimestamp, LibraryPage } from "@/features/library";
 import { MembersPage } from "@/features/members";
 import {
   isExecutionSettingsDirty,
@@ -47,6 +48,17 @@ describe("App", () => {
     const markup = renderToStaticMarkup(<App />);
 
     expect(markup).toContain("Starting Huddol");
+  });
+
+  it("renders the Library document list and accessible create action", () => {
+    const markup = renderToStaticMarkup(<LibraryPage />);
+
+    expect(markup).toContain('aria-label="Library documents"');
+    expect(markup).toContain('aria-label="New document"');
+    expect(markup).toContain("Loading documents");
+    expect(formatLibraryTimestamp("2026-08-29T01:30:00Z", "en-GB")).toContain(
+      "29 Aug 2026",
+    );
   });
 
   it("marks execution settings dirty only when the selection changes", () => {
@@ -1183,6 +1195,7 @@ describe("App", () => {
     expect(markup).not.toContain(">Overview<");
     expect(markup).not.toContain("Organization 1");
     expect(markup).toContain(">Discussions<");
+    expect(markup).toContain(">Library<");
     expect(markup).not.toContain(">Mentions<");
     expect(markup).not.toContain('aria-label="Mentions"');
     expect(markup).toContain(">Members<");
@@ -1198,7 +1211,7 @@ describe("App", () => {
     const navigationButtons = [...markup.matchAll(/class="([^"]+)"/g)].filter(
       ([, className]) => className.split(" ").includes("sidebar-nav-button"),
     );
-    expect(navigationButtons).toHaveLength(4);
+    expect(navigationButtons).toHaveLength(5);
   });
 
   it("renders Members as a selectable list with Agent details", () => {

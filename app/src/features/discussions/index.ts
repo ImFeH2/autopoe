@@ -5,6 +5,7 @@ export {
   isMentionNameCharacter,
   normalizeMentionText,
 } from "@/lib/mention-normalization";
+export { DiscussionMarkdown } from "./discussion-markdown";
 export {
   DiscussionForm,
   DiscussionsPage,

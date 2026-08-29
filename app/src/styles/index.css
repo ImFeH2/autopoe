@@ -5,6 +5,7 @@
 @import "../components/ui/ui.css";
 @import "../features/settings/settings.css";
 @import "../features/discussions/discussions.css";
+@import "../features/library/library.css";
 @import "../features/members/members.css";
 @import "../features/permissions/permissions.css";
 @import "./motion.css";

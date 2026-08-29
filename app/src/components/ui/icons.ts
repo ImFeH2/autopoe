@@ -1,4 +1,5 @@
 export {
+  BookOpen,
   Bot,
   MessageSquare,
   Pause,

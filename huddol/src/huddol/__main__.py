@@ -41,6 +41,7 @@ def main(
     from huddol.domain import OrganizationState
     from huddol.history import AgentHistory
     from huddol.host_tools import AgentHostTools, ProcessWatcher
+    from huddol.library import Library
     from huddol.memory import AgentMemory
     from huddol.model_runner import create_runner
     from huddol.operations import OrganizationOperations
@@ -85,6 +86,7 @@ def main(
             lambda event: writer.write_event("agent.history.updated", event),
         )
         todos = AgentTodos(store)
+        library = Library(store)
         memories = AgentMemory(storage_directory)
         watcher = ProcessWatcher(host_tools.process_owner)
         state = OrganizationState(
@@ -121,6 +123,7 @@ def main(
             todos,
             memories,
             operations,
+            library,
         )
         runtime.start()
         stop_reason = serve(
@@ -135,6 +138,7 @@ def main(
             memories,
             operations,
             execution_settings,
+            library,
         )
     except BaseException as error:
         stop_reason = "exception"

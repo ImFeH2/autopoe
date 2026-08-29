@@ -1,5 +1,6 @@
 import {
   Badge,
+  BookOpen,
   Button,
   MessageSquare,
   Settings2,
@@ -10,6 +11,7 @@ import {
 
 export type WorkspaceView =
   | "discussions"
+  | "library"
   | "members"
   | "permissions"
   | "settings";
@@ -28,6 +30,7 @@ const navigation = [
     label: "Discussions",
     view: "discussions",
   },
+  { icon: BookOpen, label: "Library", view: "library" },
   { count: "members", icon: Users, label: "Members", view: "members" },
   {
     icon: ShieldCheck,
@@ -44,7 +47,7 @@ export function AppSidebar({
   view,
 }: AppSidebarProps) {
   const counts: Record<
-    Exclude<WorkspaceView, "permissions" | "settings">,
+    Exclude<WorkspaceView, "library" | "permissions" | "settings">,
     number
   > = {
     discussions: discussionCount,

@@ -13,6 +13,7 @@ from huddol.diagnostics import log_event, log_exception
 from huddol.domain import DomainError, OrganizationState, Reminder
 from huddol.history import AgentHistory, AgentHistoryRun
 from huddol.host_tools import AgentHostTools, HostToolError
+from huddol.library import Library
 from huddol.memory import AgentMemory
 from huddol.operations import ActorContext, OrganizationOperations
 from huddol.todos import AgentTodos, wrap_tool_result
@@ -31,6 +32,7 @@ class AgentRunContext:
     history_store: AgentHistory | None = None
     history_compaction_sink: Callable[[str | None], None] | None = None
     operations: OrganizationOperations | None = None
+    library_store: Library | None = None
 
     def emit_history_event(self, event_type: str, **data: Any) -> None:
         if self.history_event_sink is not None:
@@ -161,6 +163,13 @@ class AgentRunContext:
             lambda: self._memory(action, arguments),
         )
 
+    def library(self, action: str, **arguments: Any) -> Any:
+        return self._call_tool(
+            "library",
+            action,
+            lambda: self._library(action, arguments),
+        )
+
     def memory_index_context(self) -> str | None:
         if self.memories is None:
             return None
@@ -173,6 +182,27 @@ class AgentRunContext:
 
     def model_tool_result(self, result: Any) -> Any:
         return wrap_tool_result(result, self.todo_status_reminder())
+
+    def _library(self, action: str, arguments: dict[str, Any]) -> Any:
+        if self.library_store is None:
+            raise RuntimeError("Library is unavailable")
+        if action == "list":
+            return self.library_store.list()
+        if action == "read":
+            return self.library_store.read(arguments["document_id"])
+        if action == "write":
+            document_id = arguments.get("document_id")
+            if document_id is None:
+                return self.library_store.create(
+                    arguments["title"], arguments["content"]
+                )
+            return self.library_store.update(
+                document_id,
+                arguments["expected_revision"],
+                arguments["title"],
+                arguments["content"],
+            )
+        raise ValueError(f"Unknown library action: {action}")
 
     def _history(self, action: str, arguments: dict[str, Any]) -> Any:
         if self.history_store is None:
@@ -425,6 +455,19 @@ class AgentRunContext:
                 result_fields = {"content_bytes": result["bytes"]}
                 if action == "edit":
                     result_fields["replacement_count"] = result["replacement_count"]
+        elif tool_name == "library":
+            if action == "list":
+                result_fields = {"result_count": result["count"]}
+            elif action == "read":
+                result_fields = {
+                    "content_bytes": len(result["document"]["content"].encode("utf-8"))
+                }
+            elif action == "write":
+                result_fields = {
+                    "document_id": result["document"]["id"],
+                    "revision": result["document"]["revision"],
+                    "content_bytes": len(result["document"]["content"].encode("utf-8")),
+                }
         elif tool_name == "history":
             if action == "list":
                 result_fields = {
@@ -502,6 +545,7 @@ class AgentRuntime:
         todos: AgentTodos | None = None,
         memories: AgentMemory | None = None,
         operations: OrganizationOperations | None = None,
+        library: Library | None = None,
     ) -> None:
         self._state = state
         self._runner = runner
@@ -510,6 +554,7 @@ class AgentRuntime:
         self._todos = todos
         self._memories = memories
         self._operations = operations
+        self._library = library
         self._stop_event = Event()
         self._stop_lock = Lock()
         self._stop_completed = False
@@ -674,6 +719,7 @@ class AgentRuntime:
                     memories=self._memories,
                     history_store=self._history,
                     operations=self._operations,
+                    library_store=self._library,
                 ),
             )
             if result is not None:

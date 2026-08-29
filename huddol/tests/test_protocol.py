@@ -7,6 +7,7 @@ from threading import Thread
 
 from huddol.domain import OrganizationState
 from huddol.history import AgentHistory
+from huddol.library import Library
 from huddol.memory import AgentMemory
 from huddol.model_runner import ModelRuntime
 from huddol.operations import OrganizationOperations
@@ -938,3 +939,59 @@ def test_dispatches_atomic_human_mark_all_and_explicit_ack(tmp_path: Path) -> No
         page_after_ack["result"]["messages"][0]["delivery"]["recipients"][0]["ack"]
         == "acked"
     )
+
+
+def test_dispatches_library_document_crud_and_revision_conflicts(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStore(tmp_path / "data")
+    dispatcher = Dispatcher(OrganizationState(), library=Library(store))
+
+    created = dispatcher.dispatch(
+        {
+            "id": 1,
+            "method": "library.create",
+            "params": {"title": "Team guide", "content": "# Guide"},
+        }
+    )["result"]["document"]
+    listed = dispatcher.dispatch({"id": 2, "method": "library.list"})["result"]
+    read = dispatcher.dispatch(
+        {
+            "id": 3,
+            "method": "library.read",
+            "params": {"document_id": created["id"]},
+        }
+    )["result"]["document"]
+    updated = dispatcher.dispatch(
+        {
+            "id": 4,
+            "method": "library.update",
+            "params": {
+                "document_id": created["id"],
+                "expected_revision": 1,
+                "title": "Team guide",
+                "content": "# Updated guide",
+            },
+        }
+    )["result"]["document"]
+    stale = dispatcher.dispatch(
+        {
+            "id": 5,
+            "method": "library.delete",
+            "params": {"document_id": created["id"], "expected_revision": 1},
+        }
+    )
+    deleted = dispatcher.dispatch(
+        {
+            "id": 6,
+            "method": "library.delete",
+            "params": {"document_id": created["id"], "expected_revision": 2},
+        }
+    )["result"]
+
+    assert listed["documents"][0]["title"] == "Team guide"
+    assert "content" not in listed["documents"][0]
+    assert read["content"] == "# Guide"
+    assert updated["revision"] == 2
+    assert stale["error"]["code"] == "library_revision_conflict"
+    assert deleted == {"deleted_document_id": created["id"]}
