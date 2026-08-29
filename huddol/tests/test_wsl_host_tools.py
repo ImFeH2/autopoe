@@ -20,7 +20,7 @@ class FakeLauncher:
 
     @property
     def working_directory(self) -> str:
-        return r"F:\Project\huddol"
+        return r"C:\workspace\repository"
 
     @property
     def execution_backend(self) -> str:
@@ -72,9 +72,9 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
     tools = WslHostTools(
         launcher,
         WslProbe("Debian", "/home/ada", "x86_64"),
-        "/mnt/f/Project/huddol",
-        ("/mnt/f/Project/huddol",),
-        (r"F:\Project\huddol",),
+        "/mnt/c/workspace/repository",
+        ("/mnt/c/workspace/repository",),
+        (r"C:\workspace\repository",),
     )
 
     result = tools.run(["printf", "%s", "$(not-a-shell)"], timeout_seconds=7)
@@ -89,7 +89,7 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
                 "--distribution",
                 "Debian",
                 "--cd",
-                "/mnt/f/Project/huddol",
+                "/mnt/c/workspace/repository",
                 "--exec",
                 "bwrap",
                 "--new-session",
@@ -101,10 +101,10 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
                 "/dev",
                 "--unshare-user",
                 "--bind",
-                "/mnt/f/Project/huddol",
-                "/mnt/f/Project/huddol",
+                "/mnt/c/workspace/repository",
+                "/mnt/c/workspace/repository",
                 "--chdir",
-                "/mnt/f/Project/huddol",
+                "/mnt/c/workspace/repository",
                 "--cap-drop",
                 "ALL",
                 "--",
@@ -117,7 +117,7 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
         )
     ]
     assert tools.execution_backend == "wsl"
-    assert tools.working_directory == "/mnt/f/Project/huddol"
+    assert tools.working_directory == "/mnt/c/workspace/repository"
     assert "WSL Debian" in tools.environment_context
     tools.close()
     assert launcher.closed is True
@@ -130,18 +130,18 @@ def test_wsl_host_tools_edit_reuses_native_atomic_edit(
     tools = WslHostTools(
         launcher,
         WslProbe("Debian", "/home/ada", "x86_64"),
-        "/mnt/f/Project/huddol",
-        ("/mnt/f/Project/huddol",),
-        (r"F:\Project\huddol",),
+        "/mnt/c/workspace/repository",
+        ("/mnt/c/workspace/repository",),
+        (r"C:\workspace\repository",),
     )
     calls: list[list[str]] = []
 
     def run_wsl(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         stdout = (
-            "/mnt/f/Project/huddol/project/file.txt\n"
+            "/mnt/c/workspace/repository/project/file.txt\n"
             if "readlink" in argv
-            else "F:\\Project\\huddol\\project\\file.txt\n"
+            else "C:\\workspace\\repository\\project\\file.txt\n"
         )
         return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
@@ -155,10 +155,10 @@ def test_wsl_host_tools_edit_reuses_native_atomic_edit(
         "replacement_count": 1,
     }
     assert launcher.edit_calls == [
-        (r"F:\Project\huddol\project\file.txt", "before", "after", False)
+        (r"C:\workspace\repository\project\file.txt", "before", "after", False)
     ]
-    assert calls[0][-2:] == ["--", "/mnt/f/Project/huddol/project/file.txt"]
-    assert calls[1][-2:] == ["--", "/mnt/f/Project/huddol/project/file.txt"]
+    assert calls[0][-2:] == ["--", "/mnt/c/workspace/repository/project/file.txt"]
+    assert calls[1][-2:] == ["--", "/mnt/c/workspace/repository/project/file.txt"]
 
 
 def test_wsl_host_tools_reject_invalid_inputs_before_launch() -> None:
@@ -166,7 +166,7 @@ def test_wsl_host_tools_reject_invalid_inputs_before_launch() -> None:
     tools = WslHostTools(
         launcher,
         WslProbe("Debian", "/home/ada", "x86_64"),
-        "/mnt/f/Project/huddol",
+        "/mnt/c/workspace/repository",
     )
 
     with pytest.raises(HostToolError, match="argv"):
@@ -363,7 +363,7 @@ def test_create_host_tools_falls_back_to_native_when_wsl_is_unavailable(
 
     assert tools is launcher
     assert tools.execution_backend == "native"
-    assert tools.working_directory == r"F:\Project\huddol"
+    assert tools.working_directory == r"C:\workspace\repository"
     assert saved == [("native", ())]
     assert settings.settings()["selected_backend"] == "native"
     assert settings.settings()["wsl_available"] is False
