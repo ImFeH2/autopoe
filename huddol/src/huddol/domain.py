@@ -1175,12 +1175,17 @@ class OrganizationState:
 
     def management_candidate(self) -> OrganizationState:
         with self._condition:
-            return OrganizationState(
+            candidate = OrganizationState(
                 self._working_directory,
-                persisted=self._persistence_data(),
                 message_clock=self._message_clock,
                 current_human_member_id=self._current_human_member_id,
             )
+            candidate._members = deepcopy(self._members)
+            candidate._discussions = deepcopy(self._discussions)
+            candidate._agent_execution = deepcopy(self._agent_execution)
+            candidate._next_member_id = self._next_member_id
+            candidate._next_discussion_id = self._next_discussion_id
+            return candidate
 
     def prepare_management_replacement(self) -> PreparedOrganizationState:
         with self._condition:

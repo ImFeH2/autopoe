@@ -176,6 +176,22 @@ def test_success_is_atomic_and_not_published_when_store_fails(
     assert store.load_audit_events() == before_audit
 
 
+def test_management_mutation_preserves_running_agent_execution(
+    tmp_path: Path,
+) -> None:
+    state, _store, operations = persisted_authorization(tmp_path)
+    human = ActorContext.current_human(state)
+    operations.create_agent(human, 0, "Ada")
+    operations.create_discussion(human, 1, "Work", [2])
+    state.send_message(1, 1, "@Ada first")
+    assert state.claim_next_reminder()[0] is not None
+
+    operations.create_discussion(human, 2, "Another", [2])
+
+    assert state.member(2)["status"] == "running"
+    assert state.claim_next_reminder()[0] is None
+
+
 def test_discussion_delete_requires_topic_and_preserves_other_content(
     tmp_path: Path,
 ) -> None:
