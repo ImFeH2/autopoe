@@ -49,6 +49,21 @@ def test_requires_complete_hyphen_and_underscore_tokens_with_longest_name() -> N
     ) == [(3, 0, 13), (2, 15, 19), (4, 28, 34)]
 
 
+def test_matches_internal_spaces_and_prefers_the_longest_name() -> None:
+    body = "@Technical Manager asks @Product Advisor, not @Technical."
+    found = refs(
+        body,
+        (2, "Technical"),
+        (3, "Technical Manager"),
+        (4, "Product Advisor"),
+    )
+    assert [(member_id, body[start:end]) for member_id, start, end in found] == [
+        (3, "@Technical Manager"),
+        (4, "@Product Advisor"),
+        (2, "@Technical"),
+    ]
+
+
 def test_matches_names_at_the_new_maximum_without_a_parser_side_limit() -> None:
     name = "𐐀" * 32
     body = f"Ask @{name} now"
@@ -121,7 +136,7 @@ def test_any_invalid_or_nfkc_casefold_ambiguous_name_disables_syntax() -> None:
     names = (
         MentionName(2, "Ada"),
         MentionName(3, "ＡＤＡ"),
-        MentionName(4, "Bad Name"),
+        MentionName(4, "Bad.Name"),
         MentionName(5, "Lin"),
     )
     issues = mention_name_issues(names)

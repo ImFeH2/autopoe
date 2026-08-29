@@ -40,12 +40,12 @@ def validate_mention_safe_name(value: str) -> str:
             "invalid_name", "Member names require a Unicode letter or number"
         )
     if any(
-        character not in "-_" and category(character)[0] not in {"L", "M", "N"}
+        character not in " -_" and category(character)[0] not in {"L", "M", "N"}
         for character in value
     ):
         raise MemberNameValidationError(
             "invalid_name",
-            "Member names may contain only Unicode letters, numbers, marks, '-' and '_'",
+            "Member names may contain only Unicode letters, numbers, marks, ASCII spaces, '-' and '_'",
         )
     return value
 

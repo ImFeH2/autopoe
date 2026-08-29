@@ -1270,7 +1270,7 @@ def test_legacy_name_issue_disables_reference_backfill(tmp_path: Path) -> None:
     state.send_message(1, 1, "@Lin")
 
     connection = sqlite3.connect(store.path)
-    connection.execute("UPDATE members SET name = 'Bad Name' WHERE id = 2")
+    connection.execute("UPDATE members SET name = 'Bad.Name' WHERE id = 2")
     connection.execute("UPDATE members SET deleted = 1 WHERE id = 3")
     connection.execute(
         "DELETE FROM discussion_members WHERE discussion_id = 1 AND member_id = 3"
@@ -1289,7 +1289,7 @@ def test_legacy_name_issue_disables_reference_backfill(tmp_path: Path) -> None:
             {
                 "code": "invalid_name",
                 "member_ids": [2],
-                "names": ["Bad Name"],
+                "names": ["Bad.Name"],
             }
         ],
     }

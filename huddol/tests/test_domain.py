@@ -568,7 +568,7 @@ def test_legacy_name_issue_disables_syntax_but_restores_notification_identity() 
         persisted={
             "members": [
                 {"id": 1, "type": "human", "name": "You"},
-                {"id": 2, "type": "agent", "name": "Bad Name"},
+                {"id": 2, "type": "agent", "name": "Bad.Name"},
                 {"id": 3, "type": "agent", "name": "Lin"},
             ],
             "discussions": [
@@ -599,7 +599,7 @@ def test_legacy_name_issue_disables_syntax_but_restores_notification_identity() 
             {
                 "code": "invalid_name",
                 "member_ids": [2],
-                "names": ["Bad Name"],
+                "names": ["Bad.Name"],
             }
         ],
     }
@@ -721,7 +721,7 @@ def test_deleting_legacy_invalid_agent_recovers_gate() -> None:
         persisted={
             "members": [
                 {"id": 1, "type": "human", "name": "You"},
-                {"id": 2, "type": "agent", "name": "Bad Name"},
+                {"id": 2, "type": "agent", "name": "Bad.Name"},
                 {"id": 3, "type": "agent", "name": "Lin"},
             ],
             "discussions": [
@@ -1230,10 +1230,11 @@ def test_member_rename_uses_shared_validation_and_active_uniqueness() -> None:
     with pytest.raises(DomainError, match="unique"):
         state.rename_member(1, "ＡＤＡ")
     with pytest.raises(DomainError, match="only Unicode"):
-        state.rename_member(1, "Bad Name")
+        state.rename_member(1, "Bad.Name")
 
-    snapshot = state.rename_member(2, "Builder")
-    assert snapshot["members"][1]["name"] == "Builder"
+    snapshot = state.rename_member(2, "Technical Manager")
+    assert snapshot["members"][1]["name"] == "Technical Manager"
+    assert snapshot["mention_syntax"] == {"enabled": True, "issues": []}
 
 
 def test_human_self_mention_does_not_notify_and_agent_created_discussion_does() -> None:
@@ -1317,7 +1318,7 @@ def test_rename_member_enforces_shared_validation_and_active_uniqueness() -> Non
         state.rename_member(2, " Ada")
     assert whitespace.value.code == "invalid_name"
     with pytest.raises(DomainError) as invalid:
-        state.rename_member(2, "Bad Name")
+        state.rename_member(2, "Bad.Name")
     assert invalid.value.code == "invalid_name"
     with pytest.raises(DomainError) as duplicate:
         state.rename_member(2, "ＧＲＡＣＥ")
