@@ -129,6 +129,9 @@ class AgentHostTools(Protocol):
     @property
     def environment_context(self) -> str: ...
 
+    @property
+    def write_directories(self) -> tuple[str, ...]: ...
+
     def run(
         self,
         argv: list[str],
@@ -332,11 +335,20 @@ class HostTools:
         root: Path,
         output_limit: int = 65_536,
         process_owner: str | None = None,
+        write_directories: list[str] | tuple[str, ...] = (),
+        *,
+        enforce_write_policy: bool = True,
     ) -> None:
         if output_limit < 2:
             raise ValueError("output_limit must be at least 2")
+        from huddol.write_access import WriteAccessPolicy
+
         self.root = root.resolve()
         self.process_owner = process_owner or uuid4().hex
+        self._write_access = WriteAccessPolicy(
+            write_directories,
+            enforce=enforce_write_policy,
+        )
         self._output_limit = output_limit
         self._lock = Lock()
         self._edit_lock = Lock()
@@ -352,12 +364,23 @@ class HostTools:
         return "native"
 
     @property
+    def write_directories(self) -> tuple[str, ...]:
+        return self._write_access.directories
+
+    @property
     def environment_context(self) -> str:
         system = "Windows" if os.name == "nt" else "Unix"
+        windows_exception = (
+            " Locations writable by Everyone may also be changed."
+            if os.name == "nt"
+            else ""
+        )
         return (
             "<host_environment>\n"
             f"Your command and file environment is native {system}.\n"
             f"The default working directory is {self.root}.\n"
+            "Filesystem reads may use any host path. Writes are limited to directories "
+            f"configured in Settings.{windows_exception} "
             "Prefer absolute paths. Huddol service tools such as discussion, memory, todo, "
             "history, and web_search are not filesystem commands.\n"
             "</host_environment>"
@@ -379,8 +402,9 @@ class HostTools:
         working_directory = self._resolve_directory(cwd)
         started = time.monotonic()
 
+        sandboxed_argv = self._write_access.command(argv, working_directory)
         managed = self._start_process(
-            argv,
+            sandboxed_argv,
             cwd=working_directory,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -448,6 +472,7 @@ class HostTools:
         with self._edit_lock:
             self._require_open()
             target = self._resolve_edit_path(path)
+            self._write_access.require_writable(target)
             original = self._read_edit(target)
             match_count = original.count(old_text)
             if match_count == 0:
@@ -490,8 +515,9 @@ class HostTools:
         while time.monotonic() < deadline:
             with self._lock:
                 if not self._processes:
-                    return
+                    break
             time.sleep(0.01)
+        self._write_access.close()
 
     def _resolve_directory(self, cwd: str | None) -> Path:
         candidate = Path(cwd or ".")

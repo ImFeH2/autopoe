@@ -30,7 +30,7 @@ async function findCurrentMemberNavigationTrigger(key) {
 
 describe("Discussions", () => {
   before(async () => {
-    await expect($("aria/Workspace")).toBeDisplayed();
+    await expect($("aria/Organization")).toBeDisplayed();
     for (const selector of [
       'button[aria-label="Members"]',
       'button[aria-label="Discussions"]',

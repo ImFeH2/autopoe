@@ -16,6 +16,18 @@ def main(
 
         watch_processes(sys.argv[2], sys.stdin.buffer)
         return
+    if (
+        len(sys.argv) >= 5
+        and sys.argv[1] == "--windows-write-sandbox"
+        and sys.argv[3] == "--"
+    ):
+        from pathlib import Path
+
+        from huddol.windows_write_access import run_restricted_command
+
+        raise SystemExit(
+            run_restricted_command(sys.argv[2], sys.argv[4:], str(Path.cwd()))
+        )
 
     sys.stdin.reconfigure(encoding="utf-8", errors="strict")
     sys.stdout.reconfigure(encoding="utf-8", errors="strict")
@@ -50,9 +62,11 @@ def main(
     stop_reason = "startup_failure"
     try:
         store = SQLiteStore(storage_directory)
+        execution_backend, write_directories = store.load_execution_settings()
         host_tools, execution_settings = create_host_tools(
-            store.load_execution_backend(),
-            store.save_execution_backend,
+            execution_backend,
+            write_directories,
+            store.save_execution_settings,
         )
         working_directory = host_tools.working_directory
         log_event(

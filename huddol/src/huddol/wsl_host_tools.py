@@ -12,6 +12,10 @@ from typing import Any, Literal
 
 from huddol.diagnostics import log_event
 from huddol.host_tools import AgentHostTools, HostToolError, HostTools
+from huddol.write_access import (
+    linux_write_sandbox_command,
+    normalize_write_directories,
+)
 
 WORKING_DIRECTORY_ENV = "HUDDOL_WORKING_DIRECTORY"
 ExecutionBackend = Literal["native", "wsl"]
@@ -30,11 +34,14 @@ class ExecutionSettings:
         selected_backend: ExecutionBackend,
         active_backend: ExecutionBackend,
         wsl_probe: WslProbe | None,
-        on_configure: Callable[[ExecutionBackend], None] | None = None,
+        write_directories: tuple[str, ...] = (),
+        on_configure: Callable[[ExecutionBackend, tuple[str, ...]], None] | None = None,
     ) -> None:
         self._selected_backend = selected_backend
         self._active_backend = active_backend
         self._wsl_probe = wsl_probe
+        self._write_directories = write_directories
+        self._active_write_directories = write_directories
         self._on_configure = on_configure
         self._lock = Lock()
 
@@ -43,25 +50,48 @@ class ExecutionSettings:
             selected = self._selected_backend
             active = self._active_backend
             probe = self._wsl_probe
+            write_directories = self._write_directories
+            active_write_directories = self._active_write_directories
         return {
             "platform": platform.system().lower(),
             "selected_backend": selected,
             "active_backend": active,
             "wsl_available": probe is not None,
             "wsl_distribution": probe.distribution if probe is not None else None,
-            "restart_required": selected != active,
+            "write_directories": list(write_directories),
+            "restart_required": (
+                selected != active or write_directories != active_write_directories
+            ),
         }
 
-    def configure(self, backend: str) -> dict[str, Any]:
+    def configure(
+        self,
+        backend: str,
+        write_directories: list[str],
+    ) -> dict[str, Any]:
         if backend not in ("native", "wsl"):
             raise ValueError("backend must be native or wsl")
+        if not isinstance(write_directories, list):
+            raise TypeError("write_directories must be a list")
         with self._lock:
             if backend == "wsl" and self._wsl_probe is None:
                 raise ValueError("WSL is unavailable")
+            normalized = tuple(
+                str(path)
+                for path in normalize_write_directories(
+                    write_directories,
+                    require_existing=True,
+                )
+            )
             if self._on_configure is not None:
-                self._on_configure(backend)
+                self._on_configure(backend, normalized)
             self._selected_backend = backend
-        log_event("execution.config.updated", backend=backend)
+            self._write_directories = normalized
+        log_event(
+            "execution.config.updated",
+            backend=backend,
+            write_directory_count=len(normalized),
+        )
         return self.settings()
 
 
@@ -71,10 +101,14 @@ class WslHostTools:
         launcher: AgentHostTools,
         probe: WslProbe,
         working_directory: str,
+        write_directories: tuple[str, ...] = (),
+        configured_write_directories: tuple[str, ...] = (),
     ) -> None:
         self._launcher = launcher
         self._probe = probe
         self._working_directory = working_directory
+        self._write_directories = write_directories
+        self._configured_write_directories = configured_write_directories
         self.process_owner = launcher.process_owner
 
     @classmethod
@@ -84,13 +118,27 @@ class WslHostTools:
         probe: WslProbe | None = None,
         *,
         output_limit: int = 65_536,
+        write_directories: list[str] | tuple[str, ...] = (),
     ) -> WslHostTools:
         active_probe = probe or probe_wsl()
         working_directory = translate_working_directory(active_probe, root)
+        normalized = normalize_write_directories(
+            write_directories,
+            require_existing=False,
+        )
+        translated = tuple(
+            translate_working_directory(active_probe, path) for path in normalized
+        )
         return cls(
-            HostTools(root, output_limit=output_limit),
+            HostTools(
+                root,
+                output_limit=output_limit,
+                enforce_write_policy=False,
+            ),
             active_probe,
             working_directory,
+            translated,
+            tuple(str(path) for path in normalized),
         )
 
     @property
@@ -102,11 +150,17 @@ class WslHostTools:
         return "wsl"
 
     @property
+    def write_directories(self) -> tuple[str, ...]:
+        return self._configured_write_directories
+
+    @property
     def environment_context(self) -> str:
         return (
             "<host_environment>\n"
             f"Your command and file environment is WSL {self._probe.distribution}.\n"
             f"The default working directory is {self._working_directory}.\n"
+            "Filesystem reads may use any Linux path. Writes are limited to directories "
+            "configured in Settings. "
             "Use Linux commands and Linux paths. Windows drives are usually available under "
             "/mnt/<drive-letter>. Huddol service tools such as discussion, memory, todo, "
             "history, and web_search are not filesystem commands.\n"
@@ -127,6 +181,12 @@ class WslHostTools:
         if cwd is not None:
             self._require_utf8(cwd, "cwd")
         working_directory = self._resolve_directory(cwd)
+        sandboxed_argv = linux_write_sandbox_command(
+            argv,
+            working_directory,
+            self._write_directories,
+            bwrap="bwrap",
+        )
         result = self._launcher.run(
             [
                 "wsl.exe",
@@ -135,7 +195,7 @@ class WslHostTools:
                 "--cd",
                 working_directory,
                 "--exec",
-                *argv,
+                *sandboxed_argv,
             ],
             timeout_seconds=timeout_seconds,
         )
@@ -187,6 +247,13 @@ class WslHostTools:
         ).stdout.strip()
         if not resolved_path:
             raise HostToolError("Edit path must identify an existing file")
+        resolved = PurePosixPath(resolved_path)
+        if not any(
+            resolved == PurePosixPath(root)
+            or resolved.is_relative_to(PurePosixPath(root))
+            for root in self._write_directories
+        ):
+            raise HostToolError("Path is outside the configured writable directories")
         windows_path = _run_wsl(
             [
                 "wsl.exe",
@@ -253,7 +320,8 @@ class WslHostTools:
 
 def create_host_tools(
     selected_backend: str,
-    on_configure: Callable[[ExecutionBackend], None] | None = None,
+    write_directories: list[str] | tuple[str, ...] = (),
+    on_configure: Callable[[ExecutionBackend, tuple[str, ...]], None] | None = None,
 ) -> tuple[AgentHostTools, ExecutionSettings]:
     if selected_backend not in ("native", "wsl"):
         raise RuntimeError("Persisted execution backend is invalid")
@@ -268,26 +336,30 @@ def create_host_tools(
     if selected_backend == "wsl" and probe is None:
         effective_backend = "native"
         if on_configure is not None:
-            on_configure(effective_backend)
+            on_configure(effective_backend, tuple(write_directories))
         log_event("execution.config.fallback", requested="wsl", active="native")
     tools: AgentHostTools
     if effective_backend == "wsl" and probe is not None:
         try:
-            tools = WslHostTools.start(root, probe)
+            tools = WslHostTools.start(
+                root,
+                probe,
+                write_directories=write_directories,
+            )
         except (HostToolError, OSError, ValueError) as error:
             probe = None
             effective_backend = "native"
             if on_configure is not None:
-                on_configure(effective_backend)
+                on_configure(effective_backend, tuple(write_directories))
             log_event(
                 "execution.config.fallback",
                 requested="wsl",
                 active="native",
                 reason=type(error).__name__,
             )
-            tools = HostTools(root)
+            tools = HostTools(root, write_directories=write_directories)
     else:
-        tools = HostTools(root)
+        tools = HostTools(root, write_directories=write_directories)
     _log_selected(tools)
     return (
         tools,
@@ -295,6 +367,7 @@ def create_host_tools(
             effective_backend,
             tools.execution_backend,
             probe,
+            tools.write_directories,
             on_configure,
         ),
     )

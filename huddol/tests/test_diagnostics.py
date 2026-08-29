@@ -142,7 +142,7 @@ def test_tool_logs_exclude_argv_output_and_message_content(tmp_path: Path) -> No
     )
     state.create_agent("Ada")
     state.create_discussion("Private topic", 1, [2])
-    tools = HostTools(tmp_path)
+    tools = HostTools(tmp_path, write_directories=[str(tmp_path)])
     context = AgentRunContext(
         2,
         state,

@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout";
-import { Button, Checkbox, Input, SegmentedControl } from "@/components/ui";
+import { Button, Checkbox, Input, SegmentedControl, X } from "@/components/ui";
 import {
   backend,
   type ExecutionBackend,
@@ -41,8 +41,16 @@ function errorMessage(error: unknown) {
 export function isExecutionSettingsDirty(
   current: ExecutionSettings | null,
   backend: ExecutionBackend,
+  writeDirectories: string[] = current?.write_directories ?? [],
 ): boolean {
-  return current !== null && backend !== current.selected_backend;
+  return (
+    current !== null &&
+    (backend !== current.selected_backend ||
+      writeDirectories.length !== current.write_directories.length ||
+      writeDirectories.some(
+        (path, index) => path !== current.write_directories[index],
+      ))
+  );
 }
 
 export function parseContextWindow(value: string): number | null {
@@ -89,6 +97,8 @@ export function SettingsPage() {
     useState<ExecutionSettings | null>(null);
   const [executionBackend, setExecutionBackend] =
     useState<ExecutionBackend>("native");
+  const [writeDirectories, setWriteDirectories] = useState<string[]>([]);
+  const [writeDirectory, setWriteDirectory] = useState("");
   const [executionStatus, setExecutionStatus] = useState<
     "loading" | "ready" | "saving" | "saved"
   >("loading");
@@ -128,6 +138,7 @@ export function SettingsPage() {
         }
         setExecutionSettings(current);
         setExecutionBackend(current.selected_backend);
+        setWriteDirectories(current.write_directories);
         setExecutionStatus("ready");
       })
       .catch((reason) => {
@@ -187,14 +198,29 @@ export function SettingsPage() {
     try {
       const current = await backend.updateExecutionSettings({
         backend: executionBackend,
+        write_directories: writeDirectories,
       });
       setExecutionSettings(current);
       setExecutionBackend(current.selected_backend);
+      setWriteDirectories(current.write_directories);
       setExecutionStatus("saved");
     } catch (reason) {
       setExecutionError(errorMessage(reason));
       setExecutionStatus("ready");
     }
+  }
+
+  function addWriteDirectory() {
+    const path = writeDirectory.trim();
+    if (!path || writeDirectories.includes(path)) {
+      return;
+    }
+    setWriteDirectories([...writeDirectories, path]);
+    setWriteDirectory("");
+  }
+
+  function removeWriteDirectory(path: string) {
+    setWriteDirectories(writeDirectories.filter((item) => item !== path));
   }
 
   async function handleSaveModel(event: FormEvent<HTMLFormElement>) {
@@ -254,6 +280,7 @@ export function SettingsPage() {
   const executionDirty = isExecutionSettingsDirty(
     executionSettings,
     executionBackend,
+    writeDirectories,
   );
   const executionOptions: Array<{
     label: string;
@@ -293,14 +320,14 @@ export function SettingsPage() {
     <section className="page-pane page-pane--settings">
       <PageHeader title="Settings" />
       <div className="settings-scroll">
-        {executionSettings?.platform === "windows" ? (
-          <section className="settings-section">
-            <h3 className="settings-section-title">Execution</h3>
-            <form
-              className="settings-form"
-              aria-label="Execution settings"
-              onSubmit={handleSaveExecution}
-            >
+        <section className="settings-section">
+          <h3 className="settings-section-title">Execution</h3>
+          <form
+            className="settings-form"
+            aria-label="Execution settings"
+            onSubmit={handleSaveExecution}
+          >
+            {executionSettings?.platform === "windows" ? (
               <fieldset className="settings-segmented-field">
                 <legend id="execution-environment-label">Environment</legend>
                 <SegmentedControl
@@ -311,39 +338,101 @@ export function SettingsPage() {
                   value={executionBackend}
                 />
               </fieldset>
-              <div className="settings-actions">
-                <Button
-                  disabled={executionBusy || !executionDirty}
-                  type="submit"
-                  variant="primary"
-                >
-                  {executionStatus === "saving" ? "Saving" : "Save execution"}
-                </Button>
-                {!executionDirty &&
-                (executionSettings.restart_required ||
-                  executionStatus === "saved") ? (
-                  <span
-                    className={
-                      executionSettings.restart_required
-                        ? "settings-restart-required"
-                        : undefined
+            ) : null}
+            <fieldset className="settings-directory-field">
+              <legend>Writable directories</legend>
+              <div className="settings-directory-input">
+                <Input
+                  aria-label="Writable directory"
+                  autoComplete="off"
+                  disabled={executionBusy}
+                  onChange={(event) => setWriteDirectory(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addWriteDirectory();
                     }
-                    role="status"
-                  >
-                    {executionSettings.restart_required
-                      ? "Restart required"
-                      : "Saved"}
-                  </span>
-                ) : null}
+                  }}
+                  placeholder={
+                    executionSettings?.platform === "windows"
+                      ? "C:\\Projects"
+                      : "/path/to/project"
+                  }
+                  value={writeDirectory}
+                />
+                <Button
+                  disabled={executionBusy || !writeDirectory.trim()}
+                  onClick={addWriteDirectory}
+                  size="compact"
+                >
+                  Add
+                </Button>
               </div>
-              {executionError ? (
-                <p className="caption-text m-0 text-danger" role="alert">
-                  {executionError}
-                </p>
+              {writeDirectories.length > 0 ? (
+                <ul className="settings-directory-list">
+                  {writeDirectories.map((path) => (
+                    <li key={path}>
+                      <span>{path}</span>
+                      <Button
+                        aria-label={`Remove ${path}`}
+                        disabled={executionBusy}
+                        onClick={() => removeWriteDirectory(path)}
+                        size="icon"
+                        variant="quiet"
+                      >
+                        <X aria-hidden="true" size={14} />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="settings-directory-empty">
+                  {executionSettings?.platform === "windows" &&
+                  executionBackend === "native"
+                    ? "Restricted"
+                    : "Read only"}
+                </span>
+              )}
+              {executionSettings?.platform === "windows" &&
+              executionSettings.active_backend === "native" ? (
+                <span className="caption-text text-muted">
+                  Locations writable by Everyone may also be changed.
+                </span>
               ) : null}
-            </form>
-          </section>
-        ) : null}
+            </fieldset>
+            <div className="settings-actions">
+              <Button
+                disabled={executionBusy || !executionDirty}
+                type="submit"
+                variant="primary"
+              >
+                {executionStatus === "saving" ? "Saving" : "Save execution"}
+              </Button>
+              {!executionDirty &&
+              executionSettings &&
+              (executionSettings.restart_required ||
+                executionStatus === "saved") ? (
+                <span
+                  className={
+                    executionSettings.restart_required
+                      ? "settings-restart-required"
+                      : undefined
+                  }
+                  role="status"
+                >
+                  {executionSettings.restart_required
+                    ? "Restart required"
+                    : "Saved"}
+                </span>
+              ) : null}
+            </div>
+            {executionError ? (
+              <p className="caption-text m-0 text-danger" role="alert">
+                {executionError}
+              </p>
+            ) : null}
+          </form>
+        </section>
 
         <section className="settings-section">
           <h3 className="settings-section-title">Model</h3>

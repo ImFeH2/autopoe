@@ -118,7 +118,7 @@ async function trace(label) {
 
 describe("Discussion shell trace", () => {
   before(async () => {
-    await $("aria/Workspace").waitForDisplayed({ timeout: 60_000 });
+    await $("aria/Organization").waitForDisplayed({ timeout: 60_000 });
   });
 
   it("captures A B C and A return", async () => {

@@ -312,11 +312,13 @@ export type ExecutionSettings = {
   active_backend: ExecutionBackend;
   wsl_available: boolean;
   wsl_distribution: string | null;
+  write_directories: string[];
   restart_required: boolean;
 };
 
 export type ExecutionSettingsUpdate = {
   backend: ExecutionBackend;
+  write_directories: string[];
 };
 
 export type OrganizationRole = "super_admin" | "admin" | "member";
@@ -1718,6 +1720,7 @@ export function parseExecutionSettings(value: unknown): ExecutionSettings {
   const selectedBackend = settings.selected_backend;
   const activeBackend = settings.active_backend;
   const wslDistribution = settings.wsl_distribution;
+  const writeDirectories = settings.write_directories;
   if (
     typeof settings.platform !== "string" ||
     !settings.platform ||
@@ -1726,6 +1729,11 @@ export function parseExecutionSettings(value: unknown): ExecutionSettings {
     typeof settings.wsl_available !== "boolean" ||
     (wslDistribution !== null &&
       (typeof wslDistribution !== "string" || !wslDistribution)) ||
+    !Array.isArray(writeDirectories) ||
+    writeDirectories.some(
+      (path) => typeof path !== "string" || path.length === 0,
+    ) ||
+    new Set(writeDirectories).size !== writeDirectories.length ||
     typeof settings.restart_required !== "boolean"
   ) {
     throw new Error("Invalid execution settings: fields are invalid");
@@ -1733,8 +1741,7 @@ export function parseExecutionSettings(value: unknown): ExecutionSettings {
   if (
     settings.wsl_available !== (wslDistribution !== null) ||
     (!settings.wsl_available &&
-      (selectedBackend === "wsl" || activeBackend === "wsl")) ||
-    settings.restart_required !== (selectedBackend !== activeBackend)
+      (selectedBackend === "wsl" || activeBackend === "wsl"))
   ) {
     throw new Error("Invalid execution settings: state is inconsistent");
   }
@@ -1744,6 +1751,7 @@ export function parseExecutionSettings(value: unknown): ExecutionSettings {
     active_backend: activeBackend,
     wsl_available: settings.wsl_available,
     wsl_distribution: wslDistribution,
+    write_directories: writeDirectories,
     restart_required: settings.restart_required,
   };
 }

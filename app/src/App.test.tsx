@@ -56,11 +56,18 @@ describe("App", () => {
       active_backend: "native" as const,
       wsl_available: true,
       wsl_distribution: "Debian",
+      write_directories: ["C:\\Projects"],
       restart_required: false,
     };
 
     expect(isExecutionSettingsDirty(current, "native")).toBe(false);
     expect(isExecutionSettingsDirty(current, "wsl")).toBe(true);
+    expect(isExecutionSettingsDirty(current, "native", ["C:\\Projects"])).toBe(
+      false,
+    );
+    expect(isExecutionSettingsDirty(current, "native", ["C:\\Other"])).toBe(
+      true,
+    );
     expect(isExecutionSettingsDirty(null, "native")).toBe(false);
   });
 
@@ -104,6 +111,15 @@ describe("App", () => {
     expect(() => parseContextWindow("1.5")).toThrow(
       "Context window must be an integer of at least 2",
     );
+  });
+
+  it("renders global writable directory controls without Workspace language", () => {
+    const markup = renderToStaticMarkup(<SettingsPage />);
+
+    expect(markup).toContain("Writable directories");
+    expect(markup).toContain('aria-label="Writable directory"');
+    expect(markup).toContain("Read only");
+    expect(markup).not.toContain("Workspace");
   });
 
   it("renders an accessible context window input", () => {
@@ -1163,7 +1179,7 @@ describe("App", () => {
       </TooltipProvider>,
     );
 
-    expect(markup).toContain('aria-label="Workspace"');
+    expect(markup).toContain('aria-label="Organization"');
     expect(markup).not.toContain(">Overview<");
     expect(markup).not.toContain("Organization 1");
     expect(markup).toContain(">Discussions<");

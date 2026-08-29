@@ -181,7 +181,11 @@ def test_admin_agent_can_manage_discussions_but_not_agents(tmp_path: Path) -> No
 def test_agent_edit_tool_replaces_exact_file_content(tmp_path: Path) -> None:
     target = tmp_path / "source.txt"
     target.write_text("before\n")
-    context = AgentRunContext(2, OrganizationState(), HostTools(tmp_path))
+    context = AgentRunContext(
+        2,
+        OrganizationState(),
+        HostTools(tmp_path, write_directories=[str(tmp_path)]),
+    )
 
     result = context.edit("source.txt", "before", "after")
 
@@ -631,7 +635,7 @@ def test_runtime_stop_terminates_running_exec_and_worker(tmp_path: Path) -> None
     runtime = AgentRuntime(
         state,
         runner,
-        HostTools(tmp_path),
+        HostTools(tmp_path, write_directories=[str(tmp_path)]),
         operations=authorization_operations(state, tmp_path / "auth"),
     )
     runtime.start()

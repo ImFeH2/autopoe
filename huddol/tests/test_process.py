@@ -611,7 +611,9 @@ def test_hard_killed_huddol_cleans_active_run(tmp_path: Path) -> None:
     environment["PYTHONPATH"] = (
         str(support) if not python_path else f"{support}{os.pathsep}{python_path}"
     )
-    process = start_huddol(tmp_path / "data", tmp_path, environment)
+    data = tmp_path / "data"
+    SQLiteStore(data).save_execution_settings("native", (str(tmp_path),))
+    process = start_huddol(data, tmp_path, environment)
 
     try:
         request(

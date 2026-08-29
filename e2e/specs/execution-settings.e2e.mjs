@@ -12,9 +12,23 @@ describe("Execution settings", () => {
     const form = await $("aria/Execution settings");
     await form.waitForDisplayed();
     await expect(form.$("aria/Windows")).toBeDisplayed();
+    await expect(
+      form.$("span=Locations writable by Everyone may also be changed."),
+    ).toBeDisplayed();
+    const directory = process.env.HUDDOL_WORKING_DIRECTORY;
+    if (!directory) {
+      throw new Error("HUDDOL_WORKING_DIRECTORY is required");
+    }
+    const directoryInput = await form.$("aria/Writable directory");
+    await directoryInput.setValue(directory);
+    await form.$("button=Add").click();
+    await expect(form.$(`aria/Remove ${directory}`)).toBeDisplayed();
     const wsl = await form.$("button*=WSL");
     await wsl.waitForDisplayed();
     await wsl.click();
+    await expect(
+      form.$("span=Locations writable by Everyone may also be changed."),
+    ).toBeDisplayed();
     const save = await form.$("button=Save execution");
     await save.waitForEnabled();
     await save.click();

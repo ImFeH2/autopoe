@@ -206,6 +206,7 @@ def downgrade_authorization_schema_to_seventeen(path: Path) -> None:
         connection.execute("DROP TRIGGER organization_audit_events_no_delete")
         connection.execute("DROP TABLE organization_admin_assignments")
         connection.execute("DROP TABLE organization_audit_events")
+        connection.execute("DROP TABLE execution_write_directories")
         connection.execute(
             "ALTER TABLE application_state DROP COLUMN management_revision"
         )
@@ -476,15 +477,38 @@ def test_discussion_keeps_its_human_after_all_agents_are_deleted_and_restart(
     ]
 
 
-def test_persists_execution_backend(tmp_path: Path) -> None:
+def test_persists_execution_backend_and_write_directories(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "data")
 
-    assert store.load_execution_backend() == "native"
-    store.save_execution_backend("wsl")
+    assert store.load_execution_settings() == ("native", ())
+    store.save_execution_settings("wsl", ("/project/a", "/project/b"))
 
-    assert SQLiteStore(tmp_path / "data").load_execution_backend() == "wsl"
+    assert SQLiteStore(tmp_path / "data").load_execution_settings() == (
+        "wsl",
+        ("/project/a", "/project/b"),
+    )
     with pytest.raises(ValueError, match="backend must be native or wsl"):
         store.save_execution_backend("invalid")
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        store.save_execution_settings("native", ("/project", "/project"))
+
+
+def test_schema_eighteen_adds_empty_write_directories(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    store = SQLiteStore(data)
+    store.save_execution_backend("wsl")
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP TABLE execution_write_directories")
+        connection.execute("PRAGMA user_version = 18")
+
+    migrated = SQLiteStore(data)
+
+    assert migrated.load_execution_settings() == ("wsl", ())
+    with sqlite3.connect(migrated.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'execution_write_directories'"
+        ).fetchone() == ("execution_write_directories",)
 
 
 def test_schema_sixteen_adds_execution_settings_without_changing_state(

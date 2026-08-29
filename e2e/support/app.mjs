@@ -1,7 +1,7 @@
 import { $, expect } from "@wdio/globals";
 
 export async function waitForWorkspace() {
-  const workspace = await $("aria/Workspace");
+  const workspace = await $("aria/Organization");
   await workspace.waitForDisplayed({ timeout: 15_000 });
 }
 

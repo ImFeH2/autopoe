@@ -339,13 +339,19 @@ def test_rejects_boolean_request_id_without_stopping_the_stream() -> None:
     }
 
 
-def test_execution_settings_are_shared_and_saved_for_restart() -> None:
-    saved: list[str] = []
+def test_execution_settings_are_shared_and_saved_for_restart(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "project"
+    second = tmp_path / "output"
+    first.mkdir()
+    second.mkdir()
+    saved: list[tuple[str, tuple[str, ...]]] = []
     settings = ExecutionSettings(
         "native",
         "native",
         WslProbe("Debian", "/home/ada", "x86_64"),
-        saved.append,
+        on_configure=lambda backend, paths: saved.append((backend, paths)),
     )
     input_stream = io.StringIO(
         "".join(
@@ -355,7 +361,10 @@ def test_execution_settings_are_shared_and_saved_for_restart() -> None:
                 {
                     "id": 2,
                     "method": "settings.update_execution",
-                    "params": {"backend": "wsl"},
+                    "params": {
+                        "backend": "wsl",
+                        "write_directories": [str(first), str(second)],
+                    },
                 },
                 {"id": 3, "method": "settings.get_execution", "params": {}},
             ]
@@ -376,8 +385,12 @@ def test_execution_settings_are_shared_and_saved_for_restart() -> None:
     assert responses[1]["result"] == responses[2]["result"]
     assert responses[2]["result"]["selected_backend"] == "wsl"
     assert responses[2]["result"]["active_backend"] == "native"
+    assert responses[2]["result"]["write_directories"] == [
+        str(first),
+        str(second),
+    ]
     assert responses[2]["result"]["restart_required"] is True
-    assert saved == ["wsl"]
+    assert saved == [("wsl", (str(first), str(second)))]
 
 
 def test_execution_settings_reject_unavailable_wsl() -> None:
@@ -388,7 +401,7 @@ def test_execution_settings_reject_unavailable_wsl() -> None:
         {
             "id": 1,
             "method": "settings.update_execution",
-            "params": {"backend": "wsl"},
+            "params": {"backend": "wsl", "write_directories": []},
         }
     )
 

@@ -30,6 +30,10 @@ class FakeLauncher:
     def environment_context(self) -> str:
         return "native"
 
+    @property
+    def write_directories(self) -> tuple[str, ...]:
+        return ()
+
     def run(
         self,
         argv: list[str],
@@ -69,6 +73,8 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
         launcher,
         WslProbe("Debian", "/home/ada", "x86_64"),
         "/mnt/f/Project/flowent",
+        ("/mnt/f/Project/flowent",),
+        (r"F:\Project\flowent",),
     )
 
     result = tools.run(["printf", "%s", "$(not-a-shell)"], timeout_seconds=7)
@@ -85,6 +91,23 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
                 "--cd",
                 "/mnt/f/Project/flowent",
                 "--exec",
+                "bwrap",
+                "--new-session",
+                "--die-with-parent",
+                "--ro-bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--unshare-user",
+                "--bind",
+                "/mnt/f/Project/flowent",
+                "/mnt/f/Project/flowent",
+                "--chdir",
+                "/mnt/f/Project/flowent",
+                "--cap-drop",
+                "ALL",
+                "--",
                 "printf",
                 "%s",
                 "$(not-a-shell)",
@@ -108,6 +131,8 @@ def test_wsl_host_tools_edit_reuses_native_atomic_edit(
         launcher,
         WslProbe("Debian", "/home/ada", "x86_64"),
         "/mnt/f/Project/flowent",
+        ("/mnt/f/Project/flowent",),
+        (r"F:\Project\flowent",),
     )
     calls: list[list[str]] = []
 
@@ -157,30 +182,71 @@ def test_wsl_host_tools_reject_invalid_inputs_before_launch() -> None:
 
 def test_execution_settings_persist_selection_and_require_restart(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    saved: list[str] = []
+    writable = tmp_path / "writable"
+    writable.mkdir()
+    saved: list[tuple[str, tuple[str, ...]]] = []
     probe = WslProbe("Debian", "/home/ada", "x86_64")
     monkeypatch.setattr(wsl_host_tools.platform, "system", lambda: "Windows")
-    settings = ExecutionSettings("native", "native", probe, saved.append)
+    settings = ExecutionSettings(
+        "native",
+        "native",
+        probe,
+        on_configure=lambda backend, paths: saved.append((backend, paths)),
+    )
 
-    updated = settings.configure("wsl")
+    updated = settings.configure("wsl", [str(writable)])
 
-    assert saved == ["wsl"]
+    assert saved == [("wsl", (str(writable),))]
     assert updated == {
         "platform": "windows",
         "selected_backend": "wsl",
         "active_backend": "native",
         "wsl_available": True,
         "wsl_distribution": "Debian",
+        "write_directories": [str(writable)],
         "restart_required": True,
     }
+
+
+def test_write_directory_change_requires_restart(tmp_path: Path) -> None:
+    writable = tmp_path / "writable"
+    writable.mkdir()
+    settings = ExecutionSettings("native", "native", None)
+
+    updated = settings.configure("native", [str(writable)])
+
+    assert updated["active_backend"] == "native"
+    assert updated["write_directories"] == [str(writable)]
+    assert updated["restart_required"] is True
+
+
+def test_execution_settings_remain_unchanged_when_save_fails(
+    tmp_path: Path,
+) -> None:
+    settings = ExecutionSettings(
+        "native",
+        "native",
+        WslProbe("Debian", "/home/ada", "x86_64"),
+        on_configure=lambda _backend, _paths: (_ for _ in ()).throw(
+            OSError("cannot save")
+        ),
+    )
+
+    with pytest.raises(OSError, match="cannot save"):
+        settings.configure("wsl", [str(tmp_path)])
+
+    assert settings.settings()["selected_backend"] == "native"
+    assert settings.settings()["write_directories"] == []
+    assert settings.settings()["restart_required"] is False
 
 
 def test_execution_settings_reject_unavailable_wsl() -> None:
     settings = ExecutionSettings("native", "native", None)
 
     with pytest.raises(ValueError, match="WSL is unavailable"):
-        settings.configure("wsl")
+        settings.configure("wsl", [])
 
 
 def test_probe_wsl_reads_default_user_distribution(
@@ -222,7 +288,7 @@ def test_create_host_tools_uses_selected_wsl_on_windows(
     monkeypatch.setattr(
         WslHostTools,
         "start",
-        classmethod(lambda cls, root, active_probe: expected),
+        classmethod(lambda cls, root, active_probe, **_kwargs: expected),
     )
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
@@ -237,7 +303,7 @@ def test_create_host_tools_falls_back_when_wsl_start_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    saved: list[str] = []
+    saved: list[tuple[str, tuple[str, ...]]] = []
     probe = WslProbe("Debian", "/home/ada", "x86_64")
     launcher = FakeLauncher()
     monkeypatch.setenv(wsl_host_tools.WORKING_DIRECTORY_ENV, str(tmp_path))
@@ -247,18 +313,25 @@ def test_create_host_tools_falls_back_when_wsl_start_fails(
         WslHostTools,
         "start",
         classmethod(
-            lambda cls, root, active_probe: (_ for _ in ()).throw(
+            lambda cls, root, active_probe, **_kwargs: (_ for _ in ()).throw(
                 HostToolError("cannot map root")
             )
         ),
     )
-    monkeypatch.setattr(wsl_host_tools, "HostTools", lambda root: launcher)
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "HostTools",
+        lambda root, **_kwargs: launcher,
+    )
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
-    tools, settings = wsl_host_tools.create_host_tools("wsl", saved.append)
+    tools, settings = wsl_host_tools.create_host_tools(
+        "wsl",
+        on_configure=lambda backend, paths: saved.append((backend, paths)),
+    )
 
     assert tools is launcher
-    assert saved == ["native"]
+    assert saved == [("native", ())]
     assert settings.settings()["selected_backend"] == "native"
     assert settings.settings()["wsl_available"] is False
 
@@ -267,7 +340,7 @@ def test_create_host_tools_falls_back_to_native_when_wsl_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    saved: list[str] = []
+    saved: list[tuple[str, tuple[str, ...]]] = []
     monkeypatch.setenv(wsl_host_tools.WORKING_DIRECTORY_ENV, str(tmp_path))
     monkeypatch.setattr(wsl_host_tools.os, "name", "nt")
     monkeypatch.setattr(
@@ -276,15 +349,22 @@ def test_create_host_tools_falls_back_to_native_when_wsl_is_unavailable(
         lambda: (_ for _ in ()).throw(HostToolError("unavailable")),
     )
     launcher = FakeLauncher()
-    monkeypatch.setattr(wsl_host_tools, "HostTools", lambda root: launcher)
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "HostTools",
+        lambda root, **_kwargs: launcher,
+    )
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
-    tools, settings = wsl_host_tools.create_host_tools("wsl", saved.append)
+    tools, settings = wsl_host_tools.create_host_tools(
+        "wsl",
+        on_configure=lambda backend, paths: saved.append((backend, paths)),
+    )
 
     assert tools is launcher
     assert tools.execution_backend == "native"
     assert tools.working_directory == r"F:\Project\flowent"
-    assert saved == ["native"]
+    assert saved == [("native", ())]
     assert settings.settings()["selected_backend"] == "native"
     assert settings.settings()["wsl_available"] is False
 

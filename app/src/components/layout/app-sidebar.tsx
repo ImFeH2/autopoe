@@ -63,7 +63,7 @@ export function AppSidebar({
         <h1 className="app-brand m-0 font-semibold">Huddol</h1>
       </div>
 
-      <nav className="sidebar-navigation" aria-label="Workspace">
+      <nav className="sidebar-navigation" aria-label="Organization">
         {navigation.map((item) => {
           const Icon = item.icon;
           const count = "count" in item ? counts[item.count] : null;

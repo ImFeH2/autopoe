@@ -15,10 +15,31 @@ import huddol.host_tools as host_tools_module
 from huddol.host_tools import (
     OWNER_ENV,
     HostToolError,
-    HostTools,
     ProcessWatcher,
     UnixProcessGroup,
 )
+from huddol.host_tools import (
+    HostTools as BaseHostTools,
+)
+from huddol.write_access import macos_write_sandbox_command
+
+
+class HostTools(BaseHostTools):
+    def __init__(
+        self,
+        root: Path,
+        output_limit: int = 65_536,
+        process_owner: str | None = None,
+        write_directories: list[str] | None = None,
+    ) -> None:
+        super().__init__(
+            root,
+            output_limit,
+            process_owner,
+            write_directories=(
+                [str(root)] if write_directories is None else write_directories
+            ),
+        )
 
 
 def wait_for_path(path: Path) -> None:
@@ -95,6 +116,16 @@ def test_run_uses_launch_root_relative_cwd_without_shell(tmp_path: Path) -> None
     assert tools.execution_backend == "native"
     assert tools.working_directory == str(tmp_path)
     assert str(tmp_path) in tools.environment_context
+
+
+def test_native_windows_environment_context_discloses_acl_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = BaseHostTools(tmp_path, enforce_write_policy=False)
+    monkeypatch.setattr(host_tools_module.os, "name", "nt")
+
+    assert "writable by Everyone" in tools.environment_context
 
 
 def test_run_timeout_terminates_the_process_tree(tmp_path: Path) -> None:
@@ -390,7 +421,10 @@ def test_edit_accepts_previously_protected_paths(tmp_path: Path, path: str) -> N
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("before\n")
 
-    HostTools(tmp_path).edit(path, "before", "after")
+    HostTools(
+        tmp_path,
+        write_directories=[str(target.parent)],
+    ).edit(path, "before", "after")
 
     assert target.read_text() == "after\n"
 
@@ -403,7 +437,10 @@ def test_edit_accepts_absolute_paths_and_rejects_missing_or_directory_paths(
     directory = tmp_path / "folder"
     directory.mkdir()
 
-    result = HostTools(tmp_path).edit(str(outside), "before", "after")
+    result = HostTools(
+        tmp_path,
+        write_directories=[str(outside.parent)],
+    ).edit(str(outside), "before", "after")
 
     assert result["path"] == str(outside)
     assert outside.read_text() == "after\n"
@@ -430,11 +467,171 @@ def test_edit_follows_symbolic_links_outside_launch_root(tmp_path: Path) -> None
     link = tmp_path / "link"
     link.symlink_to(outside, target_is_directory=True)
 
-    result = HostTools(tmp_path).edit("link/file.txt", "before", "after")
+    result = HostTools(
+        tmp_path,
+        write_directories=[str(outside)],
+    ).edit("link/file.txt", "before", "after")
 
     assert result["path"] == str(target)
     assert link.is_symlink()
     assert target.read_text() == "after\n"
+
+
+def test_edit_rejects_symbolic_link_outside_writable_directories(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-denied"
+    outside.mkdir()
+    target = outside / "file.txt"
+    target.write_text("before\n")
+    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(HostToolError, match="configured writable directories"):
+        HostTools(tmp_path).edit("link/file.txt", "before", "after")
+
+    assert target.read_text() == "before\n"
+
+
+def test_empty_write_directories_make_run_and_edit_read_only(tmp_path: Path) -> None:
+    target = tmp_path / "source.txt"
+    target.write_text("before\n")
+    tools = HostTools(tmp_path, write_directories=[])
+
+    result = tools.run(
+        [
+            sys.executable,
+            "-c",
+            "import pathlib; pathlib.Path('created.txt').write_text('blocked')",
+        ]
+    )
+
+    assert result["exit_code"] != 0
+    assert not (tmp_path / "created.txt").exists()
+    with pytest.raises(HostToolError, match="configured writable directories"):
+        tools.edit("source.txt", "before", "after")
+    assert target.read_text() == "before\n"
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Linux Bubblewrap",
+)
+def test_linux_run_writes_only_configured_directories(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    tools = BaseHostTools(tmp_path, write_directories=[str(allowed)])
+
+    result = tools.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import pathlib,sys; "
+                "pathlib.Path(sys.argv[1]).write_text('allowed'); "
+                "\ntry: pathlib.Path(sys.argv[2]).write_text('outside')"
+                "\nexcept OSError: raise SystemExit(0)"
+                "\nraise SystemExit(1)"
+            ),
+            str(allowed / "created.txt"),
+            str(outside / "created.txt"),
+        ]
+    )
+
+    assert result["exit_code"] == 0
+    assert (allowed / "created.txt").read_text() == "allowed"
+    assert not (outside / "created.txt").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows restricted token")
+def test_windows_run_writes_only_configured_directories(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    existing = allowed / "existing.txt"
+    existing.write_text("before")
+    tools = BaseHostTools(tmp_path, write_directories=[str(allowed)])
+    sid = tools._write_access._windows.sid
+
+    try:
+        result = tools.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import pathlib,sys; "
+                    "pathlib.Path(sys.argv[1]).write_text('after'); "
+                    "\ntry: pathlib.Path(sys.argv[2]).write_text('outside')"
+                    "\nexcept OSError: raise SystemExit(0)"
+                    "\nraise SystemExit(1)"
+                ),
+                str(existing),
+                str(outside / "created.txt"),
+            ]
+        )
+    finally:
+        tools.close()
+
+    assert result["exit_code"] == 0
+    assert existing.read_text() == "after"
+    assert not (outside / "created.txt").exists()
+    acl = subprocess.run(
+        ["icacls", str(allowed)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert sid not in acl
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS Seatbelt")
+def test_macos_run_writes_only_configured_directories(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    tools = BaseHostTools(tmp_path, write_directories=[str(allowed)])
+
+    result = tools.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import pathlib,sys; "
+                "pathlib.Path(sys.argv[1]).write_text('allowed'); "
+                "\ntry: pathlib.Path(sys.argv[2]).write_text('outside')"
+                "\nexcept OSError: raise SystemExit(0)"
+                "\nraise SystemExit(1)"
+            ),
+            str(allowed / "created.txt"),
+            str(outside / "created.txt"),
+        ]
+    )
+
+    assert result["exit_code"] == 0
+    assert (allowed / "created.txt").read_text() == "allowed"
+    assert not (outside / "created.txt").exists()
+
+
+def test_macos_profile_denies_writes_outside_parameterized_roots(
+    tmp_path: Path,
+) -> None:
+    allowed = tmp_path / 'quoted " directory'
+    allowed.mkdir()
+
+    command = macos_write_sandbox_command(
+        ["printf", "%s", "literal"],
+        [allowed],
+    )
+
+    assert command[:2] == ["/usr/bin/sandbox-exec", "-p"]
+    assert "(allow default)" in command[2]
+    assert "(deny file-write*" in command[2]
+    assert '(require-not (subpath (param "WRITABLE_0")))' in command[2]
+    assert f"-DWRITABLE_0={allowed}" in command
+    assert command[-4:] == ["--", "printf", "%s", "literal"]
 
 
 def test_close_waits_for_an_edit_already_writing(tmp_path: Path) -> None:

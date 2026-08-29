@@ -60,7 +60,10 @@ from huddol.runtime import AgentRunContext, AgentRunFailure
 from huddol.todos import TODO_STATUS_START, AgentTodos
 
 
-def activation_context(tmp_path: Path) -> tuple[Reminder, AgentRunContext]:
+def activation_context(
+    tmp_path: Path,
+    write_directories: list[str] | None = None,
+) -> tuple[Reminder, AgentRunContext]:
     state = OrganizationState()
     state.create_agent("Ada")
     state.create_discussion("Work", 1, [2])
@@ -70,7 +73,10 @@ def activation_context(tmp_path: Path) -> tuple[Reminder, AgentRunContext]:
     return activation, AgentRunContext(
         agent_id=2,
         state=state,
-        host_tools=HostTools(tmp_path),
+        host_tools=HostTools(
+            tmp_path,
+            write_directories=[] if write_directories is None else write_directories,
+        ),
     )
 
 
@@ -713,7 +719,7 @@ def test_runner_publishes_native_web_search_events(tmp_path: Path) -> None:
     assert outcome.messages == messages
 
 
-def test_pydantic_runner_executes_edit_and_run_tools_anywhere_on_host(
+def test_pydantic_runner_executes_edit_and_run_tools_in_configured_directory(
     tmp_path: Path,
 ) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-outside-tools"
@@ -770,7 +776,10 @@ def test_pydantic_runner_executes_edit_and_run_tools_anywhere_on_host(
             model="test-model",
         )
     )
-    reminder, context = activation_context(tmp_path)
+    reminder, context = activation_context(
+        tmp_path,
+        write_directories=[str(outside)],
+    )
 
     with runner._agent.override(model=FunctionModel(stream_function=respond)):
         outcome = runner.run(

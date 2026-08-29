@@ -215,7 +215,10 @@ class Dispatcher:
         return self._execution_settings.settings()
 
     def _update_execution_settings(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._execution_settings.configure(require_string(params, "backend"))
+        return self._execution_settings.configure(
+            require_string(params, "backend"),
+            require_string_list(params, "write_directories"),
+        )
 
     def _get_model_settings(self, params: dict[str, Any]) -> dict[str, Any]:
         if params:
@@ -594,6 +597,13 @@ def require_optional_positive_integer(params: dict[str, Any], key: str) -> int |
         return None
     if type(value) is not int or value < 2:
         raise ProtocolError(f"{key} must be an integer of at least 2 or null")
+    return value
+
+
+def require_string_list(params: dict[str, Any], key: str) -> list[str]:
+    value = params.get(key)
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ProtocolError(f"{key} must be a list of strings")
     return value
 
 

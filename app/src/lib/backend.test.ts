@@ -217,6 +217,7 @@ describe("parseExecutionSettings", () => {
         active_backend: "native",
         wsl_available: true,
         wsl_distribution: "Debian",
+        write_directories: ["F:\\Project", "C:\\Users\\Ada\\Code"],
         restart_required: true,
       }),
     ).toEqual({
@@ -225,11 +226,26 @@ describe("parseExecutionSettings", () => {
       active_backend: "native",
       wsl_available: true,
       wsl_distribution: "Debian",
+      write_directories: ["F:\\Project", "C:\\Users\\Ada\\Code"],
       restart_required: true,
     });
   });
 
-  it("rejects contradictory WSL availability and restart state", () => {
+  it("accepts a directory-only change that needs restart", () => {
+    expect(
+      parseExecutionSettings({
+        platform: "linux",
+        selected_backend: "native",
+        active_backend: "native",
+        wsl_available: false,
+        wsl_distribution: null,
+        write_directories: ["/project"],
+        restart_required: true,
+      }).restart_required,
+    ).toBe(true);
+  });
+
+  it("rejects an unavailable WSL selection", () => {
     expect(() =>
       parseExecutionSettings({
         platform: "windows",
@@ -237,9 +253,31 @@ describe("parseExecutionSettings", () => {
         active_backend: "native",
         wsl_available: false,
         wsl_distribution: null,
+        write_directories: [],
         restart_required: false,
       }),
     ).toThrow("state is inconsistent");
+  });
+
+  it("rejects duplicate or invalid writable directories", () => {
+    const base = {
+      platform: "linux",
+      selected_backend: "native",
+      active_backend: "native",
+      wsl_available: false,
+      wsl_distribution: null,
+      restart_required: false,
+    };
+
+    expect(() =>
+      parseExecutionSettings({
+        ...base,
+        write_directories: ["/project", "/project"],
+      }),
+    ).toThrow("fields are invalid");
+    expect(() =>
+      parseExecutionSettings({ ...base, write_directories: [""] }),
+    ).toThrow("fields are invalid");
   });
 });
 

@@ -23,7 +23,8 @@ MESSAGE_CREATED_AT_SCHEMA_VERSION = 14
 GLOBAL_HUMAN_MEMBERSHIP_SCHEMA_VERSION = 15
 DELIVERY_SCHEMA_VERSION = 16
 EXECUTION_SETTINGS_SCHEMA_VERSION = 17
-SCHEMA_VERSION = 18
+AUTHORIZATION_SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIR"
 
 AuditAction = Literal[
@@ -392,10 +393,17 @@ class SQLiteStore:
                     self._migrate_version_seventeen(connection)
                 elif version == EXECUTION_SETTINGS_SCHEMA_VERSION:
                     self._migrate_version_seventeen(connection)
+                elif version == AUTHORIZATION_SCHEMA_VERSION:
+                    self._migrate_version_eighteen(connection)
                 elif version != SCHEMA_VERSION:
                     raise RuntimeError(
                         f"Unsupported Huddol database version: {version}"
                     )
+                if (
+                    connection.execute("PRAGMA user_version").fetchone()[0]
+                    == AUTHORIZATION_SCHEMA_VERSION
+                ):
+                    self._migrate_version_eighteen(connection)
                 self._validate_authorization_storage(connection)
                 interrupted_runs = self._interrupt_running_agent_runs(connection)
                 orphaned_todos = self._delete_orphaned_agent_todos(connection)
@@ -547,6 +555,12 @@ class SQLiteStore:
                 backend TEXT NOT NULL CHECK (backend IN ('native', 'wsl')),
                 FOREIGN KEY (id) REFERENCES application_state (id)
                     ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE execution_write_directories (
+                position INTEGER PRIMARY KEY CHECK (position >= 0),
+                path TEXT NOT NULL UNIQUE CHECK (length(path) > 0)
             )
             """,
         )
@@ -1419,6 +1433,19 @@ class SQLiteStore:
                     """
                 )
             SQLiteStore._create_authorization_tables(connection)
+            connection.execute(f"PRAGMA user_version = {AUTHORIZATION_SCHEMA_VERSION}")
+
+    @staticmethod
+    def _migrate_version_eighteen(connection: sqlite3.Connection) -> None:
+        with SQLiteStore._migration_transaction(connection):
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS execution_write_directories (
+                    position INTEGER PRIMARY KEY CHECK (position >= 0),
+                    path TEXT NOT NULL UNIQUE CHECK (length(path) > 0)
+                )
+                """
+            )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @staticmethod
@@ -2380,18 +2407,42 @@ class SQLiteStore:
                         (state["member_id"], discussion_id, message_id),
                     )
 
-    def load_execution_backend(self) -> str:
+    def load_execution_settings(self) -> tuple[str, tuple[str, ...]]:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT backend FROM execution_settings WHERE id = 1"
             ).fetchone()
+            write_directories = tuple(
+                item["path"]
+                for item in connection.execute(
+                    """
+                    SELECT path FROM execution_write_directories
+                    ORDER BY position
+                    """
+                )
+            )
         backend = row["backend"] if row is not None else "native"
-        log_event("database.execution_config.loaded", backend=backend)
-        return backend
+        log_event(
+            "database.execution_config.loaded",
+            backend=backend,
+            write_directory_count=len(write_directories),
+        )
+        return backend, write_directories
 
-    def save_execution_backend(self, backend: str) -> None:
+    def load_execution_backend(self) -> str:
+        return self.load_execution_settings()[0]
+
+    def save_execution_settings(
+        self,
+        backend: str,
+        write_directories: tuple[str, ...],
+    ) -> None:
         if backend not in ("native", "wsl"):
             raise ValueError("backend must be native or wsl")
+        if any(not isinstance(path, str) or not path for path in write_directories):
+            raise ValueError("write_directories must contain non-empty strings")
+        if len(write_directories) != len(set(write_directories)):
+            raise ValueError("write_directories must not contain duplicates")
         with self._connect() as connection, connection:
             connection.execute(
                 """
@@ -2400,8 +2451,26 @@ class SQLiteStore:
                 """,
                 (backend,),
             )
+            connection.execute("DELETE FROM execution_write_directories")
+            connection.executemany(
+                """
+                INSERT INTO execution_write_directories (position, path)
+                VALUES (?, ?)
+                """,
+                enumerate(write_directories),
+            )
         self.path.chmod(0o600)
-        log_event("database.execution_config.saved", backend=backend)
+        log_event(
+            "database.execution_config.saved",
+            backend=backend,
+            write_directory_count=len(write_directories),
+        )
+
+    def save_execution_backend(self, backend: str) -> None:
+        self.save_execution_settings(
+            backend,
+            self.load_execution_settings()[1],
+        )
 
     def load_model_config(self) -> dict[str, Any] | None:
         with self._connect() as connection:
