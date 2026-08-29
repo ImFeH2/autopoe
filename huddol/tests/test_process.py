@@ -36,14 +36,16 @@ from huddol.persistence import SQLiteStore
 
 def start_huddol(
     data_directory: Path,
-    cwd: Path | None = None,
+    home_directory: Path | None = None,
     environment: dict[str, str] | None = None,
 ) -> subprocess.Popen[str]:
     isolated_environment = (os.environ if environment is None else environment).copy()
     isolated_environment["HUDDOL_DATA_DIR"] = str(data_directory)
+    if home_directory is not None:
+        isolated_environment["HOME"] = str(home_directory)
     return subprocess.Popen(
         [sys.executable, "-m", "huddol"],
-        cwd=cwd,
+        cwd=data_directory.parent if home_directory is not None else None,
         env=isolated_environment,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -329,7 +331,7 @@ def test_huddol_does_not_load_model_settings_from_dotenv(tmp_path: Path) -> None
         close_process(process)
 
 
-def test_persists_state_and_uses_each_launch_directory(
+def test_persists_state_and_uses_each_backend_home(
     tmp_path: Path,
 ) -> None:
     first_directory = tmp_path / "first"
@@ -606,7 +608,6 @@ def test_hard_killed_huddol_cleans_active_run(tmp_path: Path) -> None:
         "model_runner.create_runner = lambda **kwargs: LongRunRunner()\n"
     )
     environment = os.environ.copy()
-    environment["HUDDOL_WORKING_DIRECTORY"] = str(tmp_path)
     python_path = environment.get("PYTHONPATH")
     environment["PYTHONPATH"] = (
         str(support) if not python_path else f"{support}{os.pathsep}{python_path}"

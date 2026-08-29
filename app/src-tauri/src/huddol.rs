@@ -87,7 +87,6 @@ pub struct HuddolProcess {
     subscriber: SharedSubscriber,
     diagnostics: SharedDiagnostics,
     counters: SharedCounters,
-    working_directory: PathBuf,
 }
 
 impl Default for HuddolProcess {
@@ -97,9 +96,6 @@ impl Default for HuddolProcess {
             subscriber: Arc::new(Mutex::new(None)),
             diagnostics: Arc::new(BridgeDiagnostics::default()),
             counters: Arc::new(BridgeCounters::default()),
-            working_directory: std::env::var_os("HUDDOL_WORKING_DIRECTORY")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
         }
     }
 }
@@ -152,10 +148,7 @@ impl HuddolProcess {
                 (command, "sidecar")
             }
         };
-        let command = command
-            .env_clear()
-            .envs(std::env::vars_os())
-            .current_dir(&self.working_directory);
+        let command = command.env_clear().envs(std::env::vars_os());
         let (mut events, child) = match command.spawn() {
             Ok(process) => process,
             Err(error) => {

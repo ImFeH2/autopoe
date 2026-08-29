@@ -15,9 +15,9 @@ describe("Execution settings", () => {
     await expect(
       form.$("span=Locations writable by Everyone may also be changed."),
     ).toBeDisplayed();
-    const directory = process.env.HUDDOL_WORKING_DIRECTORY;
+    const directory = process.env.HUDDOL_E2E_WRITABLE_DIRECTORY;
     if (!directory) {
-      throw new Error("HUDDOL_WORKING_DIRECTORY is required");
+      throw new Error("HUDDOL_E2E_WRITABLE_DIRECTORY is required");
     }
     const directoryInput = await form.$("aria/Writable directory");
     await directoryInput.setValue(directory);

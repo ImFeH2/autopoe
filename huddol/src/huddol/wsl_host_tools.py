@@ -17,7 +17,6 @@ from huddol.write_access import (
     normalize_write_directories,
 )
 
-WORKING_DIRECTORY_ENV = "HUDDOL_WORKING_DIRECTORY"
 ExecutionBackend = Literal["native", "wsl"]
 
 
@@ -114,14 +113,13 @@ class WslHostTools:
     @classmethod
     def start(
         cls,
-        root: Path,
+        native_home: Path,
         probe: WslProbe | None = None,
         *,
         output_limit: int = 65_536,
         write_directories: list[str] | tuple[str, ...] = (),
     ) -> WslHostTools:
         active_probe = probe or probe_wsl()
-        working_directory = translate_working_directory(active_probe, root)
         normalized = normalize_write_directories(
             write_directories,
             require_existing=False,
@@ -131,12 +129,12 @@ class WslHostTools:
         )
         return cls(
             HostTools(
-                root,
+                native_home,
                 output_limit=output_limit,
                 enforce_write_policy=False,
             ),
             active_probe,
-            working_directory,
+            active_probe.home,
             translated,
             tuple(str(path) for path in normalized),
         )
@@ -325,7 +323,7 @@ def create_host_tools(
 ) -> tuple[AgentHostTools, ExecutionSettings]:
     if selected_backend not in ("native", "wsl"):
         raise RuntimeError("Persisted execution backend is invalid")
-    root = Path(os.environ.get(WORKING_DIRECTORY_ENV) or Path.cwd()).expanduser()
+    native_home = Path.home()
     probe: WslProbe | None = None
     if os.name == "nt":
         try:
@@ -342,7 +340,7 @@ def create_host_tools(
     if effective_backend == "wsl" and probe is not None:
         try:
             tools = WslHostTools.start(
-                root,
+                native_home,
                 probe,
                 write_directories=write_directories,
             )
@@ -357,9 +355,9 @@ def create_host_tools(
                 active="native",
                 reason=type(error).__name__,
             )
-            tools = HostTools(root, write_directories=write_directories)
+            tools = HostTools(native_home, write_directories=write_directories)
     else:
-        tools = HostTools(root, write_directories=write_directories)
+        tools = HostTools(native_home, write_directories=write_directories)
     _log_selected(tools)
     return (
         tools,

@@ -123,6 +123,32 @@ def test_wsl_host_tools_run_directly_through_wsl_exe() -> None:
     assert launcher.closed is True
 
 
+def test_wsl_host_tools_start_uses_backend_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    probe = WslProbe("Debian", "/home/ada", "x86_64")
+    launcher = FakeLauncher()
+    native_home = tmp_path / "native-home"
+    native_home.mkdir()
+    roots: list[Path] = []
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "HostTools",
+        lambda root, **_kwargs: roots.append(root) or launcher,
+    )
+    monkeypatch.setattr(
+        wsl_host_tools,
+        "translate_working_directory",
+        lambda _probe, _root: (_ for _ in ()).throw(AssertionError("unexpected")),
+    )
+
+    tools = WslHostTools.start(native_home, probe)
+
+    assert roots == [native_home]
+    assert tools.working_directory == "/home/ada"
+
+
 def test_wsl_host_tools_edit_reuses_native_atomic_edit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -276,25 +302,35 @@ def test_probe_wsl_rejects_docker_default(monkeypatch: pytest.MonkeyPatch) -> No
         wsl_host_tools.probe_wsl()
 
 
-def test_create_host_tools_uses_selected_wsl_on_windows(
+def test_create_host_tools_uses_selected_wsl_home_on_windows(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     probe = WslProbe("Debian", "/home/ada", "x86_64")
-    expected = WslHostTools(FakeLauncher(), probe, "/mnt/f/project")
-    monkeypatch.setenv(wsl_host_tools.WORKING_DIRECTORY_ENV, str(tmp_path))
+    expected = WslHostTools(FakeLauncher(), probe, probe.home)
+    native_home = tmp_path / "native-home"
+    native_home.mkdir()
+    starts: list[tuple[Path, WslProbe]] = []
+    monkeypatch.setenv("HUDDOL_WORKING_DIRECTORY", str(tmp_path / "startup"))
+    monkeypatch.setattr(wsl_host_tools.Path, "home", lambda: native_home)
     monkeypatch.setattr(wsl_host_tools.os, "name", "nt")
     monkeypatch.setattr(wsl_host_tools, "probe_wsl", lambda: probe)
     monkeypatch.setattr(
         WslHostTools,
         "start",
-        classmethod(lambda cls, root, active_probe, **_kwargs: expected),
+        classmethod(
+            lambda cls, home, active_probe, **_kwargs: (
+                starts.append((home, active_probe)) or expected
+            )
+        ),
     )
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
     tools, settings = wsl_host_tools.create_host_tools("wsl")
 
     assert tools is expected
+    assert tools.working_directory == probe.home
+    assert starts == [(native_home, probe)]
     assert settings.settings()["selected_backend"] == "wsl"
     assert settings.settings()["wsl_distribution"] == "Debian"
 
@@ -306,22 +342,25 @@ def test_create_host_tools_falls_back_when_wsl_start_fails(
     saved: list[tuple[str, tuple[str, ...]]] = []
     probe = WslProbe("Debian", "/home/ada", "x86_64")
     launcher = FakeLauncher()
-    monkeypatch.setenv(wsl_host_tools.WORKING_DIRECTORY_ENV, str(tmp_path))
+    native_home = tmp_path / "native-home"
+    native_home.mkdir()
+    roots: list[Path] = []
+    monkeypatch.setattr(wsl_host_tools.Path, "home", lambda: native_home)
     monkeypatch.setattr(wsl_host_tools.os, "name", "nt")
     monkeypatch.setattr(wsl_host_tools, "probe_wsl", lambda: probe)
     monkeypatch.setattr(
         WslHostTools,
         "start",
         classmethod(
-            lambda cls, root, active_probe, **_kwargs: (_ for _ in ()).throw(
-                HostToolError("cannot map root")
+            lambda cls, home, active_probe, **_kwargs: (_ for _ in ()).throw(
+                HostToolError("cannot use WSL home")
             )
         ),
     )
     monkeypatch.setattr(
         wsl_host_tools,
         "HostTools",
-        lambda root, **_kwargs: launcher,
+        lambda root, **_kwargs: roots.append(root) or launcher,
     )
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
@@ -331,17 +370,21 @@ def test_create_host_tools_falls_back_when_wsl_start_fails(
     )
 
     assert tools is launcher
+    assert roots == [native_home]
     assert saved == [("native", ())]
     assert settings.settings()["selected_backend"] == "native"
     assert settings.settings()["wsl_available"] is False
 
 
-def test_create_host_tools_falls_back_to_native_when_wsl_is_unavailable(
+def test_create_host_tools_falls_back_to_native_home_when_wsl_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     saved: list[tuple[str, tuple[str, ...]]] = []
-    monkeypatch.setenv(wsl_host_tools.WORKING_DIRECTORY_ENV, str(tmp_path))
+    native_home = tmp_path / "native-home"
+    native_home.mkdir()
+    roots: list[Path] = []
+    monkeypatch.setattr(wsl_host_tools.Path, "home", lambda: native_home)
     monkeypatch.setattr(wsl_host_tools.os, "name", "nt")
     monkeypatch.setattr(
         wsl_host_tools,
@@ -352,7 +395,7 @@ def test_create_host_tools_falls_back_to_native_when_wsl_is_unavailable(
     monkeypatch.setattr(
         wsl_host_tools,
         "HostTools",
-        lambda root, **_kwargs: launcher,
+        lambda root, **_kwargs: roots.append(root) or launcher,
     )
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
@@ -362,22 +405,25 @@ def test_create_host_tools_falls_back_to_native_when_wsl_is_unavailable(
     )
 
     assert tools is launcher
+    assert roots == [native_home]
     assert tools.execution_backend == "native"
-    assert tools.working_directory == r"C:\workspace\repository"
     assert saved == [("native", ())]
     assert settings.settings()["selected_backend"] == "native"
     assert settings.settings()["wsl_available"] is False
 
 
-def test_create_host_tools_uses_startup_directory_for_native_backend(
+def test_create_host_tools_uses_user_home_for_native_backend(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv(wsl_host_tools.WORKING_DIRECTORY_ENV, str(tmp_path))
+    native_home = tmp_path / "native-home"
+    native_home.mkdir()
+    monkeypatch.setenv("HUDDOL_WORKING_DIRECTORY", str(tmp_path / "startup"))
+    monkeypatch.setattr(wsl_host_tools.Path, "home", lambda: native_home)
     monkeypatch.setattr(wsl_host_tools, "_log_selected", lambda tools: None)
 
     tools, settings = wsl_host_tools.create_host_tools("native")
 
     assert tools.execution_backend == "native"
-    assert tools.working_directory == str(tmp_path)
+    assert tools.working_directory == str(native_home)
     assert settings.settings()["active_backend"] == "native"

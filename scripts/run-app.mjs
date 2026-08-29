@@ -56,10 +56,7 @@ function findUv() {
   return candidates.find((candidate) => candidate && existsSync(candidate));
 }
 
-const env = {
-  ...process.env,
-  HUDDOL_WORKING_DIRECTORY: process.cwd(),
-};
+const env = { ...process.env };
 if (action === "dev") {
   const uv = findUv() ?? (process.platform === "win32" ? "uv.exe" : "uv");
   const sync = spawnSync(uv, ["sync", "--project", core], {

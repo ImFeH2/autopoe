@@ -35,7 +35,7 @@ for (const spec of specs) {
         env: {
           ...process.env,
           HUDDOL_DATA_DIR: dataDirectory,
-          HUDDOL_WORKING_DIRECTORY: rootDir,
+          HUDDOL_E2E_WRITABLE_DIRECTORY: rootDir,
         },
         stdio: "inherit",
       },
