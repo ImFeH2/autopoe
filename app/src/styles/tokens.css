@@ -1,0 +1,92 @@
+:root {
+  --gray-0: 250 249 248;
+  --gray-50: 249 247 246;
+  --gray-100: 247 245 244;
+  --gray-200: 238 235 234;
+  --gray-300: 218 214 213;
+  --gray-400: 175 172 171;
+  --gray-500: 112 110 109;
+  --gray-600: 68 67 66;
+  --gray-700: 46 45 45;
+  --gray-800: 35 34 34;
+  --gray-900: 31 30 30;
+  --gray-1000: 24 23 23;
+  --gray-1100: 17 16 16;
+
+  --blue-100: 173 199 252;
+  --blue-300: 108 148 236;
+  --blue-500: 75 112 204;
+  --blue-700: 50 73 148;
+  --green-200: 51 194 127;
+  --green-300: 30 166 114;
+  --green-500: 14 98 69;
+  --yellow-200: 229 153 62;
+  --yellow-300: 217 121 23;
+  --red-100: 255 177 171;
+  --red-300: 228 108 99;
+  --red-500: 178 45 48;
+  --purple-300: 174 116 216;
+
+  --text-base: var(--gray-100);
+  --text-muted: var(--gray-400);
+  --text-disabled: var(--gray-600);
+  --text-primary: var(--blue-300);
+  --text-success: var(--green-300);
+  --text-warning: var(--yellow-300);
+  --text-danger: var(--red-300);
+
+  --bg-app: var(--gray-1000);
+  --bg-base: var(--gray-900);
+  --bg-raised: var(--gray-800);
+  --bg-hover: var(--gray-700);
+
+  --border-base: var(--gray-700);
+  --border-interactive: var(--gray-600);
+  --border-interactive-hover: var(--gray-500);
+  --border-focus: var(--blue-500);
+  --outline-focus: var(--blue-700);
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.15);
+  --shadow-base: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --shadow-popover:
+    0 0 0 1px rgb(var(--border-base)), 0 15px 35px rgb(0 0 0 / 0.2),
+    0 5px 15px rgb(0 0 0 / 0.18);
+  --shadow-dialog: 0 10px 40px rgb(0 0 0 / 0.22), 0 0 16px rgb(0 0 0 / 0.18);
+  --shadow-tooltip:
+    0 0 0 1px rgb(var(--border-base)), 0 2px 5px rgb(0 0 0 / 0.14);
+  --shadow-button: 0 1px 1px rgb(0 0 0 / 0.14);
+
+  --font-sans:
+    "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, Helvetica,
+    Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 24px;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+
+  --duration-fast: 90ms;
+  --duration-base: 160ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
