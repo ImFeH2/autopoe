@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from huddol.core.errors import DomainError
 from huddol.ports.agent import HistoryStore, SettingsStore, TodoStore
+from huddol.ports.sandbox import Sandbox
 from huddol.ports.store import OrganizationStore
 from huddol.runtime.reminder import (
     ModelRunner,
@@ -100,6 +101,10 @@ class Scheduler:
 
     def tools_for_actor(self, actor: Actor) -> AgentTools:
         return AgentTools(self._deps, actor, self._authorizer)
+
+    @property
+    def sandbox(self) -> Sandbox:
+        return self._deps.sandbox
 
     def reconfigure_sandbox(self, write_directories: list[str]) -> None:
         self._deps.sandbox.configure(write_directories)

@@ -22,6 +22,7 @@ from pydantic_ai.models.openai import (
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from huddol.adapters.model.compaction import compact
 from huddol.adapters.model.config import ModelConfig
 from huddol.adapters.model.prompt import SYSTEM_PROMPT
 from huddol.core.errors import DomainError
@@ -324,7 +325,13 @@ class PydanticModelRunner:
             _result(tool)
 
     def run(self, request: TurnRequest, tools: AgentTools) -> TurnOutcome:
-        history = _decode_history(request.history_json)
+        raw = json.loads(request.history_json or "[]")
+        trimmed = compact(raw, self._config.compaction_threshold)
+        history = (
+            _decode_history(json.dumps(trimmed.kept, ensure_ascii=False))
+            if trimmed.applied
+            else _decode_history(request.history_json)
+        )
         prompt = request.reminder.render()
         if request.runtime_context:
             prompt = f"{prompt}\n\n{request.runtime_context}"

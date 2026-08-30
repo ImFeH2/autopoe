@@ -4,7 +4,6 @@ from typing import Any
 
 from huddol.adapters.jsonl.protocol import Dispatcher
 from huddol.adapters.model.config import ModelConfig
-from huddol.adapters.sandbox.paths import normalize_directories
 from huddol.core.errors import DomainError
 from huddol.runtime.scheduler import Scheduler
 from huddol.tools import AgentTools
@@ -213,10 +212,10 @@ class Api:
             if section == "execution":
                 directories = values.pop("write_directories", None)
                 if directories is not None:
-                    accepted = normalize_directories(list(directories))
-                    canonical = [str(item) for item in accepted]
-                    self._scheduler.reconfigure_sandbox(canonical)
-                    settings.set_write_directories(canonical)
+                    self._scheduler.reconfigure_sandbox(list(directories))
+                    settings.set_write_directories(
+                        list(self._scheduler.sandbox.write_directories)
+                    )
             merged = {**(settings.get_settings(section) or {}), **values}
             settings.set_settings(section, merged)
             self._dispatcher.emit("settings.updated", {"section": section})

@@ -3,6 +3,10 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from huddol.ports.sandbox import Sandbox
 
 DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIR"
 
@@ -12,6 +16,21 @@ def data_directory() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     return Path.home() / ".huddol"
+
+
+def _build_sandbox(agent_store: Any) -> Sandbox:
+    from huddol.adapters.sandbox.native import NativeSandbox
+
+    directories = agent_store.write_directories()
+    execution = agent_store.get_settings("execution") or {}
+    if str(execution.get("backend", "native")) == "wsl":
+        from huddol.adapters.sandbox.wsl import probe_wsl
+        from huddol.adapters.sandbox.wsl_sandbox import WslSandbox
+
+        probe = probe_wsl()
+        if probe is not None:
+            return WslSandbox("/", directories, probe, tolerant=True)
+    return NativeSandbox(Path.cwd(), directories, tolerant=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,7 +46,6 @@ def main(argv: list[str] | None = None) -> int:
     from huddol.adapters.jsonl.api import HUMAN_ID, Api
     from huddol.adapters.jsonl.protocol import Dispatcher, JsonLineWriter, serve
     from huddol.adapters.model.config import ModelConfig
-    from huddol.adapters.sandbox.native import NativeSandbox
     from huddol.adapters.sqlite.agent import SqliteAgentStore
     from huddol.adapters.sqlite.store import SqliteStore
     from huddol.runtime.scheduler import Scheduler
@@ -45,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         if member.is_agent and member.state == "running":
             store.set_agent_state(member.id, "idle")
 
-    sandbox = NativeSandbox(Path.cwd(), agent_store.write_directories(), tolerant=True)
+    sandbox = _build_sandbox(agent_store)
     deps = Dependencies(
         store=store,
         todos=agent_store,

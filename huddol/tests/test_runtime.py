@@ -192,3 +192,32 @@ def test_previously_reminded_is_flagged_on_the_second_turn(world) -> None:
     assert second is not None
     assert second.items[0].previously_reminded is True
     assert "still waiting" in second.render()
+
+
+def test_compacted_content_stays_retrievable_through_history(world) -> None:
+    mention(world)
+    from huddol.services.history import History
+
+    early = json.dumps(
+        [
+            {
+                "kind": "request",
+                "parts": [{"part_kind": "user-prompt", "content": "bubblewrap notes"}],
+            },
+            {"kind": "response", "parts": [{"part_kind": "text", "content": "noted"}]},
+        ]
+    )
+    first = world.history.start_run(MAIN)
+    world.history.finish_run(
+        MAIN, first.sequence, status="completed", messages_json=early
+    )
+
+    later = json.dumps([{"kind": "response", "parts": []}])
+    second = world.history.start_run(MAIN)
+    world.history.finish_run(
+        MAIN, second.sequence, status="completed", messages_json=later
+    )
+
+    assert "bubblewrap" not in world.history.latest_messages(MAIN)
+    found = History(world.history, MAIN).search("bubblewrap")
+    assert [item.sequence for item in found] == [first.sequence]

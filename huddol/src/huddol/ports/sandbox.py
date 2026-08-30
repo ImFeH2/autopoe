@@ -21,6 +21,8 @@ class EditResult:
 
 
 class Sandbox(Protocol):
+    skipped: tuple[tuple[str, str], ...]
+
     @property
     def root(self) -> str: ...
 
