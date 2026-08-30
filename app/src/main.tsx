@@ -1,9 +1,5 @@
-import "@fontsource-variable/inter/wght.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "@/App";
-import { TooltipProvider } from "@/components/ui";
-import "@/styles/index.css";
 
 function installDesktopInteractionGuards() {
   document.addEventListener("dragstart", (event) => event.preventDefault());
@@ -12,11 +8,7 @@ function installDesktopInteractionGuards() {
     const isEditable =
       target instanceof Element &&
       target.closest('input, textarea, [contenteditable="true"]') !== null;
-    const hasSelectedMessageText =
-      target instanceof Element &&
-      target.closest(".message-bubble") !== null &&
-      Boolean(window.getSelection()?.toString().trim());
-    if (!isEditable && !hasSelectedMessageText) {
+    if (!isEditable) {
       event.preventDefault();
     }
   });
@@ -29,11 +21,7 @@ async function render() {
 
   installDesktopInteractionGuards();
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <React.StrictMode>
-      <TooltipProvider>
-        <App />
-      </TooltipProvider>
-    </React.StrictMode>,
+    <React.StrictMode />,
   );
 }
 
