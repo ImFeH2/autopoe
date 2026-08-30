@@ -52,6 +52,7 @@ class Scheduler:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._wake = threading.Event()
+        self._loop: threading.Thread | None = None
         self._on_event = on_event or (lambda name, payload: None)
 
     @property
@@ -79,10 +80,29 @@ class Scheduler:
     def wake(self) -> None:
         self._wake.set()
 
+    def start(self, poll_seconds: float = 0.2) -> None:
+        if self._loop is not None:
+            return
+        self._loop = threading.Thread(
+            target=self.serve,
+            args=(poll_seconds,),
+            name="huddol-loop",
+            daemon=True,
+        )
+        self._loop.start()
+
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
-        for thread in list(self._threads.values()):
+        loop = self._loop
+        self._loop = None
+        if loop is not None and loop.ident is not None:
+            loop.join(timeout=5)
+        with self._lock:
+            running = list(self._threads.values())
+        for thread in running:
+            if thread.ident is None:
+                continue
             thread.join(timeout=5)
 
     def runnable_agents(self) -> tuple[int, ...]:
@@ -212,8 +232,8 @@ class Scheduler:
                 thread = threading.Thread(
                     target=work, name=f"huddol-agent-{agent_id}", daemon=True
                 )
+                thread.start()
                 self._threads[agent_id] = thread
-            thread.start()
             started.append(agent_id)
         return tuple(started)
 

@@ -16,11 +16,7 @@ function installDesktopInteractionGuards() {
   });
 }
 
-async function render() {
-  if (import.meta.env.MODE === "debug") {
-    await import("@wdio/tauri-plugin");
-  }
-
+function render() {
   installDesktopInteractionGuards();
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
@@ -29,4 +25,4 @@ async function render() {
   );
 }
 
-void render();
+render();

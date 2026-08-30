@@ -5,6 +5,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
+from types import TracebackType
+from typing import Any, Self
 
 from huddol.core.discussion import Discussion, Message
 from huddol.core.member import AgentState, Member, MemberType, name_key
@@ -74,18 +77,77 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 """
 
 
+def first(rows: list[sqlite3.Row]) -> sqlite3.Row | None:
+    return rows[0] if rows else None
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+class LockedConnection:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+        self._lock = RLock()
+
+    @property
+    def lock(self) -> RLock:
+        return self._lock
+
+    def execute(self, sql: str, parameters: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._connection.execute(sql, parameters).fetchall()
+
+    def execute_cursor(
+        self, sql: str, parameters: Sequence[Any] = ()
+    ) -> sqlite3.Cursor:
+        with self._lock:
+            return self._connection.execute(sql, parameters)
+
+    def executemany(
+        self, sql: str, parameters: Sequence[Sequence[Any]]
+    ) -> sqlite3.Cursor:
+        with self._lock:
+            return self._connection.executemany(sql, parameters)
+
+    def executescript(self, sql: str) -> None:
+        with self._lock:
+            self._connection.executescript(sql)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._connection.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._connection.close()
+
+    def __enter__(self) -> Self:
+        self._lock.acquire()
+        self._connection.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        try:
+            self._connection.__exit__(exc_type, exc, traceback)
+        finally:
+            self._lock.release()
 
 
 class SqliteStore:
     def __init__(self, path: Path | str) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(self._path, check_same_thread=False)
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA foreign_keys=ON")
+        connection = sqlite3.connect(self._path, check_same_thread=False)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        self._db = LockedConnection(connection)
         self._db.executescript(SCHEMA)
         self._db.commit()
 
@@ -93,13 +155,13 @@ class SqliteStore:
         self._db.close()
 
     @contextmanager
-    def _write(self) -> Iterator[sqlite3.Connection]:
-        with self._db:
-            yield self._db
+    def _write(self) -> Iterator[LockedConnection]:
+        with self._db as connection:
+            yield connection
 
     def _next_id(self, table: str) -> int:
-        row = self._db.execute(f"SELECT COALESCE(MAX(id), 0) + 1 AS v FROM {table}")
-        return int(row.fetchone()["v"])
+        rows = self._db.execute(f"SELECT COALESCE(MAX(id), 0) + 1 AS v FROM {table}")
+        return int(rows[0]["v"])
 
     def _member(self, row: sqlite3.Row) -> Member:
         return Member(
@@ -118,15 +180,17 @@ class SqliteStore:
         return tuple(self._member(row) for row in self._db.execute(sql))
 
     def get_member(self, member_id: int) -> Member | None:
-        row = self._db.execute(
-            "SELECT * FROM members WHERE id = ?", (member_id,)
-        ).fetchone()
+        row = first(
+            self._db.execute("SELECT * FROM members WHERE id = ?", (member_id,))
+        )
         return self._member(row) if row else None
 
     def name_taken(self, name: str) -> bool:
-        row = self._db.execute(
-            "SELECT 1 FROM members WHERE name_key = ?", (name_key(name),)
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT 1 FROM members WHERE name_key = ?", (name_key(name),)
+            )
+        )
         return row is not None
 
     def create_member(self, member_type: MemberType, name: str) -> Member:
@@ -191,9 +255,9 @@ class SqliteStore:
         return tuple(self._discussion(row) for row in self._db.execute(sql, params))
 
     def get_discussion(self, discussion_id: int) -> Discussion | None:
-        row = self._db.execute(
-            "SELECT * FROM discussions WHERE id = ?", (discussion_id,)
-        ).fetchone()
+        row = first(
+            self._db.execute("SELECT * FROM discussions WHERE id = ?", (discussion_id,))
+        )
         return self._discussion(row) if row else None
 
     def create_discussion(self, topic: str, member_ids: Sequence[int]) -> Discussion:
@@ -270,10 +334,13 @@ class SqliteStore:
             for member in self.list_members()
             if member.id in discussion.member_ids
         ]
-        row = self._db.execute(
-            "SELECT COALESCE(MAX(id), 0) + 1 AS v FROM messages WHERE discussion_id = ?",
-            (discussion_id,),
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT COALESCE(MAX(id), 0) + 1 AS v FROM messages WHERE discussion_id = ?",
+                (discussion_id,),
+            )
+        )
+        assert row is not None
         message_id = int(row["v"])
         mentions = build_mentions(
             discussion_id, message_id, body, members, sender_id=sender_id
@@ -332,11 +399,13 @@ class SqliteStore:
         return tuple(self._message(row) for row in self._db.execute(sql, params))
 
     def message_count(self, discussion_id: int) -> int:
-        row = self._db.execute(
-            "SELECT COUNT(*) AS v FROM messages WHERE discussion_id = ?",
-            (discussion_id,),
-        ).fetchone()
-        return int(row["v"])
+        row = first(
+            self._db.execute(
+                "SELECT COUNT(*) AS v FROM messages WHERE discussion_id = ?",
+                (discussion_id,),
+            )
+        )
+        return int(row["v"]) if row else 0
 
     def mentions_by_message(self, discussion_id: int) -> Mapping[int, frozenset[int]]:
         found: dict[int, set[int]] = {}
@@ -423,10 +492,12 @@ class SqliteStore:
             return cursor.rowcount
 
     def watermark(self, discussion_id: int, member_id: int) -> int:
-        row = self._db.execute(
-            "SELECT message_id FROM watermarks WHERE discussion_id = ? AND member_id = ?",
-            (discussion_id, member_id),
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT message_id FROM watermarks WHERE discussion_id = ? AND member_id = ?",
+                (discussion_id, member_id),
+            )
+        )
         return int(row["message_id"]) if row else 0
 
     def set_watermark(

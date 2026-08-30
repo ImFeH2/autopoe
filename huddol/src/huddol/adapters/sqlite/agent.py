@@ -5,6 +5,7 @@ import sqlite3
 import uuid
 from collections.abc import Sequence
 
+from huddol.adapters.sqlite.store import LockedConnection, first
 from huddol.core.errors import DomainError
 from huddol.core.todo import Todo, TodoStatus
 from huddol.ports.agent import AgentRun
@@ -38,7 +39,7 @@ CREATE TABLE IF NOT EXISTS reminded (
 
 
 class SqliteAgentStore:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: LockedConnection) -> None:
         self._db = db
         self._db.executescript(SCHEMA)
         self._db.commit()
@@ -65,10 +66,13 @@ class SqliteAgentStore:
         )
 
     def add_todo(self, agent_id: int, title: str, detail: str = "") -> Todo:
-        row = self._db.execute(
-            "SELECT COALESCE(MAX(id), 0) + 1 AS v FROM agent_todos WHERE agent_id = ?",
-            (agent_id,),
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT COALESCE(MAX(id), 0) + 1 AS v FROM agent_todos WHERE agent_id = ?",
+                (agent_id,),
+            )
+        )
+        assert row is not None
         todo_id = int(row["v"])
         with self._db:
             self._db.execute(
@@ -80,17 +84,20 @@ class SqliteAgentStore:
 
     def set_todo_status(self, agent_id: int, todo_id: int, status: TodoStatus) -> Todo:
         with self._db:
-            cursor = self._db.execute(
+            cursor = self._db.execute_cursor(
                 "UPDATE agent_todos SET status = ? WHERE agent_id = ? AND id = ?",
                 (status, agent_id, todo_id),
             )
         if cursor.rowcount == 0:
             raise DomainError("not_found", f"Todo {todo_id} does not exist")
-        row = self._db.execute(
-            "SELECT id, title, status, detail FROM agent_todos WHERE agent_id = ?"
-            " AND id = ?",
-            (agent_id, todo_id),
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT id, title, status, detail FROM agent_todos WHERE agent_id = ?"
+                " AND id = ?",
+                (agent_id, todo_id),
+            )
+        )
+        assert row is not None
         return Todo(
             int(row["id"]),
             str(row["title"]),
@@ -100,7 +107,7 @@ class SqliteAgentStore:
 
     def remove_todo(self, agent_id: int, todo_id: int) -> None:
         with self._db:
-            cursor = self._db.execute(
+            cursor = self._db.execute_cursor(
                 "DELETE FROM agent_todos WHERE agent_id = ? AND id = ?",
                 (agent_id, todo_id),
             )
@@ -131,11 +138,13 @@ class SqliteAgentStore:
             return frozenset()
         found: set[int] = set()
         for discussion_id, message_id in keys:
-            row = self._db.execute(
-                "SELECT 1 FROM reminded WHERE agent_id = ? AND discussion_id = ?"
-                " AND message_id = ?",
-                (agent_id, discussion_id, message_id),
-            ).fetchone()
+            row = first(
+                self._db.execute(
+                    "SELECT 1 FROM reminded WHERE agent_id = ? AND discussion_id = ?"
+                    " AND message_id = ?",
+                    (agent_id, discussion_id, message_id),
+                )
+            )
             if row is not None:
                 found.add(message_id)
         return frozenset(found)
@@ -146,10 +155,13 @@ class SqliteAgentStore:
         run_id: str | None = None,
         reminded: Sequence[tuple[int, int]] = (),
     ) -> AgentRun:
-        row = self._db.execute(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 AS v FROM agent_runs WHERE agent_id = ?",
-            (agent_id,),
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 AS v FROM agent_runs WHERE agent_id = ?",
+                (agent_id,),
+            )
+        )
+        assert row is not None
         sequence = int(row["v"])
         identifier = run_id or uuid.uuid4().hex
         started = self._now()
@@ -197,11 +209,13 @@ class SqliteAgentStore:
             )
 
     def latest_messages(self, agent_id: int) -> str:
-        row = self._db.execute(
-            "SELECT messages_json FROM agent_runs WHERE agent_id = ?"
-            " AND messages_json != '[]' ORDER BY sequence DESC LIMIT 1",
-            (agent_id,),
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT messages_json FROM agent_runs WHERE agent_id = ?"
+                " AND messages_json != '[]' ORDER BY sequence DESC LIMIT 1",
+                (agent_id,),
+            )
+        )
         return str(row["messages_json"]) if row else "[]"
 
     def runs(self, agent_id: int, *, limit: int = 50) -> tuple[AgentRun, ...]:
@@ -213,7 +227,7 @@ class SqliteAgentStore:
 
     def mark_interrupted(self) -> int:
         with self._db:
-            cursor = self._db.execute(
+            cursor = self._db.execute_cursor(
                 "UPDATE agent_runs SET status = 'interrupted', completed_at = ?"
                 " WHERE status = 'running'",
                 (self._now(),),
@@ -232,9 +246,11 @@ class SqliteAgentStore:
         return tuple(self._run(row) for row in rows)
 
     def get_settings(self, section: str) -> dict[str, object] | None:
-        row = self._db.execute(
-            "SELECT values_json FROM settings WHERE section = ?", (section,)
-        ).fetchone()
+        row = first(
+            self._db.execute(
+                "SELECT values_json FROM settings WHERE section = ?", (section,)
+            )
+        )
         if row is None:
             return None
         loaded = json.loads(str(row["values_json"]))

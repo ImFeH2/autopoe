@@ -163,12 +163,6 @@ label.form-row {
   color: rgb(var(--text-muted));
 }
 
-label.form-row .field {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-normal);
-  color: rgb(var(--text-base));
-}
-
 .message-actions {
   display: flex;
   align-items: center;
@@ -176,6 +170,12 @@ label.form-row .field {
   margin-top: var(--space-3);
 }
 
-.composer-actions .field {
+.composer-actions > .field {
   flex: 1;
+}
+
+label.form-row > .field {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  color: rgb(var(--text-base));
 }

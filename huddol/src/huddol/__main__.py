@@ -107,10 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     Api(scheduler, dispatcher)
 
-    import threading
-
-    worker = threading.Thread(target=scheduler.serve, daemon=True, name="huddol-loop")
-    worker.start()
+    scheduler.start()
 
     dispatcher.emit(
         "ready",

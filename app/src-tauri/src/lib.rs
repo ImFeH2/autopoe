@@ -39,11 +39,6 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             app.state::<ActivationState>().request(app);
         }));
-    #[cfg(feature = "debug")]
-    let builder = builder
-        .plugin(tauri_plugin_wdio_webdriver::init())
-        .plugin(tauri_plugin_wdio::init());
-
     let app = builder
         .plugin(tauri_plugin_shell::init())
         .manage(HuddolProcess::default())
@@ -96,45 +91,37 @@ mod tests {
         let single_instance = source
             .find(".plugin(tauri_plugin_single_instance::init")
             .unwrap();
-        let webdriver = source
-            .find(".plugin(tauri_plugin_wdio_webdriver::init")
-            .unwrap();
         let shell = source.find(".plugin(tauri_plugin_shell::init").unwrap();
 
-        assert!(single_instance < webdriver);
         assert!(single_instance < shell);
     }
 
     #[test]
     fn startup_windows_are_shown_without_activation() {
-        for (name, source) in [
-            ("release", include_str!("../tauri.conf.json")),
-            ("debug", include_str!("../tauri.debug.conf.json")),
-        ] {
-            let config: serde_json::Value = serde_json::from_str(source).unwrap();
-            let window = &config["app"]["windows"][0];
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &config["app"]["windows"][0];
 
-            assert_eq!(
-                window["visible"], false,
-                "{name} window must be created hidden before its first show"
-            );
-            assert_eq!(window["focus"], false, "{name} window must not activate");
-            assert_eq!(
-                window["focusable"], true,
-                "{name} window must remain activatable by a Human click"
-            );
-            assert_eq!(
-                window["alwaysOnTop"], false,
-                "{name} window must not be topmost"
-            );
-            assert_eq!(
-                window["maximized"], false,
-                "{name} window must not start maximized"
-            );
-            assert_eq!(
-                window["skipTaskbar"], false,
-                "{name} window must appear in the taskbar"
-            );
-        }
+        assert_eq!(
+            window["visible"], false,
+            "the window must be created hidden before its first show"
+        );
+        assert_eq!(window["focus"], false, "the window must not activate");
+        assert_eq!(
+            window["focusable"], true,
+            "the window must remain activatable by a Human click"
+        );
+        assert_eq!(
+            window["alwaysOnTop"], false,
+            "the window must not be topmost"
+        );
+        assert_eq!(
+            window["maximized"], false,
+            "the window must not start maximized"
+        );
+        assert_eq!(
+            window["skipTaskbar"], false,
+            "the window must appear in the taskbar"
+        );
     }
 }

@@ -75,7 +75,7 @@ def test_sql_pending_matches_the_core_formula_under_random_operations(
         elif action < 0.7:
             pending_any = store._db.execute(
                 "SELECT discussion_id, message_id, member_id FROM acks LIMIT 5"
-            ).fetchall()
+            )
             if pending_any:
                 row = rng.choice(pending_any)
                 store.revoke_ack(
@@ -164,3 +164,37 @@ def test_unread_counts_ignore_own_messages(store: SqliteStore) -> None:
     assert store.unread_counts(agent.id)[room.id] == 1
     store.set_watermark(room.id, human.id, 2)
     assert store.unread_counts(human.id)[room.id] == 0
+
+
+def test_the_connection_survives_concurrent_threads(store: SqliteStore) -> None:
+    import threading
+
+    human = store.create_member("human", "You")
+    agent = store.create_member("agent", "Main")
+    room = store.create_discussion("concurrent", [human.id, agent.id])
+    failures: list[Exception] = []
+
+    def writer() -> None:
+        try:
+            for index in range(40):
+                store.append_message(room.id, human.id, f"@Main item {index}")
+        except Exception as error:  # noqa: BLE001
+            failures.append(error)
+
+    def reader() -> None:
+        try:
+            for _ in range(40):
+                store.pending(agent.id)
+                store.messages(room.id)
+                store.unread_counts(agent.id)
+        except Exception as error:  # noqa: BLE001
+            failures.append(error)
+
+    threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert failures == []
+    assert store.message_count(room.id) == 40

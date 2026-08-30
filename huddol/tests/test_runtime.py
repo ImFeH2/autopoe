@@ -278,3 +278,47 @@ def test_the_nudge_reaches_the_model_but_not_the_history(world) -> None:
     Scheduler(world, runner).run_turn(MAIN)
     assert "exchanged" in runner.requests[0].runtime_context
     assert "exchanged" not in world.history.latest_messages(MAIN)
+
+
+def test_stop_is_safe_while_a_turn_is_being_started(world) -> None:
+    import threading
+
+    scheduler = Scheduler(world, RecordingRunner())
+    never_started = threading.Thread(target=lambda: None)
+    scheduler._threads[MAIN] = never_started
+    scheduler.stop()
+
+
+def test_stop_waits_for_a_running_turn(world) -> None:
+    import threading
+
+    release = threading.Event()
+
+    def slow(request, tools):
+        release.wait(timeout=5)
+        return TurnOutcome(messages_json="[]")
+
+    mention(world)
+    scheduler = Scheduler(world, RecordingRunner(slow))
+    assert scheduler.tick() == (MAIN,)
+    release.set()
+    scheduler.stop()
+    assert world.store.get_member(MAIN).state == "idle"
+
+
+def test_the_scheduler_loop_is_joined_on_stop(world) -> None:
+    scheduler = Scheduler(world, RecordingRunner())
+    scheduler.start(poll_seconds=0.01)
+    assert scheduler._loop is not None
+    loop = scheduler._loop
+    scheduler.stop()
+    assert loop.is_alive() is False
+
+
+def test_starting_twice_keeps_a_single_loop(world) -> None:
+    scheduler = Scheduler(world, RecordingRunner())
+    scheduler.start(poll_seconds=0.01)
+    first = scheduler._loop
+    scheduler.start(poll_seconds=0.01)
+    assert scheduler._loop is first
+    scheduler.stop()
