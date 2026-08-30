@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import sys
 from collections.abc import Sequence
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from huddol.adapters.sandbox.paths import bind_order
 from huddol.core.errors import DomainError
@@ -44,8 +44,10 @@ def linux_command(
         "--unshare-user",
     ]
     for root in bind_order(write_directories):
-        command.extend(("--bind", str(root), str(root)))
-    command.extend(("--chdir", str(cwd), "--cap-drop", "ALL", "--", *argv))
+        rendered = root.as_posix()
+        command.extend(("--bind", rendered, rendered))
+    directory = cwd.as_posix() if isinstance(cwd, PurePath) else str(cwd)
+    command.extend(("--chdir", directory, "--cap-drop", "ALL", "--", *argv))
     return command
 
 
@@ -77,7 +79,9 @@ def macos_profile(count: int) -> str:
 
 def macos_command(argv: Sequence[str], write_directories: Sequence[Path]) -> list[str]:
     roots = [root for root in write_directories if root.is_dir()]
-    parameters = [f"-DWRITABLE_{index}={root}" for index, root in enumerate(roots)]
+    parameters = [
+        f"-DWRITABLE_{index}={root.as_posix()}" for index, root in enumerate(roots)
+    ]
     return [SANDBOX_EXEC, "-p", macos_profile(len(roots)), *parameters, "--", *argv]
 
 

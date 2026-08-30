@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -52,7 +52,10 @@ def test_bind_order_puts_shallow_paths_first() -> None:
 
 def test_linux_command_carries_the_required_isolation_flags() -> None:
     command = linux_command(
-        ["ls"], "/work", [Path("/w/deep/nested"), Path("/w")], bwrap="/usr/bin/bwrap"
+        ["ls"],
+        "/work",
+        [PurePosixPath("/w/deep/nested"), PurePosixPath("/w")],
+        bwrap="/usr/bin/bwrap",
     )
     assert command[:1] == ["/usr/bin/bwrap"]
     for flag in ("--new-session", "--die-with-parent", "--unshare-user"):
@@ -213,3 +216,18 @@ def test_a_sandbox_with_unusable_configuration_still_constructs(tmp_path: Path) 
 def test_strict_mode_still_rejects_bad_input(tmp_path: Path) -> None:
     with pytest.raises(DomainError):
         NativeSandbox(tmp_path, ["not-absolute"], enforce=False)
+
+
+def test_linux_command_renders_posix_paths_on_every_host() -> None:
+    command = linux_command(
+        ["ls"],
+        PurePosixPath("/work"),
+        [PurePosixPath("/w/deep"), PurePosixPath("/w")],
+        bwrap="/usr/bin/bwrap",
+    )
+    assert "--chdir" in command
+    assert command[command.index("--chdir") + 1] == "/work"
+    for rendered in ("/w", "/w/deep"):
+        assert rendered in command
+        assert "\\" not in rendered
+    assert command.index("/w") < command.index("/w/deep")
