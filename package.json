@@ -16,7 +16,7 @@
     "build:debug": "node scripts/build-debug.mjs",
     "check": "pnpm check:app && pnpm check:huddol && pnpm check:rust",
     "check:app": "pnpm exec biome check . && pnpm typecheck",
-    "check:huddol": "node scripts/huddol.mjs ruff check . && node scripts/huddol.mjs ruff format --check . && node scripts/huddol.mjs mypy src/huddol",
+    "check:huddol": "node scripts/huddol.mjs ruff check . && node scripts/huddol.mjs ruff format --check . && node scripts/huddol.mjs mypy src/huddol && node scripts/huddol.mjs lint-imports",
     "check:rust": "cargo fmt --manifest-path app/src-tauri/Cargo.toml --check && node scripts/cargo.mjs check && node scripts/cargo.mjs clippy --all-targets -- -D warnings",
     "format": "pnpm exec biome format --write . && node scripts/huddol.mjs ruff format . && cargo fmt --manifest-path app/src-tauri/Cargo.toml",
     "lint": "pnpm exec biome lint . && node scripts/huddol.mjs ruff check . && node scripts/cargo.mjs clippy --all-targets -- -D warnings",

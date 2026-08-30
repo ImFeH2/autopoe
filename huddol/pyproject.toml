@@ -34,8 +34,70 @@ show_error_codes = true
 module = ["huddol.host_tools", "huddol.windows_write_access"]
 disable_error_code = ["attr-defined"]
 
+[tool.importlinter]
+root_package = "huddol"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers run one way only"
+type = "layers"
+layers = [
+    "huddol.adapters",
+    "huddol.runtime",
+    "huddol.tools",
+    "huddol.services",
+    "huddol.ports",
+    "huddol.core",
+]
+
+[[tool.importlinter.contracts]]
+name = "Services do not know about each other"
+type = "independence"
+modules = [
+    "huddol.services.todo",
+    "huddol.services.memory",
+    "huddol.services.library",
+    "huddol.services.history",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only adapters know the model runtime"
+type = "forbidden"
+source_modules = [
+    "huddol.core",
+    "huddol.ports",
+    "huddol.services",
+    "huddol.tools",
+    "huddol.runtime",
+]
+forbidden_modules = ["pydantic_ai"]
+
+[[tool.importlinter.contracts]]
+name = "Only adapters touch storage and the network"
+type = "forbidden"
+source_modules = [
+    "huddol.core",
+    "huddol.services",
+    "huddol.tools",
+    "huddol.runtime",
+]
+forbidden_modules = ["sqlite3", "httpx", "subprocess"]
+
+[[tool.importlinter.contracts]]
+name = "Core is self contained"
+type = "forbidden"
+source_modules = ["huddol.core"]
+forbidden_modules = [
+    "huddol.ports",
+    "huddol.services",
+    "huddol.tools",
+    "huddol.runtime",
+    "huddol.adapters",
+]
+
 [dependency-groups]
 dev = [
+    "import-linter>=2.14",
     "mypy>=2.3.1",
     "pyinstaller>=6.21.0",
     "pytest>=9.1.1",
