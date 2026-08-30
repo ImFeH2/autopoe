@@ -14,6 +14,15 @@ def tree(tmp_path: Path) -> MarkdownTree:
     return MarkdownTree(tmp_path / "library")
 
 
+def require_symlinks(tmp_path: Path) -> None:
+    probe = tmp_path / "symlink-probe"
+    try:
+        probe.symlink_to(tmp_path)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlinks are unavailable on this host: {error}")
+    probe.unlink()
+
+
 def test_creates_reads_and_lists_nested_documents(tree: MarkdownTree) -> None:
     tree.write("notes.md", "top level")
     tree.write("specs/protocol.md", "nested")
@@ -60,6 +69,7 @@ def test_rejects_non_markdown_files(tree: MarkdownTree) -> None:
 def test_symlinked_files_cannot_read_outside_the_tree(
     tree: MarkdownTree, tmp_path: Path
 ) -> None:
+    require_symlinks(tmp_path)
     secret = tmp_path / "secret.md"
     secret.write_text("classified", encoding="utf-8")
     (tree.root / "link.md").symlink_to(secret)
@@ -70,8 +80,9 @@ def test_symlinked_files_cannot_read_outside_the_tree(
 
 
 def test_symlink_pointing_inside_the_tree_is_still_excluded_from_listings(
-    tree: MarkdownTree,
+    tree: MarkdownTree, tmp_path: Path
 ) -> None:
+    require_symlinks(tmp_path)
     tree.write("real.md", "content")
     (tree.root / "alias.md").symlink_to(tree.root / "real.md")
     assert [item.path for item in tree.list()] == ["real.md"]

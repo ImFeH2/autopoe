@@ -81,7 +81,7 @@ def test_macos_profile_keeps_dev_null_writable_and_protects_root_directories() -
 def test_macos_command_passes_roots_as_parameters(tmp_path: Path) -> None:
     command = macos_command(["ls"], [tmp_path])
     assert command[0] == "/usr/bin/sandbox-exec"
-    assert f"-DWRITABLE_0={tmp_path}" in command
+    assert f"-DWRITABLE_0={tmp_path.as_posix()}" in command
     assert command[-2:] == ["--", "ls"]
 
 
