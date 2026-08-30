@@ -39,7 +39,8 @@ def validate_detail(value: object) -> str:
         raise DomainError("invalid_detail", "Todo detail must be a string")
     if len(value) > MAX_DETAIL_LENGTH:
         raise DomainError(
-            "invalid_detail", f"Todo detail must be at most {MAX_DETAIL_LENGTH} characters"
+            "invalid_detail",
+            f"Todo detail must be at most {MAX_DETAIL_LENGTH} characters",
         )
     return value.strip()
 

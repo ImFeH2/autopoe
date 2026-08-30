@@ -17,8 +17,12 @@ def store(tmp_path: Path) -> SqliteStore:
     created.close()
 
 
-def reference_pending(store: SqliteStore, member_id: int) -> tuple[tuple[int, int], ...]:
-    discussions = {item.id: item for item in store.list_discussions(include_archived=True)}
+def reference_pending(
+    store: SqliteStore, member_id: int
+) -> tuple[tuple[int, int], ...]:
+    discussions = {
+        item.id: item for item in store.list_discussions(include_archived=True)
+    }
     mentions: list[Mention] = []
     acks: list[Ack] = []
     for discussion in discussions.values():
@@ -29,14 +33,18 @@ def reference_pending(store: SqliteStore, member_id: int) -> tuple[tuple[int, in
             "SELECT message_id, member_id FROM acks WHERE discussion_id = ?",
             (discussion.id,),
         ):
-            acks.append(Ack(discussion.id, int(row["message_id"]), int(row["member_id"])))
+            acks.append(
+                Ack(discussion.id, int(row["message_id"]), int(row["member_id"]))
+            )
     found = pending_for(member_id, mentions, ack_keys(acks), discussions)
     return tuple(sorted((item.discussion_id, item.message_id) for item in found))
 
 
 def sql_pending(store: SqliteStore, member_id: int) -> tuple[tuple[int, int], ...]:
     return tuple(
-        sorted((item.discussion_id, item.message_id) for item in store.pending(member_id))
+        sorted(
+            (item.discussion_id, item.message_id) for item in store.pending(member_id)
+        )
     )
 
 

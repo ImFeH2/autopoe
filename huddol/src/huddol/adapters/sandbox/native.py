@@ -109,7 +109,9 @@ class NativeSandbox:
         timeout: int | None = None,
     ) -> RunResult:
         if not argv or not all(isinstance(item, str) for item in argv):
-            raise DomainError("invalid_argv", "argv must be a non-empty list of strings")
+            raise DomainError(
+                "invalid_argv", "argv must be a non-empty list of strings"
+            )
         directory = self._resolve_cwd(cwd)
         command = self._wrap(argv, directory)
         try:
@@ -151,7 +153,9 @@ class NativeSandbox:
         if not isinstance(new_text, str):
             raise DomainError("invalid_edit", "new_text must be a string")
         candidate = Path(path)
-        target = (candidate if candidate.is_absolute() else self._root / candidate).resolve()
+        target = (
+            candidate if candidate.is_absolute() else self._root / candidate
+        ).resolve()
         if not target.is_file():
             raise DomainError("not_found", f"{path} does not exist")
         self.require_writable(target)

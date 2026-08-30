@@ -75,9 +75,7 @@ def macos_profile(count: int) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def macos_command(
-    argv: Sequence[str], write_directories: Sequence[Path]
-) -> list[str]:
+def macos_command(argv: Sequence[str], write_directories: Sequence[Path]) -> list[str]:
     roots = [root for root in write_directories if root.is_dir()]
     parameters = [f"-DWRITABLE_{index}={root}" for index, root in enumerate(roots)]
     return [SANDBOX_EXEC, "-p", macos_profile(len(roots)), *parameters, "--", *argv]

@@ -71,7 +71,7 @@ def test_macos_profile_keeps_dev_null_writable_and_protects_root_directories() -
     profile = macos_profile(2)
     assert '(require-not (literal "/dev/null"))' in profile
     assert profile.count("file-write-unlink") == 2
-    assert '(vnode-type DIRECTORY)' in profile
+    assert "(vnode-type DIRECTORY)" in profile
     assert macos_profile(0).count("file-write-unlink") == 0
 
 
@@ -157,7 +157,8 @@ def test_unsandboxed_run_executes_and_captures_output(tmp_path: Path) -> None:
 
 @LINUX_ONLY
 @pytest.mark.skipif(
-    subprocess.run(["which", "bwrap"], capture_output=True, check=False).returncode != 0,
+    subprocess.run(["which", "bwrap"], capture_output=True, check=False).returncode
+    != 0,
     reason="bubblewrap is not installed",
 )
 def test_sandboxed_run_allows_writes_inside_and_blocks_them_outside(

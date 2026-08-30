@@ -157,7 +157,9 @@ class SqliteStore:
     def delete_member(self, member_id: int) -> None:
         with self._write() as db:
             db.execute("UPDATE members SET deleted = 1 WHERE id = ?", (member_id,))
-            db.execute("DELETE FROM discussion_members WHERE member_id = ?", (member_id,))
+            db.execute(
+                "DELETE FROM discussion_members WHERE member_id = ?", (member_id,)
+            )
 
     def _discussion(self, row: sqlite3.Row) -> Discussion:
         members = self._db.execute(
@@ -214,7 +216,8 @@ class SqliteStore:
     ) -> Discussion:
         with self._write() as db:
             db.execute(
-                "DELETE FROM discussion_members WHERE discussion_id = ?", (discussion_id,)
+                "DELETE FROM discussion_members WHERE discussion_id = ?",
+                (discussion_id,),
             )
             db.executemany(
                 "INSERT INTO discussion_members (discussion_id, member_id) VALUES (?, ?)",
@@ -240,7 +243,9 @@ class SqliteStore:
                 "acks",
                 "watermarks",
             ):
-                db.execute(f"DELETE FROM {table} WHERE discussion_id = ?", (discussion_id,))
+                db.execute(
+                    f"DELETE FROM {table} WHERE discussion_id = ?", (discussion_id,)
+                )
             db.execute("DELETE FROM discussions WHERE id = ?", (discussion_id,))
 
     def _message(self, row: sqlite3.Row) -> Message:
@@ -326,7 +331,8 @@ class SqliteStore:
 
     def message_count(self, discussion_id: int) -> int:
         row = self._db.execute(
-            "SELECT COUNT(*) AS v FROM messages WHERE discussion_id = ?", (discussion_id,)
+            "SELECT COUNT(*) AS v FROM messages WHERE discussion_id = ?",
+            (discussion_id,),
         ).fetchone()
         return int(row["v"])
 
@@ -392,7 +398,8 @@ class SqliteStore:
         self, member_id: int, mentions: Sequence[Mention]
     ) -> frozenset[int]:
         row = self._db.execute(
-            "SELECT MAX(started_at) AS v FROM agent_runs WHERE agent_id = ?", (member_id,)
+            "SELECT MAX(started_at) AS v FROM agent_runs WHERE agent_id = ?",
+            (member_id,),
         ).fetchone()
         last = row["v"] if row else None
         if not last:
@@ -429,10 +436,7 @@ class SqliteStore:
             cursor = db.executemany(
                 "DELETE FROM acks WHERE discussion_id = ? AND message_id = ?"
                 " AND member_id = ?",
-                [
-                    (discussion_id, message_id, member_id)
-                    for message_id in message_ids
-                ],
+                [(discussion_id, message_id, member_id) for message_id in message_ids],
             )
             return cursor.rowcount
 

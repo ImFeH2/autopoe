@@ -75,7 +75,9 @@ class OrganizationStore(Protocol):
         self, member_id: int, mentions: Sequence[Mention]
     ) -> frozenset[int]: ...
 
-    def ack(self, discussion_id: int, message_ids: Sequence[int], member_id: int) -> int: ...
+    def ack(
+        self, discussion_id: int, message_ids: Sequence[int], member_id: int
+    ) -> int: ...
 
     def revoke_ack(
         self, discussion_id: int, message_ids: Sequence[int], member_id: int

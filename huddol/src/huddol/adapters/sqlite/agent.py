@@ -213,9 +213,7 @@ class SqliteAgentStore:
             )
 
     def write_directories(self) -> tuple[str, ...]:
-        rows = self._db.execute(
-            "SELECT path FROM write_directories ORDER BY position"
-        )
+        rows = self._db.execute("SELECT path FROM write_directories ORDER BY position")
         return tuple(str(row["path"]) for row in rows)
 
     def set_write_directories(self, values: Sequence[str]) -> None:

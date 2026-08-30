@@ -54,7 +54,9 @@ def _tables(db: sqlite3.Connection) -> frozenset[str]:
     return frozenset(str(row["name"]) for row in rows)
 
 
-def _rows(db: sqlite3.Connection, table: str, present: frozenset[str]) -> Iterator[sqlite3.Row]:
+def _rows(
+    db: sqlite3.Connection, table: str, present: frozenset[str]
+) -> Iterator[sqlite3.Row]:
     if table not in present:
         return iter(())
     return iter(db.execute(f"SELECT * FROM {table}").fetchall())
@@ -274,9 +276,7 @@ def migrate(legacy_dir: Path, target_dir: Path) -> Report:
         rows = list(_rows(legacy, table, present))
         if rows:
             columns = list(rows[0].keys())
-            values = {
-                key: rows[0][key] for key in columns if not key.startswith("id")
-            }
+            values = {key: rows[0][key] for key in columns if not key.startswith("id")}
             agent_store.set_settings(section, values)
     directories = [
         str(row["path"])
@@ -297,8 +297,10 @@ def migrate(legacy_dir: Path, target_dir: Path) -> Report:
         content = str(row["content"]) if "content" in keys else ""
         filename = safe_filename(title, taken)
         heading = filename.removesuffix(".md")
-        body = content if content.lstrip().startswith("#") or heading == title else (
-            f"# {title}\n\n{content}"
+        body = (
+            content
+            if content.lstrip().startswith("#") or heading == title
+            else (f"# {title}\n\n{content}")
         )
         library.write(filename, body)
     report.record("library_documents", len(documents))
@@ -346,7 +348,9 @@ def verify(legacy_dir: Path, target_dir: Path) -> list[str]:
         if before != after:
             problems.append(f"library: {before} rows, {after} files")
 
-    for row in target.execute("SELECT agent_id, sequence, messages_json FROM agent_runs"):
+    for row in target.execute(
+        "SELECT agent_id, sequence, messages_json FROM agent_runs"
+    ):
         try:
             json.loads(str(row["messages_json"]))
         except json.JSONDecodeError:

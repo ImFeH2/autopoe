@@ -30,7 +30,9 @@ class MarkdownTree:
             raise DomainError("invalid_path", "Path must not be empty")
         pure = PurePosixPath(path.replace("\\", "/"))
         if pure.is_absolute() or any(part in ("..", "") for part in pure.parts):
-            raise DomainError("invalid_path", "Path must be relative and must not escape")
+            raise DomainError(
+                "invalid_path", "Path must be relative and must not escape"
+            )
         if require_suffix and pure.suffix != ALLOWED_SUFFIX:
             raise DomainError("invalid_path", "Only Markdown files are allowed")
         target = (self._root / pure).resolve()

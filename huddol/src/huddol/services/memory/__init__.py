@@ -34,5 +34,7 @@ class Memory:
             content = ""
         listing = "\n".join(f"- {item.path}" for item in entries)
         if content.strip():
-            return f"Your memory index ({INDEX}):\n{content.strip()}\n\nFiles:\n{listing}"
+            return (
+                f"Your memory index ({INDEX}):\n{content.strip()}\n\nFiles:\n{listing}"
+            )
         return f"Your memory files:\n{listing}"

@@ -45,7 +45,11 @@ def legacy(tmp_path: Path) -> Path:
     db.executescript(LEGACY)
     db.executemany(
         "INSERT INTO members VALUES (?, ?, ?, ?, ?)",
-        [(1, "human", "You", 0, 0), (13, "agent", "Main", 0, 0), (36, "agent", "TM", 0, 0)],
+        [
+            (1, "human", "You", 0, 0),
+            (13, "agent", "Main", 0, 0),
+            (36, "agent", "TM", 0, 0),
+        ],
     )
     db.execute("INSERT INTO discussions VALUES (1, 'topic')")
     db.executemany(
@@ -63,7 +67,9 @@ def legacy(tmp_path: Path) -> Path:
         "INSERT INTO mentions VALUES (?, ?, ?, ?, ?, ?, ?)",
         [(1, 1, 0, 13, 1, 1, 1), (1, 2, 0, 13, 1, 0, 1)],
     )
-    db.execute("INSERT INTO message_mention_acknowledgements VALUES (1, 1, 13, 'agent')")
+    db.execute(
+        "INSERT INTO message_mention_acknowledgements VALUES (1, 1, 13, 'agent')"
+    )
     db.executemany(
         "INSERT INTO message_read_receipts VALUES (?, ?, ?, ?, ?)",
         [(1, 1, 13, "agent", "r1"), (1, 2, 13, "agent", "r1")],
@@ -71,9 +77,30 @@ def legacy(tmp_path: Path) -> Path:
     db.executemany(
         "INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            (13, 1, "r1", "completed", "2026-08-01T00:00:01Z", "2026-08-01T00:01:00Z",
-             "{}", '[{"kind":"request"}]', None, None),
-            (13, 2, "r2", "running", "2026-08-02T00:00:01Z", None, "{}", "[]", None, None),
+            (
+                13,
+                1,
+                "r1",
+                "completed",
+                "2026-08-01T00:00:01Z",
+                "2026-08-01T00:01:00Z",
+                "{}",
+                '[{"kind":"request"}]',
+                None,
+                None,
+            ),
+            (
+                13,
+                2,
+                "r2",
+                "running",
+                "2026-08-02T00:00:01Z",
+                None,
+                "{}",
+                "[]",
+                None,
+                None,
+            ),
         ],
     )
     db.executemany(
@@ -153,7 +180,9 @@ def test_inactive_membership_is_dropped(legacy: Path, tmp_path: Path) -> None:
     db = sqlite3.connect(tmp_path / "new" / "huddol.sqlite3")
     members = {
         row[0]
-        for row in db.execute("SELECT member_id FROM discussion_members WHERE discussion_id = 1")
+        for row in db.execute(
+            "SELECT member_id FROM discussion_members WHERE discussion_id = 1"
+        )
     }
     assert members == {1, 13}
     db.close()
@@ -175,7 +204,9 @@ def test_unfinished_legacy_runs_are_marked_interrupted(
 ) -> None:
     migrate(legacy, tmp_path / "new")
     db = sqlite3.connect(tmp_path / "new" / "huddol.sqlite3")
-    statuses = [row[0] for row in db.execute("SELECT status FROM agent_runs ORDER BY sequence")]
+    statuses = [
+        row[0] for row in db.execute("SELECT status FROM agent_runs ORDER BY sequence")
+    ]
     assert statuses == ["completed", "interrupted"]
     db.close()
 
@@ -220,7 +251,9 @@ def test_settings_sections_are_carried_over(legacy: Path, tmp_path: Path) -> Non
     store.close()
 
 
-def test_refuses_to_run_when_a_wal_file_is_present(legacy: Path, tmp_path: Path) -> None:
+def test_refuses_to_run_when_a_wal_file_is_present(
+    legacy: Path, tmp_path: Path
+) -> None:
     (legacy / "huddol.sqlite3-wal").write_bytes(b"")
     with pytest.raises(RuntimeError, match="stop Huddol"):
         migrate(legacy, tmp_path / "new")
