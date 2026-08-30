@@ -69,3 +69,10 @@ def test_repeated_mentions_collapse_to_one_per_member() -> None:
 
 def test_several_distinct_members_in_one_body() -> None:
     assert ids("@Main @Technical Manager @Product Advisor") == (13, 36, 98)
+
+
+def test_mentioning_yourself_creates_no_pending_item() -> None:
+    mentions = build_mentions(
+        1, 1, "@Main note to self and @Product Advisor", ALL, sender_id=13
+    )
+    assert [item.member_id for item in mentions] == [98]

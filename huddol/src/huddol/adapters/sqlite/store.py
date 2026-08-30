@@ -275,7 +275,9 @@ class SqliteStore:
             (discussion_id,),
         ).fetchone()
         message_id = int(row["v"])
-        mentions = build_mentions(discussion_id, message_id, body, members)
+        mentions = build_mentions(
+            discussion_id, message_id, body, members, sender_id=sender_id
+        )
         message = Message(
             discussion_id=discussion_id,
             id=message_id,

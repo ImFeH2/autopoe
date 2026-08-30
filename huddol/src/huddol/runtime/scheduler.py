@@ -96,9 +96,13 @@ class Scheduler:
         member = self.store.get_member(agent_id)
         if member is None:
             raise DomainError("not_found", f"Member {agent_id} does not exist")
-        return AgentTools(
-            self._deps, Actor(agent_id, member.is_agent), self._authorizer
-        )
+        return self.tools_for_actor(Actor(agent_id, member.is_agent))
+
+    def tools_for_actor(self, actor: Actor) -> AgentTools:
+        return AgentTools(self._deps, actor, self._authorizer)
+
+    def reconfigure_sandbox(self, write_directories: list[str]) -> None:
+        self._deps.sandbox.configure(write_directories)
 
     def runtime_context(self, agent_id: int) -> str:
         parts = [self._deps.sandbox.describe_environment()]

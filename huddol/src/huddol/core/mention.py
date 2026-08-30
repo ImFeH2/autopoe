@@ -61,8 +61,10 @@ def build_mentions(
     message_id: int,
     body: str,
     members: Iterable[Member],
+    *,
+    sender_id: int | None = None,
 ) -> tuple[Mention, ...]:
-    seen: set[int] = set()
+    seen: set[int] = set() if sender_id is None else {sender_id}
     mentions: list[Mention] = []
     for member_id, position in find_mention_ids(body, members):
         if member_id in seen:

@@ -1,0 +1,275 @@
+from __future__ import annotations
+
+import io
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from huddol.adapters.files.tree import MarkdownTree
+from huddol.adapters.jsonl.api import HUMAN_ID, Api
+from huddol.adapters.jsonl.protocol import Dispatcher, JsonLineWriter, parse, serve
+from huddol.adapters.model.unavailable import UnavailableRunner
+from huddol.adapters.sandbox.native import NativeSandbox
+from huddol.adapters.sqlite.agent import SqliteAgentStore
+from huddol.adapters.sqlite.store import SqliteStore
+from huddol.runtime.scheduler import Scheduler
+from huddol.tools import Dependencies
+
+
+class Capture(io.StringIO):
+    def frames(self) -> list[dict[str, Any]]:
+        return [json.loads(line) for line in self.getvalue().splitlines() if line]
+
+
+@pytest.fixture
+def server(tmp_path: Path):
+    store = SqliteStore(tmp_path / "huddol.sqlite3")
+    agent_store = SqliteAgentStore(store._db)
+    store.create_member("human", "You")
+    deps = Dependencies(
+        store=store,
+        todos=agent_store,
+        history=agent_store,
+        settings=agent_store,
+        sandbox=NativeSandbox(tmp_path, [str(tmp_path)], enforce=False),
+        library_tree=MarkdownTree(tmp_path / "library"),
+        memory_tree_for=lambda member_id: MarkdownTree(
+            tmp_path / "agents" / str(member_id) / "memory"
+        ),
+    )
+    output = Capture()
+    dispatcher = Dispatcher(JsonLineWriter(output))
+    scheduler = Scheduler(deps, UnavailableRunner("no model"))
+    Api(scheduler, dispatcher)
+    yield dispatcher, output, deps
+    store.close()
+
+
+def call(dispatcher: Dispatcher, output: Capture, method: str, **params: Any) -> Any:
+    before = len(output.frames())
+    request = parse(json.dumps({"id": 99, "method": method, "params": params}))
+    assert request is not None
+    dispatcher.handle(request)
+    frames = output.frames()[before:]
+    responses = [item for item in frames if item.get("type") == "response"]
+    assert responses, f"no response for {method}"
+    return responses[-1]
+
+
+def test_bad_json_produces_an_error_event_not_a_crash(server) -> None:
+    dispatcher, output, _ = server
+    serve(dispatcher, io.StringIO("{not json}\n"))
+    assert output.frames()[-1]["code"] == "invalid_frame"
+
+
+def test_internal_methods_are_refused_from_outside(server) -> None:
+    dispatcher, output, _ = server
+    serve(
+        dispatcher, io.StringIO(json.dumps({"id": 1, "method": "system.secret"}) + "\n")
+    )
+    assert output.frames()[-1]["error"]["code"] == "internal_method"
+
+
+def test_shutdown_stops_the_loop(server) -> None:
+    dispatcher, _, _ = server
+    assert (
+        serve(dispatcher, io.StringIO(json.dumps({"method": "system.shutdown"}) + "\n"))
+        == "shutdown"
+    )
+
+
+def test_unknown_methods_return_a_named_error(server) -> None:
+    dispatcher, output, _ = server
+    assert call(dispatcher, output, "nope.at.all")["error"]["code"] == "unknown_method"
+
+
+def test_domain_errors_become_structured_responses(server) -> None:
+    dispatcher, output, _ = server
+    response = call(dispatcher, output, "organization.create_agent", name="   ")
+    assert response["error"]["code"] == "invalid_name"
+
+
+def test_notifications_without_an_id_emit_an_error_event(server) -> None:
+    dispatcher, output, _ = server
+    request = parse(json.dumps({"method": "organization.create_agent", "params": {}}))
+    assert request is not None
+    dispatcher.handle(request)
+    last = output.frames()[-1]
+    assert last["type"] == "error"
+    assert last["code"] == "invalid_name"
+
+
+def test_creating_an_agent_emits_an_incremental_event(server) -> None:
+    dispatcher, output, _ = server
+    call(dispatcher, output, "organization.create_agent", name="Main")
+    events = [item for item in output.frames() if item.get("type") == "member.created"]
+    assert events and events[0]["name"] == "Main"
+
+
+def test_events_are_deltas_not_whole_organization_snapshots(server) -> None:
+    dispatcher, output, _ = server
+    call(dispatcher, output, "organization.create_agent", name="Main")
+    event = next(item for item in output.frames() if item["type"] == "member.created")
+    assert set(event) == {"type", "id", "name", "state"}
+    assert "members" not in event
+    assert "discussions" not in event
+
+
+def test_full_human_flow_over_the_protocol(server) -> None:
+    dispatcher, output, deps = server
+    agent = call(dispatcher, output, "organization.create_agent", name="Main")["result"]
+    room = call(
+        dispatcher,
+        output,
+        "discussion.create",
+        topic="ship it",
+        member_ids=[agent["id"]],
+    )["result"]
+    call(
+        dispatcher, output, "discussion.send", discussion_id=room["id"], body="@Main go"
+    )
+
+    assert [item.message_id for item in deps.store.pending(agent["id"])] == [1]
+    listed = call(dispatcher, output, "discussion.list")["result"]
+    assert listed[0]["topic"] == "ship it"
+
+    read = call(dispatcher, output, "discussion.read", discussion_id=room["id"])[
+        "result"
+    ]
+    assert read["messages"][0]["body"] == "@Main go"
+
+
+def test_human_ack_and_revoke_round_trip(server) -> None:
+    dispatcher, output, deps = server
+    agent = call(dispatcher, output, "organization.create_agent", name="Main")["result"]
+    room = call(
+        dispatcher, output, "discussion.create", topic="t", member_ids=[agent["id"]]
+    )["result"]
+    call(
+        dispatcher, output, "discussion.send", discussion_id=room["id"], body="@You hi"
+    )
+    deps.store.append_message(room["id"], agent["id"], "@You please review")
+
+    call(dispatcher, output, "discussion.read", discussion_id=room["id"])
+    assert len(deps.store.pending(HUMAN_ID)) == 1
+    call(
+        dispatcher, output, "discussion.ack", discussion_id=room["id"], message_ids=[2]
+    )
+    assert deps.store.pending(HUMAN_ID) == ()
+
+    call(
+        dispatcher,
+        output,
+        "discussion.revoke_ack",
+        discussion_id=room["id"],
+        message_ids=[2],
+    )
+    assert len(deps.store.pending(HUMAN_ID)) == 1
+
+
+def test_archiving_stops_pending_and_unarchiving_restores_it(server) -> None:
+    dispatcher, output, deps = server
+    agent = call(dispatcher, output, "organization.create_agent", name="Main")["result"]
+    room = call(
+        dispatcher, output, "discussion.create", topic="t", member_ids=[agent["id"]]
+    )["result"]
+    call(
+        dispatcher, output, "discussion.send", discussion_id=room["id"], body="@Main go"
+    )
+
+    call(
+        dispatcher,
+        output,
+        "discussion.archive",
+        discussion_id=room["id"],
+        archived=True,
+    )
+    assert deps.store.pending(agent["id"]) == ()
+    call(
+        dispatcher,
+        output,
+        "discussion.archive",
+        discussion_id=room["id"],
+        archived=False,
+    )
+    assert len(deps.store.pending(agent["id"])) == 1
+
+
+def test_settings_never_return_the_api_key(server) -> None:
+    dispatcher, output, _ = server
+    call(
+        dispatcher,
+        output,
+        "settings.update",
+        section="model",
+        values={
+            "api_type": "openai",
+            "base_url": "https://example.test/v1",
+            "api_key": "super-secret-value",
+            "model": "some-model",
+        },
+    )
+    result = call(dispatcher, output, "settings.get", section="model")["result"]
+    assert "super-secret-value" not in json.dumps(result)
+    assert result["api_key_set"] is True
+    assert result["model"] == "some-model"
+
+
+def test_observability_keys_are_never_returned(server) -> None:
+    dispatcher, output, _ = server
+    call(
+        dispatcher,
+        output,
+        "settings.update",
+        section="observability",
+        values={
+            "enabled": True,
+            "base_url": "u",
+            "public_key": "pk",
+            "secret_key": "sk",
+        },
+    )
+    result = call(dispatcher, output, "settings.get", section="observability")["result"]
+    assert "sk" not in json.dumps(result)
+    assert "pk" not in json.dumps(result)
+    assert result["keys_set"] is True
+
+
+def test_execution_settings_update_the_live_sandbox(server, tmp_path: Path) -> None:
+    dispatcher, output, deps = server
+    target = tmp_path / "workspace"
+    target.mkdir()
+    call(
+        dispatcher,
+        output,
+        "settings.update",
+        section="execution",
+        values={"backend": "native", "write_directories": [str(target)]},
+    )
+    assert deps.sandbox.write_directories == (str(target.resolve()),)
+
+
+def test_agent_detail_reports_todos_and_runs(server) -> None:
+    dispatcher, output, deps = server
+    agent = call(dispatcher, output, "organization.create_agent", name="Main")["result"]
+    deps.todos.add_todo(agent["id"], "some work", "detail")
+    run = deps.history.start_run(agent["id"])
+    deps.history.finish_run(
+        agent["id"], run.sequence, status="completed", messages_json="[]"
+    )
+
+    detail = call(dispatcher, output, "agent.detail", agent_id=agent["id"])["result"]
+    assert detail["todos"][0]["title"] == "some work"
+    assert detail["runs"][0]["status"] == "completed"
+
+
+def test_library_round_trips_over_the_protocol(server) -> None:
+    dispatcher, output, _ = server
+    written = call(
+        dispatcher, output, "library.write", path="notes.md", content="shared"
+    )["result"]
+    read = call(dispatcher, output, "library.read", path="notes.md")["result"]
+    assert read["content"] == "shared"
+    assert read["hash"] == written["hash"]
