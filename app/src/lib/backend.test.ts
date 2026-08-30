@@ -46,7 +46,9 @@ describe("Backend", () => {
     await vi.waitFor(() =>
       expect(invoke.mock.calls.some(([name]) => name === "send")).toBe(true),
     );
-    const [, payload] = invoke.mock.calls.find(([name]) => name === "send")!;
+    const sent = invoke.mock.calls.find(([name]) => name === "send");
+    if (!sent) throw new Error("no send call");
+    const [, payload] = sent;
     const message = (payload as { message: { id: number; method: string } })
       .message;
     expect(message.method).toBe("organization.create_agent");
@@ -65,7 +67,9 @@ describe("Backend", () => {
     await vi.waitFor(() =>
       expect(invoke.mock.calls.some(([name]) => name === "send")).toBe(true),
     );
-    const [, payload] = invoke.mock.calls.find(([name]) => name === "send")!;
+    const sent = invoke.mock.calls.find(([name]) => name === "send");
+    if (!sent) throw new Error("no send call");
+    const [, payload] = sent;
     const { id } = (payload as { message: { id: number } }).message;
 
     reply({
@@ -122,7 +126,9 @@ describe("Backend", () => {
     await vi.waitFor(() =>
       expect(invoke.mock.calls.some(([name]) => name === "send")).toBe(true),
     );
-    const [, payload] = invoke.mock.calls.find(([name]) => name === "send")!;
+    const sent = invoke.mock.calls.find(([name]) => name === "send");
+    if (!sent) throw new Error("no send call");
+    const [, payload] = sent;
     const { id } = (payload as { message: { id: number } }).message;
 
     reply({ type: "response", id, result: [] });
