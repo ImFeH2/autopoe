@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     writer = JsonLineWriter(sys.stdout)
     dispatcher = Dispatcher(writer)
 
+    from huddol.adapters.model.observability import ObservabilityConfig
+
     config = ModelConfig.restore(agent_store.get_settings("model"))
     runner: object
     if config is None:
@@ -90,7 +92,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         from huddol.adapters.model.runner import PydanticModelRunner
 
-        runner = PydanticModelRunner(config)
+        tracing = ObservabilityConfig.restore(agent_store.get_settings("observability"))
+        observability = None
+        if tracing is not None:
+            from huddol.adapters.model.langfuse import LangfuseObservability
+
+            observability = LangfuseObservability(tracing)
+        runner = PydanticModelRunner(config, observability)
 
     scheduler = Scheduler(
         deps,
@@ -111,6 +119,9 @@ def main(argv: list[str] | None = None) -> int:
             "data_directory": str(directory),
             "human_id": HUMAN_ID,
             "model_configured": config is not None,
+            "tracing_enabled": bool(
+                ObservabilityConfig.restore(agent_store.get_settings("observability"))
+            ),
             "write_directories": list(sandbox.write_directories),
             "unusable_write_directories": [
                 {"path": path, "reason": reason} for path, reason in sandbox.skipped

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -86,6 +87,31 @@ def build_reminder(
     if not items:
         return None
     return Reminder(agent_id, agent_name, tuple(items))
+
+
+EXCHANGE_NUDGE_AT = 6
+
+
+def exchange_nudge(
+    store: OrganizationStore, agent_id: int, discussion_ids: Sequence[int]
+) -> str:
+    warnings: list[str] = []
+    for discussion_id in dict.fromkeys(discussion_ids):
+        recent = store.messages(discussion_id)[-EXCHANGE_NUDGE_AT:]
+        if len(recent) < EXCHANGE_NUDGE_AT:
+            continue
+        senders = {item.sender_id for item in recent}
+        if len(senders) != 2 or agent_id not in senders:
+            continue
+        other = next(item for item in senders if item != agent_id)
+        member = store.get_member(other)
+        name = member.name if member else f"Member {other}"
+        warnings.append(
+            f"You and {name} have exchanged {len(recent)} messages in a row in"
+            f" Discussion {discussion_id}. If nothing further is needed from them,"
+            " acknowledge instead of mentioning them again."
+        )
+    return "\n".join(warnings)
 
 
 @dataclass(frozen=True)

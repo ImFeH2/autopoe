@@ -221,3 +221,60 @@ def test_compacted_content_stays_retrievable_through_history(world) -> None:
     assert "bubblewrap" not in world.history.latest_messages(MAIN)
     found = History(world.history, MAIN).search("bubblewrap")
     assert [item.sequence for item in found] == [first.sequence]
+
+
+def test_a_long_back_and_forth_produces_a_nudge(world) -> None:
+    room = world.store.create_discussion("ping pong", [HUMAN, MAIN, HELPER])
+    for index in range(6):
+        sender = MAIN if index % 2 == 0 else HELPER
+        world.store.append_message(room.id, sender, f"turn {index}")
+    world.store.append_message(room.id, HELPER, "@Main again")
+
+    scheduler = Scheduler(world, RecordingRunner())
+    context = scheduler.runtime_context(MAIN, (room.id,))
+    assert "exchanged" in context
+    assert "Helper" in context
+    assert "acknowledge instead of mentioning them again" in context
+
+
+def test_no_nudge_when_a_third_member_is_involved(world) -> None:
+    room = world.store.create_discussion("group", [HUMAN, MAIN, HELPER])
+    for index in range(6):
+        sender = [MAIN, HELPER, HUMAN][index % 3]
+        world.store.append_message(room.id, sender, f"turn {index}")
+
+    scheduler = Scheduler(world, RecordingRunner())
+    assert "exchanged" not in scheduler.runtime_context(MAIN, (room.id,))
+
+
+def test_no_nudge_for_a_short_exchange(world) -> None:
+    room = world.store.create_discussion("brief", [HUMAN, MAIN])
+    world.store.append_message(room.id, MAIN, "one")
+    world.store.append_message(room.id, HUMAN, "two")
+
+    scheduler = Scheduler(world, RecordingRunner())
+    assert "exchanged" not in scheduler.runtime_context(MAIN, (room.id,))
+
+
+def test_no_nudge_for_an_exchange_you_are_not_part_of(world) -> None:
+    room = world.store.create_discussion("others", [HUMAN, MAIN, HELPER])
+    for index in range(6):
+        sender = HUMAN if index % 2 == 0 else HELPER
+        world.store.append_message(room.id, sender, f"turn {index}")
+
+    scheduler = Scheduler(world, RecordingRunner())
+    assert "exchanged" not in scheduler.runtime_context(MAIN, (room.id,))
+
+
+def test_the_nudge_reaches_the_model_but_not_the_history(world) -> None:
+    room = mention(world)
+    world.store.set_discussion_members(room, [HUMAN, MAIN, HELPER])
+    for index in range(6):
+        sender = MAIN if index % 2 == 0 else HELPER
+        world.store.append_message(room, sender, f"turn {index}")
+    world.store.append_message(room, HELPER, "@Main once more")
+
+    runner = RecordingRunner()
+    Scheduler(world, runner).run_turn(MAIN)
+    assert "exchanged" in runner.requests[0].runtime_context
+    assert "exchanged" not in world.history.latest_messages(MAIN)

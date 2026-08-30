@@ -24,6 +24,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from huddol.adapters.model.compaction import compact
 from huddol.adapters.model.config import ModelConfig
+from huddol.adapters.model.observability import Observability, TurnTrace, active_trace
 from huddol.adapters.model.prompt import SYSTEM_PROMPT
 from huddol.core.errors import DomainError
 from huddol.runtime.reminder import TurnOutcome, TurnRequest
@@ -74,8 +75,11 @@ def _result(value: Any) -> Any:
 
 
 class PydanticModelRunner:
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self, config: ModelConfig, observability: Observability | None = None
+    ) -> None:
         self._config = config
+        self._observability = observability
         self._agent: Agent[AgentTools, str] = Agent(
             build_model(config),
             deps_type=AgentTools,
@@ -83,6 +87,9 @@ class PydanticModelRunner:
             instructions=SYSTEM_PROMPT,
             retries=2,
             tools=[_web_search_tool()],
+            capabilities=(
+                [observability.instrumentation()] if observability is not None else []
+            ),
         )
         self._register()
 
@@ -339,7 +346,8 @@ class PydanticModelRunner:
         async def once() -> Any:
             return await self._agent.run(prompt, deps=tools, message_history=history)
 
-        with capture_run_messages() as captured:
+        trace = TurnTrace.of(request.reminder)
+        with capture_run_messages() as captured, active_trace(trace):
             try:
                 result = asyncio.run(once())
             except Exception as failure:  # noqa: BLE001

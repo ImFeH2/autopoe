@@ -14,6 +14,7 @@ from huddol.runtime.reminder import (
     Reminder,
     TurnRequest,
     build_reminder,
+    exchange_nudge,
 )
 from huddol.services.memory import Memory
 from huddol.services.todo import Todos
@@ -109,8 +110,13 @@ class Scheduler:
     def reconfigure_sandbox(self, write_directories: list[str]) -> None:
         self._deps.sandbox.configure(write_directories)
 
-    def runtime_context(self, agent_id: int) -> str:
+    def runtime_context(
+        self, agent_id: int, discussion_ids: tuple[int, ...] = ()
+    ) -> str:
         parts = [self._deps.sandbox.describe_environment()]
+        nudge = exchange_nudge(self.store, agent_id, discussion_ids)
+        if nudge:
+            parts.append(nudge)
         memory = Memory(self._deps.memory_tree_for(agent_id)).index_context()
         if memory:
             parts.append(memory)
@@ -146,7 +152,9 @@ class Scheduler:
         request = TurnRequest(
             reminder=reminder,
             history_json=self.history.latest_messages(agent_id),
-            runtime_context=self.runtime_context(agent_id),
+            runtime_context=self.runtime_context(
+                agent_id, tuple(item.discussion_id for item in reminder.items)
+            ),
         )
         status = "completed"
         error: str | None = None
