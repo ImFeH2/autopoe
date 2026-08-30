@@ -35,7 +35,16 @@ class TodoStore(Protocol):
 
 
 class HistoryStore(Protocol):
-    def start_run(self, agent_id: int, run_id: str) -> AgentRun: ...
+    def start_run(
+        self,
+        agent_id: int,
+        run_id: str | None = None,
+        reminded: Sequence[tuple[int, int]] = (),
+    ) -> AgentRun: ...
+
+    def previously_reminded(
+        self, agent_id: int, keys: Sequence[tuple[int, int]]
+    ) -> frozenset[int]: ...
 
     def finish_run(
         self,

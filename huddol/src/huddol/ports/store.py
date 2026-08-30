@@ -71,10 +71,6 @@ class OrganizationStore(Protocol):
 
     def pending(self, member_id: int) -> tuple[Mention, ...]: ...
 
-    def previously_reminded(
-        self, member_id: int, mentions: Sequence[Mention]
-    ) -> frozenset[int]: ...
-
     def ack(
         self, discussion_id: int, message_ids: Sequence[int], member_id: int
     ) -> int: ...

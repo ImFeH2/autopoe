@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS write_directories (
     position INTEGER PRIMARY KEY,
     path TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS reminded (
+    agent_id INTEGER NOT NULL,
+    discussion_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    first_reminded_at TEXT NOT NULL,
+    PRIMARY KEY (agent_id, discussion_id, message_id)
+);
 """
 
 
@@ -117,7 +124,28 @@ class SqliteAgentStore:
             error=row["error"],
         )
 
-    def start_run(self, agent_id: int, run_id: str | None = None) -> AgentRun:
+    def previously_reminded(
+        self, agent_id: int, keys: Sequence[tuple[int, int]]
+    ) -> frozenset[int]:
+        if not keys:
+            return frozenset()
+        found: set[int] = set()
+        for discussion_id, message_id in keys:
+            row = self._db.execute(
+                "SELECT 1 FROM reminded WHERE agent_id = ? AND discussion_id = ?"
+                " AND message_id = ?",
+                (agent_id, discussion_id, message_id),
+            ).fetchone()
+            if row is not None:
+                found.add(message_id)
+        return frozenset(found)
+
+    def start_run(
+        self,
+        agent_id: int,
+        run_id: str | None = None,
+        reminded: Sequence[tuple[int, int]] = (),
+    ) -> AgentRun:
         row = self._db.execute(
             "SELECT COALESCE(MAX(sequence), 0) + 1 AS v FROM agent_runs WHERE agent_id = ?",
             (agent_id,),
@@ -130,6 +158,14 @@ class SqliteAgentStore:
                 "INSERT INTO agent_runs (agent_id, sequence, run_id, status, started_at,"
                 " messages_json) VALUES (?, ?, ?, 'running', ?, '[]')",
                 (agent_id, sequence, identifier, started),
+            )
+            self._db.executemany(
+                "INSERT OR IGNORE INTO reminded (agent_id, discussion_id, message_id,"
+                " first_reminded_at) VALUES (?, ?, ?, ?)",
+                [
+                    (agent_id, discussion_id, message_id, started)
+                    for discussion_id, message_id in reminded
+                ],
             )
         return AgentRun(
             agent_id, sequence, identifier, "running", started, None, "[]", None, None

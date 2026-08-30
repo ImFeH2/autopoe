@@ -394,26 +394,6 @@ class SqliteStore:
             for row in rows
         )
 
-    def previously_reminded(
-        self, member_id: int, mentions: Sequence[Mention]
-    ) -> frozenset[int]:
-        row = self._db.execute(
-            "SELECT MAX(started_at) AS v FROM agent_runs WHERE agent_id = ?",
-            (member_id,),
-        ).fetchone()
-        last = row["v"] if row else None
-        if not last:
-            return frozenset()
-        found: set[int] = set()
-        for mention in mentions:
-            item = self._db.execute(
-                "SELECT created_at FROM messages WHERE discussion_id = ? AND id = ?",
-                (mention.discussion_id, mention.message_id),
-            ).fetchone()
-            if item and str(item["created_at"]) < str(last):
-                found.add(mention.message_id)
-        return frozenset(found)
-
     def ack(
         self, discussion_id: int, message_ids: Sequence[int], member_id: int
     ) -> int:
