@@ -31,8 +31,8 @@ warn_unused_configs = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["huddol.host_tools", "huddol.windows_write_access"]
-disable_error_code = ["attr-defined"]
+module = ["huddol.adapters.sandbox.windows"]
+disable_error_code = ["attr-defined", "name-defined"]
 
 [tool.importlinter]
 root_package = "huddol"
