@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import subprocess
+import shutil
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -159,11 +159,7 @@ def test_unsandboxed_run_executes_and_captures_output(tmp_path: Path) -> None:
 
 
 @LINUX_ONLY
-@pytest.mark.skipif(
-    subprocess.run(["which", "bwrap"], capture_output=True, check=False).returncode
-    != 0,
-    reason="bubblewrap is not installed",
-)
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap is not installed")
 def test_sandboxed_run_allows_writes_inside_and_blocks_them_outside(
     tmp_path: Path,
 ) -> None:
