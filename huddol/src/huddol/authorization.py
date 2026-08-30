@@ -48,6 +48,7 @@ SUPER_ADMIN_CAPABILITIES: tuple[Capability, ...] = (
     "discussion.manage",
 )
 ADMIN_CAPABILITIES: tuple[Capability, ...] = (
+    "organization.agent.manage",
     "organization.members.read",
     "organization.permissions.read",
     "organization.metadata.read",

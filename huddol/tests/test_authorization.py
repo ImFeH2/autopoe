@@ -48,7 +48,11 @@ def test_capability_matrix_and_admin_content_scope_are_separate(tmp_path: Path) 
     permissions = operations.permissions(ada)
     assert permissions["role"] == "admin"
     assert "discussion.manage" in permissions["capabilities"]
-    assert "organization.agent.manage" not in permissions["capabilities"]
+    assert "organization.agent.manage" in permissions["capabilities"]
+    created = operations.create_agent(ada, revision(operations, ada), "Grace")
+    assert created["members"][-1]["name"] == "Grace"
+    with pytest.raises(DomainError, match="Permission denied"):
+        operations.grant_admin(ada, revision(operations, ada), 3)
     assert operations.discussion_content_scope(ada) == frozenset({1})
     with pytest.raises(DomainError) as unavailable:
         operations.require_discussion_content(ada, 2, lambda: "leaked")

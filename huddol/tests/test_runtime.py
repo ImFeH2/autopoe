@@ -149,7 +149,9 @@ def test_agent_tools_only_expose_message_bodies_through_read(tmp_path: Path) -> 
     }
 
 
-def test_admin_agent_can_manage_discussions_but_not_agents(tmp_path: Path) -> None:
+def test_admin_agent_can_manage_agents_and_discussions_but_not_roles(
+    tmp_path: Path,
+) -> None:
     store = SQLiteStore(tmp_path / "data")
     state = OrganizationState(
         tmp_path,
@@ -167,13 +169,15 @@ def test_admin_agent_can_manage_discussions_but_not_agents(tmp_path: Path) -> No
         2, state, HostTools(tmp_path), run_id="run", operations=operations
     )
 
-    with pytest.raises(DomainError) as agent_denied:
-        context.organization("pause_agent", agent_id=3, expected_revision=5)
-    assert agent_denied.value.code == "permission_denied"
+    paused = context.organization("pause_agent", agent_id=3, expected_revision=5)
+    assert paused["status"] == "paused"
+    with pytest.raises(DomainError) as role_denied:
+        context.organization("grant_admin", agent_id=3, expected_revision=6)
+    assert role_denied.value.code == "permission_denied"
     assert context.discussion(
         "delete",
         discussion_id=2,
-        expected_revision=5,
+        expected_revision=6,
         confirm_topic="Lin work",
     ) == {"discussion_id": 2, "deleted": True}
     assert context.discussion("list") == [{"id": 1, "topic": "Ada work"}]
