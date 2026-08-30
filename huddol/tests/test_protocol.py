@@ -284,3 +284,46 @@ def test_shutdown_answers_a_request_that_carries_an_id(server) -> None:
     assert reason == "shutdown"
     last = output.frames()[-1]
     assert last == {"type": "response", "id": 7, "result": {"stopped": True}}
+
+
+def test_rejected_write_directories_are_not_persisted(server, tmp_path: Path) -> None:
+    dispatcher, output, deps = server
+    good = tmp_path / "good"
+    good.mkdir()
+    call(
+        dispatcher,
+        output,
+        "settings.update",
+        section="execution",
+        values={"write_directories": [str(good)]},
+    )
+
+    failed = call(
+        dispatcher,
+        output,
+        "settings.update",
+        section="execution",
+        values={"write_directories": [str(good), "relative/bad"]},
+    )
+    assert failed["error"]["code"] == "invalid_directory"
+
+    result = call(dispatcher, output, "settings.get", section="execution")["result"]
+    assert result["write_directories"] == [str(good.resolve())]
+    assert deps.sandbox.write_directories == (str(good.resolve()),)
+
+
+def test_accepted_write_directories_are_stored_canonically(
+    server, tmp_path: Path
+) -> None:
+    dispatcher, output, _ = server
+    target = tmp_path / "workspace"
+    target.mkdir()
+    call(
+        dispatcher,
+        output,
+        "settings.update",
+        section="execution",
+        values={"write_directories": [f"{target}/", str(target)]},
+    )
+    result = call(dispatcher, output, "settings.get", section="execution")["result"]
+    assert result["write_directories"] == [str(target.resolve())]
