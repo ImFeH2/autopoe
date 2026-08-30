@@ -1139,7 +1139,10 @@ class OrganizationState:
             if error is not None:
                 execution.status = "error"
                 execution.error = error
-            elif execution.acknowledged_in_turn > 0:
+            elif not any(
+                mention.previously_reminded
+                for mention in self._pending_reminder_mentions(agent_id)
+            ):
                 execution.status = "idle"
                 execution.error = None
                 execution.consecutive_unproductive_turns = 0
@@ -1147,7 +1150,7 @@ class OrganizationState:
                 execution.consecutive_unproductive_turns += 1
                 if execution.consecutive_unproductive_turns >= 3:
                     execution.status = "error"
-                    execution.error = "Agent did not acknowledge any pending Mentions in three consecutive Turns"
+                    execution.error = "Agent left reminded Mentions unacknowledged in three consecutive Turns"
                 else:
                     execution.status = "idle"
                     execution.error = None

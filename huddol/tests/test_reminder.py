@@ -40,24 +40,45 @@ def test_unacked_mentions_are_marked_previously_reminded_on_the_next_turn() -> N
     assert reminder.mentions[0].previously_reminded is True
 
 
-def test_acknowledging_any_pending_mention_resets_unproductive_turns() -> None:
+def test_acknowledging_new_mentions_does_not_hide_a_stuck_reminder() -> None:
     state = make_state()
-    state.send_message(1, 1, "@Ada First")
-    state.send_message(1, 1, "@Ada Second")
+    state.send_message(1, 1, "@Ada Stuck")
+
+    for turn in range(3):
+        fresh = state.send_message(1, 1, f"@Ada Fresh {turn}")
+        reminder, _ = state.claim_next_reminder()
+        assert reminder is not None
+        fresh_id = fresh["discussions"][0]["messages"][-1]["id"]
+        state.record_message_reads(
+            2,
+            [(1, fresh_id)],
+            source="agent_reminder_context",
+            agent_run_id=f"turn-{turn}",
+        )
+        state.ack_messages(2, 1, [fresh_id])
+        state.complete_turn(2)
+
+    assert state.member(2)["status"] == "error"
+
+
+def test_mentions_arriving_during_a_turn_wait_for_the_next_activation() -> None:
+    state = make_state()
+    state.send_message(1, 1, "@Ada Current")
     assert state.claim_next_reminder()[0] is not None
-    state.complete_turn(2)
-    assert state.claim_next_reminder()[0] is not None
+    state.send_message(1, 1, "@Ada Next")
     state.record_message_reads(
-        2, [(1, 1)], source="agent_reminder_context", agent_run_id="turn-2"
+        2, [(1, 1)], source="agent_reminder_context", agent_run_id="turn"
     )
     state.ack_messages(2, 1, [1])
+
     state.complete_turn(2)
 
+    assert state.agent_execution_diagnostics(2)["consecutive_unproductive_turns"] == 0
     reminder, _ = state.claim_next_reminder()
-
     assert reminder is not None
-    assert [item.message_id for item in reminder.mentions] == [2]
-    assert state.member(2)["status"] == "running"
+    assert [
+        (item.message_id, item.previously_reminded) for item in reminder.mentions
+    ] == [(2, False)]
 
 
 def test_three_turns_without_ack_put_the_agent_in_error() -> None:
@@ -73,7 +94,7 @@ def test_three_turns_without_ack_put_the_agent_in_error() -> None:
         "type": "agent",
         "name": "Ada",
         "status": "error",
-        "error": "Agent did not acknowledge any pending Mentions in three consecutive Turns",
+        "error": "Agent left reminded Mentions unacknowledged in three consecutive Turns",
     }
     assert state.claim_next_reminder()[0] is None
 
