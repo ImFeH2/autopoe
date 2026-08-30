@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIRECTORY"
+DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIR"
 
 
 def data_directory() -> Path:
