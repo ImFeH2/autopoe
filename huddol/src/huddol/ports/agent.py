@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+from huddol.core.todo import Todo, TodoStatus
+
+
+@dataclass(frozen=True)
+class AgentRun:
+    agent_id: int
+    sequence: int
+    run_id: str
+    status: str
+    started_at: str
+    completed_at: str | None
+    messages_json: str
+    usage_json: str | None
+    error: str | None
+
+
+class TodoStore(Protocol):
+    def list_todos(self, agent_id: int) -> tuple[Todo, ...]: ...
+
+    def add_todo(self, agent_id: int, title: str) -> Todo: ...
+
+    def set_todo_status(
+        self, agent_id: int, todo_id: int, status: TodoStatus
+    ) -> Todo: ...
+
+    def remove_todo(self, agent_id: int, todo_id: int) -> None: ...
+
+    def clear_todos(self, agent_id: int) -> None: ...
+
+
+class HistoryStore(Protocol):
+    def start_run(self, agent_id: int, run_id: str) -> AgentRun: ...
+
+    def finish_run(
+        self,
+        agent_id: int,
+        sequence: int,
+        *,
+        status: str,
+        messages_json: str,
+        usage_json: str | None = None,
+        error: str | None = None,
+    ) -> None: ...
+
+    def latest_messages(self, agent_id: int) -> str: ...
+
+    def runs(self, agent_id: int, *, limit: int = 50) -> tuple[AgentRun, ...]: ...
+
+    def mark_interrupted(self) -> int: ...
+
+    def search_runs(
+        self, agent_id: int, query: str, *, limit: int = 20
+    ) -> tuple[AgentRun, ...]: ...
+
+
+class SettingsStore(Protocol):
+    def get_settings(self, section: str) -> dict[str, object] | None: ...
+
+    def set_settings(self, section: str, values: dict[str, object]) -> None: ...
+
+    def write_directories(self) -> tuple[str, ...]: ...
+
+    def set_write_directories(self, values: Sequence[str]) -> None: ...
