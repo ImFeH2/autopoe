@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from huddol.adapters.sqlite.store import SqliteStore
+from huddol.core.mention import Mention
 from huddol.core.pending import Ack, ack_keys, pending_for
 
 
@@ -18,24 +19,13 @@ def store(tmp_path: Path) -> SqliteStore:
 
 def reference_pending(store: SqliteStore, member_id: int) -> tuple[tuple[int, int], ...]:
     discussions = {item.id: item for item in store.list_discussions(include_archived=True)}
-    mentions = []
+    mentions: list[Mention] = []
     acks: list[Ack] = []
     for discussion in discussions.values():
         for message_id, members in store.mentions_by_message(discussion.id).items():
             for other in members:
-                mentions.append(
-                    type(
-                        "M",
-                        (),
-                        {
-                            "discussion_id": discussion.id,
-                            "message_id": message_id,
-                            "member_id": other,
-                            "position": 0,
-                        },
-                    )()
-                )
-        for row in store._db.execute(  # noqa: SLF001
+                mentions.append(Mention(discussion.id, message_id, other, 0))
+        for row in store._db.execute(
             "SELECT message_id, member_id FROM acks WHERE discussion_id = ?",
             (discussion.id,),
         ):
@@ -75,7 +65,7 @@ def test_sql_pending_matches_the_core_formula_under_random_operations(
                 pick = rng.choice(pending)
                 store.ack(pick.discussion_id, [pick.message_id], member.id)
         elif action < 0.7:
-            pending_any = store._db.execute(  # noqa: SLF001
+            pending_any = store._db.execute(
                 "SELECT discussion_id, message_id, member_id FROM acks LIMIT 5"
             ).fetchall()
             if pending_any:
