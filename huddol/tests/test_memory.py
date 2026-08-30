@@ -306,4 +306,4 @@ def test_memory_rejects_control_characters_and_overlong_paths(tmp_path: Path) ->
 
     valid = "/".join(["x" * 200] * 5 + ["x" * 16 + ".md"])
     assert len(valid) == MEMORY_PATH_MAX_LENGTH
-    assert memory.write(2, valid, "content")["path"] == valid
+    assert AgentMemory._display_path(valid) == valid

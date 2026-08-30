@@ -574,6 +574,28 @@ def test_linux_run_writes_only_configured_directories(tmp_path: Path) -> None:
     assert not (outside / "created.txt").exists()
 
 
+def _windows_acl_sddl(path: Path) -> str:
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-Command",
+            (
+                "$ErrorActionPreference = 'Stop'; "
+                "$sddl = (Get-Acl -LiteralPath $env:HUDDOL_TEST_ACL_PATH).Sddl; "
+                "if (-not $sddl) { throw 'ACL SDDL is empty' }; "
+                "[Console]::Out.Write($sddl)"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HUDDOL_TEST_ACL_PATH": str(path)},
+    )
+    return result.stdout
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows restricted token")
 def test_windows_run_writes_only_configured_directories(tmp_path: Path) -> None:
     allowed = tmp_path / "allowed"
@@ -587,19 +609,7 @@ def test_windows_run_writes_only_configured_directories(tmp_path: Path) -> None:
     logon_sid = tools._write_access._windows.logon_sid
 
     try:
-        active_acl = subprocess.run(
-            [
-                "powershell.exe",
-                "-NoLogo",
-                "-NoProfile",
-                "-Command",
-                "& { param($path) (Get-Acl -LiteralPath $path).Sddl }",
-                str(allowed),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
+        active_acl = _windows_acl_sddl(allowed)
         assert sid in active_acl
         assert logon_sid in active_acl
         result = tools.run(
@@ -623,19 +633,7 @@ def test_windows_run_writes_only_configured_directories(tmp_path: Path) -> None:
     assert result["exit_code"] == 0
     assert existing.read_text() == "after"
     assert not (outside / "created.txt").exists()
-    acl = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoLogo",
-            "-NoProfile",
-            "-Command",
-            "& { param($path) (Get-Acl -LiteralPath $path).Sddl }",
-            str(allowed),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
+    acl = _windows_acl_sddl(allowed)
     assert sid not in acl
     assert logon_sid not in acl
 
