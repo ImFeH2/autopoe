@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS agent_todos (
     agent_id INTEGER NOT NULL,
     id INTEGER NOT NULL,
     title TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL,
     PRIMARY KEY (agent_id, id)
@@ -42,15 +43,21 @@ class SqliteAgentStore:
 
     def list_todos(self, agent_id: int) -> tuple[Todo, ...]:
         rows = self._db.execute(
-            "SELECT id, title, status FROM agent_todos WHERE agent_id = ? ORDER BY id",
+            "SELECT id, title, status, detail FROM agent_todos WHERE agent_id = ?"
+            " ORDER BY id",
             (agent_id,),
         )
         return tuple(
-            Todo(int(row["id"]), str(row["title"]), str(row["status"]))  # type: ignore[arg-type]
+            Todo(
+                int(row["id"]),
+                str(row["title"]),
+                str(row["status"]),  # type: ignore[arg-type]
+                str(row["detail"]),
+            )
             for row in rows
         )
 
-    def add_todo(self, agent_id: int, title: str) -> Todo:
+    def add_todo(self, agent_id: int, title: str, detail: str = "") -> Todo:
         row = self._db.execute(
             "SELECT COALESCE(MAX(id), 0) + 1 AS v FROM agent_todos WHERE agent_id = ?",
             (agent_id,),
@@ -58,11 +65,11 @@ class SqliteAgentStore:
         todo_id = int(row["v"])
         with self._db:
             self._db.execute(
-                "INSERT INTO agent_todos (agent_id, id, title, status, created_at)"
-                " VALUES (?, ?, ?, 'pending', ?)",
-                (agent_id, todo_id, title, self._now()),
+                "INSERT INTO agent_todos (agent_id, id, title, detail, status,"
+                " created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+                (agent_id, todo_id, title, detail, self._now()),
             )
-        return Todo(todo_id, title, "pending")
+        return Todo(todo_id, title, "pending", detail)
 
     def set_todo_status(self, agent_id: int, todo_id: int, status: TodoStatus) -> Todo:
         with self._db:
@@ -73,10 +80,16 @@ class SqliteAgentStore:
         if cursor.rowcount == 0:
             raise DomainError("not_found", f"Todo {todo_id} does not exist")
         row = self._db.execute(
-            "SELECT id, title, status FROM agent_todos WHERE agent_id = ? AND id = ?",
+            "SELECT id, title, status, detail FROM agent_todos WHERE agent_id = ?"
+            " AND id = ?",
             (agent_id, todo_id),
         ).fetchone()
-        return Todo(int(row["id"]), str(row["title"]), str(row["status"]))  # type: ignore[arg-type]
+        return Todo(
+            int(row["id"]),
+            str(row["title"]),
+            str(row["status"]),  # type: ignore[arg-type]
+            str(row["detail"]),
+        )
 
     def remove_todo(self, agent_id: int, todo_id: int) -> None:
         with self._db:

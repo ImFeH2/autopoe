@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from huddol.core.todo import Todo, status_reminder, validate_start, validate_title
+from huddol.core.todo import (
+    Todo,
+    status_reminder,
+    validate_detail,
+    validate_start,
+    validate_title,
+)
 from huddol.ports.agent import TodoStore
 
 
@@ -12,8 +18,10 @@ class Todos:
     def list(self) -> tuple[Todo, ...]:
         return self._store.list_todos(self._agent_id)
 
-    def add(self, title: str) -> Todo:
-        return self._store.add_todo(self._agent_id, validate_title(title))
+    def add(self, title: str, detail: str | None = None) -> Todo:
+        return self._store.add_todo(
+            self._agent_id, validate_title(title), validate_detail(detail)
+        )
 
     def start(self, todo_id: int) -> Todo:
         validate_start(self.list(), todo_id)

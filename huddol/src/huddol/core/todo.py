@@ -8,6 +8,7 @@ from huddol.core.errors import DomainError
 
 TodoStatus = Literal["pending", "in_progress", "done"]
 MAX_TITLE_LENGTH = 200
+MAX_DETAIL_LENGTH = 4000
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class Todo:
     id: int
     title: str
     status: TodoStatus
+    detail: str = ""
 
 
 def validate_title(value: object) -> str:
@@ -28,6 +30,18 @@ def validate_title(value: object) -> str:
             "invalid_title", f"Todo title must be at most {MAX_TITLE_LENGTH} characters"
         )
     return title
+
+
+def validate_detail(value: object) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise DomainError("invalid_detail", "Todo detail must be a string")
+    if len(value) > MAX_DETAIL_LENGTH:
+        raise DomainError(
+            "invalid_detail", f"Todo detail must be at most {MAX_DETAIL_LENGTH} characters"
+        )
+    return value.strip()
 
 
 def in_progress(todos: Sequence[Todo]) -> Todo | None:
