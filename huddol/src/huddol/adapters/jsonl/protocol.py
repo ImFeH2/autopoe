@@ -64,6 +64,9 @@ class Dispatcher:
     def emit(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
         self._writer.write({"type": event_type, **(payload or {})})
 
+    def respond(self, request_id: int, result: Any) -> None:
+        self._writer.write({"type": "response", "id": request_id, "result": result})
+
     def handle(self, request: Request) -> None:
         handler = self._handlers.get(request.method)
         if handler is None:
@@ -79,9 +82,7 @@ class Dispatcher:
             self._fail(request, "internal_error", f"{type(error).__name__}: {error}")
         else:
             if request.id is not None:
-                self._writer.write(
-                    {"type": "response", "id": request.id, "result": result}
-                )
+                self.respond(request.id, result)
 
     def _fail(self, request: Request, code: str, message: str) -> None:
         if request.id is None:
@@ -112,6 +113,8 @@ def serve(
             dispatcher.emit("error", {"code": "invalid_frame", "message": "bad JSON"})
             continue
         if request.method == "system.shutdown":
+            if request.id is not None:
+                dispatcher.respond(request.id, {"stopped": True})
             return "shutdown"
         if request.method.startswith(INTERNAL_PREFIX) and not allow_internal:
             dispatcher._fail(request, "internal_method", "Internal Huddol method")

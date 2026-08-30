@@ -273,3 +273,14 @@ def test_library_round_trips_over_the_protocol(server) -> None:
     read = call(dispatcher, output, "library.read", path="notes.md")["result"]
     assert read["content"] == "shared"
     assert read["hash"] == written["hash"]
+
+
+def test_shutdown_answers_a_request_that_carries_an_id(server) -> None:
+    dispatcher, output, _ = server
+    reason = serve(
+        dispatcher,
+        io.StringIO(json.dumps({"id": 7, "method": "system.shutdown"}) + "\n"),
+    )
+    assert reason == "shutdown"
+    last = output.frames()[-1]
+    assert last == {"type": "response", "id": 7, "result": {"stopped": True}}

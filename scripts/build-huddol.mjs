@@ -97,16 +97,20 @@ if (smoke.error || smoke.status !== 0) {
     smoke.error ?? new Error(`Huddol smoke exited with status ${smoke.status}`)
   );
 }
-const responses = smoke.stdout
+const frames = smoke.stdout
   .trim()
   .split("\n")
   .map((line) => JSON.parse(line));
+const ready = frames.find((frame) => frame.type === "ready");
+const organization = frames.find((frame) => frame.id === 1);
+const stopped = frames.find((frame) => frame.id === 2);
 if (
-  responses.length !== 2 ||
-  responses[0].id !== 1 ||
-  responses[0].result?.organization?.id !== 1 ||
-  responses[1].id !== 2 ||
-  responses[1].result?.stopped !== true
+  !ready ||
+  !Array.isArray(ready.methods) ||
+  ready.methods.length === 0 ||
+  organization?.result?.id !== 1 ||
+  !Array.isArray(organization.result.members) ||
+  stopped?.result?.stopped !== true
 ) {
   throw new Error("Huddol smoke returned an invalid response");
 }
