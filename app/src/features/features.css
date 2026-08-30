@@ -168,3 +168,14 @@ label.form-row .field {
   font-weight: var(--weight-normal);
   color: rgb(var(--text-base));
 }
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.composer-actions .field {
+  flex: 1;
+}

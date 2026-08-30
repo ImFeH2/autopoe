@@ -158,19 +158,19 @@ class AgentTools:
         discussion = store.get_discussion(discussion_id)
         assert discussion is not None
         everything = store.messages(discussion_id)
+        read_before = store.watermark(discussion_id, self._actor.member_id)
 
         if message_id is None:
             selected = everything[-limit:] if limit else everything
         else:
             mentions = store.mentions_by_message(discussion_id)
-            watermark = store.watermark(discussion_id, self._actor.member_id)
             try:
                 selected = context_window(
                     everything,
                     message_id,
                     self._actor.member_id,
                     mentions,
-                    watermark,
+                    read_before,
                 )
             except ValueError as error:
                 raise DomainError(
@@ -192,9 +192,16 @@ class AgentTools:
         members = {
             item.id: item.name for item in store.list_members(include_deleted=True)
         }
+        awaiting = tuple(
+            item.message_id
+            for item in store.pending(self._actor.member_id)
+            if item.discussion_id == discussion_id
+        )
         return {
             "id": discussion.id,
             "topic": discussion.topic,
+            "read_through": read_before,
+            "awaiting_ack": list(awaiting),
             "members": [
                 {"id": item, "name": members.get(item, f"Member {item}")}
                 for item in sorted(discussion.member_ids)

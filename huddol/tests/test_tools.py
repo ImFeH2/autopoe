@@ -177,3 +177,42 @@ def test_todo_hard_constraint_surfaces_through_the_tool(world) -> None:
     with pytest.raises(DomainError) as error:
         tools.start_todo(second["id"])
     assert error.value.code == "todo_already_in_progress"
+
+
+def test_read_reports_what_is_waiting_for_you(world) -> None:
+    human = tools_for(world, HUMAN)
+    room = human.create_discussion("waiting", [MAIN])
+    human.send_message(room["id"], "background")
+    world.store.append_message(room["id"], MAIN, "@You please confirm")
+
+    result = human.read_discussion(room["id"])
+    assert result["awaiting_ack"] == [2]
+
+    human.ack(room["id"], [2])
+    assert human.read_discussion(room["id"])["awaiting_ack"] == []
+
+
+def test_read_reports_the_position_you_had_reached_before_reading(world) -> None:
+    human = tools_for(world, HUMAN)
+    room = human.create_discussion("watermark", [MAIN])
+    world.store.append_message(room["id"], MAIN, "one")
+    world.store.append_message(room["id"], MAIN, "two")
+
+    first = human.read_discussion(room["id"])
+    assert first["read_through"] == 0
+
+    world.store.append_message(room["id"], MAIN, "three")
+    second = human.read_discussion(room["id"])
+    assert second["read_through"] == 2
+    assert second["awaiting_ack"] == []
+
+
+def test_awaiting_ack_only_covers_the_discussion_you_read(world) -> None:
+    human = tools_for(world, HUMAN)
+    first = human.create_discussion("first", [MAIN])
+    second = human.create_discussion("second", [MAIN])
+    world.store.append_message(first["id"], MAIN, "@You here")
+    world.store.append_message(second["id"], MAIN, "@You and here")
+
+    assert human.read_discussion(first["id"])["awaiting_ack"] == [1]
+    assert human.read_discussion(second["id"])["awaiting_ack"] == [1]

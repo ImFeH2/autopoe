@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Main,
   Panel,
@@ -29,22 +36,14 @@ import {
 
 function useOrganization() {
   const [members, setMembers] = useState<Member[]>([]);
-  const [humanId, setHumanId] = useState(1);
   const refresh = useCallback(async () => {
     const organization = await backend.organization();
     setMembers(organization.members);
-    setHumanId(organization.human_id);
   }, []);
-  return { members, humanId, refresh };
+  return { members, refresh };
 }
 
-function DiscussionsView({
-  members,
-  humanId,
-}: {
-  members: Member[];
-  humanId: number;
-}) {
+function DiscussionsView({ members }: { members: Member[] }) {
   const [list, setList] = useState<DiscussionSummary[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [detail, setDetail] = useState<DiscussionDetail | null>(null);
@@ -80,9 +79,10 @@ function DiscussionsView({
     });
   }, [selected, loadList, loadDetail]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when messages change
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
-  }, []);
+  }, [detail]);
 
   const submit = async () => {
     if (!body.trim() || selected === null) return;
@@ -98,11 +98,15 @@ function DiscussionsView({
     }
   };
 
-  const mentionsMe = (text: string) => {
-    const me = members.find((member) => member.id === humanId);
-    return me
-      ? text.toLowerCase().includes(`@${me.name.toLowerCase()}`)
-      : false;
+  const awaiting = new Set(detail?.awaiting_ack ?? []);
+
+  const confirm = async (messageId: number, undo: boolean) => {
+    if (selected === null) return;
+    await (undo
+      ? backend.revokeAck(selected, [messageId])
+      : backend.ack(selected, [messageId]));
+    await loadDetail(selected);
+    await loadList();
   };
 
   return (
@@ -138,27 +142,45 @@ function DiscussionsView({
         {detail ? (
           <>
             <div className="messages">
-              {detail.messages.map((message) => (
-                <article
-                  key={message.id}
-                  className="message"
-                  data-mentions-you={mentionsMe(message.body)}
-                >
-                  <Avatar name={message.sender_name} />
-                  <div className="message-body">
-                    <div className="message-head">
-                      <span className="message-sender">
-                        {message.sender_name}
-                      </span>
-                      <span className="message-time">
-                        {formatTime(message.created_at)}
-                      </span>
+              {detail.messages.map((message, index) => (
+                <Fragment key={message.id}>
+                  {index > 0 &&
+                  detail.messages[index - 1].id <= detail.read_through &&
+                  message.id > detail.read_through ? (
+                    <div className="unread-divider">New</div>
+                  ) : null}
+                  <article
+                    key={message.id}
+                    className="message"
+                    data-mentions-you={awaiting.has(message.id)}
+                  >
+                    <Avatar name={message.sender_name} />
+                    <div className="message-body">
+                      <div className="message-head">
+                        <span className="message-sender">
+                          {message.sender_name}
+                        </span>
+                        <span className="message-time">
+                          {formatTime(message.created_at)}
+                        </span>
+                      </div>
+                      <div className="message-text">
+                        {highlightMentions(message.body, members)}
+                      </div>
+                      {awaiting.has(message.id) ? (
+                        <div className="message-actions">
+                          <Badge tone="pending">Waiting for you</Badge>
+                          <Button
+                            size="sm"
+                            onClick={() => confirm(message.id, false)}
+                          >
+                            Mark handled
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="message-text">
-                      {highlightMentions(message.body, members)}
-                    </div>
-                  </div>
-                </article>
+                  </article>
+                </Fragment>
               ))}
               <div ref={bottom} />
             </div>
@@ -400,50 +422,182 @@ function LibraryView() {
 
 function SettingsView() {
   const [model, setModel] = useState<Record<string, unknown>>({});
-  const [execution, setExecution] = useState<Record<string, unknown>>({});
+  const [directories, setDirectories] = useState<string[]>([]);
+  const [draft, setDraft] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [unusable, setUnusable] = useState<{ path: string; reason: string }[]>(
+    [],
+  );
+
+  const load = useCallback(async () => {
+    setModel(await backend.settings("model"));
+    const execution = await backend.settings("execution");
+    setDirectories((execution.write_directories as string[]) ?? []);
+  }, []);
 
   useEffect(() => {
-    void backend.settings("model").then(setModel);
-    void backend.settings("execution").then(setExecution);
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    return backend.onEvent((event) => {
+      if (event.type === "ready") {
+        setUnusable(
+          (event.unusable_write_directories as {
+            path: string;
+            reason: string;
+          }[]) ?? [],
+        );
+      }
+    });
   }, []);
+
+  const save = async (values: Record<string, unknown>, section: string) => {
+    setStatus(null);
+    try {
+      await backend.updateSettings(section, values);
+      setStatus("Saved");
+      await load();
+    } catch (failure) {
+      setStatus(failure instanceof Error ? failure.message : String(failure));
+    }
+  };
+
+  const addDirectory = async () => {
+    if (!draft.trim()) return;
+    await save(
+      { write_directories: [...directories, draft.trim()] },
+      "execution",
+    );
+    setDraft("");
+  };
+
+  const removeDirectory = async (path: string) => {
+    await save(
+      { write_directories: directories.filter((item) => item !== path) },
+      "execution",
+    );
+  };
 
   return (
     <>
       <Panel title="Settings">
         <Row title="Model" meta="Provider and credentials" selected />
-        <Row title="Execution" meta="Writable directories" />
+        <Row title="Execution" meta={`${directories.length} writable`} />
       </Panel>
-      <Main title="Settings">
+      <Main title="Settings" banner={status}>
         <div className="detail">
+          <section>
+            <h3>Writable directories</h3>
+            <p className="row-meta">
+              Agents can read anything you can read, but only write inside
+              these.
+            </p>
+            {unusable.length > 0 ? (
+              <ul className="detail-list">
+                {unusable.map((item) => (
+                  <li key={item.path} className="detail-item">
+                    <span className="mono">{item.path}</span>
+                    <Badge tone="pending">{item.reason}</Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <ul className="detail-list">
+              {directories.length === 0 ? (
+                <li className="row-meta">
+                  None configured. Agents cannot write anything.
+                </li>
+              ) : (
+                directories.map((path) => (
+                  <li key={path} className="detail-item">
+                    <span className="mono">{path}</span>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => removeDirectory(path)}
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))
+              )}
+            </ul>
+            <div className="composer-actions">
+              <Input
+                value={draft}
+                placeholder="Absolute path to allow writing"
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) =>
+                  event.key === "Enter" && void addDirectory()
+                }
+              />
+              <Button onClick={addDirectory} disabled={!draft.trim()}>
+                Add
+              </Button>
+            </div>
+          </section>
           <section>
             <h3>Model</h3>
             <div className="form-grid">
               <label className="form-row">
                 Provider
-                <Input readOnly value={String(model.api_type ?? "")} />
+                <Input
+                  value={String(model.api_type ?? "openai")}
+                  onChange={(event) =>
+                    setModel({ ...model, api_type: event.target.value })
+                  }
+                />
+              </label>
+              <label className="form-row">
+                Base URL
+                <Input
+                  value={String(model.base_url ?? "")}
+                  onChange={(event) =>
+                    setModel({ ...model, base_url: event.target.value })
+                  }
+                />
               </label>
               <label className="form-row">
                 Model
-                <Input readOnly value={String(model.model ?? "")} />
-              </label>
-              <label className="form-row">
-                API key
                 <Input
-                  readOnly
-                  value={model.api_key_set ? "configured" : "not set"}
+                  value={String(model.model ?? "")}
+                  onChange={(event) =>
+                    setModel({ ...model, model: event.target.value })
+                  }
                 />
               </label>
+              <label className="form-row">
+                API key {model.api_key_set ? "(already configured)" : ""}
+                <Input
+                  type="password"
+                  value={apiKey}
+                  placeholder={
+                    model.api_key_set ? "Leave blank to keep" : "Required"
+                  }
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+              </label>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  const values: Record<string, unknown> = {
+                    api_type: model.api_type,
+                    base_url: model.base_url,
+                    model: model.model,
+                  };
+                  if (apiKey.trim()) values.api_key = apiKey.trim();
+                  await save(values, "model");
+                  setApiKey("");
+                }}
+              >
+                Save model settings
+              </Button>
+              <p className="row-meta">
+                Changing the model takes effect the next time Huddol starts.
+              </p>
             </div>
-          </section>
-          <section>
-            <h3>Writable directories</h3>
-            <ul className="detail-list">
-              {((execution.write_directories as string[]) ?? []).map((path) => (
-                <li key={path} className="detail-item">
-                  <span className="mono">{path}</span>
-                </li>
-              ))}
-            </ul>
           </section>
         </div>
       </Main>
@@ -453,7 +607,7 @@ function SettingsView() {
 
 export default function App() {
   const [section, setSection] = useState<Section>("discussions");
-  const { members, humanId, refresh } = useOrganization();
+  const { members, refresh } = useOrganization();
   const [ready, setReady] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -489,7 +643,7 @@ export default function App() {
     <Shell>
       <Rail active={section} onSelect={setSection} />
       {section === "discussions" ? (
-        <DiscussionsView members={members} humanId={humanId} />
+        <DiscussionsView members={members} />
       ) : section === "members" ? (
         <MembersView members={members} refresh={refresh} />
       ) : section === "library" ? (
