@@ -12,7 +12,11 @@ from huddol.adapters.sandbox.commands import (
     macos_command,
     windows_command,
 )
-from huddol.adapters.sandbox.paths import is_within, normalize_directories
+from huddol.adapters.sandbox.paths import (
+    is_within,
+    normalize_directories,
+    normalize_tolerantly,
+)
 from huddol.core.errors import DomainError
 from huddol.ports.sandbox import EditResult, RunResult
 
@@ -27,11 +31,18 @@ class NativeSandbox:
         write_directories: Sequence[str] = (),
         *,
         enforce: bool = True,
+        tolerant: bool = False,
     ) -> None:
         self._root = Path(root).resolve()
         self._enforce = enforce
-        self._roots = normalize_directories(write_directories)
         self._windows: object | None = None
+        self.skipped: tuple[tuple[str, str], ...] = ()
+        if tolerant:
+            result = normalize_tolerantly(write_directories)
+            self._roots = result.accepted
+            self.skipped = result.skipped
+        else:
+            self._roots = normalize_directories(write_directories)
 
     @property
     def root(self) -> str:

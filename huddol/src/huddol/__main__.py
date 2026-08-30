@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         if member.is_agent and member.state == "running":
             store.set_agent_state(member.id, "idle")
 
-    sandbox = NativeSandbox(Path.cwd(), agent_store.write_directories())
+    sandbox = NativeSandbox(Path.cwd(), agent_store.write_directories(), tolerant=True)
     deps = Dependencies(
         store=store,
         todos=agent_store,
@@ -93,6 +93,10 @@ def main(argv: list[str] | None = None) -> int:
             "data_directory": str(directory),
             "human_id": HUMAN_ID,
             "model_configured": config is not None,
+            "write_directories": list(sandbox.write_directories),
+            "unusable_write_directories": [
+                {"path": path, "reason": reason} for path, reason in sandbox.skipped
+            ],
             "methods": list(dispatcher.methods()),
         },
     )

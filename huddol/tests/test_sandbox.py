@@ -180,3 +180,36 @@ def test_sandboxed_run_allows_writes_inside_and_blocks_them_outside(
     assert outside.exit_code != 0
     assert "Read-only file system" in outside.stderr
     assert (protected / "keep.txt").read_text(encoding="utf-8") == "original"
+
+
+def test_posix_paths_are_reported_as_foreign_not_merely_invalid() -> None:
+    from huddol.adapters.sandbox.paths import normalize_tolerantly
+
+    result = normalize_tolerantly(["/project/huddol", "relative/thing"])
+    reasons = {path: reason for path, reason in result.skipped}
+    if sys.platform.startswith("win"):
+        assert reasons["/project/huddol"] == "foreign_directory"
+    else:
+        assert "/project/huddol" not in reasons
+    assert reasons["relative/thing"] == "invalid_directory"
+
+
+def test_tolerant_mode_keeps_the_usable_directories(tmp_path: Path) -> None:
+    from huddol.adapters.sandbox.paths import normalize_tolerantly
+
+    usable = tmp_path / "workspace"
+    usable.mkdir()
+    result = normalize_tolerantly([str(usable), "not-absolute"])
+    assert result.accepted == (usable.resolve(),)
+    assert [path for path, _ in result.skipped] == ["not-absolute"]
+
+
+def test_a_sandbox_with_unusable_configuration_still_constructs(tmp_path: Path) -> None:
+    sandbox = NativeSandbox(tmp_path, ["not-absolute"], enforce=False, tolerant=True)
+    assert sandbox.write_directories == ()
+    assert sandbox.skipped == (("not-absolute", "invalid_directory"),)
+
+
+def test_strict_mode_still_rejects_bad_input(tmp_path: Path) -> None:
+    with pytest.raises(DomainError):
+        NativeSandbox(tmp_path, ["not-absolute"], enforce=False)
