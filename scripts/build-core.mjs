@@ -8,9 +8,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { root } from "./process.mjs";
 
-const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const core = resolve(root, "core");
 const binaries = resolve(root, "app", "src-tauri", "binaries");
 const dist = resolve(core, "dist");

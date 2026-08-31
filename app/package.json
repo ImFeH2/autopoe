@@ -7,8 +7,6 @@
   "scripts": {
     "dev": "vite",
     "build:frontend": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
