@@ -20,8 +20,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
-/huddol/build/
-/huddol/dist/
+/core/build/
+/core/dist/
 /app/src-tauri/binaries/
 
 # Editor directories and files
@@ -34,3 +34,7 @@ __pycache__/
 *.njsproj
 *.sln
 *.sw?
+
+# tauri icon also emits mobile icons this desktop app never bundles
+app/src-tauri/icons/android/
+app/src-tauri/icons/ios/

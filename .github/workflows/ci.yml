@@ -43,7 +43,7 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
-          cache-dependency-glob: huddol/uv.lock
+          cache-dependency-glob: core/uv.lock
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
@@ -60,13 +60,15 @@ jobs:
         env:
           LEFTHOOK: 0
       - name: Install Python dependencies
-        run: uv sync --project huddol --all-groups --frozen
+        run: uv sync --project core --all-groups --frozen
       - name: Check
         run: pnpm check
       - name: Test
         run: pnpm test
       - name: Build frontend
         run: pnpm build:frontend
+      - name: Package the core
+        run: pnpm build:core
       - name: Check release build
         working-directory: app/src-tauri
         run: cargo check --release

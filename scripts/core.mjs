@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const core = resolve(root, "huddol");
+const core = resolve(root, "core");
 const args = process.argv.slice(2);
 if (args.length === 0) {
   throw new Error("Expected a Huddol command");

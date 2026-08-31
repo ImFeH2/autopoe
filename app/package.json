@@ -6,11 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:components": "vite --open /component-lab.html",
-    "dev:desktop": "pnpm dev",
     "build:frontend": "tsc && vite build",
-    "build:desktop": "pnpm build:frontend && pnpm build:huddol",
-    "build:huddol": "pnpm --workspace-root run build:huddol",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",

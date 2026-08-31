@@ -41,7 +41,7 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
-          cache-dependency-glob: huddol/uv.lock
+          cache-dependency-glob: core/uv.lock
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -56,7 +56,7 @@ jobs:
         env:
           LEFTHOOK: 0
       - name: Install Python dependencies
-        run: uv sync --project huddol --all-groups --frozen
+        run: uv sync --project core --all-groups --frozen
       - name: Build release
         uses: tauri-apps/tauri-action@v1
         env:

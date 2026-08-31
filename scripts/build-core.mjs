@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const core = resolve(root, "huddol");
+const core = resolve(root, "core");
 const binaries = resolve(root, "app", "src-tauri", "binaries");
 const dist = resolve(core, "dist");
 const work = resolve(core, "build");

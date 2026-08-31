@@ -18,7 +18,7 @@
   },
   "hooks": {
     "before:init": "pnpm verify",
-    "after:bump": ["uv lock --project huddol", "node scripts/cargo.mjs check"]
+    "after:bump": ["uv lock --project core", "node scripts/cargo.mjs check"]
   },
   "plugins": {
     "@release-it/bumper": {
@@ -32,7 +32,7 @@
           "path": "package.version"
         },
         {
-          "file": "huddol/pyproject.toml",
+          "file": "core/pyproject.toml",
           "path": "project.version"
         }
       ]

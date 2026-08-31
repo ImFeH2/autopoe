@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const app = resolve(root, "app");
-const core = resolve(root, "huddol");
+const core = resolve(root, "core");
 const [action, ...args] = process.argv.slice(2);
 if (action !== "dev" && action !== "build") {
   throw new Error("Expected app action: dev or build");

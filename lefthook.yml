@@ -6,9 +6,9 @@ commit-msg:
 pre-commit:
   parallel: true
   jobs:
-    - name: app
-      run: pnpm check:app && pnpm test:app
-    - name: huddol
-      run: pnpm check:huddol && pnpm test:huddol
+    - name: web
+      run: pnpm check:web && pnpm test:web
+    - name: core
+      run: pnpm check:core && pnpm test:core
     - name: rust
       run: pnpm check:rust && pnpm test:rust
