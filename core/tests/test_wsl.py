@@ -122,30 +122,43 @@ def test_probe_reports_the_first_distribution() -> None:
     assert found.distribution == "Debian"
 
 
-def test_backend_selection_falls_back_when_wsl_is_missing(tmp_path) -> None:
-    from huddol.__main__ import _build_sandbox
+def _stores(tmp_path):
     from huddol.adapters.sqlite.agent import SqliteAgentStore
     from huddol.adapters.sqlite.store import SqliteStore
 
     store = SqliteStore(tmp_path / "huddol.sqlite3")
-    agent_store = SqliteAgentStore(store._db)
+    return store, SqliteAgentStore(store._db)
+
+
+def test_wsl_backend_is_used_when_a_distribution_is_available(tmp_path) -> None:
+    from huddol.__main__ import _build_sandbox
+
+    store, agent_store = _stores(tmp_path)
     agent_store.set_settings("execution", {"backend": "wsl"})
     agent_store.set_write_directories(["/project/huddol"])
 
-    sandbox = _build_sandbox(agent_store)
-    assert type(sandbox).__name__ in {"WslSandbox", "NativeSandbox"}
-    if type(sandbox).__name__ == "NativeSandbox":
-        assert sandbox.write_directories == () or sandbox.skipped
+    sandbox = _build_sandbox(agent_store, probe=WslProbe(DISTRO))
+    assert type(sandbox).__name__ == "WslSandbox"
+    assert sandbox.write_directories == ("/project/huddol",)
+    store.close()
+
+
+def test_backend_falls_back_to_native_when_wsl_is_missing(tmp_path) -> None:
+    from huddol.__main__ import _build_sandbox
+
+    store, agent_store = _stores(tmp_path)
+    agent_store.set_settings("execution", {"backend": "wsl"})
+    agent_store.set_write_directories(["/project/huddol"])
+
+    sandbox = _build_sandbox(agent_store, probe=None)
+    assert type(sandbox).__name__ == "NativeSandbox"
     store.close()
 
 
 def test_native_backend_is_chosen_by_default(tmp_path) -> None:
     from huddol.__main__ import _build_sandbox
-    from huddol.adapters.sqlite.agent import SqliteAgentStore
-    from huddol.adapters.sqlite.store import SqliteStore
 
-    store = SqliteStore(tmp_path / "huddol.sqlite3")
-    agent_store = SqliteAgentStore(store._db)
-    sandbox = _build_sandbox(agent_store)
+    store, agent_store = _stores(tmp_path)
+    sandbox = _build_sandbox(agent_store, probe=WslProbe(DISTRO))
     assert type(sandbox).__name__ == "NativeSandbox"
     store.close()

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from huddol.ports.sandbox import Sandbox
 
+_MISSING = object()
 DATA_DIRECTORY_ENV = "HUDDOL_DATA_DIR"
 
 
@@ -18,7 +19,7 @@ def data_directory() -> Path:
     return Path.home() / ".huddol"
 
 
-def _build_sandbox(agent_store: Any) -> Sandbox:
+def _build_sandbox(agent_store: Any, probe: Any = _MISSING) -> Sandbox:
     from huddol.adapters.sandbox.native import NativeSandbox
 
     directories = agent_store.write_directories()
@@ -27,9 +28,9 @@ def _build_sandbox(agent_store: Any) -> Sandbox:
         from huddol.adapters.sandbox.wsl import probe_wsl
         from huddol.adapters.sandbox.wsl_sandbox import WslSandbox
 
-        probe = probe_wsl()
-        if probe is not None:
-            return WslSandbox("/", directories, probe, tolerant=True)
+        found = probe_wsl() if probe is _MISSING else probe
+        if found is not None:
+            return WslSandbox("/", directories, found, tolerant=True)
     return NativeSandbox(Path.cwd(), directories, tolerant=True)
 
 
