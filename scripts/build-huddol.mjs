@@ -85,7 +85,7 @@ try {
     encoding: "utf8",
     env: { ...process.env, HUDDOL_DATA_DIR: smokeData },
     input:
-      '{"id":1,"method":"organization.get","params":{}}\n' +
+      '{"id":1,"method":"ping","params":{"token":"huddol-smoke"}}\n' +
       '{"id":2,"method":"system.shutdown","params":{}}\n',
     timeout: 15_000,
   });
@@ -102,14 +102,17 @@ const frames = smoke.stdout
   .split("\n")
   .map((line) => JSON.parse(line));
 const ready = frames.find((frame) => frame.type === "ready");
-const organization = frames.find((frame) => frame.id === 1);
+const pong = frames.find((frame) => frame.id === 1);
 const stopped = frames.find((frame) => frame.id === 2);
+
+// The packaged binary only has to prove three things: it finished starting up,
+// it answers over the pipe, and it stops cleanly. Domain behaviour is covered by
+// the process level tests, so this stays independent of the business API.
 if (
   !ready ||
   !Array.isArray(ready.methods) ||
   ready.methods.length === 0 ||
-  organization?.result?.id !== 1 ||
-  !Array.isArray(organization.result.members) ||
+  pong?.result?.pong !== "huddol-smoke" ||
   stopped?.result?.stopped !== true
 ) {
   throw new Error("Huddol smoke returned an invalid response");

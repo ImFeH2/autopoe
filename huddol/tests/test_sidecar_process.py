@@ -349,3 +349,30 @@ def test_secrets_never_come_back_over_the_pipe(tmp_path: Path, section: str) -> 
     assert "SECRET-API-KEY" not in rendered
     assert "SECRET-PUBLIC" not in rendered
     assert "SECRET-SECRET" not in rendered
+
+
+def test_ping_answers_without_touching_the_domain(tmp_path: Path) -> None:
+    frames, code, stderr = drive(
+        tmp_path / "data",
+        [{"id": 1, "method": "ping", "params": {"token": "abc"}}],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["result"] == {"pong": "abc"}
+
+
+def test_ping_works_without_a_token(tmp_path: Path) -> None:
+    frames, code, _ = drive(tmp_path / "data", [{"id": 1, "method": "ping"}])
+    assert code == 0
+    assert response(frames, 1)["result"] == {"pong": None}
+
+
+def test_the_packaging_smoke_sequence_holds(tmp_path: Path) -> None:
+    frames, code, stderr = drive(
+        tmp_path / "data",
+        [{"id": 1, "method": "ping", "params": {"token": "huddol-smoke"}}],
+    )
+    assert code == 0, stderr
+    ready = events(frames, "ready")
+    assert ready and ready[0]["methods"]
+    assert response(frames, 1)["result"]["pong"] == "huddol-smoke"
+    assert response(frames, 9999)["result"] == {"stopped": True}

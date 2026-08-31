@@ -54,6 +54,7 @@ class Dispatcher:
     def __init__(self, writer: JsonLineWriter) -> None:
         self._writer = writer
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {}
+        self.register("ping", lambda params: {"pong": params.get("token")})
 
     def register(self, method: str, handler: Callable[[dict[str, Any]], Any]) -> None:
         self._handlers[method] = handler
