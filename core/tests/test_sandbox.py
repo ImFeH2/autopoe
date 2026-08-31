@@ -184,12 +184,12 @@ def test_sandboxed_run_allows_writes_inside_and_blocks_them_outside(
 def test_posix_paths_are_reported_as_foreign_not_merely_invalid() -> None:
     from huddol.adapters.sandbox.paths import normalize_tolerantly
 
-    result = normalize_tolerantly(["/project/huddol", "relative/thing"])
+    result = normalize_tolerantly(["/workspace/app", "relative/thing"])
     reasons = {path: reason for path, reason in result.skipped}
     if sys.platform.startswith("win"):
-        assert reasons["/project/huddol"] == "foreign_directory"
+        assert reasons["/workspace/app"] == "foreign_directory"
     else:
-        assert "/project/huddol" not in reasons
+        assert "/workspace/app" not in reasons
     assert reasons["relative/thing"] == "invalid_directory"
 
 

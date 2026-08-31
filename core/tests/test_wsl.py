@@ -13,13 +13,13 @@ from huddol.adapters.sandbox.wsl import (
 from huddol.adapters.sandbox.wsl_sandbox import WslSandbox
 from huddol.core.errors import DomainError
 
-DISTRO = "Debian"
+DISTRO = "TestDistro"
 
 
 def test_wsl_directories_accept_posix_paths_windows_would_reject() -> None:
-    assert normalize_wsl_directories(["/project/huddol", "/mnt/f/Project/huddol"]) == (
-        "/project/huddol",
-        "/mnt/f/Project/huddol",
+    assert normalize_wsl_directories(["/workspace/app", "/mnt/d/work/project"]) == (
+        "/workspace/app",
+        "/mnt/d/work/project",
     )
 
 
@@ -36,10 +36,10 @@ def test_wsl_directories_deduplicate() -> None:
 @pytest.mark.parametrize(
     ("posix", "windows"),
     [
-        ("/mnt/f/Project/huddol", "F:\\Project\\huddol"),
+        ("/mnt/d/work/project", "D:\\work\\project"),
         ("/mnt/c/Users/Someone", "C:\\Users\\Someone"),
-        ("/project/huddol", "\\\\wsl.localhost\\Debian\\project\\huddol"),
-        ("/home/me/notes.md", "\\\\wsl.localhost\\Debian\\home\\me\\notes.md"),
+        ("/workspace/app", "\\\\wsl.localhost\\TestDistro\\workspace\\app"),
+        ("/home/me/notes.md", "\\\\wsl.localhost\\TestDistro\\home\\me\\notes.md"),
     ],
 )
 def test_posix_paths_map_onto_windows(posix: str, windows: str) -> None:
@@ -49,8 +49,8 @@ def test_posix_paths_map_onto_windows(posix: str, windows: str) -> None:
 @pytest.mark.parametrize(
     ("windows", "posix"),
     [
-        ("F:\\Project\\huddol", "/mnt/f/Project/huddol"),
-        ("\\\\wsl.localhost\\Debian\\project\\huddol", "/project/huddol"),
+        ("D:\\work\\project", "/mnt/d/work/project"),
+        ("\\\\wsl.localhost\\TestDistro\\workspace\\app", "/workspace/app"),
     ],
 )
 def test_windows_paths_map_back_onto_posix(windows: str, posix: str) -> None:
@@ -58,7 +58,7 @@ def test_windows_paths_map_back_onto_posix(windows: str, posix: str) -> None:
 
 
 def test_drive_mapping_round_trips() -> None:
-    original = "/mnt/f/Project/huddol"
+    original = "/mnt/d/work/project"
     assert to_posix_path(to_windows_path(original, DISTRO)) == original
 
 
@@ -71,26 +71,26 @@ def test_untranslatable_paths_are_rejected() -> None:
 
 def test_wsl_command_runs_bubblewrap_inside_the_distribution() -> None:
     command = wsl_command(
-        ["ls"], "/project/huddol", ["/project/huddol/deep", "/project"], DISTRO
+        ["ls"], "/workspace/app", ["/workspace/app/deep", "/project"], DISTRO
     )
     assert command[:4] == ["wsl.exe", "-d", DISTRO, "--"]
     assert "/usr/bin/bwrap" in command
     for flag in ("--new-session", "--die-with-parent", "--unshare-user"):
         assert flag in command
     assert command[-3:] == ["--cap-drop", "ALL", "--"] or command[-1] == "ls"
-    assert command.index("/project") < command.index("/project/huddol/deep")
+    assert command.index("/project") < command.index("/workspace/app/deep")
 
 
 def test_wsl_sandbox_describes_the_distribution_and_mounts() -> None:
-    sandbox = WslSandbox("/project/huddol", ["/project/huddol"], WslProbe(DISTRO))
+    sandbox = WslSandbox("/workspace/app", ["/workspace/app"], WslProbe(DISTRO))
     description = sandbox.describe_environment()
     assert DISTRO in description
     assert "/mnt/<drive-letter>" in description
-    assert "/project/huddol" in description
+    assert "/workspace/app" in description
 
 
 def test_wsl_sandbox_refuses_edits_outside_the_writable_roots() -> None:
-    sandbox = WslSandbox("/project/huddol", ["/project/huddol"], WslProbe(DISTRO))
+    sandbox = WslSandbox("/workspace/app", ["/workspace/app"], WslProbe(DISTRO))
     with pytest.raises(DomainError) as error:
         sandbox.edit("/etc/passwd", "root", "hacked")
     assert error.value.code == "not_writable"
@@ -98,12 +98,12 @@ def test_wsl_sandbox_refuses_edits_outside_the_writable_roots() -> None:
 
 def test_wsl_sandbox_tolerates_unusable_configuration() -> None:
     sandbox = WslSandbox(
-        "/project/huddol",
-        ["/project/huddol", "not-absolute"],
+        "/workspace/app",
+        ["/workspace/app", "not-absolute"],
         WslProbe(DISTRO),
         tolerant=True,
     )
-    assert sandbox.write_directories == ("/project/huddol",)
+    assert sandbox.write_directories == ("/workspace/app",)
     assert sandbox.skipped == (("not-absolute", "invalid_directory"),)
 
 
@@ -117,9 +117,9 @@ def test_probe_returns_none_when_wsl_is_unavailable() -> None:
 
 
 def test_probe_reports_the_first_distribution() -> None:
-    found = probe_wsl(lambda: "Debian")
+    found = probe_wsl(lambda: "TestDistro")
     assert found is not None
-    assert found.distribution == "Debian"
+    assert found.distribution == "TestDistro"
 
 
 def _stores(tmp_path):
@@ -135,11 +135,11 @@ def test_wsl_backend_is_used_when_a_distribution_is_available(tmp_path) -> None:
 
     store, agent_store = _stores(tmp_path)
     agent_store.set_settings("execution", {"backend": "wsl"})
-    agent_store.set_write_directories(["/project/huddol"])
+    agent_store.set_write_directories(["/workspace/app"])
 
     sandbox = _build_sandbox(agent_store, probe=WslProbe(DISTRO))
     assert type(sandbox).__name__ == "WslSandbox"
-    assert sandbox.write_directories == ("/project/huddol",)
+    assert sandbox.write_directories == ("/workspace/app",)
     store.close()
 
 
@@ -148,7 +148,7 @@ def test_backend_falls_back_to_native_when_wsl_is_missing(tmp_path) -> None:
 
     store, agent_store = _stores(tmp_path)
     agent_store.set_settings("execution", {"backend": "wsl"})
-    agent_store.set_write_directories(["/project/huddol"])
+    agent_store.set_write_directories(["/workspace/app"])
 
     sandbox = _build_sandbox(agent_store, probe=None)
     assert type(sandbox).__name__ == "NativeSandbox"

@@ -121,7 +121,7 @@ def legacy(tmp_path: Path) -> Path:
     db.execute("INSERT INTO execution_settings VALUES (1, 'wsl')")
     db.executemany(
         "INSERT INTO execution_write_directories VALUES (?, ?)",
-        [(0, "/project/huddol"), (1, "/tmp")],
+        [(0, "/workspace/app"), (1, "/tmp")],
     )
     db.execute("INSERT INTO organization_admin_assignments VALUES (13, 't')")
     db.commit()
@@ -247,7 +247,7 @@ def test_settings_sections_are_carried_over(legacy: Path, tmp_path: Path) -> Non
     assert model is not None
     assert model["model"] == "m"
     assert agent_store.get_settings("execution") == {"backend": "wsl"}
-    assert agent_store.write_directories() == ("/project/huddol", "/tmp")
+    assert agent_store.write_directories() == ("/workspace/app", "/tmp")
     store.close()
 
 

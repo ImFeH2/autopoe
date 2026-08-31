@@ -108,5 +108,5 @@ def test_settings_round_trip_and_write_directories(
     }
     assert agent_store.get_settings("missing") is None
 
-    agent_store.set_write_directories(["/project/huddol", "/tmp", "/project/huddol"])
-    assert agent_store.write_directories() == ("/project/huddol", "/tmp")
+    agent_store.set_write_directories(["/workspace/app", "/tmp", "/workspace/app"])
+    assert agent_store.write_directories() == ("/workspace/app", "/tmp")
