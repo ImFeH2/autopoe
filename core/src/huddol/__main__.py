@@ -54,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
 
     directory = data_directory()
     directory.mkdir(parents=True, exist_ok=True)
+    workspace = directory / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
     store = SqliteStore(directory / "huddol.sqlite3")
     agent_store = SqliteAgentStore(store._db)
     agent_store.mark_interrupted()
@@ -64,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         if member.is_agent and member.state == "running":
             store.set_agent_state(member.id, "idle")
 
-    sandbox = _build_sandbox(agent_store, directory)
+    sandbox = _build_sandbox(agent_store, workspace)
     deps = Dependencies(
         store=store,
         todos=agent_store,
