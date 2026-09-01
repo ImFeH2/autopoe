@@ -18,11 +18,11 @@ const withManifest =
         ...args.slice(separator),
       ];
 
-// Clearing externalBin lets cargo check and clippy run before the sidecar
-// binary has been built.
+// Clearing the bundled resources lets cargo check and clippy run before the
+// core has been packaged.
 await run(binary("cargo"), withManifest, {
   env: {
     ...process.env,
-    TAURI_CONFIG: JSON.stringify({ bundle: { externalBin: [] } }),
+    TAURI_CONFIG: JSON.stringify({ bundle: { resources: [] } }),
   },
 });

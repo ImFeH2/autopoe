@@ -10,27 +10,27 @@ use std::{
 use crate::bridge_diagnostics::{BridgeDiagnostics, os_error_code};
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use tauri::{AppHandle, ipc::Channel};
+use tauri::{AppHandle, Manager, ipc::Channel, path::BaseDirectory};
 use tauri_plugin_shell::{
     ShellExt,
     process::{CommandChild, CommandEvent},
 };
 
-const HUDDOL_BINARY: &str = "huddol";
+const HUDDOL_BUNDLED_CORE: &str = "core/huddol";
 const HUDDOL_CORE_PROJECT: &str = "../../core";
 const SHUTDOWN_ID: u64 = u64::MAX;
 
 #[derive(Debug, PartialEq)]
 enum HuddolExecutable {
     Development,
-    Sidecar,
+    Bundled,
 }
 
 fn resolve_huddol_executable(is_dev: bool) -> HuddolExecutable {
     if is_dev {
         HuddolExecutable::Development
     } else {
-        HuddolExecutable::Sidecar
+        HuddolExecutable::Bundled
     }
 }
 
@@ -115,22 +115,25 @@ impl HuddolProcess {
                 ]),
                 "development_python",
             ),
-            HuddolExecutable::Sidecar => {
-                let command = match shell.sidecar(HUDDOL_BINARY) {
-                    Ok(command) => command,
+            HuddolExecutable::Bundled => {
+                let executable = match app
+                    .path()
+                    .resolve(HUDDOL_BUNDLED_CORE, BaseDirectory::Resource)
+                {
+                    Ok(executable) => executable,
                     Err(error) => {
                         self.diagnostics.record(
                             "ERROR",
                             "bridge.process.start_failed",
                             json!({
-                                "stage": "sidecar_resolution",
-                                "error_type": "shell_error",
+                                "stage": "bundled_core_resolution",
+                                "error_type": "path_error",
                             }),
                         );
-                        return Err(error).context("create Huddol sidecar command");
+                        return Err(error).context("resolve the bundled Huddol core");
                     }
                 };
-                (command, "sidecar")
+                (shell.command(executable), "bundled_core")
             }
         };
         let command = command.env_clear().envs(std::env::vars_os());
@@ -593,7 +596,7 @@ mod tests {
             resolve_huddol_executable(true),
             HuddolExecutable::Development
         );
-        assert_eq!(resolve_huddol_executable(false), HuddolExecutable::Sidecar);
+        assert_eq!(resolve_huddol_executable(false), HuddolExecutable::Bundled);
     }
 
     #[test]

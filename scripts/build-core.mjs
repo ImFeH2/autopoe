@@ -1,17 +1,11 @@
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-} from "node:fs";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { root } from "./process.mjs";
 
 const core = resolve(root, "core");
-const binaries = resolve(root, "app", "src-tauri", "binaries");
+const bundled = resolve(root, "app", "src-tauri", "core");
 const dist = resolve(core, "dist");
 const work = resolve(core, "build");
 
@@ -29,26 +23,8 @@ function run(command, args, options = {}) {
   }
 }
 
-function output(command, args) {
-  const result = spawnSync(command, args, {
-    cwd: root,
-    encoding: "utf8",
-  });
-  if (result.error || result.status !== 0) {
-    throw (
-      result.error ??
-      new Error(`${command} exited with status ${result.status}`)
-    );
-  }
-  return result.stdout.trim();
-}
-
-const target =
-  process.env.TAURI_ENV_TARGET_TRIPLE ||
-  output("rustc", ["--print", "host-tuple"]);
 const extension = process.platform === "win32" ? ".exe" : "";
 
-mkdirSync(binaries, { recursive: true });
 run(
   "uv",
   [
@@ -69,17 +45,14 @@ run(
   { cwd: core },
 );
 
-const source = resolve(dist, `huddol${extension}`);
-const destination = resolve(binaries, `huddol-${target}${extension}`);
-copyFileSync(source, destination);
-if (process.platform !== "win32") {
-  chmodSync(destination, 0o755);
-}
+rmSync(bundled, { force: true, recursive: true });
+cpSync(resolve(dist, "huddol"), bundled, { recursive: true });
 
+const executable = resolve(bundled, `huddol${extension}`);
 const smokeData = mkdtempSync(join(tmpdir(), "huddol-smoke-"));
 let smoke;
 try {
-  smoke = spawnSync(destination, [], {
+  smoke = spawnSync(executable, [], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, HUDDOL_DATA_DIR: smokeData },
@@ -117,4 +90,4 @@ if (
   throw new Error("Huddol smoke returned an invalid response");
 }
 
-process.stdout.write(`${destination}\n`);
+process.stdout.write(`${executable}\n`);

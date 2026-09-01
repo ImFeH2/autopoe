@@ -22,7 +22,7 @@ __pycache__/
 .venv/
 /core/build/
 /core/dist/
-/app/src-tauri/binaries/
+/app/src-tauri/core/
 
 # Editor directories and files
 .vscode/*

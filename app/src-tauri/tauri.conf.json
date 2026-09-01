@@ -31,7 +31,7 @@
   },
   "bundle": {
     "active": true,
-    "externalBin": ["binaries/huddol"],
+    "resources": ["core/"],
     "targets": "all",
     "linux": {
       "deb": {
