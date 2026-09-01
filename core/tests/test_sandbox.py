@@ -148,6 +148,7 @@ def test_describe_environment_names_the_writable_roots(tmp_path: Path) -> None:
     description = sandbox.describe_environment()
     assert str(tmp_path.resolve()) in description
     assert "read any path" in description
+    assert "absolute form" in description
 
 
 @LINUX_ONLY

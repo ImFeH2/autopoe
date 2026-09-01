@@ -59,7 +59,8 @@ class WslSandbox:
         listing = "\n".join(f"- {item}" for item in self._roots) or "- none"
         return (
             f"Your commands run inside WSL {self._probe.distribution}.\n"
-            f"Your working root is {self._root}.\n"
+            "Always give paths in absolute form. Relative paths resolve against "
+            f"{self._root}, which is not a project directory and is not writable.\n"
             "Windows drives are available under /mnt/<drive-letter>.\n"
             f"You can only write inside:\n{listing}"
         )

@@ -67,8 +67,9 @@ class NativeSandbox:
     def describe_environment(self) -> str:
         listing = "\n".join(f"- {item}" for item in self.write_directories) or "- none"
         return (
-            f"Your working root is {self._root}.\n"
-            f"You can read any path the host user can read.\n"
+            "Always give paths in absolute form. Relative paths resolve against "
+            f"{self._root}, which is not a project directory and is not writable.\n"
+            "You can read any path the host user can read.\n"
             f"You can only write inside:\n{listing}"
         )
 

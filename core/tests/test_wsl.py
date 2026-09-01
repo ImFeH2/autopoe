@@ -89,6 +89,7 @@ def test_wsl_sandbox_describes_the_distribution_and_mounts() -> None:
     assert DISTRO in description
     assert "/mnt/<drive-letter>" in description
     assert "/workspace/app" in description
+    assert "absolute form" in description
 
 
 def test_wsl_sandbox_refuses_edits_outside_the_writable_roots() -> None:
