@@ -46,6 +46,41 @@ export function highlightMentions(
   return nodes.length > 0 ? nodes : [body];
 }
 
+const MAX_NAME_LENGTH = 64;
+
+export type MentionQuery = { start: number; query: string };
+
+export function mentionQuery(text: string, caret: number): MentionQuery | null {
+  if (caret <= 0) return null;
+  const from = Math.max(0, caret - MAX_NAME_LENGTH - 1);
+  const at = text.lastIndexOf("@", caret - 1);
+  if (at < 0 || at < from) return null;
+
+  const before = at > 0 ? text[at - 1] : "";
+  if (before && /[\p{L}\p{N}]/u.test(before)) return null;
+
+  const query = text.slice(at + 1, caret);
+  if (query.includes("@") || /[\n\r]/.test(query)) return null;
+  return { start: at, query };
+}
+
+export function matchMembers(members: Member[], query: string): Member[] {
+  const needle = query.trim().toLowerCase();
+  return members
+    .filter((member) => member.name.toLowerCase().startsWith(needle))
+    .sort((a, b) => a.name.length - b.name.length);
+}
+
+export function completeMention(
+  text: string,
+  mention: MentionQuery,
+  caret: number,
+  name: string,
+): { text: string; caret: number } {
+  const head = `${text.slice(0, mention.start)}@${name} `;
+  return { text: head + text.slice(caret), caret: head.length };
+}
+
 export function formatTime(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;

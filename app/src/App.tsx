@@ -23,7 +23,13 @@ import {
   StateDot,
   Textarea,
 } from "./components/ui";
-import { formatTime, highlightMentions } from "./features/mentions";
+import {
+  completeMention,
+  formatTime,
+  highlightMentions,
+  matchMembers,
+  mentionQuery,
+} from "./features/mentions";
 import "./features/features.css";
 import {
   type AgentDetail,
@@ -53,7 +59,11 @@ function DiscussionsView({ members }: { members: Member[] }) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<FoundMessage[] | null>(null);
+  const [caret, setCaret] = useState(0);
+  const [highlighted, setHighlighted] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
 
   const loadList = useCallback(async () => {
     const found = await backend.discussions();
@@ -114,6 +124,26 @@ function DiscussionsView({ members }: { members: Member[] }) {
     setSelected(result.discussion_id);
     setQuery("");
     setFound(null);
+  };
+
+  const mention = mentionQuery(body, caret);
+  const inDiscussion = useMemo(() => {
+    const allowed = new Set((detail?.members ?? []).map((item) => item.id));
+    return members.filter((item) => allowed.has(item.id));
+  }, [members, detail]);
+  const candidates = mention ? matchMembers(inDiscussion, mention.query) : [];
+  const suggesting = mention !== null && candidates.length > 0 && !dismissed;
+
+  const accept = (member: Member) => {
+    if (!mention) return;
+    const next = completeMention(body, mention, caret, member.name);
+    setBody(next.text);
+    setCaret(next.caret);
+    setHighlighted(0);
+    requestAnimationFrame(() => {
+      composer.current?.focus();
+      composer.current?.setSelectionRange(next.caret, next.caret);
+    });
   };
 
   const awaiting = new Set(detail?.awaiting_ack ?? []);
@@ -226,11 +256,72 @@ function DiscussionsView({ members }: { members: Member[] }) {
               <div ref={bottom} />
             </div>
             <div className="composer">
+              {suggesting ? (
+                <ul className="mention-menu">
+                  {candidates.slice(0, 6).map((member, index) => (
+                    <li key={member.id}>
+                      <button
+                        type="button"
+                        data-active={index === highlighted % candidates.length}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          accept(member);
+                        }}
+                      >
+                        <Avatar name={member.name} />
+                        <span>{member.name}</span>
+                        <span className="row-meta">
+                          {member.type === "human" ? "Human" : member.state}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               <Textarea
+                ref={composer}
                 value={body}
                 placeholder="Write a message. Use @Name to notify a Member."
-                onChange={(event) => setBody(event.target.value)}
+                onChange={(event) => {
+                  setBody(event.target.value);
+                  setCaret(event.target.selectionStart ?? 0);
+                  setHighlighted(0);
+                  setDismissed(false);
+                }}
+                onSelect={(event) =>
+                  setCaret(event.currentTarget.selectionStart ?? 0)
+                }
                 onKeyDown={(event) => {
+                  if (suggesting) {
+                    const size = candidates.length;
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setHighlighted((current) => (current + 1) % size);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setHighlighted((current) => (current - 1 + size) % size);
+                      return;
+                    }
+                    if (event.key === "Tab" || event.key === "Enter") {
+                      if (
+                        event.key === "Enter" &&
+                        (event.metaKey || event.ctrlKey)
+                      ) {
+                        // fall through to send
+                      } else {
+                        event.preventDefault();
+                        accept(candidates[highlighted % size]);
+                        return;
+                      }
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setDismissed(true);
+                      return;
+                    }
+                  }
                   if (
                     event.key === "Enter" &&
                     (event.metaKey || event.ctrlKey)

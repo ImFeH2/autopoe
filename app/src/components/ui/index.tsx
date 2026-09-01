@@ -2,6 +2,7 @@ import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
+  Ref,
   TextareaHTMLAttributes,
 } from "react";
 import "./ui.css";
@@ -40,10 +41,14 @@ export function Input({
 
 export function Textarea({
   className,
+  ref,
   ...rest
-}: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  ref?: Ref<HTMLTextAreaElement>;
+}) {
   return (
     <textarea
+      ref={ref}
       className={className ? `field ${className}` : "field"}
       {...rest}
     />
