@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from huddol.adapters.sqlite.store import LockedConnection, first
 from huddol.core.errors import DomainError
 from huddol.core.todo import Todo, TodoStatus
-from huddol.ports.agent import AgentRun
+from huddol.ports.agent import AgentRun, TurnEffect
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_todos (
@@ -34,6 +34,15 @@ CREATE TABLE IF NOT EXISTS reminded (
     message_id INTEGER NOT NULL,
     first_reminded_at TEXT NOT NULL,
     PRIMARY KEY (agent_id, discussion_id, message_id)
+);
+CREATE TABLE IF NOT EXISTS run_effects (
+    agent_id INTEGER NOT NULL,
+    sequence INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    tool TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (agent_id, sequence, ordinal)
 );
 """
 
@@ -224,6 +233,52 @@ class SqliteAgentStore:
             (agent_id, limit),
         )
         return tuple(self._run(row) for row in rows)
+
+    def record_effect(
+        self, agent_id: int, sequence: int, tool: str, summary: str
+    ) -> None:
+        with self._db:
+            row = first(
+                self._db.execute(
+                    "SELECT COALESCE(MAX(ordinal), 0) AS last FROM run_effects"
+                    " WHERE agent_id = ? AND sequence = ?",
+                    (agent_id, sequence),
+                )
+            )
+            ordinal = (int(row["last"]) if row is not None else 0) + 1
+            self._db.execute(
+                "INSERT INTO run_effects (agent_id, sequence, ordinal, tool, summary,"
+                " created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (agent_id, sequence, ordinal, tool, summary, self._now()),
+            )
+
+    def effects(
+        self, agent_id: int, *, sequences: Sequence[int] = ()
+    ) -> tuple[TurnEffect, ...]:
+        if sequences:
+            placeholders = ",".join("?" for _ in sequences)
+            rows = self._db.execute(
+                "SELECT sequence, ordinal, tool, summary, created_at FROM run_effects"
+                f" WHERE agent_id = ? AND sequence IN ({placeholders})"
+                " ORDER BY sequence DESC, ordinal",
+                (agent_id, *sequences),
+            )
+        else:
+            rows = self._db.execute(
+                "SELECT sequence, ordinal, tool, summary, created_at FROM run_effects"
+                " WHERE agent_id = ? ORDER BY sequence DESC, ordinal",
+                (agent_id,),
+            )
+        return tuple(
+            TurnEffect(
+                int(row["sequence"]),
+                int(row["ordinal"]),
+                str(row["tool"]),
+                str(row["summary"]),
+                str(row["created_at"]),
+            )
+            for row in rows
+        )
 
     def mark_interrupted(self) -> int:
         with self._db:

@@ -32,16 +32,31 @@ class Dependencies:
     memory_tree_for: Any
 
 
+@dataclass(frozen=True)
+class TurnBinding:
+    agent_id: int
+    sequence: int
+
+
 class AgentTools:
     def __init__(
         self,
         deps: Dependencies,
         actor: Actor,
         authorizer: Authorizer | None = None,
+        turn: TurnBinding | None = None,
     ) -> None:
         self._deps = deps
         self._actor = actor
         self._auth = authorizer or Authorizer()
+        self._turn = turn
+
+    def _record(self, tool: str, summary: str) -> None:
+        if self._turn is None:
+            return
+        self._deps.history.record_effect(
+            self._turn.agent_id, self._turn.sequence, tool, summary
+        )
 
     def _check(self, capability: str, target: object = None) -> None:
         self._auth.check(self._actor, capability, target)
@@ -227,6 +242,11 @@ class AgentTools:
             discussion_id, self._actor.member_id, validated
         )
         self._deps.store.set_watermark(discussion_id, self._actor.member_id, message.id)
+        self._record(
+            "send",
+            f"Discussion {discussion_id}: message {message.id}"
+            f" ({len(validated)} characters)",
+        )
         return {
             "discussion_id": message.discussion_id,
             "id": message.id,
@@ -246,6 +266,7 @@ class AgentTools:
         acked = self._deps.store.ack(
             discussion_id, list(message_ids), self._actor.member_id
         )
+        self._record("ack", f"Discussion {discussion_id}: {acked} acknowledged")
         return {"discussion_id": discussion_id, "acked": acked}
 
     def search_messages(
@@ -283,6 +304,7 @@ class AgentTools:
     ) -> dict[str, Any]:
         self._check("run")
         result = self._deps.sandbox.run(list(argv), cwd=cwd, timeout=timeout)
+        self._record("run", f"{' '.join(argv)} exited {result.exit_code}")
         return {
             "exit_code": result.exit_code,
             "stdout": result.stdout,
@@ -301,6 +323,7 @@ class AgentTools:
         result = self._deps.sandbox.edit(
             path, old_text, new_text, replace_all=replace_all
         )
+        self._record("edit", f"{result.path} ({result.replacements} replaced)")
         return {
             "path": result.path,
             "diff": result.diff,
@@ -362,11 +385,13 @@ class AgentTools:
     ) -> dict[str, Any]:
         self._check("memory.write", path)
         entry = self._memory().write(path, content, expected_hash=expected_hash)
+        self._record("memory.write", entry.path)
         return {"path": entry.path, "hash": entry.content_hash}
 
     def delete_memory(self, path: str) -> dict[str, Any]:
         self._check("memory.delete", path)
         self._memory().delete(path)
+        self._record("memory.delete", path)
         return {"path": path, "deleted": True}
 
     def _library(self) -> Library:
@@ -402,16 +427,19 @@ class AgentTools:
                 "current_hash": digest,
                 "current_content": current,
             }
+        self._record("library.write", entry.path)
         return {"path": entry.path, "hash": entry.content_hash}
 
     def delete_library(self, path: str) -> dict[str, Any]:
         self._check("library.delete", path)
         self._library().delete(path)
+        self._record("library.delete", path)
         return {"path": path, "deleted": True}
 
     def move_library(self, source: str, destination: str) -> dict[str, Any]:
         self._check("library.move", source)
         entry = self._library().move(source, destination)
+        self._record("library.move", f"{source} to {entry.path}")
         return {"path": entry.path, "hash": entry.content_hash}
 
     def _history(self) -> History:

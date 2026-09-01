@@ -18,7 +18,7 @@ from huddol.runtime.reminder import (
 )
 from huddol.services.memory import Memory
 from huddol.services.todo import Todos
-from huddol.tools import AgentTools, Dependencies
+from huddol.tools import AgentTools, Dependencies, TurnBinding
 from huddol.tools.authorize import Actor, Authorizer
 
 logger = logging.getLogger("huddol.runtime")
@@ -120,8 +120,10 @@ class Scheduler:
             raise DomainError("not_found", f"Member {agent_id} does not exist")
         return self.tools_for_actor(Actor(agent_id, member.is_agent))
 
-    def tools_for_actor(self, actor: Actor) -> AgentTools:
-        return AgentTools(self._deps, actor, self._authorizer)
+    def tools_for_actor(
+        self, actor: Actor, turn: TurnBinding | None = None
+    ) -> AgentTools:
+        return AgentTools(self._deps, actor, self._authorizer, turn)
 
     @property
     def sandbox(self) -> Sandbox:
@@ -179,7 +181,12 @@ class Scheduler:
         status = "completed"
         error: str | None = None
         try:
-            outcome = self._runner.run(request, self.tools_for(agent_id))
+            outcome = self._runner.run(
+                request,
+                self.tools_for_actor(
+                    Actor(agent_id, True), TurnBinding(agent_id, run.sequence)
+                ),
+            )
             if outcome.error:
                 status = "failed"
                 error = outcome.error

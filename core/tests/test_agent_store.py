@@ -110,3 +110,29 @@ def test_settings_round_trip_and_write_directories(
 
     agent_store.set_write_directories(["/workspace/app", "/tmp", "/workspace/app"])
     assert agent_store.write_directories() == ("/workspace/app", "/tmp")
+
+
+def test_effects_are_numbered_per_turn_and_read_back_in_order(
+    agent_store: SqliteAgentStore,
+) -> None:
+    agent_store.start_run(AGENT)
+    agent_store.record_effect(AGENT, 1, "run", "pytest exited 0")
+    agent_store.record_effect(AGENT, 1, "send", "Discussion 2: message 9")
+    agent_store.start_run(AGENT)
+    agent_store.record_effect(AGENT, 2, "ack", "Discussion 2: 1 acknowledged")
+
+    everything = agent_store.effects(AGENT)
+    assert [(item.sequence, item.ordinal, item.tool) for item in everything] == [
+        (2, 1, "ack"),
+        (1, 1, "run"),
+        (1, 2, "send"),
+    ]
+
+    only_first = agent_store.effects(AGENT, sequences=[1])
+    assert [item.tool for item in only_first] == ["run", "send"]
+
+
+def test_effects_are_scoped_to_one_agent(agent_store: SqliteAgentStore) -> None:
+    agent_store.record_effect(AGENT, 1, "send", "mine")
+    agent_store.record_effect(AGENT + 1, 1, "send", "theirs")
+    assert [item.summary for item in agent_store.effects(AGENT)] == ["mine"]

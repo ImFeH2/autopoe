@@ -5,6 +5,7 @@ from typing import Any
 from huddol.adapters.jsonl.protocol import Dispatcher
 from huddol.adapters.model.config import ModelConfig
 from huddol.core.errors import DomainError
+from huddol.core.turn import idle_streak
 from huddol.runtime.scheduler import Scheduler
 from huddol.tools import AgentTools
 from huddol.tools.authorize import Actor
@@ -170,10 +171,28 @@ class Api:
         def agent_detail(params: dict[str, Any]) -> Any:
             agent_id = int(params["agent_id"])
             tools = self._scheduler.tools_for_actor(Actor(agent_id, True))
+            runs = self._scheduler.history.runs(agent_id, limit=30)
+            effects = self._scheduler.history.effects(
+                agent_id, sequences=[run.sequence for run in runs]
+            )
+            produced: dict[int, list[dict[str, Any]]] = {}
+            for effect in effects:
+                produced.setdefault(effect.sequence, []).append(
+                    {"tool": effect.tool, "summary": effect.summary}
+                )
             return {
                 "id": agent_id,
                 "todos": tools.list_todos(),
                 "memory": tools.list_memory(),
+                "idle_streak": idle_streak(
+                    [
+                        (
+                            run.status,
+                            [item["tool"] for item in produced.get(run.sequence, [])],
+                        )
+                        for run in runs
+                    ]
+                ),
                 "runs": [
                     {
                         "sequence": run.sequence,
@@ -182,8 +201,9 @@ class Api:
                         "completed_at": run.completed_at,
                         "usage": run.usage_json,
                         "error": run.error,
+                        "effects": produced.get(run.sequence, []),
                     }
-                    for run in self._scheduler.history.runs(agent_id, limit=30)
+                    for run in runs
                 ],
             }
 

@@ -9,7 +9,7 @@ from huddol.adapters.sandbox.native import NativeSandbox
 from huddol.adapters.sqlite.agent import SqliteAgentStore
 from huddol.adapters.sqlite.store import SqliteStore
 from huddol.core.errors import DomainError
-from huddol.tools import AgentTools, Dependencies
+from huddol.tools import AgentTools, Dependencies, TurnBinding
 from huddol.tools.authorize import Actor, Authorizer
 
 HUMAN = 1
@@ -216,3 +216,42 @@ def test_awaiting_ack_only_covers_the_discussion_you_read(world) -> None:
 
     assert human.read_discussion(first["id"])["awaiting_ack"] == [1]
     assert human.read_discussion(second["id"])["awaiting_ack"] == [1]
+
+
+def test_a_turn_records_what_it_produced(world) -> None:
+    tools = tools_for(world, MAIN, turn=TurnBinding(MAIN, 1))
+    discussion = tools.create_discussion("Work", [OTHER])["id"]
+    sent = tools.send_message(discussion, "Starting now")["id"]
+    tools.run(["echo", "hi"])
+    tools.write_library("notes.md", "content")
+
+    recorded = world.history.effects(MAIN, sequences=[1])
+    assert [item.tool for item in recorded] == [
+        "send",
+        "run",
+        "library.write",
+    ]
+    assert str(sent) in recorded[0].summary
+
+
+def test_tools_outside_a_turn_record_nothing(world) -> None:
+    tools = tools_for(world, MAIN)
+    discussion = tools.create_discussion("Work", [OTHER])["id"]
+    tools.send_message(discussion, "Starting now")
+    assert world.history.effects(MAIN) == ()
+
+
+def test_an_acknowledging_turn_is_not_counted_as_productive(world) -> None:
+    from huddol.core.turn import is_productive
+
+    author = tools_for(world, OTHER)
+    discussion = author.create_discussion("Work", [MAIN])["id"]
+    message = author.send_message(discussion, "@Main please look")["id"]
+
+    tools = tools_for(world, MAIN, turn=TurnBinding(MAIN, 1))
+    tools.read_discussion(discussion, message)
+    tools.ack(discussion, [message])
+
+    recorded = world.history.effects(MAIN, sequences=[1])
+    assert [item.tool for item in recorded] == ["ack"]
+    assert not is_productive([item.tool for item in recorded])

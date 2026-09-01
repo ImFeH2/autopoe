@@ -265,6 +265,31 @@ def test_agent_detail_reports_todos_and_runs(server) -> None:
     assert detail["runs"][0]["status"] == "completed"
 
 
+def test_agent_detail_reports_each_turn_output_and_the_idle_streak(server) -> None:
+    dispatcher, output, deps = server
+    agent = call(dispatcher, output, "organization.create_agent", name="Main")["result"]
+    agent_id = agent["id"]
+
+    productive = deps.history.start_run(agent_id)
+    deps.history.record_effect(agent_id, productive.sequence, "send", "message 4")
+    deps.history.finish_run(
+        agent_id, productive.sequence, status="completed", messages_json="[]"
+    )
+    for _ in range(2):
+        spinning = deps.history.start_run(agent_id)
+        deps.history.record_effect(agent_id, spinning.sequence, "ack", "1 acknowledged")
+        deps.history.finish_run(
+            agent_id, spinning.sequence, status="completed", messages_json="[]"
+        )
+
+    detail = call(dispatcher, output, "agent.detail", agent_id=agent_id)["result"]
+    assert detail["idle_streak"] == 2
+    assert detail["runs"][0]["effects"] == [
+        {"tool": "ack", "summary": "1 acknowledged"}
+    ]
+    assert detail["runs"][2]["effects"] == [{"tool": "send", "summary": "message 4"}]
+
+
 def test_library_round_trips_over_the_protocol(server) -> None:
     dispatcher, output, _ = server
     written = call(

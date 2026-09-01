@@ -20,6 +20,15 @@ class AgentRun:
     error: str | None
 
 
+@dataclass(frozen=True)
+class TurnEffect:
+    sequence: int
+    ordinal: int
+    tool: str
+    summary: str
+    created_at: str
+
+
 class TodoStore(Protocol):
     def list_todos(self, agent_id: int) -> tuple[Todo, ...]: ...
 
@@ -60,6 +69,14 @@ class HistoryStore(Protocol):
     def latest_messages(self, agent_id: int) -> str: ...
 
     def runs(self, agent_id: int, *, limit: int = 50) -> tuple[AgentRun, ...]: ...
+
+    def record_effect(
+        self, agent_id: int, sequence: int, tool: str, summary: str
+    ) -> None: ...
+
+    def effects(
+        self, agent_id: int, *, sequences: Sequence[int] = ()
+    ) -> tuple[TurnEffect, ...]: ...
 
     def mark_interrupted(self) -> int: ...
 
