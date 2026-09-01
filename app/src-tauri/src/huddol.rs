@@ -1,5 +1,4 @@
 use std::{
-    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -18,25 +17,21 @@ use tauri_plugin_shell::{
 };
 
 const HUDDOL_BINARY: &str = "huddol";
-const HUDDOL_DEVELOPMENT_PYTHON: &str = "HUDDOL_DEVELOPMENT_PYTHON";
+const HUDDOL_CORE_PROJECT: &str = "../../core";
 const SHUTDOWN_ID: u64 = u64::MAX;
 
 #[derive(Debug, PartialEq)]
 enum HuddolExecutable {
-    Development(PathBuf),
+    Development,
     Sidecar,
 }
 
-fn resolve_huddol_executable(
-    is_dev: bool,
-    development_python: Option<PathBuf>,
-) -> Result<HuddolExecutable> {
+fn resolve_huddol_executable(is_dev: bool) -> HuddolExecutable {
     if is_dev {
-        return development_python
-            .map(HuddolExecutable::Development)
-            .context("Huddol development Python is not configured");
+        HuddolExecutable::Development
+    } else {
+        HuddolExecutable::Sidecar
     }
-    Ok(HuddolExecutable::Sidecar)
 }
 
 type SharedChild = Arc<Mutex<Option<CommandChild>>>;
@@ -108,26 +103,16 @@ impl HuddolProcess {
             json!({"development": tauri::is_dev()}),
         );
         let shell = app.shell();
-        let executable = match resolve_huddol_executable(
-            tauri::is_dev(),
-            std::env::var_os(HUDDOL_DEVELOPMENT_PYTHON).map(PathBuf::from),
-        ) {
-            Ok(executable) => executable,
-            Err(error) => {
-                self.diagnostics.record(
-                    "ERROR",
-                    "bridge.process.start_failed",
-                    json!({
-                        "stage": "executable_resolution",
-                        "error_type": "configuration_error",
-                    }),
-                );
-                return Err(error);
-            }
-        };
-        let (command, executable_kind) = match executable {
-            HuddolExecutable::Development(python) => (
-                shell.command(python).args(["-m", "huddol"]),
+        let (command, executable_kind) = match resolve_huddol_executable(tauri::is_dev()) {
+            HuddolExecutable::Development => (
+                shell.command("uv").args([
+                    "run",
+                    "--project",
+                    HUDDOL_CORE_PROJECT,
+                    "python",
+                    "-m",
+                    "huddol",
+                ]),
                 "development_python",
             ),
             HuddolExecutable::Sidecar => {
@@ -604,17 +589,11 @@ mod tests {
 
     #[test]
     fn selects_development_python_only_for_tauri_dev() {
-        let python = PathBuf::from("/tmp/huddol-python");
-
         assert_eq!(
-            resolve_huddol_executable(true, Some(python.clone())).unwrap(),
-            HuddolExecutable::Development(python)
+            resolve_huddol_executable(true),
+            HuddolExecutable::Development
         );
-        assert!(resolve_huddol_executable(true, None).is_err());
-        assert_eq!(
-            resolve_huddol_executable(false, Some(PathBuf::from("ignored"))).unwrap(),
-            HuddolExecutable::Sidecar
-        );
+        assert_eq!(resolve_huddol_executable(false), HuddolExecutable::Sidecar);
     }
 
     #[test]
