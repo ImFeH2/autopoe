@@ -474,15 +474,71 @@ function LibraryView() {
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState("");
+  const [loaded, setLoaded] = useState("");
+  const [hash, setHash] = useState<string | undefined>(undefined);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
 
-  useEffect(() => {
-    void backend.library().then(setEntries);
+  const reload = useCallback(async () => {
+    setEntries(await backend.library());
   }, []);
 
   useEffect(() => {
-    if (selected)
-      void backend.readLibrary(selected).then((doc) => setContent(doc.content));
+    void reload();
+  }, [reload]);
+
+  useEffect(() => {
+    if (!selected) return;
+    void backend.readLibrary(selected).then((doc) => {
+      setContent(doc.content);
+      setLoaded(doc.content);
+      setHash(doc.hash);
+    });
   }, [selected]);
+
+  const dirty = selected !== null && content !== loaded;
+
+  const save = async () => {
+    if (selected === null) return;
+    setStatus(null);
+    const result = await backend.writeLibrary(selected, content, hash);
+    if (result.conflict) {
+      setStatus("Someone else changed this document. Reopen it to see theirs.");
+      return;
+    }
+    setHash(result.hash);
+    setLoaded(content);
+    setStatus("Saved");
+    await reload();
+  };
+
+  const create = async () => {
+    const path = draft.trim();
+    if (!path) return;
+    await backend.writeLibrary(path, "");
+    setDraft("");
+    await reload();
+    setSelected(path);
+  };
+
+  const rename = async () => {
+    if (selected === null) return;
+    const destination = window.prompt("New path", selected);
+    if (!destination || destination === selected) return;
+    const moved = await backend.moveLibrary(selected, destination);
+    await reload();
+    setSelected(moved.path);
+  };
+
+  const remove = async () => {
+    if (selected === null) return;
+    if (!window.confirm(`Delete ${selected}?`)) return;
+    await backend.deleteLibrary(selected);
+    setSelected(null);
+    setContent("");
+    setLoaded("");
+    await reload();
+  };
 
   return (
     <>
@@ -500,12 +556,54 @@ function LibraryView() {
             />
           ))
         )}
+        <div className="composer">
+          <Input
+            value={draft}
+            placeholder="New document path"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && void create()}
+          />
+          <Button onClick={create} disabled={!draft.trim()}>
+            Create document
+          </Button>
+        </div>
       </Panel>
-      <Main title={selected ?? "Select a document"}>
+      <Main
+        title={selected ?? "Select a document"}
+        banner={status}
+        actions={
+          selected ? (
+            <>
+              <Button size="sm" onClick={rename}>
+                Rename
+              </Button>
+              <Button size="sm" variant="danger" onClick={remove}>
+                Delete
+              </Button>
+            </>
+          ) : undefined
+        }
+      >
         {selected ? (
-          <div className="messages">
-            <div className="message-text">{content}</div>
-          </div>
+          <>
+            <div className="messages">
+              <Textarea
+                className="library-editor"
+                value={content}
+                onChange={(event) => setContent(event.target.value)}
+              />
+            </div>
+            <div className="composer">
+              <div className="composer-actions">
+                <span className="composer-hint">
+                  Agents share this document.
+                </span>
+                <Button variant="primary" onClick={save} disabled={!dirty}>
+                  Save
+                </Button>
+              </div>
+            </div>
+          </>
         ) : (
           <EmptyState
             title="Nothing selected"
