@@ -4,9 +4,9 @@
   "version": "../package.json",
   "identifier": "im.feh2.huddol",
   "build": {
-    "beforeDevCommand": "pnpm dev:desktop",
+    "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build:desktop",
+    "beforeBuildCommand": "pnpm build:frontend",
     "frontendDist": "../dist"
   },
   "app": {
