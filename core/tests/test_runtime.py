@@ -322,3 +322,62 @@ def test_starting_twice_keeps_a_single_loop(world) -> None:
     scheduler.start(poll_seconds=0.01)
     assert scheduler._loop is first
     scheduler.stop()
+
+
+def spend(world, agent_id: int, tokens: int) -> None:
+    run = world.history.start_run(agent_id)
+    world.history.finish_run(
+        agent_id,
+        run.sequence,
+        status="completed",
+        messages_json="[]",
+        usage_json=json.dumps({"input_tokens": tokens, "output_tokens": 0}),
+    )
+
+
+def test_an_agent_over_its_token_limit_is_not_scheduled(world) -> None:
+    mention(world)
+    world.settings.set_settings("limits", {"agent_token_limit": 500})
+    scheduler = Scheduler(world, RecordingRunner())
+    assert scheduler.runnable_agents() == (MAIN,)
+
+    spend(world, MAIN, 500)
+    assert scheduler.over_token_limit(MAIN)
+    assert scheduler.runnable_agents() == ()
+
+
+def test_raising_the_limit_lets_the_agent_run_again(world) -> None:
+    mention(world)
+    world.settings.set_settings("limits", {"agent_token_limit": 100})
+    spend(world, MAIN, 400)
+    scheduler = Scheduler(world, RecordingRunner())
+    assert scheduler.runnable_agents() == ()
+
+    world.settings.set_settings("limits", {"agent_token_limit": 1000})
+    assert scheduler.runnable_agents() == (MAIN,)
+
+
+def test_no_limit_configured_means_no_ceiling(world) -> None:
+    mention(world)
+    spend(world, MAIN, 10_000_000)
+    scheduler = Scheduler(world, RecordingRunner())
+    assert scheduler.token_limit() == 0
+    assert not scheduler.over_token_limit(MAIN)
+    assert scheduler.runnable_agents() == (MAIN,)
+
+
+def test_a_malformed_limit_is_treated_as_no_limit(world) -> None:
+    mention(world)
+    world.settings.set_settings("limits", {"agent_token_limit": "not a number"})
+    scheduler = Scheduler(world, RecordingRunner())
+    assert scheduler.token_limit() == 0
+    assert scheduler.runnable_agents() == (MAIN,)
+
+
+def test_the_limit_is_per_agent_not_shared(world) -> None:
+    mention(world)
+    world.settings.set_settings("limits", {"agent_token_limit": 500})
+    spend(world, HELPER, 900)
+    scheduler = Scheduler(world, RecordingRunner())
+    assert scheduler.over_token_limit(HELPER)
+    assert scheduler.runnable_agents() == (MAIN,)

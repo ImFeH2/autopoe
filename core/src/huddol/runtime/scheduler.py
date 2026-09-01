@@ -105,13 +105,32 @@ class Scheduler:
                 continue
             thread.join(timeout=5)
 
+    def token_limit(self) -> int:
+        limits = self.settings.get_settings("limits") or {}
+        value = limits.get("agent_token_limit", 0)
+        if not isinstance(value, int | float | str):
+            return 0
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+    def over_token_limit(self, agent_id: int) -> bool:
+        limit = self.token_limit()
+        if limit <= 0:
+            return False
+        return self.history.usage_total(agent_id)["total_tokens"] >= limit
+
     def runnable_agents(self) -> tuple[int, ...]:
         found: list[int] = []
         for member in self.store.list_members():
             if not member.is_agent or member.state != "idle":
                 continue
-            if self.store.pending(member.id):
-                found.append(member.id)
+            if not self.store.pending(member.id):
+                continue
+            if self.over_token_limit(member.id):
+                continue
+            found.append(member.id)
         return tuple(found)
 
     def tools_for(self, agent_id: int) -> AgentTools:

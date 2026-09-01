@@ -136,3 +136,38 @@ def test_effects_are_scoped_to_one_agent(agent_store: SqliteAgentStore) -> None:
     agent_store.record_effect(AGENT, 1, "send", "mine")
     agent_store.record_effect(AGENT + 1, 1, "send", "theirs")
     assert [item.summary for item in agent_store.effects(AGENT)] == ["mine"]
+
+
+def test_usage_totals_add_up_across_turns(agent_store: SqliteAgentStore) -> None:
+    import json as _json
+
+    for inbound, outbound in ((100, 20), (300, 50)):
+        run = agent_store.start_run(AGENT)
+        agent_store.finish_run(
+            AGENT,
+            run.sequence,
+            status="completed",
+            messages_json="[]",
+            usage_json=_json.dumps(
+                {
+                    "input_tokens": inbound,
+                    "output_tokens": outbound,
+                    "cache_read_tokens": 5,
+                    "requests": 1,
+                }
+            ),
+        )
+
+    total = agent_store.usage_total(AGENT)
+    assert total["input_tokens"] == 400
+    assert total["output_tokens"] == 70
+    assert total["total_tokens"] == 470
+    assert total["requests"] == 2
+
+
+def test_turns_without_usage_do_not_break_the_total(
+    agent_store: SqliteAgentStore,
+) -> None:
+    run = agent_store.start_run(AGENT)
+    agent_store.finish_run(AGENT, run.sequence, status="failed", messages_json="[]")
+    assert agent_store.usage_total(AGENT)["total_tokens"] == 0

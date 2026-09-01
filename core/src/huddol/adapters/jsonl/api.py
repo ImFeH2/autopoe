@@ -33,10 +33,17 @@ class Api:
 
         def organization_get(params: dict[str, Any]) -> Any:
             del params
+            members = self._human().list_members()
+            for member in members:
+                if member["type"] != "agent":
+                    continue
+                usage = self._scheduler.history.usage_total(int(member["id"]))
+                member["tokens"] = usage["total_tokens"]
             return {
                 "id": 1,
-                "members": self._human().list_members(),
+                "members": members,
                 "human_id": HUMAN_ID,
+                "token_limit": self._scheduler.token_limit(),
             }
 
         def create_agent(params: dict[str, Any]) -> Any:
@@ -184,6 +191,9 @@ class Api:
                 "id": agent_id,
                 "todos": tools.list_todos(),
                 "memory": tools.list_memory(),
+                "usage": self._scheduler.history.usage_total(agent_id),
+                "token_limit": self._scheduler.token_limit(),
+                "over_token_limit": self._scheduler.over_token_limit(agent_id),
                 "idle_streak": idle_streak(
                     [
                         (

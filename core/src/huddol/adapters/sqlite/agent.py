@@ -280,6 +280,35 @@ class SqliteAgentStore:
             for row in rows
         )
 
+    def usage_total(self, agent_id: int) -> dict[str, int]:
+        row = first(
+            self._db.execute(
+                "SELECT"
+                " COALESCE(SUM(json_extract(usage_json, '$.input_tokens')), 0) AS input,"
+                " COALESCE(SUM(json_extract(usage_json, '$.output_tokens')), 0) AS output,"
+                " COALESCE(SUM(json_extract(usage_json, '$.cache_read_tokens')), 0) AS cached,"
+                " COALESCE(SUM(json_extract(usage_json, '$.requests')), 0) AS requests"
+                " FROM agent_runs WHERE agent_id = ? AND usage_json IS NOT NULL",
+                (agent_id,),
+            )
+        )
+        if row is None:
+            return {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "requests": 0,
+                "total_tokens": 0,
+            }
+        stored = {
+            "input_tokens": int(row["input"]),
+            "output_tokens": int(row["output"]),
+            "cache_read_tokens": int(row["cached"]),
+            "requests": int(row["requests"]),
+        }
+        stored["total_tokens"] = stored["input_tokens"] + stored["output_tokens"]
+        return stored
+
     def mark_interrupted(self) -> int:
         with self._db:
             cursor = self._db.execute_cursor(
