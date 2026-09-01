@@ -179,3 +179,42 @@ label.form-row > .field {
   font-weight: var(--weight-normal);
   color: rgb(var(--text-base));
 }
+
+.detail-turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgb(var(--border-base));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--bg-base));
+}
+
+.detail-turn .detail-item {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.detail-effects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  list-style: none;
+  border-left: 2px solid rgb(var(--border-base));
+}
+
+.detail-effects li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.detail-effects .row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

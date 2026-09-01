@@ -285,9 +285,11 @@ def test_agent_detail_reports_each_turn_output_and_the_idle_streak(server) -> No
     detail = call(dispatcher, output, "agent.detail", agent_id=agent_id)["result"]
     assert detail["idle_streak"] == 2
     assert detail["runs"][0]["effects"] == [
-        {"tool": "ack", "summary": "1 acknowledged"}
+        {"ordinal": 1, "tool": "ack", "summary": "1 acknowledged"}
     ]
-    assert detail["runs"][2]["effects"] == [{"tool": "send", "summary": "message 4"}]
+    assert detail["runs"][2]["effects"] == [
+        {"ordinal": 1, "tool": "send", "summary": "message 4"}
+    ]
 
 
 def test_library_round_trips_over_the_protocol(server) -> None:

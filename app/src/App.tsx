@@ -259,7 +259,13 @@ function MembersView({
           <Row
             key={item.id}
             title={item.name}
-            meta={item.type === "human" ? "Human" : item.state}
+            meta={
+              item.type === "human"
+                ? "Human"
+                : item.tokens
+                  ? `${item.state} · ${item.tokens.toLocaleString()} tokens`
+                  : item.state
+            }
             leading={<Avatar name={item.name} />}
             trailing={
               item.type === "agent" ? (
@@ -344,19 +350,69 @@ function MembersView({
               </ul>
             </section>
             <section>
+              <h3>Spend</h3>
+              <ul className="detail-list">
+                <li className="detail-item">
+                  <span>Tokens used</span>
+                  <span className="row-meta">
+                    {detail.usage.total_tokens.toLocaleString()}
+                    {detail.token_limit > 0
+                      ? ` of ${detail.token_limit.toLocaleString()}`
+                      : ""}
+                  </span>
+                </li>
+                <li className="detail-item">
+                  <span>Model requests</span>
+                  <span className="row-meta">{detail.usage.requests}</span>
+                </li>
+                {detail.over_token_limit ? (
+                  <li className="detail-item">
+                    <Badge tone="pending">
+                      Limit reached, no longer scheduled
+                    </Badge>
+                  </li>
+                ) : null}
+              </ul>
+            </section>
+            <section>
               <h3>Recent turns</h3>
+              {detail.idle_streak >= 3 ? (
+                <p className="row-meta">
+                  The last {detail.idle_streak} turns acknowledged work without
+                  sending, editing or running anything.
+                </p>
+              ) : null}
               <ul className="detail-list">
                 {detail.runs.slice(0, 10).map((run) => (
-                  <li key={run.sequence} className="detail-item">
-                    <span className="mono">#{run.sequence}</span>
-                    <span className="row-meta">
-                      {formatTime(run.started_at)}
-                    </span>
-                    <Badge
-                      tone={run.status === "completed" ? "default" : "pending"}
-                    >
-                      {run.status}
-                    </Badge>
+                  <li key={run.sequence} className="detail-turn">
+                    <div className="detail-item">
+                      <span className="mono">#{run.sequence}</span>
+                      <span className="row-meta">
+                        {formatTime(run.started_at)}
+                      </span>
+                      <Badge
+                        tone={
+                          run.status === "completed" ? "default" : "pending"
+                        }
+                      >
+                        {run.status}
+                      </Badge>
+                    </div>
+                    {run.effects.length === 0 ? (
+                      <span className="row-meta">Produced nothing</span>
+                    ) : (
+                      <ul className="detail-effects">
+                        {run.effects.map((effect) => (
+                          <li key={`${run.sequence}-${effect.ordinal}`}>
+                            <span className="mono">{effect.tool}</span>
+                            <span className="row-meta">{effect.summary}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {run.error ? (
+                      <span className="row-meta">{run.error}</span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -425,6 +481,7 @@ function SettingsView() {
   const [directories, setDirectories] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [tokenLimit, setTokenLimit] = useState("0");
   const [status, setStatus] = useState<string | null>(null);
   const [unusable, setUnusable] = useState<{ path: string; reason: string }[]>(
     [],
@@ -434,6 +491,8 @@ function SettingsView() {
     setModel(await backend.settings("model"));
     const execution = await backend.settings("execution");
     setDirectories((execution.write_directories as string[]) ?? []);
+    const limits = await backend.settings("limits");
+    setTokenLimit(String(limits.agent_token_limit ?? 0));
   }, []);
 
   useEffect(() => {
@@ -485,6 +544,14 @@ function SettingsView() {
       <Panel title="Settings">
         <Row title="Model" meta="Provider and credentials" selected />
         <Row title="Execution" meta={`${directories.length} writable`} />
+        <Row
+          title="Limits"
+          meta={
+            Number(tokenLimit) > 0
+              ? `${Number(tokenLimit).toLocaleString()} tokens per Agent`
+              : "No ceiling"
+          }
+        />
       </Panel>
       <Main title="Settings" banner={status}>
         <div className="detail">
@@ -535,6 +602,28 @@ function SettingsView() {
               />
               <Button onClick={addDirectory} disabled={!draft.trim()}>
                 Add
+              </Button>
+            </div>
+          </section>
+          <section>
+            <h3>Limits</h3>
+            <p className="row-meta">
+              An Agent that reaches its ceiling stops being scheduled. Raise the
+              limit to let it continue. Use 0 for no ceiling.
+            </p>
+            <div className="composer-actions">
+              <Input
+                value={tokenLimit}
+                inputMode="numeric"
+                placeholder="Cumulative tokens per Agent"
+                onChange={(event) => setTokenLimit(event.target.value)}
+              />
+              <Button
+                onClick={() =>
+                  save({ agent_token_limit: Number(tokenLimit) || 0 }, "limits")
+                }
+              >
+                Save limit
               </Button>
             </div>
           </section>

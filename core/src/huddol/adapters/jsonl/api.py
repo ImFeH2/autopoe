@@ -185,7 +185,11 @@ class Api:
             produced: dict[int, list[dict[str, Any]]] = {}
             for effect in effects:
                 produced.setdefault(effect.sequence, []).append(
-                    {"tool": effect.tool, "summary": effect.summary}
+                    {
+                        "ordinal": effect.ordinal,
+                        "tool": effect.tool,
+                        "summary": effect.summary,
+                    }
                 )
             return {
                 "id": agent_id,

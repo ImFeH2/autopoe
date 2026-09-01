@@ -144,6 +144,47 @@ describe("Backend", () => {
     ).not.toThrow();
   });
 
+  async function lastSent() {
+    await vi.waitFor(() =>
+      expect(invoke.mock.calls.some(([name]) => name === "send")).toBe(true),
+    );
+    const sent = [...invoke.mock.calls]
+      .reverse()
+      .find(([name]) => name === "send");
+    if (!sent) throw new Error("no send call");
+    return (
+      sent[1] as {
+        message: {
+          id: number;
+          method: string;
+          params: Record<string, unknown>;
+        };
+      }
+    ).message;
+  }
+
+  it("sends the search query under the method the core exposes", async () => {
+    const backend = connected();
+    await backend.connect();
+    const promise = backend.searchMessages("deadline");
+    const { id, method, params } = await lastSent();
+    expect(method).toBe("discussion.search");
+    expect(params).toEqual({ query: "deadline" });
+    reply({ type: "response", id, result: [] });
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it("moves a library document to its destination path", async () => {
+    const backend = connected();
+    await backend.connect();
+    const promise = backend.moveLibrary("old.md", "new.md");
+    const { id, method, params } = await lastSent();
+    expect(method).toBe("library.move");
+    expect(params).toEqual({ path: "old.md", destination: "new.md" });
+    reply({ type: "response", id, result: { path: "new.md" } });
+    await expect(promise).resolves.toMatchObject({ path: "new.md" });
+  });
+
   it("unsubscribing stops delivery", async () => {
     const backend = connected();
     const seen: unknown[] = [];

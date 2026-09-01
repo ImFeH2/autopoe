@@ -5,6 +5,7 @@ export type Member = {
   type: "human" | "agent";
   name: string;
   state: "idle" | "running" | "paused";
+  tokens?: number;
 };
 
 export type DiscussionSummary = {
@@ -40,6 +41,8 @@ export type Todo = {
   detail: string;
 };
 
+export type TurnEffect = { ordinal: number; tool: string; summary: string };
+
 export type AgentRun = {
   sequence: number;
   status: string;
@@ -47,6 +50,15 @@ export type AgentRun = {
   completed_at: string | null;
   usage: string | null;
   error: string | null;
+  effects: TurnEffect[];
+};
+
+export type Usage = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  requests: number;
+  total_tokens: number;
 };
 
 export type AgentDetail = {
@@ -54,6 +66,17 @@ export type AgentDetail = {
   todos: Todo[];
   memory: { path: string; size: number; hash: string }[];
   runs: AgentRun[];
+  usage: Usage;
+  token_limit: number;
+  over_token_limit: boolean;
+  idle_streak: number;
+};
+
+export type FoundMessage = {
+  discussion_id: number;
+  id: number;
+  sender_name: string;
+  body: string;
 };
 
 export type LibraryEntry = { path: string; size: number; hash: string };
@@ -137,9 +160,12 @@ export class Backend {
   }
 
   organization() {
-    return this.call<{ id: number; members: Member[]; human_id: number }>(
-      "organization.get",
-    );
+    return this.call<{
+      id: number;
+      members: Member[];
+      human_id: number;
+      token_limit: number;
+    }>("organization.get");
   }
 
   createAgent(name: string) {
@@ -221,6 +247,10 @@ export class Backend {
     return this.call<{ id: number }>("discussion.delete", { discussion_id });
   }
 
+  searchMessages(query: string) {
+    return this.call<FoundMessage[]>("discussion.search", { query });
+  }
+
   agentDetail(agent_id: number) {
     return this.call<AgentDetail>("agent.detail", { agent_id });
   }
@@ -242,6 +272,14 @@ export class Backend {
       content,
       expected_hash,
     });
+  }
+
+  deleteLibrary(path: string) {
+    return this.call<{ path: string }>("library.delete", { path });
+  }
+
+  moveLibrary(path: string, destination: string) {
+    return this.call<LibraryEntry>("library.move", { path, destination });
   }
 
   settings(section: string) {
