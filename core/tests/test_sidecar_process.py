@@ -71,6 +71,13 @@ def test_the_data_directory_variable_is_honoured(tmp_path: Path) -> None:
     assert (target / "huddol.sqlite3").is_file()
 
 
+def test_the_working_root_is_the_data_directory(tmp_path: Path) -> None:
+    target = tmp_path / "somewhere" / "else"
+    frames, code, stderr = drive(target, [], cwd=tmp_path)
+    assert code == 0, stderr
+    assert events(frames, "ready")[0]["working_directory"] == str(target)
+
+
 def test_shutdown_answers_and_exits_cleanly(tmp_path: Path) -> None:
     frames, code, _ = drive(tmp_path / "data", [])
     assert code == 0

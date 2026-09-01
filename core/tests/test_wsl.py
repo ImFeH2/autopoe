@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from huddol.adapters.sandbox.wsl import (
@@ -137,7 +139,7 @@ def test_wsl_backend_is_used_when_a_distribution_is_available(tmp_path) -> None:
     agent_store.set_settings("execution", {"backend": "wsl"})
     agent_store.set_write_directories(["/workspace/app"])
 
-    sandbox = _build_sandbox(agent_store, probe=WslProbe(DISTRO))
+    sandbox = _build_sandbox(agent_store, tmp_path, probe=WslProbe(DISTRO))
     assert type(sandbox).__name__ == "WslSandbox"
     assert sandbox.write_directories == ("/workspace/app",)
     store.close()
@@ -150,7 +152,7 @@ def test_backend_falls_back_to_native_when_wsl_is_missing(tmp_path) -> None:
     agent_store.set_settings("execution", {"backend": "wsl"})
     agent_store.set_write_directories(["/workspace/app"])
 
-    sandbox = _build_sandbox(agent_store, probe=None)
+    sandbox = _build_sandbox(agent_store, tmp_path, probe=None)
     assert type(sandbox).__name__ == "NativeSandbox"
     store.close()
 
@@ -159,6 +161,7 @@ def test_native_backend_is_chosen_by_default(tmp_path) -> None:
     from huddol.__main__ import _build_sandbox
 
     store, agent_store = _stores(tmp_path)
-    sandbox = _build_sandbox(agent_store, probe=WslProbe(DISTRO))
+    sandbox = _build_sandbox(agent_store, tmp_path, probe=WslProbe(DISTRO))
     assert type(sandbox).__name__ == "NativeSandbox"
+    assert Path(sandbox.root) == tmp_path.resolve()
     store.close()

@@ -19,7 +19,7 @@ def data_directory() -> Path:
     return Path.home() / ".huddol"
 
 
-def _build_sandbox(agent_store: Any, probe: Any = _MISSING) -> Sandbox:
+def _build_sandbox(agent_store: Any, root: Path, probe: Any = _MISSING) -> Sandbox:
     from huddol.adapters.sandbox.native import NativeSandbox
 
     directories = agent_store.write_directories()
@@ -31,7 +31,7 @@ def _build_sandbox(agent_store: Any, probe: Any = _MISSING) -> Sandbox:
         found = probe_wsl() if probe is _MISSING else probe
         if found is not None:
             return WslSandbox("/", directories, found, tolerant=True)
-    return NativeSandbox(Path.cwd(), directories, tolerant=True)
+    return NativeSandbox(root, directories, tolerant=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         if member.is_agent and member.state == "running":
             store.set_agent_state(member.id, "idle")
 
-    sandbox = _build_sandbox(agent_store)
+    sandbox = _build_sandbox(agent_store, directory)
     deps = Dependencies(
         store=store,
         todos=agent_store,
