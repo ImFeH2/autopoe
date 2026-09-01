@@ -218,3 +218,8 @@ label.form-row > .field {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.panel-search {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid rgb(var(--border-base));
+}

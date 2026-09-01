@@ -30,6 +30,7 @@ import {
   backend,
   type DiscussionDetail,
   type DiscussionSummary,
+  type FoundMessage,
   type LibraryEntry,
   type Member,
 } from "./lib/backend";
@@ -50,6 +51,8 @@ function DiscussionsView({ members }: { members: Member[] }) {
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<FoundMessage[] | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
   const loadList = useCallback(async () => {
@@ -98,6 +101,21 @@ function DiscussionsView({ members }: { members: Member[] }) {
     }
   };
 
+  const search = async (text: string) => {
+    setQuery(text);
+    if (!text.trim()) {
+      setFound(null);
+      return;
+    }
+    setFound(await backend.searchMessages(text.trim()));
+  };
+
+  const openResult = async (result: FoundMessage) => {
+    setSelected(result.discussion_id);
+    setQuery("");
+    setFound(null);
+  };
+
   const awaiting = new Set(detail?.awaiting_ack ?? []);
 
   const confirm = async (messageId: number, undo: boolean) => {
@@ -112,7 +130,30 @@ function DiscussionsView({ members }: { members: Member[] }) {
   return (
     <>
       <Panel title="Discussions">
-        {list.length === 0 ? (
+        <div className="panel-search">
+          <Input
+            value={query}
+            placeholder="Search messages"
+            onChange={(event) => void search(event.target.value)}
+          />
+        </div>
+        {found !== null ? (
+          found.length === 0 ? (
+            <EmptyState
+              title="No matches"
+              description={`Nothing for “${query}”.`}
+            />
+          ) : (
+            found.map((result) => (
+              <Row
+                key={`${result.discussion_id}-${result.id}`}
+                title={result.body}
+                meta={result.sender_name}
+                onClick={() => void openResult(result)}
+              />
+            ))
+          )
+        ) : list.length === 0 ? (
           <EmptyState
             title="No discussions yet"
             description="Create one to get started."
