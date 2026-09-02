@@ -30,6 +30,33 @@ export function Button({
   );
 }
 
+type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  size?: "md" | "sm";
+};
+
+export function IconButton({
+  label,
+  size = "md",
+  type = "button",
+  className,
+  children,
+  ...rest
+}: IconButtonProps) {
+  return (
+    <button
+      type={type}
+      className={className ? `icon-button ${className}` : "icon-button"}
+      data-size={size}
+      aria-label={label}
+      title={label}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Input({
   className,
   ...rest
@@ -55,6 +82,42 @@ export function Textarea({
   );
 }
 
+export function SearchField({
+  icon,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement> & { icon: ReactNode }) {
+  return (
+    <div className="search-field">
+      <span className="search-field-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <Input type="search" {...rest} />
+    </div>
+  );
+}
+
+export function Field({
+  label,
+  htmlFor,
+  hint,
+  children,
+}: {
+  label: ReactNode;
+  htmlFor: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="form-field">
+      <label className="form-label" htmlFor={htmlFor}>
+        {label}
+      </label>
+      {children}
+      {hint ? <p className="form-hint">{hint}</p> : null}
+    </div>
+  );
+}
+
 export function Badge({
   tone = "default",
   children,
@@ -69,11 +132,63 @@ export function Badge({
   );
 }
 
-export function StateDot({ state }: { state: "idle" | "running" | "paused" }) {
+export function Chip({
+  tone = "neutral",
+  children,
+}: {
+  tone?: "neutral" | "blue" | "warning" | "danger" | "success";
+  children: ReactNode;
+}) {
+  return (
+    <span className="chip" data-tone={tone}>
+      {children}
+    </span>
+  );
+}
+
+export function CountPill({ children }: { children: ReactNode }) {
+  return <p className="count-pill">{children}</p>;
+}
+
+export function StateDot({
+  state,
+  ping = false,
+}: {
+  state: "idle" | "running" | "paused";
+  ping?: boolean;
+}) {
   const label =
     state === "running" ? "Running" : state === "paused" ? "Paused" : "Idle";
   return (
-    <span className="dot" data-state={state} role="img" aria-label={label} />
+    <span className="dot-wrap">
+      <span className="dot" data-state={state} role="img" aria-label={label} />
+      {ping && state === "running" ? (
+        <span className="dot-ping" aria-hidden="true" />
+      ) : null}
+    </span>
+  );
+}
+
+export function Dot({
+  tone,
+}: {
+  tone: "grey" | "blue" | "green" | "yellow" | "red";
+}) {
+  return <span className="dot" data-tone={tone} />;
+}
+
+export function StatusText({
+  dot,
+  children,
+}: {
+  dot: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <span className="status-text">
+      {dot}
+      {children}
+    </span>
   );
 }
 
@@ -100,10 +215,17 @@ export function initialsFor(name: string): string {
   return (words[0][0] + words[words.length - 1][0]).toUpperCase();
 }
 
-export function Avatar({ name }: { name: string }) {
+export function Avatar({
+  name,
+  size = "md",
+}: {
+  name: string;
+  size?: "xs" | "sm" | "md" | "lg";
+}) {
   return (
     <span
       className="avatar"
+      data-size={size}
       style={{ background: `rgb(${hueFor(name)})` }}
       aria-hidden="true"
     >
@@ -112,13 +234,70 @@ export function Avatar({ name }: { name: string }) {
   );
 }
 
+export function Banner({
+  tone = "info",
+  icon,
+  children,
+  onDismiss,
+}: {
+  tone?: "info" | "success" | "warning" | "danger";
+  icon?: ReactNode;
+  children: ReactNode;
+  onDismiss?: () => void;
+}) {
+  return (
+    <div className="banner" data-tone={tone} role="status">
+      {icon ? (
+        <span className="banner-icon" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
+      <div className="banner-body">{children}</div>
+      {onDismiss ? (
+        <button type="button" className="banner-dismiss" onClick={onDismiss}>
+          Dismiss
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function Meter({
+  value,
+  max,
+  label,
+}: {
+  value: number;
+  max: number;
+  label: string;
+}) {
+  const ratio = max > 0 ? Math.min(1, value / max) : 0;
+  const tone = ratio >= 1 ? "danger" : ratio >= 0.8 ? "warning" : "normal";
+  return (
+    <div className="meter" data-tone={tone}>
+      <meter
+        className="meter-native"
+        aria-label={label}
+        value={value}
+        min={0}
+        max={max}
+      />
+      <span className="meter-fill" style={{ width: `${ratio * 100}%` }} />
+    </div>
+  );
+}
+
+export function Spinner({ label }: { label: string }) {
+  return <span className="spinner" role="status" aria-label={label} />;
+}
+
 export function EmptyState({
   title,
   description,
   action,
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   action?: ReactNode;
 }) {
   return (

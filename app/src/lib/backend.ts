@@ -294,4 +294,15 @@ export class Backend {
   }
 }
 
-export const backend = new Backend();
+const insideTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+// Running the frontend in a plain browser has no Tauri bridge, so development
+// falls back to fixtures. Vite folds import.meta.env.DEV to false for the
+// bundle Tauri ships, which drops the mock and its data entirely. The mock
+// receives this class as an argument instead of importing it: a value import
+// would close a cycle that this top-level await deadlocks on, silently.
+export const backend: Backend =
+  import.meta.env.DEV && !insideTauri
+    ? (await import("./mock")).createMockBackend(Backend)
+    : new Backend();

@@ -1,3 +1,4 @@
+@import "@fontsource-variable/inter";
 @import "./tokens.css";
 
 *,
@@ -14,12 +15,13 @@ body,
 }
 
 body {
-  background: rgb(var(--bg-app));
+  background: rgb(var(--bg-base));
   color: rgb(var(--text-base));
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   font-weight: var(--weight-normal);
-  line-height: 1.5;
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -28,18 +30,29 @@ h1,
 h2,
 h3,
 p,
-figure {
+figure,
+ul,
+ol {
   margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
 }
 
 h1 {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-title);
 }
 
 h2 {
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
 }
 
 h3 {
@@ -52,21 +65,41 @@ input,
 textarea,
 select {
   font: inherit;
+  letter-spacing: inherit;
   color: inherit;
+}
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
 }
 
 a {
   color: rgb(var(--text-primary));
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--blue-500) / 0.45);
+  text-underline-offset: 2px;
+  transition:
+    color var(--duration-fast) linear,
+    text-decoration-color var(--duration-fast) linear;
 }
 
 a:hover {
-  text-decoration: underline;
+  color: rgb(var(--blue-100));
+  text-decoration-color: rgb(var(--blue-100));
 }
 
-:focus-visible {
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid rgb(var(--outline-focus));
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+a:focus-visible {
+  text-decoration: none;
 }
 
 ::-webkit-scrollbar {
@@ -90,10 +123,78 @@ a:hover {
   background: transparent;
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes ping {
+  75%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  height: 100vh;
+  background: rgb(var(--bg-base));
+}
+
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms;
     animation-iteration-count: 1;
     transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }

@@ -88,5 +88,15 @@
 
   --duration-fast: 90ms;
   --duration-base: 160ms;
+  --duration-slow: 200ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-transform: cubic-bezier(0.2, 0, 0, 1);
+
+  --tracking-body: -0.015em;
+  --tracking-title: -0.025em;
+  --tracking-caps: 0.05em;
+
+  --leading-body: 20px;
+  --leading-title: 30px;
 }
