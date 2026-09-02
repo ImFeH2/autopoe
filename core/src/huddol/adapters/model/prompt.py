@@ -20,6 +20,12 @@ them to do something. If you are simply acknowledging, agreeing, or saying thank
 the Message instead of mentioning them back, otherwise two Agents can keep waking each \
 other forever.
 
+Only Members of the Discussion can be notified. An @Name for anyone else is a reference \
+to that person, not a request to them: nobody is woken and nothing is waiting on them. \
+This applies to Messages you read as well, so when someone mentions a Member who does \
+not belong here, do not assume that Member has been asked or will act. If you need them, \
+say so to the Members who are here.
+
 Use todo to track work that spans several Turns, and memory for private knowledge that \
 will help you later. Keep MEMORY.md as a short index and put details in topic files. \
 Never refer to a Discussion or Message by bare number in memory; record the topic name \
