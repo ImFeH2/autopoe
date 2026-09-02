@@ -4,7 +4,11 @@ import type { Member } from "../lib/backend";
 export function highlightMentions(
   body: string,
   members: Member[],
+  notifiable?: ReadonlySet<number>,
 ): ReactNode[] {
+  const byName = new Map(
+    members.map((member) => [member.name.toLowerCase(), member] as const),
+  );
   const names = members
     .map((member) => member.name)
     .sort((a, b) => b.length - a.length);
@@ -36,8 +40,23 @@ export function highlightMentions(
     }
 
     if (at > index) nodes.push(body.slice(index, at));
+    const text = body.slice(at, at + 1 + matched.length);
+    const member = byName.get(matched.toLowerCase());
+    const reaches =
+      notifiable === undefined ||
+      (member !== undefined && notifiable.has(member.id));
     nodes.push(
-      <mark key={`m${key++}`}>{body.slice(at, at + 1 + matched.length)}</mark>,
+      reaches ? (
+        <mark key={`m${key++}`}>{text}</mark>
+      ) : (
+        <span
+          className="mention-reference"
+          key={`m${key++}`}
+          title="Mentioned but not in this discussion, so nobody was notified"
+        >
+          {text}
+        </span>
+      ),
     );
     index = at + 1 + matched.length;
   }
@@ -69,6 +88,27 @@ export function matchMembers(members: Member[], query: string): Member[] {
   return members
     .filter((member) => member.name.toLowerCase().startsWith(needle))
     .sort((a, b) => a.name.length - b.name.length);
+}
+
+export type MentionCandidates = { inDiscussion: Member[]; elsewhere: Member[] };
+
+export function candidatesFor(
+  members: Member[],
+  inDiscussion: ReadonlySet<number>,
+  query: string,
+): MentionCandidates {
+  const here = matchMembers(
+    members.filter((member) => inDiscussion.has(member.id)),
+    query,
+  );
+  if (!query.trim()) return { inDiscussion: here, elsewhere: [] };
+  return {
+    inDiscussion: here,
+    elsewhere: matchMembers(
+      members.filter((member) => !inDiscussion.has(member.id)),
+      query,
+    ),
+  };
 }
 
 export function completeMention(

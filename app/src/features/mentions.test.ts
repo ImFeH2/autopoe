@@ -1,6 +1,13 @@
+import { isValidElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import type { Member } from "../lib/backend";
-import { completeMention, matchMembers, mentionQuery } from "./mentions";
+import {
+  candidatesFor,
+  completeMention,
+  highlightMentions,
+  matchMembers,
+  mentionQuery,
+} from "./mentions";
 
 const members: Member[] = [
   { id: 1, type: "human", name: "You", state: "idle" },
@@ -88,11 +95,62 @@ describe("mentionQuery boundaries", () => {
   });
 });
 
-describe("candidates are scoped to the discussion", () => {
-  it("a member who is not in the discussion is never suggested", () => {
-    const inDiscussion = members.filter((member) => member.id !== 3);
-    expect(matchMembers(inDiscussion, "ma").map((m) => m.name)).toEqual([
-      "Main",
+describe("candidatesFor", () => {
+  const here = new Set([1, 2]);
+
+  it("a bare mention offers only the people who can be notified", () => {
+    const groups = candidatesFor(members, here, "");
+    expect(groups.inDiscussion.map((m) => m.name)).toEqual(["You", "Main"]);
+    expect(groups.elsewhere).toEqual([]);
+  });
+
+  it("a keyword searches the whole organization", () => {
+    const groups = candidatesFor(members, here, "ma");
+    expect(groups.inDiscussion.map((m) => m.name)).toEqual(["Main"]);
+    expect(groups.elsewhere.map((m) => m.name)).toEqual(["Mainframe"]);
+  });
+
+  it("keeps discussion members ahead of everyone else", () => {
+    const groups = candidatesFor(members, here, "");
+    expect(groups.inDiscussion.length).toBeGreaterThan(0);
+    expect(groups.elsewhere.length).toBe(0);
+  });
+
+  it("finds nobody when the keyword matches no one", () => {
+    const groups = candidatesFor(members, here, "zzz");
+    expect(groups.inDiscussion).toEqual([]);
+    expect(groups.elsewhere).toEqual([]);
+  });
+});
+
+describe("highlightMentions", () => {
+  function kinds(body: string, notifiable?: Set<number>) {
+    return highlightMentions(body, members, notifiable)
+      .filter((node) => isValidElement(node))
+      .map((node) => {
+        const element = node as ReactElement<{ className?: string }>;
+        return element.props.className ?? String(element.type);
+      });
+  }
+
+  it("marks a mention that reaches someone in the discussion", () => {
+    expect(kinds("hi @Main", new Set([2]))).toEqual(["mark"]);
+  });
+
+  it("renders a mention of someone outside the discussion as a reference", () => {
+    expect(kinds("about @Mainframe", new Set([2]))).toEqual([
+      "mention-reference",
     ]);
+  });
+
+  it("distinguishes the two inside one message", () => {
+    expect(kinds("@Main please review @Mainframe work", new Set([2]))).toEqual([
+      "mark",
+      "mention-reference",
+    ]);
+  });
+
+  it("treats every match as reaching when no membership is given", () => {
+    expect(kinds("@Main and @Mainframe")).toEqual(["mark", "mark"]);
   });
 });

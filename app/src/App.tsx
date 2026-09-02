@@ -24,10 +24,10 @@ import {
   Textarea,
 } from "./components/ui";
 import {
+  candidatesFor,
   completeMention,
   formatTime,
   highlightMentions,
-  matchMembers,
   mentionQuery,
 } from "./features/mentions";
 import "./features/features.css";
@@ -127,11 +127,14 @@ function DiscussionsView({ members }: { members: Member[] }) {
   };
 
   const mention = mentionQuery(body, caret);
-  const inDiscussion = useMemo(() => {
-    const allowed = new Set((detail?.members ?? []).map((item) => item.id));
-    return members.filter((item) => allowed.has(item.id));
-  }, [members, detail]);
-  const candidates = mention ? matchMembers(inDiscussion, mention.query) : [];
+  const memberIds = useMemo(
+    () => new Set((detail?.members ?? []).map((item) => item.id)),
+    [detail],
+  );
+  const grouped = mention
+    ? candidatesFor(members, memberIds, mention.query)
+    : { inDiscussion: [], elsewhere: [] };
+  const candidates = [...grouped.inDiscussion, ...grouped.elsewhere];
   const suggesting = mention !== null && candidates.length > 0 && !dismissed;
 
   const accept = (member: Member) => {
@@ -236,7 +239,7 @@ function DiscussionsView({ members }: { members: Member[] }) {
                         </span>
                       </div>
                       <div className="message-text">
-                        {highlightMentions(message.body, members)}
+                        {highlightMentions(message.body, members, memberIds)}
                       </div>
                       {awaiting.has(message.id) ? (
                         <div className="message-actions">
@@ -258,8 +261,13 @@ function DiscussionsView({ members }: { members: Member[] }) {
             <div className="composer">
               {suggesting ? (
                 <ul className="mention-menu">
-                  {candidates.slice(0, 6).map((member, index) => (
-                    <li key={member.id}>
+                  {candidates.slice(0, 8).map((member, index) => (
+                    <li
+                      key={member.id}
+                      data-divider={
+                        index > 0 && index === grouped.inDiscussion.length
+                      }
+                    >
                       <button
                         type="button"
                         data-active={index === highlighted % candidates.length}
@@ -271,7 +279,11 @@ function DiscussionsView({ members }: { members: Member[] }) {
                         <Avatar name={member.name} />
                         <span>{member.name}</span>
                         <span className="row-meta">
-                          {member.type === "human" ? "Human" : member.state}
+                          {memberIds.has(member.id)
+                            ? member.type === "human"
+                              ? "Human"
+                              : member.state
+                            : "reference only"}
                         </span>
                       </button>
                     </li>

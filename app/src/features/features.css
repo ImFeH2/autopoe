@@ -275,3 +275,15 @@ label.form-row > .field {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.message-text .mention-reference {
+  color: rgb(var(--text-muted));
+  font-weight: var(--weight-medium);
+  border-bottom: 1px dotted rgb(var(--border-interactive));
+}
+
+.mention-menu li[data-divider="true"] {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid rgb(var(--border-base));
+}
