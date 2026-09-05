@@ -171,6 +171,58 @@ def test_acknowledgement_ownership_survives_the_real_pipe(tmp_path: Path) -> Non
         store.close()
 
 
+def test_membership_changes_preserve_history_and_pending(tmp_path: Path) -> None:
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    setup = [
+        ("organization.create_agent", {"name": "Helper"}),
+        ("organization.pause_agent", {"agent_id": 2}),
+        ("discussion.create", {"topic": "review", "member_ids": [2]}),
+        ("discussion.send", {"discussion_id": 1, "body": "@Helper review this"}),
+    ]
+    _, code, stderr = drive(
+        data,
+        [
+            {"id": index, "method": method, "params": params}
+            for index, (method, params) in enumerate(setup, 1)
+        ],
+    )
+    assert code == 0, stderr
+
+    for member_ids in ([1], [1, 2], [2]):
+        frames, code, stderr = drive(
+            data,
+            [
+                {
+                    "id": 1,
+                    "method": "discussion.set_members",
+                    "params": {"discussion_id": 1, "member_ids": member_ids},
+                },
+                {"id": 2, "method": "discussion.read", "params": {"discussion_id": 1}},
+                {"id": 3, "method": "discussion.list"},
+            ],
+        )
+        assert code == 0, stderr
+        assert response(frames, 1)["result"]["member_ids"] == member_ids
+        if 1 in member_ids:
+            detail = response(frames, 2)["result"]
+            assert [member["id"] for member in detail["members"]] == member_ids
+            assert detail["messages"][0]["body"] == "@Helper review this"
+        else:
+            assert response(frames, 2)["error"]["code"] == "not_a_member"
+            assert response(frames, 3)["result"] == []
+        assert len(events(frames, "discussion.updated")) == 1
+        store = SqliteStore(data / "huddol.sqlite3")
+        try:
+            assert store.message_count(1) == 1
+            assert [item.message_id for item in store.pending(2)] == (
+                [1] if 2 in member_ids else []
+            )
+        finally:
+            store.close()
+
+
 def test_state_survives_a_restart(tmp_path: Path) -> None:
     data = tmp_path / "data"
     drive(

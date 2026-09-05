@@ -114,6 +114,7 @@ export function OverflowMenu({
               disabled={action.disabled}
               onClick={() => {
                 setOpen(false);
+                wrapper.current?.querySelector("button")?.focus();
                 action.onSelect();
               }}
             >

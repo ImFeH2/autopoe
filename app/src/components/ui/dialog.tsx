@@ -1,6 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Button, Field, IconButton, Input } from "./index";
 import "./dialog.css";
 
@@ -19,11 +19,25 @@ export function Modal({
   children?: ReactNode;
   footer: ReactNode;
 }) {
+  const opener = useRef<HTMLElement | null>(null);
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog">
+        <Dialog.Content
+          className="dialog"
+          onOpenAutoFocus={() => {
+            opener.current =
+              document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            opener.current?.focus();
+          }}
+          {...(description ? {} : { "aria-describedby": undefined })}
+        >
           <div className="dialog-head">
             <Dialog.Title className="dialog-title">{title}</Dialog.Title>
             <Dialog.Close asChild>

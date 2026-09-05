@@ -110,7 +110,8 @@ export function DiscussionsPage() {
       if (
         event.type === "message.created" ||
         event.type === "mention.acked" ||
-        event.type === "mention.revoked"
+        event.type === "mention.revoked" ||
+        event.type === "discussion.updated"
       ) {
         void load();
       }

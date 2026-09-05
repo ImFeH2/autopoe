@@ -562,7 +562,11 @@ export function createMockBackend(Base: typeof Backend): Backend {
 
         case "discussion.list":
           return discussions
-            .filter((item) => params.include_archived || !item.archived)
+            .filter(
+              (item) =>
+                item.member_ids.includes(1) &&
+                (params.include_archived || !item.archived),
+            )
             .map(summary);
 
         case "discussion.create": {
@@ -587,6 +591,8 @@ export function createMockBackend(Base: typeof Backend): Backend {
         case "discussion.read": {
           const item = find(params.discussion_id);
           if (!item) throw new Error("no such discussion");
+          if (!item.member_ids.includes(1))
+            throw new Error("You do not belong to this Discussion");
           return {
             id: item.id,
             topic: item.topic,

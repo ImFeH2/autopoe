@@ -126,6 +126,39 @@
   box-shadow: none;
 }
 
+.checkbox {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: var(--text-sm);
+  height: var(--text-sm);
+  flex: none;
+  margin: 0;
+  border: 1px solid rgb(var(--border-interactive));
+  border-radius: var(--radius-xs);
+  background: rgb(var(--bg-app));
+  cursor: pointer;
+}
+
+.checkbox:checked {
+  border-color: rgb(var(--border-focus));
+  background: rgb(var(--border-focus));
+}
+
+.checkbox:checked::after {
+  content: "";
+  width: var(--space-2);
+  height: var(--space-3);
+  border: solid rgb(var(--text-base));
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .field {
   width: 100%;
   height: 32px;

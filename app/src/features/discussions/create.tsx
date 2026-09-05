@@ -1,8 +1,9 @@
 import { useEffect, useId, useState } from "react";
 import { useOrganization } from "../../app/organization";
 import { Modal } from "../../components/ui/dialog";
-import { Avatar, Button, Chip, Field, Input } from "../../components/ui/index";
+import { Button, Field, Input } from "../../components/ui/index";
 import { backend } from "../../lib/backend";
+import { MemberPicker } from "./members";
 
 export function CreateDiscussionDialog({
   open,
@@ -64,33 +65,12 @@ export function CreateDiscussionDialog({
           onChange={(event) => setTopic(event.target.value)}
         />
       </Field>
-      <fieldset className="member-picker">
-        <legend>Members</legend>
-        <ul className="member-picker-list">
-          {others.map((member) => (
-            <li key={member.id}>
-              <label className="member-option">
-                <input
-                  type="checkbox"
-                  checked={chosen.includes(member.id)}
-                  onChange={(event) =>
-                    setChosen((current) =>
-                      event.target.checked
-                        ? [...current, member.id]
-                        : current.filter((id) => id !== member.id),
-                    )
-                  }
-                />
-                <Avatar name={member.name} size="sm" />
-                <span className="member-option-name">{member.name}</span>
-                <Chip tone={member.type === "agent" ? "blue" : "neutral"}>
-                  {member.type === "agent" ? "Agent" : "Human"}
-                </Chip>
-              </label>
-            </li>
-          ))}
-        </ul>
-      </fieldset>
+      <MemberPicker
+        members={others}
+        selected={chosen}
+        onChange={setChosen}
+        disabled={busy}
+      />
     </Modal>
   );
 }

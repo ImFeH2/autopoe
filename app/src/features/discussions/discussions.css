@@ -98,13 +98,6 @@
   background: rgb(var(--bg-hover));
 }
 
-.member-option input {
-  accent-color: rgb(var(--blue-500));
-  width: 14px;
-  height: 14px;
-  margin: 0;
-}
-
 .member-option-name {
   flex: 1;
   min-width: 0;

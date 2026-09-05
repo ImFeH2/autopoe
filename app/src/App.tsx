@@ -178,7 +178,8 @@ export default function App() {
         event.type.startsWith("turn.") ||
         event.type === "message.created" ||
         event.type === "mention.acked" ||
-        event.type === "mention.revoked"
+        event.type === "mention.revoked" ||
+        event.type === "discussion.updated"
       ) {
         void refresh();
       }

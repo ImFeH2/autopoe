@@ -27,10 +27,11 @@ import {
 import { plural, relativeTime } from "../../lib/format";
 import { formatTime, highlightMentions } from "../mentions";
 import { Composer } from "./composer";
+import { DiscussionMembersDialog } from "./members";
 import "./discussions.css";
 
 export function ThreadPage({ id }: { id: number }) {
-  const { members } = useOrganization();
+  const { members, humanId, refresh } = useOrganization();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<DiscussionDetail | null>(null);
   const [missing, setMissing] = useState(false);
@@ -38,6 +39,7 @@ export function ThreadPage({ id }: { id: number }) {
   const [ackBusy, setAckBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [doomed, setDoomed] = useState(false);
+  const [editingMembers, setEditingMembers] = useState(false);
   const [fresh, setFresh] = useState<ReadonlySet<number>>(new Set());
   const bottom = useRef<HTMLDivElement>(null);
   const seen = useRef(0);
@@ -62,7 +64,8 @@ export function ThreadPage({ id }: { id: number }) {
       if (
         event.type === "message.created" ||
         event.type === "mention.acked" ||
-        event.type === "mention.revoked"
+        event.type === "mention.revoked" ||
+        event.type === "discussion.updated"
       ) {
         void load();
       }
@@ -192,6 +195,12 @@ export function ThreadPage({ id }: { id: number }) {
                 label="Discussion actions"
                 actions={[
                   {
+                    id: "members",
+                    label: "Members",
+                    icon: <Users size={15} />,
+                    onSelect: () => setEditingMembers(true),
+                  },
+                  {
                     id: "archive",
                     label: "Archive",
                     icon: <Archive size={15} />,
@@ -304,6 +313,19 @@ export function ThreadPage({ id }: { id: number }) {
           onSend={send}
         />
       </PageBody>
+
+      {editingMembers && detail ? (
+        <DiscussionMembersDialog
+          discussionId={id}
+          memberIds={detail.members.map((member) => member.id)}
+          onClose={() => setEditingMembers(false)}
+          onSaved={async (ids) => {
+            await refresh();
+            if (ids.includes(humanId)) await load();
+            else navigate({ name: "discussions" });
+          }}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={doomed}

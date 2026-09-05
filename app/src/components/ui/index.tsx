@@ -59,10 +59,16 @@ export function IconButton({
 
 export function Input({
   className,
+  type,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement>) {
+  const base = type === "checkbox" ? "checkbox" : "field";
   return (
-    <input className={className ? `field ${className}` : "field"} {...rest} />
+    <input
+      type={type}
+      className={className ? `${base} ${className}` : base}
+      {...rest}
+    />
   );
 }
 
