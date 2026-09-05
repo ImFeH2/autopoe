@@ -204,6 +204,89 @@ def test_discussion_notifications_do_not_depend_on_the_caller_type(
     ]
 
 
+def test_compaction_setting_applies_to_the_next_runner(world, monkeypatch) -> None:
+    import io
+
+    from pydantic_ai import ModelMessagesTypeAdapter, models
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        UserPromptPart,
+    )
+    from pydantic_ai.models.function import FunctionModel
+
+    from huddol.adapters.jsonl.api import Api
+    from huddol.adapters.jsonl.protocol import Dispatcher, JsonLineWriter, parse
+    from huddol.adapters.model.config import ModelConfig
+    from huddol.adapters.model.runner import PydanticModelRunner
+
+    mention(world)
+    world.settings.set_settings(
+        "model",
+        {
+            "base_url": "https://example.invalid",
+            "api_key": "unused",
+            "model": "local",
+            "compaction_threshold": 400000,
+        },
+    )
+    received = []
+
+    def respond(messages, info):
+        received.append(len(messages))
+        return ModelResponse(parts=[TextPart("Done")])
+
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
+    monkeypatch.setattr(
+        "huddol.adapters.model.runner.build_model",
+        lambda config: FunctionModel(respond),
+    )
+    config = ModelConfig.restore(world.settings.get_settings("model"))
+    assert config is not None
+    running = PydanticModelRunner(config)
+    scheduler = Scheduler(world, running)
+    output = io.StringIO()
+    dispatcher = Dispatcher(JsonLineWriter(output))
+    Api(scheduler, dispatcher)
+    update = parse(
+        json.dumps(
+            {
+                "id": 1,
+                "method": "settings.update",
+                "params": {"section": "model", "values": {"compaction_threshold": 1}},
+            }
+        )
+    )
+    assert update is not None
+    dispatcher.handle(update)
+    assert (
+        json.loads(output.getvalue().splitlines()[-1])["result"]["compaction_threshold"]
+        == 1
+    )
+    history = []
+    for _ in range(8):
+        history.extend(
+            [
+                ModelRequest(parts=[UserPromptPart("Past request")]),
+                ModelResponse(parts=[TextPart("Past response")]),
+            ]
+        )
+    reminder = build_reminder(world.store, world.history, MAIN, "Main")
+    assert reminder is not None
+    request = TurnRequest(
+        reminder=reminder,
+        history_json=ModelMessagesTypeAdapter.dump_json(history).decode(),
+        runtime_context="",
+    )
+    assert running.run(request, scheduler.tools_for(MAIN)).error is None
+    config = ModelConfig.restore(world.settings.get_settings("model"))
+    assert config is not None
+    restarted = PydanticModelRunner(config)
+    assert restarted.run(request, scheduler.tools_for(MAIN)).error is None
+    assert received == [17, 9]
+
+
 def test_no_reminder_without_pending_mentions(world) -> None:
     assert build_reminder(world.store, world.history, MAIN, "Main") is None
 

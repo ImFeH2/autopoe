@@ -241,6 +241,7 @@ const settings: Record<string, Record<string, unknown>> = {
     api_type: "openai",
     base_url: "https://example.invalid/v1",
     model: "a-model",
+    compaction_threshold: 400_000,
     api_key_set: true,
   },
   execution: {
@@ -769,6 +770,17 @@ export function createMockBackend(Base: typeof Backend): Backend {
           if (section === "execution" && "backend" in values) {
             throw new Error(
               "Choose the backend in App settings; changes apply after restart",
+            );
+          }
+          if (
+            section === "model" &&
+            "compaction_threshold" in values &&
+            (typeof values.compaction_threshold !== "number" ||
+              !Number.isInteger(values.compaction_threshold) ||
+              values.compaction_threshold <= 0)
+          ) {
+            throw new Error(
+              "Compaction threshold must be a positive integer in bytes",
             );
           }
           if (section === "model" && typeof values.api_key === "string") {

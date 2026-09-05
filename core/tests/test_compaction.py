@@ -29,6 +29,26 @@ def conversation(pairs: int, size: int = 10) -> list[object]:
     return history
 
 
+def test_compaction_uses_utf8_bytes_at_the_threshold() -> None:
+    history = [
+        {
+            "kind": "request",
+            "parts": [{"part_kind": "user-prompt", "content": "你好 🌍"}],
+        }
+        for _ in range(12)
+    ]
+    size = len(json.dumps(history, ensure_ascii=False).encode("utf-8"))
+    unchanged = compact(history, threshold=size)
+    assert unchanged.before_bytes == size
+    assert unchanged.applied is False
+    trimmed = compact(history, threshold=size - 1)
+    assert trimmed.applied is True
+    assert trimmed.before_bytes == size
+    assert trimmed.after_bytes == len(
+        json.dumps(trimmed.kept, ensure_ascii=False).encode("utf-8")
+    )
+
+
 def test_short_history_is_left_alone() -> None:
     history = conversation(2)
     result = compact(history, threshold=1_000_000)

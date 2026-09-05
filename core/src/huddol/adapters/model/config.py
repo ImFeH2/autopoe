@@ -8,6 +8,11 @@ ApiType = Literal["openai", "openai-responses", "anthropic", "google"]
 DEFAULT_COMPACTION = 400_000
 
 
+def compaction_threshold(values: dict[str, Any]) -> int:
+    threshold = values.get("compaction_threshold") or values.get("context_window")
+    return int(threshold) if threshold else DEFAULT_COMPACTION
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     api_type: ApiType
@@ -28,13 +33,12 @@ class ModelConfig:
         api_type = str(values.get("api_type") or "openai")
         if api_type not in ("openai", "openai-responses", "anthropic", "google"):
             api_type = "openai"
-        threshold = values.get("compaction_threshold") or values.get("context_window")
         return cls(
             api_type=api_type,  # type: ignore[arg-type]
             base_url=str(base_url),
             api_key=str(api_key),
             model=str(model),
-            compaction_threshold=int(threshold) if threshold else DEFAULT_COMPACTION,
+            compaction_threshold=compaction_threshold(values),
         )
 
     def redacted(self) -> dict[str, Any]:

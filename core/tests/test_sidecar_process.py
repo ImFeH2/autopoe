@@ -128,6 +128,125 @@ def test_discussion_management_and_pagination_survive_the_pipe(tmp_path: Path) -
     assert len(events(frames, "discussion.deleted")) == 1
 
 
+def test_compaction_settings_work_without_model_credentials(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": 1, "method": "settings.get", "params": {"section": "model"}},
+            {
+                "id": 2,
+                "method": "settings.update",
+                "params": {
+                    "section": "model",
+                    "values": {"compaction_threshold": 12345},
+                },
+            },
+        ],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["result"]["compaction_threshold"] == 400_000
+    assert response(frames, 2)["result"]["compaction_threshold"] == 12345
+    assert response(frames, 2)["result"]["api_key_set"] is False
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": 1, "method": "settings.get", "params": {"section": "model"}},
+        ],
+    )
+    assert code == 0, stderr
+    assert events(frames, "ready")[0]["model_configured"] is False
+    assert response(frames, 1)["result"]["compaction_threshold"] == 12345
+
+
+@pytest.mark.parametrize("threshold", [0, -1, 1.5, True, None, "32000"])
+def test_invalid_compaction_settings_do_not_change_stored_values(
+    tmp_path: Path, threshold
+) -> None:
+    from huddol.adapters.sqlite.agent import SqliteAgentStore
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    store = SqliteStore(data / "huddol.sqlite3")
+    original = {
+        "base_url": "https://example.invalid",
+        "api_key": "retained-test-key",
+        "compaction_threshold": 64000,
+    }
+    SqliteAgentStore(store._db).set_settings("model", original)
+    store.close()
+    frames, code, stderr = drive(
+        data,
+        [
+            {
+                "id": 1,
+                "method": "settings.update",
+                "params": {
+                    "section": "model",
+                    "values": {
+                        "compaction_threshold": threshold,
+                        "api_key": "replacement-test-key",
+                    },
+                },
+            },
+            {"id": 2, "method": "settings.get", "params": {"section": "model"}},
+        ],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["error"]["code"] == "invalid_compaction_threshold"
+    assert response(frames, 2)["result"]["compaction_threshold"] == 64000
+    assert response(frames, 2)["result"]["api_key_set"] is True
+    assert events(frames, "settings.updated") == []
+    assert "retained-test-key" not in json.dumps(frames) + stderr
+    assert "replacement-test-key" not in json.dumps(frames) + stderr
+    store = SqliteStore(data / "huddol.sqlite3")
+    try:
+        assert SqliteAgentStore(store._db).get_settings("model") == original
+    finally:
+        store.close()
+
+
+def test_compaction_updates_preserve_model_credentials(tmp_path: Path) -> None:
+    from huddol.adapters.sqlite.agent import SqliteAgentStore
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    store = SqliteStore(data / "huddol.sqlite3")
+    original = {
+        "base_url": "https://example.invalid",
+        "api_key": "retained-test-key",
+        "context_window": 64000,
+    }
+    SqliteAgentStore(store._db).set_settings("model", original)
+    store.close()
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": 1, "method": "settings.get", "params": {"section": "model"}},
+            {
+                "id": 2,
+                "method": "settings.update",
+                "params": {
+                    "section": "model",
+                    "values": {"compaction_threshold": 32000},
+                },
+            },
+        ],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["result"]["compaction_threshold"] == 64000
+    assert response(frames, 2)["result"]["compaction_threshold"] == 32000
+    assert "retained-test-key" not in json.dumps(frames) + stderr
+    store = SqliteStore(data / "huddol.sqlite3")
+    try:
+        assert SqliteAgentStore(store._db).get_settings("model") == {
+            **original,
+            "compaction_threshold": 32000,
+        }
+    finally:
+        store.close()
+
+
 def test_the_process_starts_and_announces_itself(tmp_path: Path) -> None:
     frames, code, stderr = drive(tmp_path / "data", [])
     assert code == 0, stderr

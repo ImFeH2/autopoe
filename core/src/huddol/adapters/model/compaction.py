@@ -26,7 +26,7 @@ def compact(
     messages: list[object], threshold: int, *, keep: int = KEEP_RECENT
 ) -> Compaction:
     encoded = json.dumps(messages, ensure_ascii=False)
-    before = len(encoded)
+    before = len(encoded.encode("utf-8"))
     if before <= threshold or len(messages) <= keep:
         return Compaction(messages, 0, before, before)
 
@@ -37,5 +37,5 @@ def compact(
         return Compaction(messages, 0, before, before)
 
     kept = messages[boundary:]
-    after = len(json.dumps(kept, ensure_ascii=False))
+    after = len(json.dumps(kept, ensure_ascii=False).encode("utf-8"))
     return Compaction(kept, boundary, before, after)

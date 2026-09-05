@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from huddol.adapters.jsonl.protocol import Dispatcher
-from huddol.adapters.model.config import ModelConfig
+from huddol.adapters.model.config import ModelConfig, compaction_threshold
 from huddol.core.errors import DomainError
 from huddol.core.turn import idle_streak
 from huddol.runtime.scheduler import Scheduler
@@ -222,7 +222,19 @@ class Api:
             values = settings.get_settings(section) or {}
             if section == "model":
                 config = ModelConfig.restore(values)
-                return config.redacted() if config else {"api_key_set": False}
+                return (
+                    config.redacted()
+                    if config
+                    else {
+                        **{
+                            key: values[key]
+                            for key in ("api_type", "base_url", "model")
+                            if key in values
+                        },
+                        "api_key_set": bool(values.get("api_key")),
+                        "compaction_threshold": compaction_threshold(values),
+                    }
+                )
             if section == "observability":
                 return {
                     key: value
@@ -239,6 +251,13 @@ class Api:
         def settings_update(params: dict[str, Any]) -> Any:
             section = str(params.get("section", "model"))
             values = dict(params.get("values", {}))
+            if section == "model" and "compaction_threshold" in values:
+                threshold = values["compaction_threshold"]
+                if type(threshold) is not int or threshold <= 0:
+                    raise DomainError(
+                        "invalid_compaction_threshold",
+                        "Compaction threshold must be a positive integer in bytes",
+                    )
             if section == "execution":
                 if "backend" in values:
                     raise DomainError(
