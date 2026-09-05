@@ -81,6 +81,46 @@ def test_the_working_root_is_a_workspace_inside_the_data_directory(
     assert (target / "workspace").is_dir()
 
 
+def test_discussion_ids_are_not_reused_after_deletion_or_restart(
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    requests = [
+        ("organization.create_agent", {"name": "Main"}),
+        ("discussion.create", {"topic": "First", "member_ids": [2]}),
+        ("discussion.create", {"topic": "Second", "member_ids": [2]}),
+        ("discussion.delete", {"discussion_id": 2}),
+        ("discussion.create", {"topic": "Third", "member_ids": [2]}),
+        ("discussion.delete", {"discussion_id": 1}),
+        ("discussion.delete", {"discussion_id": 3}),
+    ]
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": index, "method": method, "params": params}
+            for index, (method, params) in enumerate(requests, 1)
+        ],
+    )
+    assert code == 0, stderr
+    assert [response(frames, index)["result"]["id"] for index in (2, 3, 5)] == [1, 2, 3]
+    assert response(frames, 6)["result"]["deleted"] is True
+    assert response(frames, 7)["result"]["deleted"] is True
+    frames, code, stderr = drive(
+        data,
+        [
+            {
+                "id": 1,
+                "method": "discussion.create",
+                "params": {"topic": "Fourth", "member_ids": [2]},
+            },
+            {"id": 2, "method": "discussion.read", "params": {"discussion_id": 1}},
+        ],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["result"]["id"] == 4
+    assert response(frames, 2)["error"]["code"] == "not_found"
+
+
 def test_shutdown_answers_and_exits_cleanly(tmp_path: Path) -> None:
     frames, code, _ = drive(tmp_path / "data", [])
     assert code == 0

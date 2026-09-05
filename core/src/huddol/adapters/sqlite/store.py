@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS discussions (
     topic TEXT NOT NULL,
     archived INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS discussion_sequence (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_id INTEGER NOT NULL
+);
+INSERT INTO discussion_sequence (id, last_id)
+VALUES (1, (SELECT COALESCE(MAX(id), 0) FROM discussions))
+ON CONFLICT (id) DO UPDATE SET last_id = MAX(last_id, excluded.last_id);
 CREATE TABLE IF NOT EXISTS discussion_members (
     discussion_id INTEGER NOT NULL,
     member_id INTEGER NOT NULL,
@@ -261,8 +268,13 @@ class SqliteStore:
         return self._discussion(row) if row else None
 
     def create_discussion(self, topic: str, member_ids: Sequence[int]) -> Discussion:
-        discussion_id = self._next_id("discussions")
         with self._write() as db:
+            row = db.execute(
+                "UPDATE discussion_sequence SET last_id = MAX(last_id,"
+                " (SELECT COALESCE(MAX(id), 0) FROM discussions)) + 1"
+                " WHERE id = 1 RETURNING last_id"
+            )[0]
+            discussion_id = int(row["last_id"])
             db.execute(
                 "INSERT INTO discussions (id, topic) VALUES (?, ?)",
                 (discussion_id, topic),
@@ -271,9 +283,9 @@ class SqliteStore:
                 "INSERT INTO discussion_members (discussion_id, member_id) VALUES (?, ?)",
                 [(discussion_id, member_id) for member_id in dict.fromkeys(member_ids)],
             )
-        discussion = self.get_discussion(discussion_id)
-        assert discussion is not None
-        return discussion
+            discussion = self.get_discussion(discussion_id)
+            assert discussion is not None
+            return discussion
 
     def set_discussion_members(
         self, discussion_id: int, member_ids: Sequence[int]

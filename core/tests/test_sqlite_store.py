@@ -124,6 +124,109 @@ def test_removing_a_member_clears_pending_without_touching_acks(
     assert [item.message_id for item in store.pending(agent.id)] == [2]
 
 
+@pytest.mark.parametrize("delete_all", [False, True])
+def test_discussion_ids_survive_deletion_and_restart(
+    tmp_path: Path, delete_all: bool
+) -> None:
+    path = tmp_path / "ids.sqlite3"
+    initial = SqliteStore(path)
+    try:
+        human = initial.create_member("human", "You")
+        rooms = [
+            initial.create_discussion(f"Topic {index}", [human.id])
+            for index in range(3)
+        ]
+        assert [room.id for room in rooms] == [1, 2, 3]
+        for room in rooms if delete_all else rooms[-1:]:
+            initial.delete_discussion(room.id)
+    finally:
+        initial.close()
+    reopened = SqliteStore(path)
+    try:
+        assert reopened.create_discussion("Next", [human.id]).id == 4
+    finally:
+        reopened.close()
+
+
+def test_existing_discussions_initialize_the_counter_before_deletion(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "existing.sqlite3"
+    original = SqliteStore(path)
+    try:
+        human = original.create_member("human", "You")
+        with original._db:
+            original._db.execute("INSERT INTO discussions VALUES (7, 'Keep', 1)")
+            original._db.execute("INSERT INTO discussions VALUES (42, 'Latest', 0)")
+        original.set_discussion_members(42, [human.id])
+        message, _ = original.append_message(42, human.id, "Preserve this message")
+        with original._db:
+            original._db.execute("DROP TABLE IF EXISTS discussion_sequence")
+    finally:
+        original.close()
+    upgraded = SqliteStore(path)
+    try:
+        rooms = upgraded.list_discussions(include_archived=True)
+        assert [(room.id, room.topic, room.archived) for room in rooms] == [
+            (7, "Keep", True),
+            (42, "Latest", False),
+        ]
+        assert upgraded.messages(42) == (message,)
+        upgraded.delete_discussion(42)
+        assert upgraded.create_discussion("Next", [human.id]).id == 43
+        assert upgraded.get_discussion(7) == rooms[0]
+    finally:
+        upgraded.close()
+
+
+def test_failed_discussion_creation_rolls_back_the_allocation(
+    store: SqliteStore,
+) -> None:
+    import sqlite3
+
+    human = store.create_member("human", "You")
+    first = store.create_discussion("First", [human.id])
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_discussion("Invalid", [None])
+    assert store.list_discussions() == (first,)
+    assert store.create_discussion("Next", [human.id]).id == 2
+
+
+@pytest.mark.parametrize("separate_connections", [False, True])
+def test_concurrent_discussion_creation_allocates_unique_ids(
+    tmp_path: Path, separate_connections: bool
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    path = tmp_path / "concurrent-ids.sqlite3"
+    shared = SqliteStore(path)
+    try:
+        human = shared.create_member("human", "You")
+        barrier = Barrier(4)
+
+        def create(worker: int) -> list[int]:
+            connection = SqliteStore(path) if separate_connections else shared
+            try:
+                barrier.wait(timeout=10)
+                return [
+                    connection.create_discussion(
+                        f"Topic {worker}-{index}", [human.id]
+                    ).id
+                    for index in range(8)
+                ]
+            finally:
+                if separate_connections:
+                    connection.close()
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            batches = list(pool.map(create, range(4)))
+        assert sorted(item for batch in batches for item in batch) == list(range(1, 33))
+        assert len(shared.list_discussions()) == 32
+    finally:
+        shared.close()
+
+
 def test_deleting_a_discussion_leaves_no_pending(store: SqliteStore) -> None:
     human = store.create_member("human", "You")
     agent = store.create_member("agent", "Main")
