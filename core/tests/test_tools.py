@@ -79,6 +79,32 @@ def test_reading_a_mention_returns_surrounding_context(world) -> None:
     assert result["total_messages"] == 3
 
 
+@pytest.mark.parametrize(
+    ("watermark", "expected"),
+    [(0, [3, 4, 5]), (2, [1, 2, 3, 4, 5])],
+)
+def test_reading_a_mention_preserves_context_boundaries(
+    world, watermark: int, expected: list[int]
+) -> None:
+    human = tools_for(world, HUMAN)
+    room = human.create_discussion("context", [MAIN, OTHER])
+    for body in (
+        "Earlier background",
+        "@Other handle another item",
+        "Background for this item",
+        "@Main please look",
+        "More details",
+    ):
+        human.send_message(room["id"], body)
+    tools_for(world, OTHER).send_message(room["id"], "A different sender")
+    world.store.set_watermark(room["id"], MAIN, watermark)
+
+    result = tools_for(world, MAIN).read_discussion(room["id"], message_id=4)
+
+    assert result["read_through"] == watermark
+    assert [item["id"] for item in result["messages"]] == expected
+
+
 def test_reading_advances_the_watermark_and_clears_unread(world) -> None:
     human = tools_for(world, HUMAN)
     room = human.create_discussion("unread", [MAIN])

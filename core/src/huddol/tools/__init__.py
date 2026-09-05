@@ -18,8 +18,6 @@ from huddol.services.memory import Memory
 from huddol.services.todo import Todos
 from huddol.tools.authorize import Actor, Authorizer
 
-CONTEXT_LEAD = 1
-
 
 @dataclass
 class Dependencies:
@@ -191,9 +189,6 @@ class AgentTools:
                 raise DomainError(
                     "not_found", f"Message {message_id} is not in this Discussion"
                 ) from error
-            start = everything.index(selected[0])
-            lead = everything[max(0, start - CONTEXT_LEAD) : start]
-            selected = (*lead, *selected)
 
         if selected:
             store.set_watermark(
