@@ -7,32 +7,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::backend::{BackendSettings, launcher};
 use crate::bridge_diagnostics::{BridgeDiagnostics, os_error_code};
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use tauri::{AppHandle, Manager, ipc::Channel, path::BaseDirectory};
+use tauri::{AppHandle, Manager, ipc::Channel};
 use tauri_plugin_shell::{
     ShellExt,
     process::{CommandChild, CommandEvent},
 };
 
-const HUDDOL_BUNDLED_CORE: &str = "core/huddol";
-const HUDDOL_CORE_PROJECT: &str = "../../core";
 const SHUTDOWN_ID: u64 = u64::MAX;
-
-#[derive(Debug, PartialEq)]
-enum HuddolExecutable {
-    Development,
-    Bundled,
-}
-
-fn resolve_huddol_executable(is_dev: bool) -> HuddolExecutable {
-    if is_dev {
-        HuddolExecutable::Development
-    } else {
-        HuddolExecutable::Bundled
-    }
-}
 
 type SharedChild = Arc<Mutex<Option<CommandChild>>>;
 type SharedSubscriber = Arc<Mutex<Option<Channel<Value>>>>;
@@ -103,39 +88,21 @@ impl HuddolProcess {
             json!({"development": tauri::is_dev()}),
         );
         let shell = app.shell();
-        let (command, executable_kind) = match resolve_huddol_executable(tauri::is_dev()) {
-            HuddolExecutable::Development => (
-                shell.command("uv").args([
-                    "run",
-                    "--project",
-                    HUDDOL_CORE_PROJECT,
-                    "python",
-                    "-m",
-                    "huddol",
-                ]),
-                "development_python",
-            ),
-            HuddolExecutable::Bundled => {
-                let executable = match app
-                    .path()
-                    .resolve(HUDDOL_BUNDLED_CORE, BaseDirectory::Resource)
-                {
-                    Ok(executable) => executable,
-                    Err(error) => {
-                        self.diagnostics.record(
-                            "ERROR",
-                            "bridge.process.start_failed",
-                            json!({
-                                "stage": "bundled_core_resolution",
-                                "error_type": "path_error",
-                            }),
-                        );
-                        return Err(error).context("resolve the bundled Huddol core");
-                    }
-                };
-                (shell.command(executable), "bundled_core")
-            }
-        };
+        let settings = app.state::<Arc<BackendSettings>>();
+        let target = settings
+            .active
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!(error.clone()))?;
+        let project = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
+        let plan = launcher(
+            target,
+            tauri::is_dev(),
+            &project,
+            &app.path().resource_dir()?,
+        )
+        .map_err(anyhow::Error::msg)?;
+        let executable_kind = plan.kind;
+        let command = shell.command(plan.program).args(plan.args);
         let command = command.env_clear().envs(std::env::vars_os());
         let (mut events, child) = match command.spawn() {
             Ok(process) => process,
@@ -589,15 +556,6 @@ fn disconnect_level(
 mod tests {
     use super::*;
     use tauri::ipc::InvokeResponseBody;
-
-    #[test]
-    fn selects_development_python_only_for_tauri_dev() {
-        assert_eq!(
-            resolve_huddol_executable(true),
-            HuddolExecutable::Development
-        );
-        assert_eq!(resolve_huddol_executable(false), HuddolExecutable::Bundled);
-    }
 
     #[test]
     fn logs_only_known_request_method_names() {

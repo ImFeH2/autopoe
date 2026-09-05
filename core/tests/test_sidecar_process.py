@@ -532,6 +532,45 @@ def test_observability_settings_preserve_keys_across_restarts(tmp_path: Path) ->
         store.close()
 
 
+def test_backend_selection_is_not_a_business_setting(tmp_path: Path) -> None:
+    from huddol.adapters.sqlite.agent import SqliteAgentStore
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    store = SqliteStore(data / "huddol.sqlite3")
+    SqliteAgentStore(store._db).set_settings("execution", {"backend": "wsl"})
+    store.close()
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": 1, "method": "settings.get", "params": {"section": "execution"}},
+            {
+                "id": 2,
+                "method": "settings.update",
+                "params": {
+                    "section": "execution",
+                    "values": {
+                        "backend": "native",
+                        "write_directories": [str(tmp_path)],
+                    },
+                },
+            },
+        ],
+    )
+    assert code == 0, stderr
+    assert events(frames, "ready")[0]["working_directory"] == str(data / "workspace")
+    assert "backend" not in response(frames, 1)["result"]
+    assert response(frames, 2)["error"]["code"] == "app_setting"
+    store = SqliteStore(data / "huddol.sqlite3")
+    try:
+        assert SqliteAgentStore(store._db).get_settings("execution") == {
+            "backend": "wsl"
+        }
+        assert SqliteAgentStore(store._db).write_directories() == ()
+    finally:
+        store.close()
+
+
 def test_ping_answers_without_touching_the_domain(tmp_path: Path) -> None:
     frames, code, stderr = drive(
         tmp_path / "data",

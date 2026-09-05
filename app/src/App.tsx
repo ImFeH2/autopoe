@@ -25,13 +25,14 @@ import {
   SidebarFooter,
   SidebarOrg,
 } from "./components/layout/shell";
-import { Avatar, Badge, EmptyState, Spinner } from "./components/ui/index";
+import { Avatar, Badge, Spinner } from "./components/ui/index";
 import { DiscussionsPage } from "./features/discussions/list";
 import { ThreadPage } from "./features/discussions/thread";
 import { DocumentPage } from "./features/library/document";
 import { LibraryPage } from "./features/library/list";
 import { MemberPage } from "./features/members/detail";
 import { MembersPage } from "./features/members/list";
+import { BackendPage } from "./features/settings/backend";
 import {
   ExecutionPage,
   LimitsPage,
@@ -70,6 +71,8 @@ function View({ route, tokenLimit }: { route: Route; tokenLimit: number }) {
       return <LimitsPage />;
     case "langfuse":
       return <LangfusePage />;
+    case "backend":
+      return <BackendPage />;
   }
 }
 
@@ -116,6 +119,12 @@ function Chrome({ loaded }: { loaded: Loaded }) {
               />
             </NavSection>
             <NavSection label="Settings">
+              <NavItem
+                icon={<Server size={16} />}
+                label="Backend"
+                active={active === "backend"}
+                onSelect={() => navigate({ name: "backend" })}
+              />
               <NavItem
                 icon={<Server size={16} />}
                 label="Model"
@@ -196,16 +205,7 @@ export default function App() {
     });
   }, [refresh]);
 
-  if (failure) {
-    return (
-      <div className="boot">
-        <EmptyState
-          title="Cannot reach the Huddol backend"
-          description={failure}
-        />
-      </div>
-    );
-  }
+  if (failure) return <BackendPage startupError={failure} />;
 
   if (!loaded) {
     return (

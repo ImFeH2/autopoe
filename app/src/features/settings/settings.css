@@ -9,6 +9,13 @@
   max-width: 560px;
 }
 
+.settings-form > legend {
+  padding: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-muted));
+}
+
 .settings-toggle {
   display: flex;
   align-items: center;

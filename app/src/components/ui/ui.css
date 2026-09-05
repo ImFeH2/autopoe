@@ -126,6 +126,46 @@
   box-shadow: none;
 }
 
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.choice-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.choice-control {
+  display: grid;
+  place-items: center;
+  width: var(--text-sm);
+  height: var(--text-sm);
+  padding: 0;
+  border: 1px solid rgb(var(--border-interactive));
+  border-radius: var(--radius-pill);
+  background: rgb(var(--bg-app));
+  cursor: pointer;
+}
+
+.choice-control[data-state="checked"] {
+  border-color: rgb(var(--border-focus));
+}
+
+.choice-control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.choice-indicator {
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--border-focus));
+}
+
 .checkbox {
   appearance: none;
   display: inline-grid;

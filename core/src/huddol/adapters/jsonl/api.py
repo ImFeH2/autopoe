@@ -233,7 +233,7 @@ class Api:
                 } | {"keys_set": bool(values.get("secret_key"))}
             if section == "execution":
                 return {
-                    **values,
+                    **{key: value for key, value in values.items() if key != "backend"},
                     "write_directories": list(settings.write_directories()),
                 }
             return values
@@ -242,6 +242,11 @@ class Api:
             section = str(params.get("section", "model"))
             values = dict(params.get("values", {}))
             if section == "execution":
+                if "backend" in values:
+                    raise DomainError(
+                        "app_setting",
+                        "Choose the backend in App settings; changes apply after restart",
+                    )
                 directories = values.pop("write_directories", None)
                 if directories is not None:
                     self._scheduler.reconfigure_sandbox(list(directories))

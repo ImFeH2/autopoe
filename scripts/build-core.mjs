@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { root } from "./process.mjs";
@@ -8,6 +8,11 @@ const core = resolve(root, "core");
 const bundled = resolve(root, "app", "src-tauri", "core");
 const dist = resolve(core, "dist");
 const work = resolve(core, "build");
+const wslArchive = resolve(root, "artifacts", "wsl-core.tar");
+
+if (process.platform === "win32" && !existsSync(wslArchive)) {
+  throw new Error("Missing Linux backend archive: artifacts/wsl-core.tar");
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -88,6 +93,18 @@ if (
   stopped?.result?.stopped !== true
 ) {
   throw new Error("Huddol smoke returned an invalid response");
+}
+
+if (process.platform === "linux") {
+  mkdirSync(resolve(root, "artifacts"), { recursive: true });
+  run("tar", ["-cf", wslArchive, "-C", bundled, "."]);
+}
+if (process.platform === "win32") {
+  cpSync(wslArchive, resolve(bundled, "wsl-core.tar"));
+  cpSync(
+    resolve(root, "scripts", "start-wsl-backend.sh"),
+    resolve(bundled, "start-wsl-backend.sh"),
+  );
 }
 
 process.stdout.write(`${executable}\n`);

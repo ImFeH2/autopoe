@@ -246,7 +246,7 @@ def test_execution_settings_update_the_live_sandbox(server, tmp_path: Path) -> N
         output,
         "settings.update",
         section="execution",
-        values={"backend": "native", "write_directories": [str(target)]},
+        values={"write_directories": [str(target)]},
     )
     assert deps.sandbox.write_directories == (str(target.resolve()),)
 
