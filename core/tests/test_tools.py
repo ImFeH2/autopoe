@@ -131,6 +131,30 @@ def test_ack_requires_the_message_to_have_been_read(world) -> None:
     assert world.store.pending(MAIN) == ()
 
 
+@pytest.mark.parametrize("member_id", [HUMAN, MAIN])
+def test_members_only_revoke_their_own_acknowledgements(world, member_id: int) -> None:
+    room = tools_for(world, HUMAN).create_discussion("review", [MAIN, OTHER])
+    tools_for(world, OTHER).send_message(room["id"], "@You @Main please review")
+    for actor in (HUMAN, MAIN):
+        tools = tools_for(world, actor)
+        tools.read_discussion(room["id"])
+        tools.ack(room["id"], [1])
+    tools = tools_for(world, member_id)
+    assert tools.read_discussion(room["id"])["acknowledged"] == [1]
+
+    assert tools.revoke_ack(room["id"], [1])["revoked"] == 1
+
+    own = tools.read_discussion(room["id"])
+    assert own["acknowledged"] == []
+    assert own["awaiting_ack"] == [1]
+    other = MAIN if member_id == HUMAN else HUMAN
+    assert world.store.acknowledged(room["id"], other) == (1,)
+    assert tools.revoke_ack(room["id"], [1])["revoked"] == 0
+    world.store.set_discussion_members(room["id"], [other, OTHER])
+    with pytest.raises(DomainError, match="do not belong"):
+        tools.revoke_ack(room["id"], [1])
+
+
 def test_sending_marks_your_own_message_as_read(world) -> None:
     human = tools_for(world, HUMAN)
     room = human.create_discussion("self", [MAIN])

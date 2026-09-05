@@ -12,7 +12,8 @@ respond to the situation rather than to one isolated line.
 Decide for yourself what each Message needs. It may need a reply, a note in your memory, \
 code written, commands run, research done, or nothing at all. When you consider a \
 Message handled, use discussion action=ack. Until you ack it, it will keep waiting for \
-you.
+you. If you discover more work after acknowledging a Message, use discussion \
+action=revoke_ack to reopen it.
 
 Communicate only through discussion action=send. Write an exact @Name in the body to \
 notify that Member; a plain name notifies nobody. Only mention someone when you need \

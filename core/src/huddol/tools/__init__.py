@@ -212,6 +212,9 @@ class AgentTools:
             "topic": discussion.topic,
             "read_through": read_before,
             "awaiting_ack": list(awaiting),
+            "acknowledged": list(
+                store.acknowledged(discussion_id, self._actor.member_id)
+            ),
             "members": [
                 {"id": item, "name": members.get(item, f"Member {item}")}
                 for item in sorted(discussion.member_ids)
@@ -263,6 +266,16 @@ class AgentTools:
         )
         self._record("ack", f"Discussion {discussion_id}: {acked} acknowledged")
         return {"discussion_id": discussion_id, "acked": acked}
+
+    def revoke_ack(
+        self, discussion_id: int, message_ids: Sequence[int]
+    ) -> dict[str, Any]:
+        self._check("discussion.revoke_ack", discussion_id)
+        self._require_membership(discussion_id)
+        revoked = self._deps.store.revoke_ack(
+            discussion_id, message_ids, self._actor.member_id
+        )
+        return {"discussion_id": discussion_id, "revoked": revoked}
 
     def search_messages(
         self,

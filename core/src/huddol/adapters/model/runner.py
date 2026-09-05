@@ -174,12 +174,13 @@ class PydanticModelRunner:
                         _required(body, "body", action),
                     )
                 )
-            if action == "ack":
+            if action in ("ack", "revoke_ack"):
                 targets = message_ids
                 if targets is None and message_id is not None:
                     targets = [message_id]
+                change_ack = tools.ack if action == "ack" else tools.revoke_ack
                 return _guard(
-                    lambda: tools.ack(
+                    lambda: change_ack(
                         _required(discussion_id, "discussion_id", action),
                         _required(targets, "message_ids", action),
                     )

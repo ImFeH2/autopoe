@@ -480,6 +480,16 @@ class SqliteStore:
             )
             return cursor.rowcount
 
+    def acknowledged(self, discussion_id: int, member_id: int) -> tuple[int, ...]:
+        return tuple(
+            int(row["message_id"])
+            for row in self._db.execute(
+                "SELECT message_id FROM acks WHERE discussion_id = ?"
+                " AND member_id = ? ORDER BY message_id",
+                (discussion_id, member_id),
+            )
+        )
+
     def revoke_ack(
         self, discussion_id: int, message_ids: Sequence[int], member_id: int
     ) -> int:

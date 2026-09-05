@@ -118,6 +118,59 @@ def test_a_full_conversation_survives_the_real_pipe(tmp_path: Path) -> None:
     assert response(frames, 5)["result"]["messages"][0]["body"] == "@Main please start"
 
 
+def test_acknowledgement_ownership_survives_the_real_pipe(tmp_path: Path) -> None:
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    data.mkdir()
+    store = SqliteStore(data / "huddol.sqlite3")
+    try:
+        store.create_member("human", "You")
+        store.create_member("agent", "Helper")
+        store.create_member("human", "Reporter")
+        store.set_agent_state(2, "paused")
+        store.create_discussion("review", [1, 2, 3])
+        store.append_message(1, 3, "@You @Helper please review")
+        for member_id in (1, 2):
+            store.ack(1, [1], member_id)
+    finally:
+        store.close()
+
+    requests = [
+        ("discussion.read", {"discussion_id": 1}),
+        (
+            "discussion.revoke_ack",
+            {"discussion_id": 1, "message_ids": [1], "member_id": 2},
+        ),
+        ("discussion.read", {"discussion_id": 1}),
+        ("discussion.ack", {"discussion_id": 1, "message_ids": [1]}),
+        ("discussion.read", {"discussion_id": 1}),
+        ("discussion.set_members", {"discussion_id": 1, "member_ids": [2, 3]}),
+        ("discussion.revoke_ack", {"discussion_id": 1, "message_ids": [1]}),
+    ]
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": index, "method": method, "params": params}
+            for index, (method, params) in enumerate(requests, 1)
+        ],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["result"]["acknowledged"] == [1]
+    assert response(frames, 2)["result"]["revoked"] == 1
+    assert response(frames, 3)["result"]["acknowledged"] == []
+    assert response(frames, 3)["result"]["awaiting_ack"] == [1]
+    assert response(frames, 5)["result"]["acknowledged"] == [1]
+    assert response(frames, 7)["error"]["code"] == "not_a_member"
+    assert len(events(frames, "mention.revoked")) == 1
+    store = SqliteStore(data / "huddol.sqlite3")
+    try:
+        assert store.acknowledged(1, 2) == (1,)
+        assert store.acknowledged(1, 1) == (1,)
+    finally:
+        store.close()
+
+
 def test_state_survives_a_restart(tmp_path: Path) -> None:
     data = tmp_path / "data"
     drive(

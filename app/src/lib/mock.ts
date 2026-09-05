@@ -597,6 +597,7 @@ export function createMockBackend(Base: typeof Backend): Backend {
             total_messages: item.messages.length,
             read_through: item.read_through,
             awaiting_ack: mentionsOf(item, 1),
+            acknowledged: [...item.acked],
             messages: item.messages,
           };
         }

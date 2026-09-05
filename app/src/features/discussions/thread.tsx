@@ -35,6 +35,7 @@ export function ThreadPage({ id }: { id: number }) {
   const [detail, setDetail] = useState<DiscussionDetail | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [ackBusy, setAckBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [doomed, setDoomed] = useState(false);
   const [fresh, setFresh] = useState<ReadonlySet<number>>(new Set());
@@ -58,7 +59,11 @@ export function ThreadPage({ id }: { id: number }) {
 
   useEffect(() => {
     return backend.onEvent((event) => {
-      if (event.type === "message.created" || event.type === "mention.acked") {
+      if (
+        event.type === "message.created" ||
+        event.type === "mention.acked" ||
+        event.type === "mention.revoked"
+      ) {
         void load();
       }
     });
@@ -94,6 +99,10 @@ export function ThreadPage({ id }: { id: number }) {
     [detail],
   );
   const awaiting = useMemo(() => new Set(detail?.awaiting_ack ?? []), [detail]);
+  const acknowledged = useMemo(
+    () => new Set(detail?.acknowledged ?? []),
+    [detail],
+  );
 
   const send = async (body: string) => {
     setBusy(true);
@@ -108,9 +117,19 @@ export function ThreadPage({ id }: { id: number }) {
     }
   };
 
-  const ack = async (messageIds: number[]) => {
-    await backend.ack(id, messageIds);
-    await load();
+  const ack = async (messageIds: number[], revoke = false) => {
+    if (ackBusy) return;
+    setAckBusy(true);
+    setError(null);
+    try {
+      if (revoke) await backend.revokeAck(id, messageIds);
+      else await backend.ack(id, messageIds);
+      await load();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setAckBusy(false);
+    }
   };
 
   if (missing) {
@@ -162,6 +181,7 @@ export function ThreadPage({ id }: { id: number }) {
               {awaiting.size > 0 ? (
                 <Button
                   variant="primary"
+                  disabled={ackBusy}
                   onClick={() => void ack([...awaiting])}
                 >
                   <Check size={16} />
@@ -263,8 +283,11 @@ export function ThreadPage({ id }: { id: number }) {
                     compact={compact}
                     fresh={fresh.has(message.id)}
                     pending={awaiting.has(message.id)}
+                    acknowledged={acknowledged.has(message.id)}
+                    busy={ackBusy}
                     memberIds={memberIds}
                     onAck={() => void ack([message.id])}
+                    onRevoke={() => void ack([message.id], true)}
                   />
                 </Fragment>
               );
@@ -297,20 +320,26 @@ export function ThreadPage({ id }: { id: number }) {
   );
 }
 
-function MessageRow({
+export function MessageRow({
   message,
   compact,
   fresh,
   pending,
+  acknowledged,
+  busy,
   memberIds,
   onAck,
+  onRevoke,
 }: {
   message: Message;
   compact: boolean;
   fresh: boolean;
   pending: boolean;
+  acknowledged: boolean;
+  busy: boolean;
   memberIds: ReadonlySet<number>;
   onAck: () => void;
+  onRevoke: () => void;
 }) {
   const { members } = useOrganization();
   return (
@@ -342,9 +371,21 @@ function MessageRow({
         {pending ? (
           <div className="message-actions">
             <Chip tone="warning">Mentions you</Chip>
-            <Button size="sm" onClick={onAck}>
+            <Button size="sm" disabled={busy} onClick={onAck}>
               <Check size={13} />
               Mark handled
+            </Button>
+          </div>
+        ) : acknowledged ? (
+          <div className="message-actions">
+            <Chip tone="success">Handled</Chip>
+            <Button
+              size="sm"
+              disabled={busy}
+              aria-label="Undo confirmation"
+              onClick={onRevoke}
+            >
+              Undo
             </Button>
           </div>
         ) : null}

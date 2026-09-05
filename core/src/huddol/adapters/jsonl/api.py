@@ -108,11 +108,9 @@ class Api:
             return result
 
         def discussion_revoke_ack(params: dict[str, Any]) -> Any:
-            discussion_id = int(params["discussion_id"])
-            count = store.revoke_ack(
-                discussion_id, list(params.get("message_ids", [])), HUMAN_ID
+            result = self._human().revoke_ack(
+                int(params["discussion_id"]), list(params.get("message_ids", []))
             )
-            result = {"discussion_id": discussion_id, "revoked": count}
             self._changed("mention.revoked", result)
             return result
 

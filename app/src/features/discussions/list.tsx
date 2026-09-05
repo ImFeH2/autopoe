@@ -107,7 +107,11 @@ export function DiscussionsPage() {
 
   useEffect(() => {
     return backend.onEvent((event) => {
-      if (event.type === "message.created" || event.type === "mention.acked") {
+      if (
+        event.type === "message.created" ||
+        event.type === "mention.acked" ||
+        event.type === "mention.revoked"
+      ) {
         void load();
       }
     });

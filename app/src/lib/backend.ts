@@ -31,6 +31,7 @@ export type DiscussionDetail = {
   total_messages: number;
   read_through: number;
   awaiting_ack: number[];
+  acknowledged: number[];
   messages: Message[];
 };
 

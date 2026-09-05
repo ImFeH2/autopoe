@@ -307,6 +307,50 @@ def test_acking_inside_the_turn_stops_the_next_one(world) -> None:
     assert scheduler.runnable_agents() == ()
 
 
+def test_an_agent_can_reopen_its_own_acknowledgement(world, monkeypatch) -> None:
+    from pydantic_ai import models
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from huddol.adapters.model.config import ModelConfig
+    from huddol.adapters.model.runner import PydanticModelRunner
+
+    room = mention(world)
+    actions = iter(("read", "ack", "revoke_ack"))
+    results = []
+
+    def respond(messages, info):
+        action = next(actions, None)
+        if action is None:
+            results.append(messages[-1].parts[0].content)
+            return ModelResponse(parts=[TextPart("Reopened")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "discussion",
+                    {"action": action, "discussion_id": room, "message_id": 1},
+                    tool_call_id=action,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
+    monkeypatch.setattr(
+        "huddol.adapters.model.runner.build_model",
+        lambda config: FunctionModel(respond),
+    )
+    runner = PydanticModelRunner(
+        ModelConfig("openai", "https://example.invalid", "unused", "local")
+    )
+
+    record = Scheduler(world, runner).run_turn(MAIN)
+
+    assert record is not None and record.status == "completed"
+    assert results == [{"discussion_id": room, "revoked": 1}]
+    assert world.store.acknowledged(room, MAIN) == ()
+    assert [item.message_id for item in world.store.pending(MAIN)] == [1]
+
+
 def test_an_agent_can_wake_another_by_mentioning_it(world) -> None:
     room = mention(world)
     world.store.set_discussion_members(room, [HUMAN, MAIN, HELPER])
