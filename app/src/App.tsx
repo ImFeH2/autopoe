@@ -198,7 +198,9 @@ export default function App() {
         event.type === "message.created" ||
         event.type === "mention.acked" ||
         event.type === "mention.revoked" ||
-        event.type === "discussion.updated"
+        event.type === "discussion.created" ||
+        event.type === "discussion.updated" ||
+        event.type === "discussion.deleted"
       ) {
         void refresh();
       }

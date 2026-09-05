@@ -78,6 +78,132 @@ def test_reminder_names_the_topic_and_sender(world) -> None:
     assert reminder.items[0].sender_name == "You"
 
 
+def test_model_can_manage_discussions_and_page_messages(world, monkeypatch) -> None:
+    from pydantic_ai import models
+    from pydantic_ai.messages import (
+        ModelResponse,
+        RetryPromptPart,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+    )
+    from pydantic_ai.models.function import FunctionModel
+
+    from huddol.adapters.model.config import ModelConfig
+    from huddol.adapters.model.runner import PydanticModelRunner
+
+    room = mention(world, "@Main review this")
+    world.store.append_message(room, HUMAN, "needle")
+    world.store.append_message(room, HUMAN, "tail")
+    actions = iter(
+        [
+            {"action": "add_members", "member_ids": [HELPER]},
+            {"action": "read", "before": 3, "limit": 1},
+            {"action": "read", "after": 0, "limit": 1},
+            {"action": "read", "message_id": 2, "before": 3},
+            {"action": "search", "query": "needle", "sender_id": HUMAN},
+            {"action": "remove_members", "member_ids": [HELPER]},
+            {"action": "archive"},
+            {"action": "read", "message_id": 2, "limit": 1},
+            {"action": "unarchive"},
+            {"action": "delete"},
+        ]
+    )
+    returned = []
+    retries = []
+
+    def respond(messages, info):
+        definition = next(
+            tool for tool in info.function_tools if tool.name == "discussion"
+        )
+        properties = definition.parameters_json_schema["properties"]
+        assert set(properties["action"]["enum"]) == {
+            "create",
+            "list",
+            "read",
+            "send",
+            "ack",
+            "revoke_ack",
+            "search",
+            "add_members",
+            "remove_members",
+            "archive",
+            "unarchive",
+            "delete",
+        }
+        assert {"before", "after", "limit", "sender_id"} <= properties.keys()
+        assert "permanently" in definition.description
+        for part in messages[-1].parts:
+            if isinstance(part, ToolReturnPart):
+                returned.append(part.content)
+            elif isinstance(part, RetryPromptPart):
+                retries.append(part.content)
+        action = next(actions, None)
+        if action is None:
+            return ModelResponse(parts=[TextPart("Done")])
+        return ModelResponse(
+            parts=[ToolCallPart("discussion", {"discussion_id": room, **action})]
+        )
+
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
+    monkeypatch.setattr(
+        "huddol.adapters.model.runner.build_model",
+        lambda config: FunctionModel(respond),
+    )
+    runner = PydanticModelRunner(
+        ModelConfig("openai", "https://example.invalid", "unused", "local")
+    )
+    emitted = []
+    record = Scheduler(
+        world, runner, on_event=lambda name, payload: emitted.append(name)
+    ).run_turn(MAIN)
+    assert record is not None
+    assert record.status == "completed", record.error
+    assert [name for name in emitted if name.startswith("discussion.")] == [
+        "discussion.updated",
+        "discussion.updated",
+        "discussion.updated",
+        "discussion.updated",
+        "discussion.deleted",
+    ]
+    assert emitted[-1] == "turn.finished"
+    assert len(retries) == 1 and "invalid_pagination" in str(retries[0])
+    assert returned[0]["member_ids"] == [HUMAN, MAIN, HELPER]
+    assert [item["id"] for item in returned[1]["messages"]] == [2]
+    assert [item["id"] for item in returned[2]["messages"]] == [1]
+    assert [item["id"] for item in returned[3]] == [2]
+    assert returned[4]["member_ids"] == [HUMAN, MAIN]
+    assert returned[5]["archived"] is True
+    assert [item["id"] for item in returned[6]["messages"]] == [1, 2, 3]
+    assert returned[7]["archived"] is False
+    assert returned[8] == {"id": room, "deleted": True}
+    assert world.store.get_discussion(room) is None
+    assert world.history.latest_messages(MAIN) != "[]"
+
+
+@pytest.mark.parametrize("actor_id", [HUMAN, MAIN])
+def test_discussion_notifications_do_not_depend_on_the_caller_type(
+    world, actor_id
+) -> None:
+    emitted = []
+    scheduler = Scheduler(
+        world, RecordingRunner(), on_event=lambda name, payload: emitted.append(name)
+    )
+    actor = scheduler.tools_for(actor_id)
+    room = actor.create_discussion("Notifications", [HELPER])["id"]
+    name = world.store.get_member(actor_id).name
+    scheduler.tools_for(HELPER).send_message(room, f"@{name} please review")
+    actor.read_discussion(room)
+    actor.ack(room, [1])
+    actor.revoke_ack(room, [1])
+    assert emitted == [
+        "discussion.created",
+        "message.created",
+        "mention.acked",
+        "mention.revoked",
+    ]
+
+
 def test_no_reminder_without_pending_mentions(world) -> None:
     assert build_reminder(world.store, world.history, MAIN, "Main") is None
 

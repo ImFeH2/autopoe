@@ -41,7 +41,7 @@ def server(tmp_path: Path):
     )
     output = Capture()
     dispatcher = Dispatcher(JsonLineWriter(output))
-    scheduler = Scheduler(deps, UnavailableRunner("no model"))
+    scheduler = Scheduler(deps, UnavailableRunner("no model"), on_event=dispatcher.emit)
     Api(scheduler, dispatcher)
     yield dispatcher, output, deps
     store.close()

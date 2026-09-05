@@ -77,6 +77,10 @@ class Scheduler:
         except Exception:
             logger.exception("event listener failed for %s", name)
 
+    def _changed(self, name: str, payload: dict[str, object]) -> None:
+        self.emit(name, payload)
+        self.wake()
+
     def wake(self) -> None:
         self._wake.set()
 
@@ -142,7 +146,9 @@ class Scheduler:
     def tools_for_actor(
         self, actor: Actor, turn: TurnBinding | None = None
     ) -> AgentTools:
-        return AgentTools(self._deps, actor, self._authorizer, turn)
+        return AgentTools(
+            self._deps, actor, self._authorizer, turn, on_change=self._changed
+        )
 
     @property
     def sandbox(self) -> Sandbox:

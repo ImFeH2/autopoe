@@ -28,7 +28,6 @@ class Api:
 
     def _register(self) -> None:
         register = self._dispatcher.register
-        store = self._scheduler.store
         settings = self._scheduler.settings
 
         def organization_get(params: dict[str, Any]) -> Any:
@@ -74,11 +73,9 @@ class Api:
             return result
 
         def discussion_create(params: dict[str, Any]) -> Any:
-            result = self._human().create_discussion(
+            return self._human().create_discussion(
                 str(params.get("topic", "")), list(params.get("member_ids", []))
             )
-            self._changed("discussion.created", result)
-            return result
 
         def discussion_list(params: dict[str, Any]) -> Any:
             return self._human().list_discussions(
@@ -91,60 +88,61 @@ class Api:
                 int(params["discussion_id"]),
                 int(message_id) if message_id is not None else None,
                 params.get("limit"),
+                before=params.get("before"),
+                after=params.get("after"),
             )
 
         def discussion_send(params: dict[str, Any]) -> Any:
-            result = self._human().send_message(
+            return self._human().send_message(
                 int(params["discussion_id"]), str(params.get("body", ""))
             )
-            self._changed("message.created", result)
-            return result
 
         def discussion_ack(params: dict[str, Any]) -> Any:
-            result = self._human().ack(
+            return self._human().ack(
                 int(params["discussion_id"]), list(params.get("message_ids", []))
             )
-            self._changed("mention.acked", result)
-            return result
 
         def discussion_revoke_ack(params: dict[str, Any]) -> Any:
-            result = self._human().revoke_ack(
+            return self._human().revoke_ack(
                 int(params["discussion_id"]), list(params.get("message_ids", []))
             )
-            self._changed("mention.revoked", result)
-            return result
 
         def discussion_members(params: dict[str, Any]) -> Any:
-            discussion_id = int(params["discussion_id"])
-            current = store.get_discussion(discussion_id)
-            if current is None:
-                raise DomainError("not_found", f"Discussion {discussion_id} not found")
-            updated = store.set_discussion_members(
-                discussion_id, list(params.get("member_ids", []))
+            return self._human().set_discussion_members(
+                int(params["discussion_id"]), list(params.get("member_ids", []))
             )
-            result = {"id": updated.id, "member_ids": sorted(updated.member_ids)}
-            self._changed("discussion.updated", result)
-            return result
+
+        def discussion_add_members(params: dict[str, Any]) -> Any:
+            return self._human().add_members(
+                int(params["discussion_id"]), list(params["member_ids"])
+            )
+
+        def discussion_remove_members(params: dict[str, Any]) -> Any:
+            return self._human().remove_members(
+                int(params["discussion_id"]), list(params["member_ids"])
+            )
 
         def discussion_archive(params: dict[str, Any]) -> Any:
-            discussion_id = int(params["discussion_id"])
-            store.set_archived(discussion_id, bool(params.get("archived", True)))
-            result = {
-                "id": discussion_id,
-                "archived": bool(params.get("archived", True)),
-            }
-            self._changed("discussion.updated", result)
-            return result
+            return self._human().archive_discussion(
+                int(params["discussion_id"]), bool(params.get("archived", True))
+            )
+
+        def discussion_unarchive(params: dict[str, Any]) -> Any:
+            return self._human().archive_discussion(int(params["discussion_id"]), False)
 
         def discussion_delete(params: dict[str, Any]) -> Any:
-            discussion_id = int(params["discussion_id"])
-            store.delete_discussion(discussion_id)
-            result = {"id": discussion_id, "deleted": True}
-            self._changed("discussion.deleted", result)
-            return result
+            return self._human().delete_discussion(int(params["discussion_id"]))
 
         def discussion_search(params: dict[str, Any]) -> Any:
-            return self._human().search_messages(str(params.get("query", "")))
+            return self._human().search_messages(
+                str(params.get("query", "")),
+                sender_id=int(params["sender_id"])
+                if params.get("sender_id") is not None
+                else None,
+                discussion_id=int(params["discussion_id"])
+                if params.get("discussion_id") is not None
+                else None,
+            )
 
         def library_list(params: dict[str, Any]) -> Any:
             return self._human().list_library(params.get("path"))
@@ -271,7 +269,10 @@ class Api:
         register("discussion.ack", discussion_ack)
         register("discussion.revoke_ack", discussion_revoke_ack)
         register("discussion.set_members", discussion_members)
+        register("discussion.add_members", discussion_add_members)
+        register("discussion.remove_members", discussion_remove_members)
         register("discussion.archive", discussion_archive)
+        register("discussion.unarchive", discussion_unarchive)
         register("discussion.delete", discussion_delete)
         register("discussion.search", discussion_search)
         register("library.list", library_list)

@@ -4,7 +4,7 @@ import asyncio
 import json
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic_ai import (
     Agent,
@@ -138,10 +138,32 @@ class PydanticModelRunner:
                 )
             raise ModelRetry(f"organization has no action {action}")
 
-        @agent.tool(sequential=True)
+        @agent.tool(
+            sequential=True,
+            description=(
+                "Manage discussions and messages. Read with message_id for full semantic context; "
+                "do not combine it with before/after. Pagination uses exclusive message ID bounds "
+                "and a positive limit: nearest messages after the lower bound, or before the upper "
+                "bound, returned oldest first. Without bounds, limit selects the latest messages. "
+                "Archive is reversible; delete permanently removes the discussion and all its messages."
+            ),
+        )
         def discussion(
             ctx: RunContext[AgentTools],
-            action: str,
+            action: Literal[
+                "create",
+                "list",
+                "read",
+                "send",
+                "ack",
+                "revoke_ack",
+                "search",
+                "add_members",
+                "remove_members",
+                "archive",
+                "unarchive",
+                "delete",
+            ],
             discussion_id: int | None = None,
             message_id: int | None = None,
             message_ids: list[int] | None = None,
@@ -150,6 +172,10 @@ class PydanticModelRunner:
             body: str | None = None,
             query: str | None = None,
             include_archived: bool = False,
+            before: int | None = None,
+            after: int | None = None,
+            limit: int | None = None,
+            sender_id: int | None = None,
         ) -> Any:
             tools = ctx.deps
             if action == "create":
@@ -164,7 +190,11 @@ class PydanticModelRunner:
             if action == "read":
                 return _guard(
                     lambda: tools.read_discussion(
-                        _required(discussion_id, "discussion_id", action), message_id
+                        _required(discussion_id, "discussion_id", action),
+                        message_id,
+                        limit,
+                        before=before,
+                        after=after,
                     )
                 )
             if action == "send":
@@ -187,7 +217,34 @@ class PydanticModelRunner:
                 )
             if action == "search":
                 return _guard(
-                    lambda: tools.search_messages(_required(query, "query", action))
+                    lambda: tools.search_messages(
+                        _required(query, "query", action), sender_id, discussion_id
+                    )
+                )
+            if action in ("add_members", "remove_members"):
+                change_members = (
+                    tools.add_members
+                    if action == "add_members"
+                    else tools.remove_members
+                )
+                return _guard(
+                    lambda: change_members(
+                        _required(discussion_id, "discussion_id", action),
+                        _required(member_ids, "member_ids", action),
+                    )
+                )
+            if action in ("archive", "unarchive"):
+                return _guard(
+                    lambda: tools.archive_discussion(
+                        _required(discussion_id, "discussion_id", action),
+                        action == "archive",
+                    )
+                )
+            if action == "delete":
+                return _guard(
+                    lambda: tools.delete_discussion(
+                        _required(discussion_id, "discussion_id", action)
+                    )
                 )
             raise ModelRetry(f"discussion has no action {action}")
 

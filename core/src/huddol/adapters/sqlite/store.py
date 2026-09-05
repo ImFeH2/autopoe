@@ -10,6 +10,7 @@ from types import TracebackType
 from typing import Any, Self
 
 from huddol.core.discussion import Discussion, Message
+from huddol.core.errors import DomainError
 from huddol.core.member import AgentState, Member, MemberType, name_key
 from huddol.core.mention import Mention, build_mentions
 
@@ -287,10 +288,20 @@ class SqliteStore:
             assert discussion is not None
             return discussion
 
+    def _active_member_ids(self, member_ids: Sequence[int]) -> None:
+        unknown = sorted(set(member_ids) - {item.id for item in self.list_members()})
+        if unknown:
+            raise DomainError("not_found", f"Unknown Members: {unknown}")
+
     def set_discussion_members(
         self, discussion_id: int, member_ids: Sequence[int]
     ) -> Discussion:
         with self._write() as db:
+            if self.get_discussion(discussion_id) is None:
+                raise DomainError(
+                    "not_found", f"Discussion {discussion_id} does not exist"
+                )
+            self._active_member_ids(member_ids)
             db.execute(
                 "DELETE FROM discussion_members WHERE discussion_id = ?",
                 (discussion_id,),
@@ -299,9 +310,31 @@ class SqliteStore:
                 "INSERT INTO discussion_members (discussion_id, member_id) VALUES (?, ?)",
                 [(discussion_id, member_id) for member_id in dict.fromkeys(member_ids)],
             )
-        discussion = self.get_discussion(discussion_id)
-        assert discussion is not None
-        return discussion
+            discussion = self.get_discussion(discussion_id)
+            assert discussion is not None
+            return discussion
+
+    def change_discussion_members(
+        self, discussion_id: int, member_ids: Sequence[int], *, remove: bool = False
+    ) -> Discussion:
+        with self._write() as db:
+            if self.get_discussion(discussion_id) is None:
+                raise DomainError(
+                    "not_found", f"Discussion {discussion_id} does not exist"
+                )
+            if not remove:
+                self._active_member_ids(member_ids)
+            sql = (
+                "DELETE FROM discussion_members WHERE discussion_id = ? AND member_id = ?"
+                if remove
+                else "INSERT OR IGNORE INTO discussion_members (discussion_id, member_id) VALUES (?, ?)"
+            )
+            db.executemany(
+                sql, [(discussion_id, member_id) for member_id in member_ids]
+            )
+            discussion = self.get_discussion(discussion_id)
+            assert discussion is not None
+            return discussion
 
     def set_archived(self, discussion_id: int, archived: bool) -> None:
         with self._write() as db:
@@ -395,6 +428,7 @@ class SqliteStore:
         after: int | None = None,
         before: int | None = None,
         limit: int | None = None,
+        latest: bool = False,
     ) -> tuple[Message, ...]:
         sql = "SELECT * FROM messages WHERE discussion_id = ?"
         params: list[object] = [discussion_id]
@@ -404,11 +438,12 @@ class SqliteStore:
         if before is not None:
             sql += " AND id < ?"
             params.append(before)
-        sql += " ORDER BY id"
+        sql += " ORDER BY id DESC" if latest else " ORDER BY id"
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
-        return tuple(self._message(row) for row in self._db.execute(sql, params))
+        messages = tuple(self._message(row) for row in self._db.execute(sql, params))
+        return tuple(reversed(messages)) if latest else messages
 
     def message_count(self, discussion_id: int) -> int:
         row = first(

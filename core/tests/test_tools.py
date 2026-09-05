@@ -45,6 +45,165 @@ def tools_for(deps: Dependencies, member_id: int, **kwargs) -> AgentTools:
     return AgentTools(deps, Actor(member_id, member.is_agent), **kwargs)
 
 
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"limit": 2}, [5, 6]),
+        ({"before": 5, "limit": 2}, [3, 4]),
+        ({"after": 2, "limit": 2}, [3, 4]),
+        ({"after": 0, "limit": 2}, [1, 2]),
+        ({"after": 2, "before": 5}, [3, 4]),
+        ({"after": 1, "before": 6, "limit": 2}, [2, 3]),
+        ({"before": 1}, []),
+        ({"after": 6}, []),
+        ({"message_id": 3, "limit": 1}, [1, 2, 3, 4, 5, 6]),
+    ],
+)
+def test_reading_pages_keeps_order_and_exclusive_boundaries(
+    world, params, expected
+) -> None:
+    human = tools_for(world, HUMAN)
+    room = human.create_discussion("pages", [MAIN])
+    for number in range(6):
+        human.send_message(room["id"], f"Message {number}")
+    page = tools_for(world, MAIN).read_discussion(room["id"], **params)
+    assert [item["id"] for item in page["messages"]] == expected
+    assert page["total_messages"] == 6
+    assert world.store.watermark(room["id"], MAIN) == (max(expected) if expected else 0)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"before": -1},
+        {"after": True},
+        {"before": "2"},
+        {"limit": 0},
+        {"limit": -1},
+        {"limit": 1.5},
+        {"message_id": 1, "before": 2},
+        {"message_id": 1, "after": 0},
+    ],
+)
+def test_invalid_pagination_does_not_advance_read_state(world, params) -> None:
+    room = tools_for(world, HUMAN).create_discussion("pages", [MAIN])
+    tools_for(world, HUMAN).send_message(room["id"], "@Main read this")
+    with pytest.raises(DomainError) as error:
+        tools_for(world, MAIN).read_discussion(room["id"], **params)
+    assert error.value.code == "invalid_pagination"
+    assert world.store.watermark(room["id"], MAIN) == 0
+    assert len(world.store.pending(MAIN)) == 1
+
+
+@pytest.mark.parametrize("actor_id", [HUMAN, MAIN])
+def test_discussion_management_preserves_history_and_pending(world, actor_id) -> None:
+    human = tools_for(world, HUMAN)
+    room = human.create_discussion("handoff", [MAIN, OTHER])["id"]
+    untouched = human.create_discussion("separate", [MAIN])["id"]
+    for body in ("@You @Main first", "@You @Main second"):
+        tools_for(world, OTHER).send_message(room, body)
+    actor = tools_for(world, actor_id)
+    actor.read_discussion(room)
+    actor.ack(room, [1])
+    actor.remove_members(room, [actor_id])
+    assert world.store.message_count(room) == 2
+    assert world.store.acknowledged(room, actor_id) == (1,)
+    assert world.store.pending(actor_id) == ()
+    with pytest.raises(DomainError, match="do not belong"):
+        actor.read_discussion(room)
+    actor.add_members(room, [actor_id, actor_id])
+    assert actor.read_discussion(room)["awaiting_ack"] == [2]
+    actor.archive_discussion(room)
+    assert world.store.pending(actor_id) == ()
+    assert room not in [item["id"] for item in actor.list_discussions()]
+    assert len(actor.search_messages("first", sender_id=OTHER, discussion_id=room)) == 1
+    assert actor.search_messages("first", sender_id=HUMAN, discussion_id=room) == []
+    assert actor.search_messages("first", discussion_id=untouched) == []
+    actor.archive_discussion(room, False)
+    assert actor.read_discussion(room)["awaiting_ack"] == [2]
+    actor.delete_discussion(room)
+    assert world.store.pending(actor_id) == ()
+    assert world.store.messages(room) == ()
+    assert world.store.acknowledged(room, actor_id) == ()
+    assert world.store.get_discussion(untouched) is not None
+    with pytest.raises(DomainError, match="does not exist"):
+        actor.read_discussion(room)
+
+
+@pytest.mark.parametrize(
+    ("method", "params", "capability"),
+    [
+        ("add_members", {"member_ids": [OTHER]}, "discussion.add_members"),
+        ("remove_members", {"member_ids": [MAIN]}, "discussion.remove_members"),
+        ("set_discussion_members", {"member_ids": [HUMAN]}, "discussion.set_members"),
+        ("archive_discussion", {}, "discussion.archive"),
+        ("archive_discussion", {"archived": False}, "discussion.unarchive"),
+        ("delete_discussion", {}, "discussion.delete"),
+    ],
+)
+def test_discussion_management_is_authorized_before_mutation(
+    world, method, params, capability
+) -> None:
+    room = tools_for(world, HUMAN).create_discussion("guarded", [MAIN])["id"]
+    original = world.store.get_discussion(room)
+    seen = []
+
+    def deny(actor, name, target):
+        seen.append((actor.member_id, name, target))
+        return "deny"
+
+    emitted = []
+    tools = tools_for(
+        world,
+        MAIN,
+        authorizer=Authorizer(deny),
+        on_change=lambda name, payload: emitted.append(name),
+    )
+    with pytest.raises(DomainError) as error:
+        getattr(tools, method)(room, **params)
+    assert error.value.code == "not_permitted"
+    assert seen == [(MAIN, capability, room)]
+    assert emitted == []
+    assert world.store.get_discussion(room) == original
+
+
+@pytest.mark.parametrize("method", ["add_members", "set_discussion_members"])
+def test_invalid_members_are_rejected_without_partial_changes(world, method) -> None:
+    room = tools_for(world, HUMAN).create_discussion("guarded", [MAIN])["id"]
+    original = world.store.get_discussion(room)
+    actor = tools_for(world, MAIN)
+    with pytest.raises(DomainError, match="Unknown Members"):
+        getattr(actor, method)(room, [OTHER, 999])
+    assert world.store.get_discussion(room) == original
+    world.store.delete_member(OTHER)
+    with pytest.raises(DomainError, match="Unknown Members"):
+        getattr(actor, method)(room, [OTHER])
+    assert world.store.get_discussion(room) == original
+
+
+def test_concurrent_member_changes_preserve_independent_updates(world) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    human = tools_for(world, HUMAN)
+    room = human.create_discussion("concurrent", [MAIN])["id"]
+    barrier = Barrier(2)
+
+    def add():
+        barrier.wait()
+        tools_for(world, MAIN).add_members(room, [OTHER])
+
+    def remove():
+        barrier.wait()
+        human.remove_members(room, [MAIN])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        workers = [pool.submit(add), pool.submit(remove)]
+        for worker in workers:
+            worker.result(timeout=5)
+    assert world.store.get_discussion(room).member_ids == frozenset([HUMAN, OTHER])
+
+
 def test_creating_a_discussion_always_includes_the_creator(world) -> None:
     tools = tools_for(world, HUMAN)
     room = tools.create_discussion("plan the rewrite", [MAIN])

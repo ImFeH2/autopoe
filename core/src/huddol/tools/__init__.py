@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from huddol.core.context import advance_watermark, context_window
-from huddol.core.discussion import validate_body, validate_topic
+from huddol.core.discussion import Discussion, validate_body, validate_topic
 from huddol.core.errors import DomainError
 from huddol.core.member import validate_name
 from huddol.ports.agent import HistoryStore, SettingsStore, TodoStore
@@ -43,11 +43,18 @@ class AgentTools:
         actor: Actor,
         authorizer: Authorizer | None = None,
         turn: TurnBinding | None = None,
+        *,
+        on_change: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._deps = deps
         self._actor = actor
         self._auth = authorizer or Authorizer()
         self._turn = turn
+        self._on_change = on_change or (lambda name, payload: None)
+
+    def _changed(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._on_change(name, payload)
+        return payload
 
     def _record(self, tool: str, summary: str) -> None:
         if self._turn is None:
@@ -59,11 +66,14 @@ class AgentTools:
     def _check(self, capability: str, target: object = None) -> None:
         self._auth.check(self._actor, capability, target)
 
-    def _require_membership(self, discussion_id: int) -> None:
+    def _discussion(self, discussion_id: int) -> Discussion:
         discussion = self._deps.store.get_discussion(discussion_id)
         if discussion is None:
             raise DomainError("not_found", f"Discussion {discussion_id} does not exist")
-        if not discussion.has_member(self._actor.member_id):
+        return discussion
+
+    def _require_membership(self, discussion_id: int) -> None:
+        if not self._discussion(discussion_id).has_member(self._actor.member_id):
             raise DomainError(
                 "not_a_member", f"You do not belong to Discussion {discussion_id}"
             )
@@ -137,11 +147,14 @@ class AgentTools:
         discussion = self._deps.store.create_discussion(
             validated, [self._actor.member_id, *others]
         )
-        return {
-            "id": discussion.id,
-            "topic": discussion.topic,
-            "member_ids": sorted(discussion.member_ids),
-        }
+        return self._changed(
+            "discussion.created",
+            {
+                "id": discussion.id,
+                "topic": discussion.topic,
+                "member_ids": sorted(discussion.member_ids),
+            },
+        )
 
     def list_discussions(self, include_archived: bool = False) -> list[dict[str, Any]]:
         self._check("discussion.list")
@@ -164,18 +177,40 @@ class AgentTools:
         discussion_id: int,
         message_id: int | None = None,
         limit: int | None = None,
+        *,
+        before: int | None = None,
+        after: int | None = None,
     ) -> dict[str, Any]:
         self._check("discussion.read", discussion_id)
         self._require_membership(discussion_id)
+        for name, value, minimum in (
+            ("before", before, 0),
+            ("after", after, 0),
+            ("limit", limit, 1),
+        ):
+            if value is not None and (type(value) is not int or value < minimum):
+                raise DomainError(
+                    "invalid_pagination", f"{name} must be an integer >= {minimum}"
+                )
+        if message_id is not None and (before is not None or after is not None):
+            raise DomainError(
+                "invalid_pagination",
+                "message_id cannot be combined with before or after",
+            )
         store = self._deps.store
-        discussion = store.get_discussion(discussion_id)
-        assert discussion is not None
-        everything = store.messages(discussion_id)
+        discussion = self._discussion(discussion_id)
         read_before = store.watermark(discussion_id, self._actor.member_id)
 
         if message_id is None:
-            selected = everything[-limit:] if limit else everything
+            selected = store.messages(
+                discussion_id,
+                before=before,
+                after=after,
+                limit=limit,
+                latest=after is None and limit is not None,
+            )
         else:
+            everything = store.messages(discussion_id)
             mentions = store.mentions_by_message(discussion_id)
             try:
                 selected = context_window(
@@ -245,12 +280,15 @@ class AgentTools:
             f"Discussion {discussion_id}: message {message.id}"
             f" ({len(validated)} characters)",
         )
-        return {
-            "discussion_id": message.discussion_id,
-            "id": message.id,
-            "created_at": message.created_at,
-            "mentioned": [item.member_id for item in mentions],
-        }
+        return self._changed(
+            "message.created",
+            {
+                "discussion_id": message.discussion_id,
+                "id": message.id,
+                "created_at": message.created_at,
+                "mentioned": [item.member_id for item in mentions],
+            },
+        )
 
     def ack(self, discussion_id: int, message_ids: Sequence[int]) -> dict[str, Any]:
         self._check("discussion.ack", discussion_id)
@@ -265,7 +303,9 @@ class AgentTools:
             discussion_id, list(message_ids), self._actor.member_id
         )
         self._record("ack", f"Discussion {discussion_id}: {acked} acknowledged")
-        return {"discussion_id": discussion_id, "acked": acked}
+        return self._changed(
+            "mention.acked", {"discussion_id": discussion_id, "acked": acked}
+        )
 
     def revoke_ack(
         self, discussion_id: int, message_ids: Sequence[int]
@@ -275,7 +315,69 @@ class AgentTools:
         revoked = self._deps.store.revoke_ack(
             discussion_id, message_ids, self._actor.member_id
         )
-        return {"discussion_id": discussion_id, "revoked": revoked}
+        return self._changed(
+            "mention.revoked", {"discussion_id": discussion_id, "revoked": revoked}
+        )
+
+    def _member_ids(self, member_ids: Sequence[int]) -> None:
+        if any(type(item) is not int or item <= 0 for item in member_ids):
+            raise DomainError("invalid_members", "Member IDs must be positive integers")
+
+    def set_discussion_members(
+        self, discussion_id: int, member_ids: Sequence[int]
+    ) -> dict[str, Any]:
+        self._check("discussion.set_members", discussion_id)
+        self._discussion(discussion_id)
+        self._member_ids(member_ids)
+        updated = self._deps.store.set_discussion_members(discussion_id, member_ids)
+        return self._changed(
+            "discussion.updated",
+            {"id": updated.id, "member_ids": sorted(updated.member_ids)},
+        )
+
+    def add_members(
+        self, discussion_id: int, member_ids: Sequence[int]
+    ) -> dict[str, Any]:
+        self._check("discussion.add_members", discussion_id)
+        self._member_ids(member_ids)
+        updated = self._deps.store.change_discussion_members(discussion_id, member_ids)
+        return self._changed(
+            "discussion.updated",
+            {"id": updated.id, "member_ids": sorted(updated.member_ids)},
+        )
+
+    def remove_members(
+        self, discussion_id: int, member_ids: Sequence[int]
+    ) -> dict[str, Any]:
+        self._check("discussion.remove_members", discussion_id)
+        self._member_ids(member_ids)
+        updated = self._deps.store.change_discussion_members(
+            discussion_id, member_ids, remove=True
+        )
+        return self._changed(
+            "discussion.updated",
+            {"id": updated.id, "member_ids": sorted(updated.member_ids)},
+        )
+
+    def archive_discussion(
+        self, discussion_id: int, archived: bool = True
+    ) -> dict[str, Any]:
+        self._check(
+            "discussion.archive" if archived else "discussion.unarchive", discussion_id
+        )
+        self._discussion(discussion_id)
+        self._deps.store.set_archived(discussion_id, archived)
+        return self._changed(
+            "discussion.updated", {"id": discussion_id, "archived": archived}
+        )
+
+    def delete_discussion(self, discussion_id: int) -> dict[str, Any]:
+        self._check("discussion.delete", discussion_id)
+        self._discussion(discussion_id)
+        self._deps.store.delete_discussion(discussion_id)
+        return self._changed(
+            "discussion.deleted", {"id": discussion_id, "deleted": True}
+        )
 
     def search_messages(
         self,
@@ -283,7 +385,7 @@ class AgentTools:
         sender_id: int | None = None,
         discussion_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        self._check("discussion.search")
+        self._check("discussion.search", discussion_id)
         mine = {
             item.id
             for item in self._deps.store.list_discussions(

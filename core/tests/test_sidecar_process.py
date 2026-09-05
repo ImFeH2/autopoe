@@ -53,6 +53,81 @@ def events(frames: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
     return [frame for frame in frames if frame.get("type") == kind]
 
 
+def test_discussion_management_and_pagination_survive_the_pipe(tmp_path: Path) -> None:
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    store = SqliteStore(data / "huddol.sqlite3")
+    store.create_member("human", "You")
+    for name in ("Main", "Other"):
+        member = store.create_member("agent", name)
+        store.set_agent_state(member.id, "paused")
+    store.create_discussion("paged", [1, 2])
+    store.create_discussion("retained", [1, 3])
+    store.create_discussion("hidden", [2, 3])
+    for sender, body in [
+        (1, "needle first"),
+        (2, "needle second"),
+        (1, "third"),
+        (2, "fourth"),
+    ]:
+        store.append_message(1, sender, body)
+    store.append_message(2, 3, "needle retained")
+    store.append_message(3, 2, "needle hidden")
+    store.close()
+    requests = [
+        ("discussion.add_members", {"discussion_id": 1, "member_ids": [3]}),
+        ("discussion.read", {"discussion_id": 1, "before": 4, "limit": 2}),
+        ("discussion.read", {"discussion_id": 1, "after": 1, "limit": 2}),
+        ("discussion.read", {"discussion_id": 1, "message_id": 2, "before": 4}),
+        ("discussion.search", {"query": "needle", "sender_id": 2, "discussion_id": 1}),
+        ("discussion.archive", {"discussion_id": 1}),
+        ("discussion.list", {}),
+        ("discussion.read", {"discussion_id": 1, "message_id": 2, "limit": 1}),
+        ("discussion.remove_members", {"discussion_id": 1, "member_ids": [2]}),
+        ("discussion.unarchive", {"discussion_id": 1}),
+        ("discussion.search", {"query": "needle", "sender_id": 2}),
+    ]
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": index, "method": method, "params": params}
+            for index, (method, params) in enumerate(requests, 1)
+        ],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["result"]["member_ids"] == [1, 2, 3]
+    for request_id in (2, 3):
+        assert [
+            item["id"] for item in response(frames, request_id)["result"]["messages"]
+        ] == [2, 3]
+    assert response(frames, 4)["error"]["code"] == "invalid_pagination"
+    assert [item["id"] for item in response(frames, 5)["result"]] == [2]
+    assert [item["id"] for item in response(frames, 7)["result"]] == [2]
+    assert [item["id"] for item in response(frames, 8)["result"]["messages"]] == [1, 2]
+    assert response(frames, 9)["result"]["member_ids"] == [1, 3]
+    assert response(frames, 10)["result"]["archived"] is False
+    assert [item["discussion_id"] for item in response(frames, 11)["result"]] == [1]
+    assert len(events(frames, "discussion.updated")) == 4
+
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": 1, "method": "discussion.read", "params": {"discussion_id": 1}},
+            {"id": 2, "method": "discussion.delete", "params": {"discussion_id": 1}},
+            {"id": 3, "method": "discussion.read", "params": {"discussion_id": 1}},
+            {"id": 4, "method": "discussion.search", "params": {"query": "needle"}},
+        ],
+    )
+    assert code == 0, stderr
+    assert [item["id"] for item in response(frames, 1)["result"]["members"]] == [1, 3]
+    assert len(response(frames, 1)["result"]["messages"]) == 4
+    assert response(frames, 2)["result"]["deleted"] is True
+    assert response(frames, 3)["error"]["code"] == "not_found"
+    assert [item["discussion_id"] for item in response(frames, 4)["result"]] == [2]
+    assert len(events(frames, "discussion.deleted")) == 1
+
+
 def test_the_process_starts_and_announces_itself(tmp_path: Path) -> None:
     frames, code, stderr = drive(tmp_path / "data", [])
     assert code == 0, stderr
