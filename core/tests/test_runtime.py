@@ -93,12 +93,164 @@ def test_turn_records_history_and_returns_to_idle(world) -> None:
     assert world.history.latest_messages(MAIN) == json.dumps([{"kind": "response"}])
 
 
-def test_runtime_context_is_not_persisted_into_history(world) -> None:
-    mention(world)
-    runner = RecordingRunner()
-    Scheduler(world, runner).run_turn(MAIN)
-    assert "You can only write inside" in runner.requests[0].runtime_context
-    assert "You can only write inside" not in world.history.latest_messages(MAIN)
+@pytest.mark.parametrize("fail", [False, True])
+def test_runtime_context_is_not_persisted_into_history(
+    world, monkeypatch, fail
+) -> None:
+    from pydantic_ai import ModelMessagesTypeAdapter, models
+    from pydantic_ai.messages import (
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+    from pydantic_ai.models.function import FunctionModel
+
+    from huddol.adapters.model.config import ModelConfig
+    from huddol.adapters.model.runner import PydanticModelRunner
+
+    room = mention(world, "@Main keep the discussion text")
+    received = []
+
+    def respond(messages, info):
+        received.append(ModelMessagesTypeAdapter.dump_json(messages).decode())
+        if isinstance(messages[-1].parts[-1], ToolReturnPart):
+            if fail:
+                raise RuntimeError("local model failure")
+            return ModelResponse(parts=[TextPart("Keep the model response")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "discussion",
+                    {"action": "read", "discussion_id": room, "message_id": 1},
+                    tool_call_id=f"read-{len(received)}",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
+    monkeypatch.setattr(
+        "huddol.adapters.model.runner.build_model",
+        lambda config: FunctionModel(respond),
+    )
+    runner = PydanticModelRunner(
+        ModelConfig("openai", "https://example.invalid", "unused", "local")
+    )
+    scheduler = Scheduler(world, runner)
+    tools = scheduler.tools_for(MAIN)
+    memory = tools.write_memory("MEMORY.md", "MEMORY_STATE_OLD")
+    old_todo = tools.add_todo("TASK_STATE_OLD")
+
+    for turn, state in enumerate(("OLD", "NEW"), start=1):
+        if state == "NEW":
+            tools.write_memory(
+                "MEMORY.md", "MEMORY_STATE_NEW", expected_hash=memory["hash"]
+            )
+            tools.complete_todo(old_todo["id"])
+            tools.add_todo("TASK_STATE_NEW")
+        reminder = build_reminder(world.store, world.history, MAIN, "Main")
+        assert reminder is not None
+        start = len(received)
+
+        record = scheduler.run_turn(MAIN)
+
+        assert record is not None
+        assert record.status == ("failed" if fail else "completed")
+        assert len(received) == start + 2
+        for request in received[start:]:
+            assert f"MEMORY_STATE_{state}" in request
+            assert f"TASK_STATE_{state}" in request
+            if state == "NEW":
+                assert "MEMORY_STATE_OLD" not in request
+                assert "TASK_STATE_OLD" not in request
+        saved = world.history.latest_messages(MAIN)
+        assert "MEMORY_STATE_" not in saved
+        assert "TASK_STATE_" not in saved
+        messages = ModelMessagesTypeAdapter.validate_json(saved)
+        prompts = [
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        ]
+        assert len(prompts) == turn
+        assert prompts[-1] == reminder.render()
+        assert "@Main keep the discussion text" in saved
+        assert (
+            sum(
+                isinstance(part, ToolCallPart)
+                for message in messages
+                for part in message.parts
+            )
+            == turn
+        )
+        assert (
+            sum(
+                isinstance(part, ToolReturnPart)
+                for message in messages
+                for part in message.parts
+            )
+            == turn
+        )
+        if not fail:
+            assert "Keep the model response" in saved
+
+
+@pytest.mark.parametrize("threshold", [1, 400_000])
+def test_runtime_context_removal_preserves_existing_history(
+    world, monkeypatch, threshold: int
+) -> None:
+    from pydantic_ai import ModelMessagesTypeAdapter, models
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        UserPromptPart,
+    )
+    from pydantic_ai.models.function import FunctionModel
+
+    from huddol.adapters.model.config import ModelConfig
+    from huddol.adapters.model.runner import PydanticModelRunner
+
+    room = mention(world)
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
+    monkeypatch.setattr(
+        "huddol.adapters.model.runner.build_model",
+        lambda config: FunctionModel(
+            lambda messages, info: ModelResponse(parts=[TextPart("New response")])
+        ),
+    )
+    runner = PydanticModelRunner(
+        ModelConfig("openai", "https://example.invalid", "unused", "local", threshold)
+    )
+    scheduler = Scheduler(world, runner)
+    reminder = build_reminder(world.store, world.history, MAIN, "Main")
+    assert reminder is not None
+    prompt = f"{reminder.render()}\n\n{scheduler.runtime_context(MAIN, (room,))}"
+    prior = []
+    for index in range(6):
+        prior.extend(
+            [
+                ModelRequest(parts=[UserPromptPart(prompt)], metadata={"index": index}),
+                ModelResponse(parts=[TextPart(f"Saved response {index}")]),
+            ]
+        )
+    original = ModelMessagesTypeAdapter.dump_json(prior).decode()
+    old_run = world.history.start_run(MAIN)
+    world.history.finish_run(
+        MAIN, old_run.sequence, status="completed", messages_json=original
+    )
+
+    record = scheduler.run_turn(MAIN)
+
+    assert record is not None and record.status == "completed"
+    saved = ModelMessagesTypeAdapter.validate_json(world.history.latest_messages(MAIN))
+    retained = prior[-8:] if threshold == 1 else prior
+    assert saved[: len(retained)] == retained
+    assert saved[-2].parts[0].content == reminder.render()
+    assert saved[-1].parts[0].content == "New response"
+    assert world.history.runs(MAIN)[1].messages_json == original
 
 
 def test_runtime_context_carries_memory_and_todo_state(world) -> None:

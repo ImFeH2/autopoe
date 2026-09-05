@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any, cast
 
 from pydantic_ai import (
@@ -12,6 +14,7 @@ from pydantic_ai import (
     capture_run_messages,
 )
 from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
+from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelName
 from pydantic_ai.models.openai import (
@@ -339,9 +342,33 @@ class PydanticModelRunner:
             if trimmed.applied
             else _decode_history(request.history_json)
         )
-        prompt = request.reminder.render()
+        reminder = request.reminder.render()
+        prompt = reminder
         if request.runtime_context:
             prompt = f"{prompt}\n\n{request.runtime_context}"
+        history_prompts = sum(
+            isinstance(part, UserPromptPart)
+            for message in history
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+        )
+
+        def encode_history(messages: Sequence[ModelMessage]) -> str:
+            saved = list(messages)
+            remaining = history_prompts
+            for index, message in enumerate(saved):
+                if not isinstance(message, ModelRequest):
+                    continue
+                parts = []
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart):
+                        if remaining:
+                            remaining -= 1
+                        elif part.content == prompt:
+                            part = replace(part, content=reminder)
+                    parts.append(part)
+                saved[index] = replace(message, parts=parts)
+            return ModelMessagesTypeAdapter.dump_json(saved).decode("utf-8")
 
         async def once() -> Any:
             return await self._agent.run(prompt, deps=tools, message_history=history)
@@ -353,17 +380,13 @@ class PydanticModelRunner:
             except Exception as failure:  # noqa: BLE001
                 partial = request.history_json
                 if captured:
-                    partial = ModelMessagesTypeAdapter.dump_json(list(captured)).decode(
-                        "utf-8"
-                    )
+                    partial = encode_history(captured)
                 return TurnOutcome(
                     messages_json=partial,
                     error=f"{type(failure).__name__}: {failure}",
                 )
 
-        messages = ModelMessagesTypeAdapter.dump_json(
-            list(result.all_messages())
-        ).decode("utf-8")
+        messages = encode_history(result.all_messages())
         counted = getattr(result, "usage", None)
         if callable(counted):
             counted = counted()
