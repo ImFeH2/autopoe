@@ -466,6 +466,72 @@ def test_secrets_never_come_back_over_the_pipe(tmp_path: Path, section: str) -> 
     assert "SECRET-SECRET" not in rendered
 
 
+def test_observability_settings_preserve_keys_across_restarts(tmp_path: Path) -> None:
+    from huddol.adapters.sqlite.agent import SqliteAgentStore
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    credentials = {"public_key": "test-public", "secret_key": "test-secret"}
+    frames, code, stderr = drive(
+        data,
+        [
+            {
+                "id": 1,
+                "method": "settings.update",
+                "params": {
+                    "section": "observability",
+                    "values": {
+                        "enabled": True,
+                        "base_url": "https://example.invalid",
+                        **credentials,
+                    },
+                },
+            }
+        ],
+    )
+    assert code == 0, stderr
+    assert response(frames, 1)["result"]["keys_set"] is True
+
+    restarted, code, restart_stderr = drive(
+        data,
+        [
+            {"id": 1, "method": "settings.get", "params": {"section": "observability"}},
+            {
+                "id": 2,
+                "method": "settings.update",
+                "params": {
+                    "section": "observability",
+                    "values": {
+                        "enabled": False,
+                        "base_url": "https://updated.example.invalid",
+                    },
+                },
+            },
+            {"id": 3, "method": "settings.get", "params": {"section": "observability"}},
+        ],
+    )
+    assert code == 0, restart_stderr
+    assert response(restarted, 1)["result"] == {
+        "enabled": True,
+        "base_url": "https://example.invalid",
+        "keys_set": True,
+    }
+    assert response(restarted, 3)["result"] == {
+        "enabled": False,
+        "base_url": "https://updated.example.invalid",
+        "keys_set": True,
+    }
+    rendered = json.dumps([frames, restarted]) + stderr + restart_stderr
+    assert all(key not in rendered for key in credentials.values())
+    store = SqliteStore(data / "huddol.sqlite3")
+    try:
+        values = SqliteAgentStore(store._db).get_settings("observability")
+        assert values is not None
+        assert all(values[name] == key for name, key in credentials.items())
+    finally:
+        store.close()
+
+
 def test_ping_answers_without_touching_the_domain(tmp_path: Path) -> None:
     frames, code, stderr = drive(
         tmp_path / "data",

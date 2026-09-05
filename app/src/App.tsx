@@ -1,4 +1,5 @@
 import {
+  Activity,
   BookText,
   MessagesSquare,
   Server,
@@ -36,6 +37,7 @@ import {
   LimitsPage,
   ModelPage,
 } from "./features/settings/index";
+import { LangfusePage } from "./features/settings/langfuse";
 import { backend, type Member } from "./lib/backend";
 import { plural } from "./lib/format";
 
@@ -66,6 +68,8 @@ function View({ route, tokenLimit }: { route: Route; tokenLimit: number }) {
       return <ExecutionPage />;
     case "limits":
       return <LimitsPage />;
+    case "langfuse":
+      return <LangfusePage />;
   }
 }
 
@@ -129,6 +133,12 @@ function Chrome({ loaded }: { loaded: Loaded }) {
                 label="Limits"
                 active={active === "limits"}
                 onSelect={() => navigate({ name: "limits" })}
+              />
+              <NavItem
+                icon={<Activity size={16} />}
+                label="Langfuse"
+                active={active === "langfuse"}
+                onSelect={() => navigate({ name: "langfuse" })}
               />
             </NavSection>
           </Nav>

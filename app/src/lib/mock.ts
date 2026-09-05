@@ -750,6 +750,20 @@ export function createMockBackend(Base: typeof Backend): Backend {
             };
             return settings.model;
           }
+          if (section === "observability") {
+            const redacted = { ...values };
+            delete redacted.public_key;
+            delete redacted.secret_key;
+            settings[section] = {
+              ...settings[section],
+              ...redacted,
+              keys_set:
+                typeof values.secret_key === "string"
+                  ? values.secret_key.length > 0
+                  : settings[section]?.keys_set === true,
+            };
+            return settings[section];
+          }
           settings[section] = { ...settings[section], ...values };
           return settings[section];
         }

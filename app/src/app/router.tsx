@@ -16,9 +16,16 @@ export type Route =
   | { name: "document"; path: string }
   | { name: "model" }
   | { name: "execution" }
-  | { name: "limits" };
+  | { name: "limits" }
+  | { name: "langfuse" };
 
-export type NavId = "discussions" | "members" | "library" | "model" | "limits";
+export type NavId =
+  | "discussions"
+  | "members"
+  | "library"
+  | "model"
+  | "limits"
+  | "langfuse";
 
 const NAV_OF: Record<Route["name"], NavId> = {
   discussions: "discussions",
@@ -30,6 +37,7 @@ const NAV_OF: Record<Route["name"], NavId> = {
   model: "model",
   execution: "model",
   limits: "limits",
+  langfuse: "langfuse",
 };
 
 export function navIdOf(route: Route): NavId {
