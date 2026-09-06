@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import sys
+from io import TextIOWrapper
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from huddol.ports.sandbox import Sandbox
@@ -32,6 +33,11 @@ def main(argv: list[str] | None = None) -> int:
 
         separator = args.index("--")
         return run_restricted_command(args[1], args[separator + 1 :], os.getcwd())
+
+    cast(TextIOWrapper, sys.stdin).reconfigure(encoding="utf-8", errors="strict")
+    cast(TextIOWrapper, sys.stdout).reconfigure(
+        encoding="utf-8", errors="strict", newline="\n"
+    )
 
     from huddol.adapters.files.tree import MarkdownTree
     from huddol.adapters.jsonl.api import HUMAN_ID, Api

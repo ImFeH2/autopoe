@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -51,6 +52,53 @@ def response(frames: list[dict[str, Any]], request_id: int) -> dict[str, Any]:
 
 def events(frames: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
     return [frame for frame in frames if frame.get("type") == kind]
+
+
+@pytest.mark.parametrize("escaped", [True, False])
+def test_jsonl_uses_utf8_independently_of_stdio_defaults(
+    tmp_path: Path, escaped: bool
+) -> None:
+    name = "启动验证😀"
+    env = {
+        **os.environ,
+        "HUDDOL_DATA_DIR": str(tmp_path / "data"),
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+        "PYTHONIOENCODING": "gbk",
+        "PYTHONUTF8": "0",
+    }
+    for requests in (
+        [
+            {
+                "id": 1,
+                "method": "organization.rename_member",
+                "params": {"member_id": 1, "name": name},
+            },
+            {"id": 2, "method": "organization.get"},
+        ],
+        [{"id": 2, "method": "organization.get"}],
+    ):
+        completed = subprocess.run(
+            [sys.executable, "-m", "huddol"],
+            input="".join(
+                json.dumps(item, ensure_ascii=escaped) + "\n"
+                for item in [*requests, {"id": 3, "method": "system.shutdown"}]
+            ).encode("utf-8"),
+            capture_output=True,
+            cwd=tmp_path,
+            env=env,
+            timeout=30,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr.decode(
+            "utf-8", errors="replace"
+        )
+        assert not completed.stdout.startswith(b"\xef\xbb\xbf")
+        frames = [
+            json.loads(line) for line in completed.stdout.decode("utf-8").splitlines()
+        ]
+        assert not any("error" in frame for frame in frames)
+        assert response(frames, 2)["result"]["members"][0]["name"] == name
+        assert response(frames, 3)["result"] == {"stopped": True}
 
 
 def test_discussion_list_limits_are_optional_for_the_desktop(

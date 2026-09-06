@@ -62,7 +62,7 @@ try {
     encoding: "utf8",
     env: { ...process.env, HUDDOL_DATA_DIR: smokeData },
     input:
-      '{"id":1,"method":"ping","params":{"token":"huddol-smoke"}}\n' +
+      '{"id":1,"method":"ping","params":{"token":"huddol-smoke 中文 😀"}}\n' +
       '{"id":2,"method":"system.shutdown","params":{}}\n',
     timeout: 15_000,
   });
@@ -89,7 +89,7 @@ if (
   !ready ||
   !Array.isArray(ready.methods) ||
   ready.methods.length === 0 ||
-  pong?.result?.pong !== "huddol-smoke" ||
+  pong?.result?.pong !== "huddol-smoke 中文 😀" ||
   stopped?.result?.stopped !== true
 ) {
   throw new Error("Huddol smoke returned an invalid response");
