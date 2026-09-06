@@ -6,7 +6,7 @@ on:
       - v*
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -22,6 +22,8 @@ jobs:
   build:
     name: Build (${{ matrix.os }})
     needs: ci
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -76,6 +78,8 @@ jobs:
   publish:
     name: Publish
     needs: build
+    permissions:
+      contents: write
     runs-on: ubuntu-22.04
     steps:
       - name: Publish release
