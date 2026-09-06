@@ -79,7 +79,7 @@ class Api:
 
         def discussion_list(params: dict[str, Any]) -> Any:
             return self._human().list_discussions(
-                bool(params.get("include_archived", False))
+                bool(params.get("include_archived", False)), limit=params.get("limit")
             )
 
         def discussion_read(params: dict[str, Any]) -> Any:

@@ -586,14 +586,30 @@ export function createMockBackend(Base: typeof Backend): Backend {
           return { id };
         }
 
-        case "discussion.list":
+        case "discussion.list": {
+          const limit = params.limit;
+          if (
+            limit != null &&
+            (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1)
+          ) {
+            throw new Error("limit must be an integer >= 1");
+          }
           return discussions
             .filter(
               (item) =>
                 item.member_ids.includes(1) &&
                 (params.include_archived || !item.archived),
             )
+            .sort((a, b) => {
+              const lastA = a.messages[a.messages.length - 1];
+              const lastB = b.messages[b.messages.length - 1];
+              const timeA = lastA ? Date.parse(lastA.created_at) : -Infinity;
+              const timeB = lastB ? Date.parse(lastB.created_at) : -Infinity;
+              return timeB - timeA || a.id - b.id;
+            })
+            .slice(0, limit ?? undefined)
             .map(summary);
+        }
 
         case "discussion.create": {
           const created: MockDiscussion = {

@@ -45,6 +45,53 @@ def tools_for(deps: Dependencies, member_id: int, **kwargs) -> AgentTools:
     return AgentTools(deps, Actor(member_id, member.is_agent), **kwargs)
 
 
+@pytest.mark.parametrize("actor_id", [HUMAN, MAIN])
+def test_discussion_list_orders_last_message_and_limits_after_filtering(
+    world, monkeypatch, actor_id
+) -> None:
+    human = tools_for(world, HUMAN)
+    empty = [human.create_discussion("Empty", [MAIN])["id"] for _ in range(2)]
+    rooms = []
+
+    def send(room, stamp):
+        monkeypatch.setattr("huddol.adapters.sqlite.store.now", lambda: stamp)
+        world.store.append_message(room, HUMAN, "@You @Main needle")
+
+    for day in range(1, 26):
+        room = human.create_discussion(f"Room {day}", [MAIN])["id"]
+        rooms.append(room)
+        send(room, f"2026-01-{day:02}T01:00:00Z")
+    send(rooms[0], "2026-01-29T00:00:00Z")
+    send(rooms[0], "2026-01-01T20:00:00-05:00")
+    archived = human.create_discussion("Archived", [MAIN])["id"]
+    send(archived, "2026-01-30T00:00:00Z")
+    human.archive_discussion(archived)
+    hidden = world.store.create_discussion("Hidden", [OTHER])
+    monkeypatch.setattr(
+        "huddol.adapters.sqlite.store.now", lambda: "2026-01-31T00:00:00Z"
+    )
+    world.store.append_message(hidden.id, OTHER, "needle")
+    actor = tools_for(world, actor_id)
+    pending = world.store.pending(actor_id)
+    watermarks = [world.store.watermark(room, actor_id) for room in rooms]
+    expected = list(reversed(rooms[2:])) + rooms[:2] + empty
+    assert [item["id"] for item in actor.list_discussions()] == expected
+    assert [item["id"] for item in actor.list_discussions(limit=3)] == expected[:3]
+    assert [item["id"] for item in actor.list_discussions(limit=100)] == expected
+    assert [item["id"] for item in actor.list_discussions(limit=10**30)] == expected
+    assert [item["id"] for item in actor.list_discussions(True, limit=1)] == [archived]
+    assert len(actor.search_messages("needle")) == 28
+    assert world.store.pending(actor_id) == pending
+    assert [world.store.watermark(room, actor_id) for room in rooms] == watermarks
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, "2", 1.5])
+def test_discussion_list_rejects_invalid_limits(world, limit) -> None:
+    with pytest.raises(DomainError) as error:
+        tools_for(world, MAIN).list_discussions(limit=limit)
+    assert error.value.code == "invalid_pagination"
+
+
 @pytest.mark.parametrize(
     ("params", "expected"),
     [

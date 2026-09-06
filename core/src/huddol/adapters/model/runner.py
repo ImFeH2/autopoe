@@ -141,7 +141,9 @@ class PydanticModelRunner:
         @agent.tool(
             sequential=True,
             description=(
-                "Manage discussions and messages. Read with message_id for full semantic context; "
+                "Manage discussions and messages. List returns discussions ordered by last message time "
+                "newest first, empty discussions last; limit defaults to 20 and must be positive. "
+                "Read with message_id for full semantic context; "
                 "do not combine it with before/after. Pagination uses exclusive message ID bounds "
                 "and a positive limit: nearest messages after the lower bound, or before the upper "
                 "bound, returned oldest first. Without bounds, limit selects the latest messages. "
@@ -186,7 +188,11 @@ class PydanticModelRunner:
                     )
                 )
             if action == "list":
-                return _guard(lambda: tools.list_discussions(include_archived))
+                return _guard(
+                    lambda: tools.list_discussions(
+                        include_archived, limit=20 if limit is None else limit
+                    )
+                )
             if action == "read":
                 return _guard(
                     lambda: tools.read_discussion(

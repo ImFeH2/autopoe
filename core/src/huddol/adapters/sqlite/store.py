@@ -246,7 +246,11 @@ class SqliteStore:
         )
 
     def list_discussions(
-        self, *, member_id: int | None = None, include_archived: bool = False
+        self,
+        *,
+        member_id: int | None = None,
+        include_archived: bool = False,
+        limit: int | None = None,
     ) -> tuple[Discussion, ...]:
         sql = "SELECT d.* FROM discussions d"
         params: list[object] = []
@@ -259,7 +263,13 @@ class SqliteStore:
             clauses.append("d.archived = 0")
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY d.id"
+        sql += (
+            " ORDER BY (SELECT julianday(m.created_at) FROM messages m"
+            " WHERE m.discussion_id = d.id ORDER BY m.id DESC LIMIT 1) DESC, d.id"
+        )
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(min(limit, 2**63 - 1))
         return tuple(self._discussion(row) for row in self._db.execute(sql, params))
 
     def get_discussion(self, discussion_id: int) -> Discussion | None:

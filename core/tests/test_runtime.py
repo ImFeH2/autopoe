@@ -78,6 +78,68 @@ def test_reminder_names_the_topic_and_sender(world) -> None:
     assert reminder.items[0].sender_name == "You"
 
 
+def test_model_discussion_list_defaults_to_twenty(world, monkeypatch) -> None:
+    from pydantic_ai import models
+    from pydantic_ai.messages import (
+        ModelResponse,
+        RetryPromptPart,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+    )
+    from pydantic_ai.models.function import FunctionModel
+
+    from huddol.adapters.model.config import ModelConfig
+    from huddol.adapters.model.runner import PydanticModelRunner
+
+    for day in range(1, 26):
+        monkeypatch.setattr(
+            "huddol.adapters.sqlite.store.now",
+            lambda day=day: f"2026-01-{day:02}T00:00:00Z",
+        )
+        mention(world)
+    actions = iter([{}, {"limit": 3}, {"limit": 30}, {"limit": 0}])
+    returned = []
+    retries = []
+
+    def respond(messages, info):
+        definition = next(
+            tool for tool in info.function_tools if tool.name == "discussion"
+        )
+        assert "limit" in definition.parameters_json_schema["properties"]
+        assert "defaults to 20" in definition.description
+        for part in messages[-1].parts:
+            if isinstance(part, ToolReturnPart):
+                returned.append(part.content)
+            elif isinstance(part, RetryPromptPart):
+                retries.append(part.content)
+        action = next(actions, None)
+        return (
+            ModelResponse(parts=[TextPart("Done")])
+            if action is None
+            else ModelResponse(
+                parts=[ToolCallPart("discussion", {"action": "list", **action})]
+            )
+        )
+
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
+    monkeypatch.setattr(
+        "huddol.adapters.model.runner.build_model",
+        lambda config: FunctionModel(respond),
+    )
+    runner = PydanticModelRunner(
+        ModelConfig("openai", "https://example.invalid", "unused", "local")
+    )
+    record = Scheduler(world, runner).run_turn(MAIN)
+    assert record is not None and record.status == "completed", record
+    assert [[item["id"] for item in page] for page in returned] == [
+        list(range(25, 5, -1)),
+        [25, 24, 23],
+        list(range(25, 0, -1)),
+    ]
+    assert len(retries) == 1 and "invalid_pagination" in str(retries[0])
+
+
 def test_model_can_manage_discussions_and_page_messages(world, monkeypatch) -> None:
     from pydantic_ai import models
     from pydantic_ai.messages import (

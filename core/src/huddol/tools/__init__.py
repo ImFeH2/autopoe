@@ -156,8 +156,12 @@ class AgentTools:
             },
         )
 
-    def list_discussions(self, include_archived: bool = False) -> list[dict[str, Any]]:
+    def list_discussions(
+        self, include_archived: bool = False, *, limit: int | None = None
+    ) -> list[dict[str, Any]]:
         self._check("discussion.list")
+        if limit is not None and (type(limit) is not int or limit < 1):
+            raise DomainError("invalid_pagination", "limit must be an integer >= 1")
         unread = self._deps.store.unread_counts(self._actor.member_id)
         return [
             {
@@ -168,7 +172,9 @@ class AgentTools:
                 "unread": unread.get(item.id, 0),
             }
             for item in self._deps.store.list_discussions(
-                member_id=self._actor.member_id, include_archived=include_archived
+                member_id=self._actor.member_id,
+                include_archived=include_archived,
+                limit=limit,
             )
         ]
 

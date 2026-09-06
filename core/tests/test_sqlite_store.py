@@ -168,13 +168,13 @@ def test_existing_discussions_initialize_the_counter_before_deletion(
     try:
         rooms = upgraded.list_discussions(include_archived=True)
         assert [(room.id, room.topic, room.archived) for room in rooms] == [
-            (7, "Keep", True),
             (42, "Latest", False),
+            (7, "Keep", True),
         ]
         assert upgraded.messages(42) == (message,)
         upgraded.delete_discussion(42)
         assert upgraded.create_discussion("Next", [human.id]).id == 43
-        assert upgraded.get_discussion(7) == rooms[0]
+        assert upgraded.get_discussion(7) == rooms[1]
     finally:
         upgraded.close()
 

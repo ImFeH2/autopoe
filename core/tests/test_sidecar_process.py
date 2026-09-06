@@ -53,6 +53,47 @@ def events(frames: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
     return [frame for frame in frames if frame.get("type") == kind]
 
 
+def test_discussion_list_limits_are_optional_for_the_desktop(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from huddol.adapters.sqlite.store import SqliteStore
+
+    data = tmp_path / "data"
+    store = SqliteStore(data / "huddol.sqlite3")
+    human = store.create_member("human", "You")
+    agent = store.create_member("agent", "Main")
+    for day in range(1, 26):
+        monkeypatch.setattr(
+            "huddol.adapters.sqlite.store.now",
+            lambda day=day: f"2026-01-{day:02}T00:00:00Z",
+        )
+        room = store.create_discussion(f"Room {day}", [human.id, agent.id])
+        store.append_message(room.id, agent.id, "@You needle")
+    monkeypatch.setattr(
+        "huddol.adapters.sqlite.store.now", lambda: "2026-01-31T00:00:00Z"
+    )
+    store.append_message(1, agent.id, "@You needle again")
+    store.close()
+    frames, code, stderr = drive(
+        data,
+        [
+            {"id": 1, "method": "discussion.list"},
+            {"id": 2, "method": "discussion.list", "params": {"limit": 2}},
+            {"id": 3, "method": "discussion.list", "params": {"limit": 0}},
+            {"id": 4, "method": "discussion.search", "params": {"query": "needle"}},
+            {"id": 5, "method": "discussion.list"},
+        ],
+    )
+    assert code == 0, stderr
+    full = response(frames, 1)["result"]
+    assert [item["id"] for item in full] == [1, *range(25, 1, -1)]
+    assert sum(item["unread"] for item in full) == 26
+    assert response(frames, 2)["result"] == full[:2]
+    assert response(frames, 3)["error"]["code"] == "invalid_pagination"
+    assert len(response(frames, 4)["result"]) == 26
+    assert response(frames, 5)["result"] == full
+
+
 def test_discussion_management_and_pagination_survive_the_pipe(tmp_path: Path) -> None:
     from huddol.adapters.sqlite.store import SqliteStore
 

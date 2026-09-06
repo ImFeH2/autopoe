@@ -24,7 +24,11 @@ class OrganizationStore(Protocol):
     def delete_member(self, member_id: int) -> None: ...
 
     def list_discussions(
-        self, *, member_id: int | None = None, include_archived: bool = False
+        self,
+        *,
+        member_id: int | None = None,
+        include_archived: bool = False,
+        limit: int | None = None,
     ) -> tuple[Discussion, ...]: ...
 
     def get_discussion(self, discussion_id: int) -> Discussion | None: ...
