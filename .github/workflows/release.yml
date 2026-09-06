@@ -28,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-22.04
+          - ubuntu-latest
           - windows-latest
           - macos-15
           - macos-15-intel
@@ -80,7 +80,7 @@ jobs:
     needs: build
     permissions:
       contents: write
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Publish release
         run: gh release edit "$GITHUB_REF_NAME" --draft=false

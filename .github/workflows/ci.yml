@@ -18,7 +18,7 @@ concurrency:
 jobs:
   wsl_core:
     name: Linux backend component
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -48,7 +48,7 @@ jobs:
       matrix:
         include:
           - name: Ubuntu x64
-            os: ubuntu-22.04
+            os: ubuntu-latest
           - name: Windows x64
             os: windows-latest
           - name: macOS Apple Silicon
