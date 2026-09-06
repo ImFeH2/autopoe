@@ -4,15 +4,20 @@ import "./shell.css";
 
 export function Shell({
   sidebar,
+  notice,
   children,
 }: {
   sidebar: ReactNode;
+  notice?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="shell">
       {sidebar}
-      {children}
+      <div className="shell-content">
+        {notice}
+        {children}
+      </div>
     </div>
   );
 }

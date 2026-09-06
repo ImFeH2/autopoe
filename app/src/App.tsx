@@ -25,7 +25,7 @@ import {
   SidebarFooter,
   SidebarOrg,
 } from "./components/layout/shell";
-import { Avatar, Badge, Spinner } from "./components/ui/index";
+import { Avatar, Badge, Banner, Spinner } from "./components/ui/index";
 import { DiscussionsPage } from "./features/discussions/list";
 import { ThreadPage } from "./features/discussions/thread";
 import { DocumentPage } from "./features/library/document";
@@ -39,7 +39,7 @@ import {
   ModelPage,
 } from "./features/settings/index";
 import { LangfusePage } from "./features/settings/langfuse";
-import { backend, type Member } from "./lib/backend";
+import { type BackendError, backend, type Member } from "./lib/backend";
 import { plural } from "./lib/format";
 
 type Loaded = {
@@ -76,7 +76,15 @@ function View({ route, tokenLimit }: { route: Route; tokenLimit: number }) {
   }
 }
 
-function Chrome({ loaded }: { loaded: Loaded }) {
+function Chrome({
+  loaded,
+  failure,
+  onDismiss,
+}: {
+  loaded: Loaded;
+  failure: string | null;
+  onDismiss: () => void;
+}) {
   const { route } = useRouter();
   const navigate = useNavigate();
   const active = navIdOf(route);
@@ -85,6 +93,16 @@ function Chrome({ loaded }: { loaded: Loaded }) {
 
   return (
     <Shell
+      notice={
+        failure ? (
+          <Banner
+            tone="danger"
+            onDismiss={backend.disconnected ? undefined : onDismiss}
+          >
+            {failure}
+          </Banner>
+        ) : null
+      }
       sidebar={
         <Sidebar>
           <SidebarOrg
@@ -183,11 +201,18 @@ export default function App() {
     });
   }, []);
 
+  useEffect(
+    () => backend.onFailure((error: BackendError) => setFailure(error.message)),
+    [],
+  );
+
   useEffect(() => {
     backend
       .connect()
       .then(refresh)
-      .catch((error) => setFailure(String(error)));
+      .catch((error) =>
+        setFailure(error instanceof Error ? error.message : String(error)),
+      );
   }, [refresh]);
 
   useEffect(() => {
@@ -202,12 +227,12 @@ export default function App() {
         event.type === "discussion.updated" ||
         event.type === "discussion.deleted"
       ) {
-        void refresh();
+        void refresh().catch(backend.reportFailure);
       }
     });
   }, [refresh]);
 
-  if (failure) return <BackendPage startupError={failure} />;
+  if (failure && !loaded) return <BackendPage startupError={failure} />;
 
   if (!loaded) {
     return (
@@ -227,7 +252,11 @@ export default function App() {
           refresh,
         }}
       >
-        <Chrome loaded={loaded} />
+        <Chrome
+          loaded={loaded}
+          failure={failure}
+          onDismiss={() => setFailure(null)}
+        />
       </OrganizationProvider>
     </RouterProvider>
   );

@@ -20,6 +20,7 @@ import {
 } from "../../components/ui/index";
 import { OverflowMenu } from "../../components/ui/menu";
 import {
+  BackendError,
   backend,
   type DiscussionDetail,
   type Message,
@@ -35,6 +36,7 @@ export function ThreadPage({ id }: { id: number }) {
   const navigate = useNavigate();
   const [detail, setDetail] = useState<DiscussionDetail | null>(null);
   const [missing, setMissing] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ackBusy, setAckBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +50,17 @@ export function ThreadPage({ id }: { id: number }) {
     try {
       setDetail(await backend.readDiscussion(id));
       setMissing(false);
-    } catch {
-      setMissing(true);
+      setLoadFailed(false);
+    } catch (failure) {
+      if (
+        failure instanceof BackendError &&
+        ["not_found", "not_a_member"].includes(failure.code)
+      ) {
+        setMissing(true);
+      } else {
+        setLoadFailed(true);
+        backend.reportFailure(failure);
+      }
     }
   }, [id]);
 
@@ -114,8 +125,12 @@ export function ThreadPage({ id }: { id: number }) {
     try {
       await backend.send(id, body);
       await load();
+      return true;
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      if (!(failure instanceof BackendError && failure.transport)) {
+        setError(failure instanceof Error ? failure.message : String(failure));
+      }
+      return false;
     } finally {
       setBusy(false);
     }
@@ -169,7 +184,7 @@ export function ThreadPage({ id }: { id: number }) {
   return (
     <Page>
       <PageHeader
-        title={detail?.topic ?? "Loading…"}
+        title={detail?.topic ?? (loadFailed ? "Unavailable" : "Loading…")}
         lede={
           detail
             ? `${plural(people.length, "Member")} · ${plural(detail.total_messages, "message")}`

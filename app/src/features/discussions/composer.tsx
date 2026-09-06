@@ -17,7 +17,7 @@ export function Composer({
   memberIds: ReadonlySet<number>;
   busy: boolean;
   placeholder: string;
-  onSend: (body: string) => void | Promise<void>;
+  onSend: (body: string) => Promise<boolean>;
 }) {
   const [body, setBody] = useState("");
   const [caret, setCaret] = useState(0);
@@ -61,7 +61,7 @@ export function Composer({
   const submit = async () => {
     const text = body.trim();
     if (!text || busy) return;
-    await onSend(text);
+    if (!(await onSend(text)) || input.current?.value !== body) return;
     setBody("");
     setCaret(0);
   };

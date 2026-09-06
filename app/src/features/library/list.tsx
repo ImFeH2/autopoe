@@ -53,7 +53,11 @@ export function LibraryPage() {
   const [doomed, setDoomed] = useState<LibraryEntry | null>(null);
 
   const load = useCallback(async () => {
-    setEntries(await backend.library());
+    try {
+      setEntries(await backend.library());
+    } catch (failure) {
+      backend.reportFailure(failure);
+    }
   }, []);
 
   useEffect(() => {

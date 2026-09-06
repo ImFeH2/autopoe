@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.fn();
 const channels: { onmessage?: (frame: unknown) => void }[] = [];
@@ -26,6 +26,102 @@ function reply(frame: Record<string, unknown>) {
 }
 
 describe("Backend", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("ends concurrent requests once on disconnect without waiting for send completion", async () => {
+    vi.useFakeTimers();
+    const backend = connected();
+    await backend.connect();
+    invoke.mockImplementation(() => new Promise(() => {}));
+    const failures = vi.fn();
+    const events = vi.fn();
+    backend.onFailure(failures);
+    backend.onEvent(events);
+    const first = backend.organization().catch((error) => error);
+    const second = backend.discussions().catch((error) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invoke.mock.calls.filter(([name]) => name === "send")).toHaveLength(
+      2,
+    );
+    reply({ type: "bridge.disconnected" });
+    reply({ type: "bridge.disconnected" });
+    expect(await first).toMatchObject({ code: "disconnected" });
+    expect(await second).toMatchObject({ code: "disconnected" });
+    backend.reportFailure(new Error("late failure"));
+    expect(failures).toHaveBeenCalledTimes(1);
+    expect(events).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    const count = invoke.mock.calls.length;
+    await expect(backend.organization()).rejects.toMatchObject({
+      code: "disconnected",
+    });
+    expect(invoke).toHaveBeenCalledTimes(count);
+  });
+
+  it("ends a connection handshake when its channel disconnects", async () => {
+    vi.useFakeTimers();
+    invoke.mockImplementation(() => new Promise(() => {}));
+    const backend = new Backend();
+    const result = backend.organization().catch((error) => error);
+    reply({ type: "bridge.disconnected" });
+    expect(await result).toMatchObject({ code: "disconnected" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds a silent handshake and ignores a late subscription completion", async () => {
+    vi.useFakeTimers();
+    let complete = () => {};
+    invoke.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const backend = new Backend();
+    const failure = vi.fn();
+    backend.onFailure(failure);
+    const result = backend.organization().catch((error) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await result).toMatchObject({ code: "connection_timeout" });
+    complete();
+    await expect(backend.connect()).rejects.toMatchObject({
+      code: "connection_timeout",
+    });
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cleans up a rejected send immediately", async () => {
+    vi.useFakeTimers();
+    const backend = connected();
+    await backend.connect();
+    invoke.mockRejectedValue(new Error("write failed"));
+    await expect(backend.organization()).rejects.toMatchObject({
+      code: "send_failed",
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reports a request timeout without declaring the connection dead", async () => {
+    vi.useFakeTimers();
+    const backend = connected();
+    const failures = vi.fn();
+    backend.onFailure(failures);
+    const result = backend.organization().catch((error) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await result).toMatchObject({ code: "timeout" });
+    expect(failures).toHaveBeenCalledTimes(1);
+    const next = backend.organization();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invoke.mock.calls.filter(([name]) => name === "send")).toHaveLength(
+      2,
+    );
+    reply({ type: "response", id: 1, result: "late" });
+    reply({ type: "response", id: 2, result: { members: [] } });
+    await expect(next).resolves.toEqual({ members: [] });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   beforeEach(() => {
     invoke.mockReset();
     channels.length = 0;

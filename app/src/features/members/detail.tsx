@@ -85,7 +85,11 @@ export function MemberPage({ id }: { id: number }) {
 
   const load = useCallback(async () => {
     if (member?.type !== "agent") return;
-    setDetail(await backend.agentDetail(id));
+    try {
+      setDetail(await backend.agentDetail(id));
+    } catch (failure) {
+      backend.reportFailure(failure);
+    }
   }, [id, member]);
 
   useEffect(() => {

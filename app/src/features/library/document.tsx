@@ -10,7 +10,7 @@ import {
 } from "../../components/layout/shell";
 import { ConfirmDialog, PromptDialog } from "../../components/ui/dialog";
 import { Banner, Button, Chip, EmptyState } from "../../components/ui/index";
-import { backend } from "../../lib/backend";
+import { BackendError, backend } from "../../lib/backend";
 import { documentFolder, formatBytes } from "../../lib/format";
 import "./library.css";
 
@@ -35,8 +35,12 @@ export function DocumentPage({ path }: { path: string }) {
       setDraft(document.content);
       setMissing(false);
       setConflict(false);
-    } catch {
-      setMissing(true);
+    } catch (failure) {
+      if (failure instanceof BackendError && failure.code === "not_found") {
+        setMissing(true);
+      } else {
+        backend.reportFailure(failure);
+      }
     }
   }, [path]);
 
@@ -58,6 +62,8 @@ export function DocumentPage({ path }: { path: string }) {
       }
       setLoaded({ content: draft, hash: result.hash });
       setSaved(true);
+    } catch (failure) {
+      backend.reportFailure(failure);
     } finally {
       setBusy(false);
     }

@@ -364,7 +364,6 @@ impl HuddolProcess {
             );
             return Err("Huddol is not running".to_string());
         }
-        drop(child);
         *self.subscriber.lock().map_err(|_| {
             self.diagnostics.record(
                 "ERROR",
@@ -373,6 +372,7 @@ impl HuddolProcess {
             );
             "Huddol subscriber lock poisoned".to_string()
         })? = Some(channel);
+        drop(child);
         self.diagnostics
             .record("INFO", "bridge.subscription.started", json!({}));
         Ok(())
@@ -476,13 +476,6 @@ fn disconnect(
     kill: bool,
     details: Value,
 ) {
-    let subscriber_cleared = match subscriber.lock() {
-        Ok(mut subscriber) => {
-            *subscriber = None;
-            true
-        }
-        Err(_) => false,
-    };
     let process = match child.lock() {
         Ok(mut child) => child.take(),
         Err(_) => {
@@ -492,12 +485,19 @@ fn disconnect(
                 json!({
                     "reason": reason,
                     "failure_reason": "child_lock_poisoned",
-                    "subscriber_cleared": subscriber_cleared,
                 }),
             );
             return;
         }
     };
+    if let Err(reason) = close_subscription(subscriber) {
+        diagnostics.record(
+            "WARN",
+            "bridge.subscription.close_failed",
+            json!({"reason": reason}),
+        );
+    }
+    let subscriber_cleared = subscriber.lock().is_ok_and(|channel| channel.is_none());
     let Some(process) = process else {
         diagnostics.record(
             "WARN",
@@ -534,6 +534,19 @@ fn disconnect(
         &fields,
     );
     diagnostics.record(level, "bridge.disconnected", Value::Object(fields));
+}
+
+fn close_subscription(subscriber: &SharedSubscriber) -> Result<(), &'static str> {
+    let channel = subscriber
+        .lock()
+        .map_err(|_| "subscriber_lock_poisoned")?
+        .take();
+    if let Some(channel) = channel {
+        channel
+            .send(json!({"type": "bridge.disconnected"}))
+            .map_err(|_| "channel_send_failed")?;
+    }
+    Ok(())
 }
 
 fn disconnect_level(
@@ -585,7 +598,16 @@ mod tests {
     }
 
     #[test]
-    fn forwards_json_to_the_subscriber() {
+    fn clears_the_subscription_even_when_notification_fails() {
+        let subscriber = Arc::new(Mutex::new(Some(Channel::<Value>::new(|_| {
+            Err(std::io::Error::other("closed webview").into())
+        }))));
+        assert_eq!(close_subscription(&subscriber), Err("channel_send_failed"));
+        assert!(subscriber.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn forwards_json_and_closes_the_subscription_once() {
         let messages = Arc::new(Mutex::new(Vec::<Value>::new()));
         let received = Arc::clone(&messages);
         let channel = Channel::new(move |body| {
@@ -599,9 +621,19 @@ mod tests {
 
         forward_message(&subscriber, json!({"id": 1, "result": null})).unwrap();
 
+        close_subscription(&subscriber).unwrap();
+        close_subscription(&subscriber).unwrap();
+        assert!(subscriber.lock().unwrap().is_none());
+        assert_eq!(
+            forward_message(&subscriber, json!({"type": "ready"})),
+            Err("not_subscribed")
+        );
         assert_eq!(
             *messages.lock().unwrap(),
-            vec![json!({"id": 1, "result": null})]
+            vec![
+                json!({"id": 1, "result": null}),
+                json!({"type": "bridge.disconnected"})
+            ]
         );
     }
 }

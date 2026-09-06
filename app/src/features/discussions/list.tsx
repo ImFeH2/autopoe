@@ -98,7 +98,11 @@ export function DiscussionsPage() {
   const [doomed, setDoomed] = useState<DiscussionSummary | null>(null);
 
   const load = useCallback(async () => {
-    setList(await backend.discussions(archived));
+    try {
+      setList(await backend.discussions(archived));
+    } catch (failure) {
+      backend.reportFailure(failure);
+    }
   }, [archived]);
 
   useEffect(() => {
@@ -128,9 +132,12 @@ export function DiscussionsPage() {
     }
     let live = true;
     const timer = setTimeout(() => {
-      void backend.searchMessages(text).then((found) => {
-        if (live) setResults(found);
-      });
+      void backend
+        .searchMessages(text)
+        .then((found) => {
+          if (live) setResults(found);
+        })
+        .catch(backend.reportFailure);
     }, 120);
     return () => {
       live = false;

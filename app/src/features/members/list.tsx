@@ -121,7 +121,10 @@ export function MembersPage({ tokenLimit }: { tokenLimit: number }) {
           ))}
         </fieldset>
         <ToolbarSpacer />
-        <IconButton label="Refresh" onClick={() => void refresh()}>
+        <IconButton
+          label="Refresh"
+          onClick={() => void refresh().catch(backend.reportFailure)}
+        >
           <RefreshCw size={15} />
         </IconButton>
       </Toolbar>

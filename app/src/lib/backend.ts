@@ -88,6 +88,7 @@ export class BackendError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly transport = false,
   ) {
     super(message);
     this.name = "BackendError";
@@ -113,13 +114,83 @@ export class Backend {
   #pending = new Map<number, Pending>();
   #listeners = new Set<(event: BackendEvent) => void>();
   #ready: Promise<void> | null = null;
+  #closed: BackendError | null = null;
+  #rejectConnection: ((error: BackendError) => void) | null = null;
+  #failures = new Set<(error: BackendError) => void>();
 
   async connect(): Promise<void> {
+    if (this.#closed) throw this.#closed;
     if (this.#ready) return this.#ready;
     const channel = new Channel<Frame>();
     channel.onmessage = (frame) => this.#receive(frame);
-    this.#ready = invoke("subscribe", { channel });
+    this.#ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#disconnect(
+          new BackendError(
+            "connection_timeout",
+            "Connection timed out. Restart Huddol.",
+            true,
+          ),
+        );
+      }, REQUEST_TIMEOUT);
+      this.#rejectConnection = (error) => {
+        clearTimeout(timer);
+        this.#rejectConnection = null;
+        reject(error);
+      };
+      invoke("subscribe", { channel }).then(
+        () => {
+          clearTimeout(timer);
+          this.#rejectConnection = null;
+          resolve();
+        },
+        () =>
+          this.#disconnect(
+            new BackendError(
+              "connection_failed",
+              "Could not connect to Huddol. Restart Huddol.",
+              true,
+            ),
+          ),
+      );
+    });
     return this.#ready;
+  }
+
+  get disconnected(): boolean {
+    return this.#closed !== null;
+  }
+
+  onFailure(listener: (error: BackendError) => void): () => void {
+    this.#failures.add(listener);
+    if (this.#closed) listener(this.#closed);
+    return () => this.#failures.delete(listener);
+  }
+
+  reportFailure = (error: unknown): void => {
+    if (this.#closed || (error instanceof BackendError && error.transport))
+      return;
+    this.#notify(
+      error instanceof BackendError
+        ? error
+        : new BackendError(
+            "request_failed",
+            error instanceof Error ? error.message : String(error),
+          ),
+    );
+  };
+
+  #notify(error: BackendError): void {
+    for (const listener of this.#failures) listener(error);
+  }
+
+  #disconnect(error: BackendError): void {
+    if (this.#closed) return;
+    this.#closed = error;
+    this.#rejectConnection?.(error);
+    for (const pending of this.#pending.values()) pending.reject(error);
+    this.#pending.clear();
+    this.#notify(error);
   }
 
   onEvent(listener: (event: BackendEvent) => void): () => void {
@@ -128,10 +199,20 @@ export class Backend {
   }
 
   #receive(frame: Frame): void {
+    if (this.#closed) return;
+    if (frame.type === "bridge.disconnected") {
+      this.#disconnect(
+        new BackendError(
+          "disconnected",
+          "Connection lost. Restart Huddol.",
+          true,
+        ),
+      );
+      return;
+    }
     if (frame.type === "response" && typeof frame.id === "number") {
       const pending = this.#pending.get(frame.id);
       if (!pending) return;
-      this.#pending.delete(frame.id);
       if (frame.error) {
         pending.reject(new BackendError(frame.error.code, frame.error.message));
       } else {
@@ -147,17 +228,46 @@ export class Backend {
     params: Record<string, unknown> = {},
   ): Promise<T> {
     await this.connect();
+    if (this.#closed) throw this.#closed;
     const id = this.#nextId++;
-    const settled = new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve as Pending["resolve"], reject });
-      setTimeout(() => {
-        if (!this.#pending.has(id)) return;
-        this.#pending.delete(id);
-        reject(new BackendError("timeout", `${method} timed out`));
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const error = new BackendError(
+          "timeout",
+          "Request timed out. Check before retrying.",
+          true,
+        );
+        const pending = this.#pending.get(id);
+        if (!pending) return;
+        pending.reject(error);
+        this.#notify(error);
       }, REQUEST_TIMEOUT);
+      const finish = () => {
+        clearTimeout(timer);
+        this.#pending.delete(id);
+      };
+      this.#pending.set(id, {
+        resolve: (value) => {
+          finish();
+          resolve(value as T);
+        },
+        reject: (error) => {
+          finish();
+          reject(error);
+        },
+      });
+      invoke("send", { message: { id, method, params } }).catch(() => {
+        const pending = this.#pending.get(id);
+        if (!pending) return;
+        const error = new BackendError(
+          "send_failed",
+          "Could not send request. Check before retrying.",
+          true,
+        );
+        pending.reject(error);
+        this.#notify(error);
+      });
     });
-    await invoke("send", { message: { id, method, params } });
-    return settled;
   }
 
   organization() {
